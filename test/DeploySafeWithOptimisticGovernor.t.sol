@@ -119,7 +119,7 @@ contract DeploySafeWithOptimisticGovernorTest is Test {
         vm.setEnv("MODULE_PROXY_FACTORY", vm.toString(address(moduleProxyFactory)));
 
         vm.setEnv("OG_COLLATERAL", vm.toString(address(0xCA11)));
-        vm.setEnv("OG_BOND_AMOUNT", vm.toString(uint256(1 ether)));
+        vm.setEnv("OG_BOND_AMOUNT", vm.toString(uint256(250_000_000)));
         vm.setEnv("OG_RULES", "Ship weekly updates, challenge within 7 days.");
         vm.setEnv("OG_LIVENESS", vm.toString(uint256(3600)));
         vm.setEnv("OG_IDENTIFIER_STR", "COMMITMENT");
@@ -142,7 +142,7 @@ contract DeploySafeWithOptimisticGovernorTest is Test {
         OptimisticGovernorMock og = OptimisticGovernorMock(module);
         assertEq(og.owner(), safeProxy);
         assertEq(og.collateral(), address(0xCA11));
-        assertEq(og.bondAmount(), 1 ether);
+        assertEq(og.bondAmount(), 250_000_000);
         assertEq(og.rules(), "Ship weekly updates, challenge within 7 days.");
         assertEq(og.identifier(), bytes32(bytes("COMMITMENT")));
         assertEq(og.liveness(), uint64(3600));
