@@ -91,6 +91,44 @@ forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimis
   --private-key <your_private_key>
 ```
 
+## Propose & Execute Transfers
+
+Propose a transfer (posts the UMA bond via the Optimistic Governor):
+
+```shell
+export PROPOSER_PK=<private_key>
+export OG_MODULE=<optimistic_governor_module>
+export TRANSFER_ASSET=<erc20_token_address>
+export TRANSFER_AMOUNT=<amount_in_token_units>
+export TRANSFER_DESTINATION=<recipient_address>
+
+forge script script/ProposeCommitmentTransfer.s.sol:ProposeCommitmentTransfer \
+  --rpc-url <your_rpc_url> \
+  --broadcast \
+  --private-key $PROPOSER_PK
+```
+
+Execute a proposal after it passes:
+
+```shell
+export EXECUTOR_PK=<private_key>
+export OG_MODULE=<optimistic_governor_module>
+export PROPOSAL_HASH=<proposal_hash>
+export TRANSFER_ASSET=<erc20_token_address>
+export TRANSFER_AMOUNT=<amount_in_token_units>
+export TRANSFER_DESTINATION=<recipient_address>
+
+forge script script/ExecuteCommitmentTransfer.s.sol:ExecuteCommitmentTransfer \
+  --rpc-url <your_rpc_url> \
+  --broadcast \
+  --private-key $EXECUTOR_PK
+```
+
+Optional overrides:
+
+- `TRANSFER_OPERATION` (default `0` for `CALL`)
+- `TRANSFER_VALUE` (default `0`)
+
 ### Anvil Test Key + USDC Funding (Fork)
 
 Start Anvil with the default test mnemonic and grab one of the printed private keys:
