@@ -103,6 +103,7 @@ DEPLOYER_PK=0x...
 OG_COLLATERAL=0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48
 OG_BOND_AMOUNT=1000000
 OG_RULES="Contributors must submit weekly updates. Funds are releasable after 7 days of no challenge."
+OG_IDENTIFIER_STR=ASSERT_TRUTH2
 ```
 
 A ready-to-edit template is available at `.env.mainnet.example`.
