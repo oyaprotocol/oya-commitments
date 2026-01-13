@@ -105,6 +105,8 @@ OG_BOND_AMOUNT=1000000
 OG_RULES="Contributors must submit weekly updates. Funds are releasable after 7 days of no challenge."
 ```
 
+A ready-to-edit template is available at `.env.mainnet.example`.
+
 Sepolia example (`.env.sepolia`):
 
 ```ini
