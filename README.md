@@ -36,6 +36,59 @@ forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimis
 - `OG_MASTER_COPY`, `SAFE_SINGLETON`, `SAFE_FALLBACK_HANDLER`
 - `MODULE_PROXY_FACTORY`
 
+## Web Frontend
+
+The web frontend is a lightweight UI for filling in Safe + Optimistic Governor parameters and launching the same deployment flow as the script. It can be hosted as a static site and uses RPC endpoints to read chain state and craft the deployment payloads.
+
+### Dependencies
+
+- Node.js 18+ (or newer)
+- npm, pnpm, or yarn for package management
+
+### Local Development
+
+From the web frontend directory (if you keep it alongside this repo), install dependencies and start the dev server:
+
+```shell
+npm install
+npm run dev
+```
+
+### Required Environment Variables
+
+Expose these values to the frontend build (for example via `.env` in the frontend project) so the UI can prefill defaults and target the correct network:
+
+- `MAINNET_RPC_URL` or `SEPOLIA_RPC_URL` (or another network-specific RPC URL)
+- Default addresses (optional but recommended for prefill):
+  - `SAFE_SINGLETON`
+  - `SAFE_PROXY_FACTORY`
+  - `SAFE_FALLBACK_HANDLER`
+  - `OG_MASTER_COPY`
+  - `MODULE_PROXY_FACTORY`
+
+### Form Fields → On-Chain Parameters
+
+Use the same inputs as the deploy script; the UI should map them directly to the on-chain deployment parameters:
+
+- **Safe Owners** → `SAFE_OWNERS`
+- **Safe Threshold** → `SAFE_THRESHOLD`
+- **Safe Salt Nonce** → `SAFE_SALT_NONCE`
+- **OG Collateral Token** → `OG_COLLATERAL`
+- **OG Bond Amount** → `OG_BOND_AMOUNT`
+- **OG Rules (Natural Language)** → `OG_RULES`
+- **OG Challenge Period** → `OG_CHALLENGE_PERIOD`
+- **OG Rules URI** → `OG_RULES_URI`
+- **OG Salt Nonce** → `OG_SALT_NONCE`
+- **Safe Singleton** → `SAFE_SINGLETON`
+- **Safe Proxy Factory** → `SAFE_PROXY_FACTORY`
+- **Safe Fallback Handler** → `SAFE_FALLBACK_HANDLER`
+- **OG Master Copy** → `OG_MASTER_COPY`
+- **Module Proxy Factory** → `MODULE_PROXY_FACTORY`
+
+### Deployment Note
+
+Build output is static (e.g., `dist/` or `build/`, depending on your frontend tooling) and can be hosted on any static host (Netlify, Vercel static output, S3/CloudFront, etc.). Ensure the RPC URLs and default addresses are configured for the target network before deploying the static bundle.
+
 ## Example `.env`
 
 ```ini
