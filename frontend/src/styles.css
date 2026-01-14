@@ -1,0 +1,147 @@
+:root {
+  color-scheme: light;
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  background-color: #f5f6fb;
+  color: #0f172a;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+code {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+}
+
+.page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  font-size: 0.75rem;
+  color: #6366f1;
+  margin-bottom: 8px;
+}
+
+.subtext {
+  color: #475569;
+  max-width: 720px;
+}
+
+.card {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+}
+
+.card h2 {
+  margin-top: 0;
+}
+
+.grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+input,
+textarea {
+  border-radius: 10px;
+  border: 1px solid #d0d5dd;
+  padding: 10px 12px;
+  font-size: 0.9rem;
+  font-family: inherit;
+  background: #f8fafc;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 110px;
+}
+
+button {
+  border: none;
+  border-radius: 10px;
+  background: #4f46e5;
+  color: white;
+  padding: 12px 20px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:disabled {
+  background: #a5b4fc;
+  cursor: not-allowed;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+
+.status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.outputs {
+  display: grid;
+  gap: 12px;
+}
+
+.outputs div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.outputs span {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.hint {
+  font-size: 0.8rem;
+  color: #64748b;
+  font-weight: 400;
+}
+
+.error {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+@media (max-width: 720px) {
+  .header {
+    flex-direction: column;
+  }
+}
