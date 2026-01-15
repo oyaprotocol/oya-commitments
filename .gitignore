@@ -19,3 +19,7 @@ docs/
 # Anvil files
 anvil.log
 anvil.pid
+
+# Node modules
+node_modules
+frontend/node_modules
