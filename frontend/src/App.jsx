@@ -3,8 +3,10 @@ import { ConnectButton } from '@rainbow-me/rainbowkit';
 import {
   encodeAbiParameters,
   encodeFunctionData,
+  concatHex,
   hexToSignature,
   isAddress,
+  numberToHex,
   signatureToHex,
   stringToHex,
   zeroAddress,
@@ -99,6 +101,27 @@ const safeAbi = [
     ],
     outputs: [{ type: 'bool' }],
   },
+  {
+    type: 'function',
+    name: 'addOwnerWithThreshold',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'owner', type: 'address' },
+      { name: '_threshold', type: 'uint256' },
+    ],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'removeOwner',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'prevOwner', type: 'address' },
+      { name: 'owner', type: 'address' },
+      { name: '_threshold', type: 'uint256' },
+    ],
+    outputs: [],
+  },
 ];
 
 const enableModuleAbi = [
@@ -121,6 +144,30 @@ const ogSetupAbi = [
   },
 ];
 
+const MODULE_PROXY_FACTORY_BYTECODE =
+  '0x60808060405234610016576102e4908161001b8239f35b5f80fdfe60806040526004361015610011575f80fd5b5f3560e01c63f1ab873c14610024575f80fd5b346100ce5760603660031901126100ce576004356001600160a01b03811681036100ce5760243567ffffffffffffffff81116100ce57366023820112156100ce5780600401359161007483610129565b6100816040519182610107565b83815236602485850101116100ce575f6020856100ca9660246100b09701838601378301015260443591610174565b6040516001600160a01b0390911681529081906020820190565b0390f35b5f80fd5b634e487b7160e01b5f52604160045260245ffd5b6060810190811067ffffffffffffffff82111761010257604052565b6100d2565b90601f8019910116810190811067ffffffffffffffff82111761010257604052565b67ffffffffffffffff811161010257601f01601f191660200190565b3d1561016f573d9061015682610129565b916101646040519384610107565b82523d5f602084013e565b606090565b90929183519060208501918220604091825190602082019283528382015282815261019e816100e6565b5190206001600160a01b0384811694909190851561029657835172602d8060093d393df3363d3d373d3d3d363d7360681b6020820190815260609290921b6bffffffffffffffffffffffff191660338201526e5af43d82803e903d91602b57fd5bf360881b604782015260368152610215816100e6565b51905ff590811692831561027457815f92918380939951925af1610237610145565b501561026457507f2150ada912bf189ed721c44211199e270903fc88008c2a1e1e889ef30fe67c5f5f80a3565b51637dabd39960e01b8152600490fd5b50905163371e9e8960e21b81526001600160a01b039091166004820152602490fd5b8351633202e20d60e21b815260048101879052602490fdfea26469706673582212208f37f4bfb66727d4e6c07c613af0febf39dcd35dcf8d6037c9da73384d61b55764736f6c63430008170033';
+
+function readEnv(key) {
+  if (typeof process !== 'undefined' && process?.env?.[key]) {
+    return process.env[key];
+  }
+
+  if (typeof import.meta !== 'undefined') {
+    const metaEnv = import.meta?.env;
+    if (metaEnv?.[key]) {
+      return metaEnv[key];
+    }
+  }
+
+  return undefined;
+}
+
+function readEnvWithPrefixes(key) {
+  return readEnv(key) ?? readEnv(`VITE_${key}`) ?? readEnv(`NEXT_PUBLIC_${key}`);
+}
+
+const defaultModuleProxyFactory = readEnvWithPrefixes('MODULE_PROXY_FACTORY') ?? '';
+
 const defaults = {
   safeSingleton: '0xd9Db270c1B5E3Bd161E8c8503c55cEABeE709552',
   safeProxyFactory: '0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2',
@@ -128,13 +175,16 @@ const defaults = {
   ogMasterCopy: '0x28CeBFE94a03DbCA9d17143e9d2Bd1155DC26D5d',
   ogIdentifier: 'ASSERT_TRUTH2',
   ogLiveness: '172800',
-  collateral: '0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+  collateral: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
   bondAmount: (250n * 10n ** 6n).toString(),
   safeSaltNonce: '1',
   ogSaltNonce: '1',
+  moduleProxyFactory: defaultModuleProxyFactory,
 };
 
 const zeroLike = '0x0000000000000000000000000000000000000000';
+const BURN_OWNER = '0x000000000000000000000000000000000000dEaD';
+const SENTINEL_OWNERS = '0x0000000000000000000000000000000000000001';
 
 function App() {
   const publicClient = usePublicClient();
@@ -151,7 +201,7 @@ function App() {
     safeProxyFactory: defaults.safeProxyFactory,
     safeFallbackHandler: defaults.safeFallbackHandler,
     ogMasterCopy: defaults.ogMasterCopy,
-    moduleProxyFactory: '',
+    moduleProxyFactory: defaults.moduleProxyFactory,
   });
   const [deployment, setDeployment] = useState({
     moduleProxyFactory: '',
@@ -159,6 +209,7 @@ function App() {
     ogModule: '',
   });
   const [txHashes, setTxHashes] = useState({
+    moduleProxyFactory: '',
     safeProxy: '',
     ogModule: '',
     enableModule: '',
@@ -223,16 +274,11 @@ function App() {
       return;
     }
 
-    if (!form.moduleProxyFactory) {
-      setError('ModuleProxyFactory address is required (deploy one externally or set MODULE_PROXY_FACTORY).');
-      return;
-    }
-
     setIsSubmitting(true);
     setError('');
     setStatus('Preparing deployment...');
     setDeployment({ moduleProxyFactory: '', safe: '', ogModule: '' });
-    setTxHashes({ safeProxy: '', ogModule: '', enableModule: '' });
+    setTxHashes({ moduleProxyFactory: '', safeProxy: '', ogModule: '', enableModule: '' });
 
     try {
       const account = walletClient.account.address;
@@ -241,6 +287,20 @@ function App() {
       const bondAmount = BigInt(form.bondAmount || '0');
       const liveness = BigInt(form.liveness || '0');
       const identifier = stringToHex(form.identifier, { size: 32 });
+      let moduleProxyFactory = form.moduleProxyFactory;
+
+      if (!moduleProxyFactory) {
+        setStatus('Deploying ModuleProxyFactory...');
+        const deployTx = await walletClient.deployContract({
+          abi: moduleProxyFactoryAbi,
+          bytecode: MODULE_PROXY_FACTORY_BYTECODE,
+          account,
+        });
+        setTxHashes((prev) => ({ ...prev, moduleProxyFactory: deployTx }));
+        const receipt = await publicClient.waitForTransactionReceipt({ hash: deployTx });
+        moduleProxyFactory = receipt.contractAddress ?? '';
+        setForm((prev) => ({ ...prev, moduleProxyFactory }));
+      }
 
       const safeInitializer = encodeFunctionData({
         abi: safeAbi,
@@ -291,7 +351,7 @@ function App() {
 
       const ogSimulation = await publicClient.simulateContract({
         account,
-        address: form.moduleProxyFactory,
+        address: moduleProxyFactory,
         abi: moduleProxyFactoryAbi,
         functionName: 'deployModule',
         args: [form.ogMasterCopy, ogInitializerCall, ogSaltNonce],
@@ -334,7 +394,8 @@ function App() {
 
       const signature = await walletClient.signMessage({ message: { raw: txHash } });
       const { r, s, v } = hexToSignature(signature);
-      const packedSignature = signatureToHex({ r, s, v });
+      const safeV = (v >= 27n ? v : v + 27n) + 4n; // eth_sign flavor
+      const packedSignature = concatHex([r, s, numberToHex(safeV, { size: 1 })]);
 
       setStatus('Enabling module on the Safe...');
       const execSimulation = await publicClient.simulateContract({
@@ -360,12 +421,136 @@ function App() {
       setTxHashes((prev) => ({ ...prev, enableModule: enableTxHash }));
       await publicClient.waitForTransactionReceipt({ hash: enableTxHash });
 
+      setStatus('Setting burn address as sole Safe owner...');
+      const addOwnerCallData = encodeFunctionData({
+        abi: safeAbi,
+        functionName: 'addOwnerWithThreshold',
+        args: [BURN_OWNER, 1n],
+      });
+
+      const addOwnerNonce = await publicClient.readContract({
+        address: safeProxy,
+        abi: safeAbi,
+        functionName: 'nonce',
+      });
+
+      const addOwnerTxHash = await publicClient.readContract({
+        address: safeProxy,
+        abi: safeAbi,
+        functionName: 'getTransactionHash',
+        args: [
+          safeProxy,
+          0n,
+          addOwnerCallData,
+          0,
+          0n,
+          0n,
+          0n,
+          zeroAddress,
+          zeroAddress,
+          addOwnerNonce,
+        ],
+      });
+
+      const addOwnerSignature = await walletClient.signMessage({ message: { raw: addOwnerTxHash } });
+      const { r: addOwnerR, s: addOwnerS, v: addOwnerVRaw } = hexToSignature(addOwnerSignature);
+      const addOwnerV = (addOwnerVRaw >= 27n ? addOwnerVRaw : addOwnerVRaw + 27n) + 4n;
+      const addOwnerPackedSignature = concatHex([
+        addOwnerR,
+        addOwnerS,
+        numberToHex(addOwnerV, { size: 1 }),
+      ]);
+
+      const addOwnerExec = await publicClient.simulateContract({
+        account,
+        address: safeProxy,
+        abi: safeAbi,
+        functionName: 'execTransaction',
+        args: [
+          safeProxy,
+          0n,
+          addOwnerCallData,
+          0,
+          0n,
+          0n,
+          0n,
+          zeroAddress,
+          zeroAddress,
+          addOwnerPackedSignature,
+        ],
+      });
+
+      const addOwnerTx = await walletClient.writeContract(addOwnerExec.request);
+      await publicClient.waitForTransactionReceipt({ hash: addOwnerTx });
+
+      setStatus('Removing deployer from Safe owners...');
+      const removeOwnerCallData = encodeFunctionData({
+        abi: safeAbi,
+        functionName: 'removeOwner',
+        args: [SENTINEL_OWNERS, account, 1n],
+      });
+
+      const removeOwnerNonce = await publicClient.readContract({
+        address: safeProxy,
+        abi: safeAbi,
+        functionName: 'nonce',
+      });
+
+      const removeOwnerTxHash = await publicClient.readContract({
+        address: safeProxy,
+        abi: safeAbi,
+        functionName: 'getTransactionHash',
+        args: [
+          safeProxy,
+          0n,
+          removeOwnerCallData,
+          0,
+          0n,
+          0n,
+          0n,
+          zeroAddress,
+          zeroAddress,
+          removeOwnerNonce,
+        ],
+      });
+
+      const removeOwnerSignature = await walletClient.signMessage({ message: { raw: removeOwnerTxHash } });
+      const { r: removeOwnerR, s: removeOwnerS, v: removeOwnerVRaw } = hexToSignature(removeOwnerSignature);
+      const removeOwnerV = (removeOwnerVRaw >= 27n ? removeOwnerVRaw : removeOwnerVRaw + 27n) + 4n;
+      const removeOwnerPackedSignature = concatHex([
+        removeOwnerR,
+        removeOwnerS,
+        numberToHex(removeOwnerV, { size: 1 }),
+      ]);
+
+      const removeOwnerExec = await publicClient.simulateContract({
+        account,
+        address: safeProxy,
+        abi: safeAbi,
+        functionName: 'execTransaction',
+        args: [
+          safeProxy,
+          0n,
+          removeOwnerCallData,
+          0,
+          0n,
+          0n,
+          0n,
+          zeroAddress,
+          zeroAddress,
+          removeOwnerPackedSignature,
+        ],
+      });
+
+      const removeOwnerTx = await walletClient.writeContract(removeOwnerExec.request);
+      await publicClient.waitForTransactionReceipt({ hash: removeOwnerTx });
+
       setDeployment({
-        moduleProxyFactory: form.moduleProxyFactory,
+        moduleProxyFactory,
         safe: safeProxy,
         ogModule,
       });
-      setStatus('Deployment complete.');
+      setStatus('Deployment complete (burn address is sole Safe owner).');
     } catch (err) {
       setError(err?.shortMessage || err?.message || 'Deployment failed.');
       setStatus('');
