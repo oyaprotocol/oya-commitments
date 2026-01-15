@@ -128,6 +128,8 @@ const defaults = {
   ogMasterCopy: '0x28CeBFE94a03DbCA9d17143e9d2Bd1155DC26D5d',
   ogIdentifier: 'ASSERT_TRUTH2',
   ogLiveness: '172800',
+  collateral: '0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+  bondAmount: (250n * 10n ** 6n).toString(),
   safeSaltNonce: '1',
   ogSaltNonce: '1',
 };
@@ -139,8 +141,8 @@ function App() {
   const { data: walletClient } = useWalletClient();
   const [form, setForm] = useState({
     rules: '',
-    collateral: '',
-    bondAmount: '',
+    collateral: defaults.collateral,
+    bondAmount: defaults.bondAmount,
     liveness: defaults.ogLiveness,
     identifier: defaults.ogIdentifier,
     safeSaltNonce: defaults.safeSaltNonce,
