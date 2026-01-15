@@ -109,6 +109,8 @@ contract DeploySafeWithOptimisticGovernor is Script {
         uint256 ogSaltNonce;
     }
 
+    address internal constant BURN_OWNER = 0x000000000000000000000000000000000000dEaD;
+
     function run() external {
         // ---------
         // Required
@@ -131,6 +133,7 @@ contract DeploySafeWithOptimisticGovernor is Script {
         address ogModule = deployOptimisticGovernor(config, moduleProxyFactory, safeProxy, rules);
 
         enableModule(DEPLOYER_PK, safeProxy, ogModule);
+        burnOwner(DEPLOYER_PK, safeProxy);
 
         vm.stopBroadcast();
 
@@ -247,12 +250,68 @@ contract DeploySafeWithOptimisticGovernor is Script {
         );
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(deployerPk, txHash);
-        bytes memory sig = abi.encodePacked(r, s, v);
+        bytes memory sig = abi.encodePacked(r, s, v + 4); // eth_sign flavor
 
         bool ok = safe.execTransaction(
             safeProxy, 0, enableModuleCalldata, OP_CALL, 0, 0, 0, address(0), payable(address(0)), sig
         );
         require(ok, "enableModule execTransaction failed");
+    }
+
+    function burnOwner(uint256 deployerPk, address safeProxy) internal {
+        ISafe safe = ISafe(safeProxy);
+
+        // Add burn owner
+        bytes memory addOwnerCalldata = abi.encodeWithSignature(
+            "addOwnerWithThreshold(address,uint256)", BURN_OWNER, 1
+        );
+
+        bytes32 addOwnerTxHash = safe.getTransactionHash(
+            safeProxy,
+            0,
+            addOwnerCalldata,
+            OP_CALL,
+            0,
+            0,
+            0,
+            address(0),
+            address(0),
+            safe.nonce()
+        );
+
+        (uint8 addV, bytes32 addR, bytes32 addS) = vm.sign(deployerPk, addOwnerTxHash);
+        bytes memory addSig = abi.encodePacked(addR, addS, addV + 4);
+
+        bool addOk = safe.execTransaction(
+            safeProxy, 0, addOwnerCalldata, OP_CALL, 0, 0, 0, address(0), payable(address(0)), addSig
+        );
+        require(addOk, "add burn owner failed");
+
+        // Remove deployer owner
+        bytes memory removeOwnerCalldata = abi.encodeWithSignature(
+            "removeOwner(address,address,uint256)", safe.SENTINEL_OWNERS(), vm.addr(deployerPk), 1
+        );
+
+        bytes32 removeOwnerTxHash = safe.getTransactionHash(
+            safeProxy,
+            0,
+            removeOwnerCalldata,
+            OP_CALL,
+            0,
+            0,
+            0,
+            address(0),
+            address(0),
+            safe.nonce()
+        );
+
+        (uint8 remV, bytes32 remR, bytes32 remS) = vm.sign(deployerPk, removeOwnerTxHash);
+        bytes memory remSig = abi.encodePacked(remR, remS, remV + 4);
+
+        bool remOk = safe.execTransaction(
+            safeProxy, 0, removeOwnerCalldata, OP_CALL, 0, 0, 0, address(0), payable(address(0)), remSig
+        );
+        require(remOk, "remove deployer owner failed");
     }
 
     function logDeployment(address moduleProxyFactory, address safeProxy, address ogModule, Config memory config)
