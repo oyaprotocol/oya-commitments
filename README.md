@@ -22,6 +22,29 @@ forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimis
   --private-key <your_private_key>
 ```
 
+## Commitment Agent Tooling
+
+Use the offchain agent scaffold in `agent/` to serve commitments by posting bonds, proposing transactions, monitoring deposits, and making deposits on behalf of the commitment. It ships only generic tools; add commitment-specific behavior in your own prompts or handlers.
+
+### Setup & Run
+
+```shell
+cd agent
+npm install
+cp .env.example .env # fill in RPC_URL, PRIVATE_KEY, COMMITMENT_SAFE, OG_MODULE, WATCH_ASSETS
+npm start
+```
+
+The loop polls every `POLL_INTERVAL_MS` (default 60s) for ERC20 transfers into the commitment (and optional native balance increases). If nothing changes, the LLM/decision hook is not invoked. When signals are found, `decideOnSignals` is called—extend that function to route context into your system prompt and custom tools.
+
+### Built-in Agent Tools
+
+- `postBondAndPropose`: Approves the Optimistic Oracle for the module bond and calls `proposeTransactions` on the Optimistic Governor.
+- `makeDeposit`: Sends ERC20 or native deposits into the commitment Safe using the agent key.
+- `pollCommitmentChanges`: Watches configured assets (plus the OG collateral by default) for new deposits.
+
+Add more tools for a specific commitment beside these generics; keep the default agent lean.
+
 ## Required Environment Variables
 
 - `DEPLOYER_PK`: Private key for the deployer.
@@ -40,6 +63,8 @@ forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimis
 
 The web frontend is a lightweight UI for filling in Safe + Optimistic Governor parameters and launching the same deployment flow as the script. It can be hosted as a static site and uses RPC endpoints to read chain state and craft the deployment payloads.
 
+It also prepares `.env` files for the offchain agent scaffold (in `agent/`) so you can deploy a commitment and immediately configure an agent to serve it.
+
 ### Dependencies
 
 - Node.js 18+ (or newer)
@@ -53,6 +78,11 @@ From the web frontend directory (if you keep it alongside this repo), install de
 npm install
 npm run dev
 ```
+
+Agent `.env` prep (in the UI):
+
+- Fill RPC, agent key, and addresses (Safe + OG) — the UI auto-fills addresses from the deployment section.
+- Copy or download the rendered `.env`, then run the agent locally: `cd agent && npm install && npm start`.
 
 ### Required Environment Variables
 
