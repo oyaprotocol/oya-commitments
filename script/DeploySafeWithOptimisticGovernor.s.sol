@@ -263,21 +263,10 @@ contract DeploySafeWithOptimisticGovernor is Script {
         ISafe safe = ISafe(safeProxy);
 
         // Add burn owner
-        bytes memory addOwnerCalldata = abi.encodeWithSignature(
-            "addOwnerWithThreshold(address,uint256)", BURN_OWNER, 1
-        );
+        bytes memory addOwnerCalldata = abi.encodeWithSignature("addOwnerWithThreshold(address,uint256)", BURN_OWNER, 1);
 
         bytes32 addOwnerTxHash = safe.getTransactionHash(
-            safeProxy,
-            0,
-            addOwnerCalldata,
-            OP_CALL,
-            0,
-            0,
-            0,
-            address(0),
-            address(0),
-            safe.nonce()
+            safeProxy, 0, addOwnerCalldata, OP_CALL, 0, 0, 0, address(0), address(0), safe.nonce()
         );
 
         (uint8 addV, bytes32 addR, bytes32 addS) = vm.sign(deployerPk, addOwnerTxHash);
@@ -289,21 +278,11 @@ contract DeploySafeWithOptimisticGovernor is Script {
         require(addOk, "add burn owner failed");
 
         // Remove deployer owner
-        bytes memory removeOwnerCalldata = abi.encodeWithSignature(
-            "removeOwner(address,address,uint256)", BURN_OWNER, vm.addr(deployerPk), 1
-        );
+        bytes memory removeOwnerCalldata =
+            abi.encodeWithSignature("removeOwner(address,address,uint256)", BURN_OWNER, vm.addr(deployerPk), 1);
 
         bytes32 removeOwnerTxHash = safe.getTransactionHash(
-            safeProxy,
-            0,
-            removeOwnerCalldata,
-            OP_CALL,
-            0,
-            0,
-            0,
-            address(0),
-            address(0),
-            safe.nonce()
+            safeProxy, 0, removeOwnerCalldata, OP_CALL, 0, 0, 0, address(0), address(0), safe.nonce()
         );
 
         (uint8 remV, bytes32 remR, bytes32 remS) = vm.sign(deployerPk, removeOwnerTxHash);

@@ -221,6 +221,7 @@ async function decideOnSignals(signals) {
 
 async function agentLoop() {
     try {
+        console.log(`[agent] loop tick @ ${new Date().toISOString()}`);
         const signals = await pollCommitmentChanges();
 
         if (signals.length > 0) {
