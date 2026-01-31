@@ -110,6 +110,7 @@ contract DeploySafeWithOptimisticGovernor is Script {
     }
 
     address internal constant BURN_OWNER = 0x000000000000000000000000000000000000dEaD;
+    address internal constant SENTINEL_OWNERS = 0x0000000000000000000000000000000000000001;
 
     function run() external {
         // ---------
@@ -250,7 +251,7 @@ contract DeploySafeWithOptimisticGovernor is Script {
         );
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(deployerPk, txHash);
-        bytes memory sig = abi.encodePacked(r, s, v + 4); // eth_sign flavor
+        bytes memory sig = abi.encodePacked(r, s, v); // EIP-712 signature (no eth_sign prefix)
 
         bool ok = safe.execTransaction(
             safeProxy, 0, enableModuleCalldata, OP_CALL, 0, 0, 0, address(0), payable(address(0)), sig
@@ -280,7 +281,7 @@ contract DeploySafeWithOptimisticGovernor is Script {
         );
 
         (uint8 addV, bytes32 addR, bytes32 addS) = vm.sign(deployerPk, addOwnerTxHash);
-        bytes memory addSig = abi.encodePacked(addR, addS, addV + 4);
+        bytes memory addSig = abi.encodePacked(addR, addS, addV);
 
         bool addOk = safe.execTransaction(
             safeProxy, 0, addOwnerCalldata, OP_CALL, 0, 0, 0, address(0), payable(address(0)), addSig
@@ -289,7 +290,7 @@ contract DeploySafeWithOptimisticGovernor is Script {
 
         // Remove deployer owner
         bytes memory removeOwnerCalldata = abi.encodeWithSignature(
-            "removeOwner(address,address,uint256)", safe.SENTINEL_OWNERS(), vm.addr(deployerPk), 1
+            "removeOwner(address,address,uint256)", BURN_OWNER, vm.addr(deployerPk), 1
         );
 
         bytes32 removeOwnerTxHash = safe.getTransactionHash(
@@ -306,7 +307,7 @@ contract DeploySafeWithOptimisticGovernor is Script {
         );
 
         (uint8 remV, bytes32 remR, bytes32 remS) = vm.sign(deployerPk, removeOwnerTxHash);
-        bytes memory remSig = abi.encodePacked(remR, remS, remV + 4);
+        bytes memory remSig = abi.encodePacked(remR, remS, remV);
 
         bool remOk = safe.execTransaction(
             safeProxy, 0, removeOwnerCalldata, OP_CALL, 0, 0, 0, address(0), payable(address(0)), remSig
