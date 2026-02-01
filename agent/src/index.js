@@ -12,7 +12,7 @@ import {
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
-const optimisticGovernorAbi = parseAbi([
+const optimisticGovernorAbiV1 = parseAbi([
     'function proposeTransactions((address to,uint256 value,bytes data,uint8 operation)[] transactions) returns (bytes32 proposalHash)',
     'function collateral() view returns (address)',
     'function bondAmount() view returns (uint256)',
@@ -20,6 +20,20 @@ const optimisticGovernorAbi = parseAbi([
     'function rules() view returns (string)',
     'function identifier() view returns (bytes32)',
     'function liveness() view returns (uint64)',
+]);
+
+const optimisticGovernorAbiV2 = parseAbi([
+    'function proposeTransactions((address to,uint256 value,bytes data,uint8 operation)[] transactions, bytes explanation) returns (bytes32 proposalHash)',
+    'function collateral() view returns (address)',
+    'function bondAmount() view returns (uint256)',
+    'function optimisticOracleV3() view returns (address)',
+    'function rules() view returns (string)',
+    'function identifier() view returns (bytes32)',
+    'function liveness() view returns (uint64)',
+]);
+
+const optimisticOracleAbi = parseAbi([
+    'function getMinimumBond(address collateral) view returns (uint256)',
 ]);
 
 const transferEvent = parseAbiItem(
@@ -49,7 +63,7 @@ const config = {
     privateKey: mustGetEnv('PRIVATE_KEY'),
     commitmentSafe: getAddress(mustGetEnv('COMMITMENT_SAFE')),
     ogModule: getAddress(mustGetEnv('OG_MODULE')),
-    pollIntervalMs: Number(process.env.POLL_INTERVAL_MS ?? 60_000),
+    pollIntervalMs: Number(process.env.POLL_INTERVAL_MS ?? 10_000),
     startBlock: process.env.START_BLOCK ? BigInt(process.env.START_BLOCK) : undefined,
     watchAssets: parseAddressList(process.env.WATCH_ASSETS),
     watchNativeBalance:
@@ -62,12 +76,14 @@ const config = {
     defaultDepositAmountWei: process.env.DEFAULT_DEPOSIT_AMOUNT_WEI
         ? BigInt(process.env.DEFAULT_DEPOSIT_AMOUNT_WEI)
         : undefined,
+    bondSpender: (process.env.BOND_SPENDER ?? 'og').toLowerCase(),
     openAiApiKey: process.env.OPENAI_API_KEY,
     openAiModel: process.env.OPENAI_MODEL ?? 'gpt-4.1-mini',
     openAiBaseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
 };
 
 const account = privateKeyToAccount(config.privateKey);
+const agentAddress = account.address;
 const publicClient = createPublicClient({ transport: http(config.rpcUrl) });
 const walletClient = createWalletClient({ account, transport: http(config.rpcUrl) });
 
@@ -79,7 +95,7 @@ let ogContext;
 async function loadOptimisticGovernorDefaults() {
     const collateral = await publicClient.readContract({
         address: config.ogModule,
-        abi: optimisticGovernorAbi,
+        abi: optimisticGovernorAbiV1,
         functionName: 'collateral',
     });
 
@@ -90,32 +106,32 @@ async function loadOgContext() {
     const [collateral, bondAmount, optimisticOracle, rules, identifier, liveness] = await Promise.all([
         publicClient.readContract({
             address: config.ogModule,
-            abi: optimisticGovernorAbi,
+            abi: optimisticGovernorAbiV1,
             functionName: 'collateral',
         }),
         publicClient.readContract({
             address: config.ogModule,
-            abi: optimisticGovernorAbi,
+            abi: optimisticGovernorAbiV1,
             functionName: 'bondAmount',
         }),
         publicClient.readContract({
             address: config.ogModule,
-            abi: optimisticGovernorAbi,
+            abi: optimisticGovernorAbiV1,
             functionName: 'optimisticOracleV3',
         }),
         publicClient.readContract({
             address: config.ogModule,
-            abi: optimisticGovernorAbi,
+            abi: optimisticGovernorAbiV1,
             functionName: 'rules',
         }),
         publicClient.readContract({
             address: config.ogModule,
-            abi: optimisticGovernorAbi,
+            abi: optimisticGovernorAbiV1,
             functionName: 'identifier',
         }),
         publicClient.readContract({
             address: config.ogModule,
-            abi: optimisticGovernorAbi,
+            abi: optimisticGovernorAbiV1,
             functionName: 'liveness',
         }),
     ]);
@@ -130,6 +146,56 @@ async function loadOgContext() {
     };
 }
 
+async function logOgFundingStatus() {
+    try {
+        const [collateral, bondAmount, optimisticOracle] = await Promise.all([
+            publicClient.readContract({
+                address: config.ogModule,
+                abi: optimisticGovernorAbiV1,
+                functionName: 'collateral',
+            }),
+            publicClient.readContract({
+                address: config.ogModule,
+                abi: optimisticGovernorAbiV1,
+                functionName: 'bondAmount',
+            }),
+            publicClient.readContract({
+                address: config.ogModule,
+                abi: optimisticGovernorAbiV1,
+                functionName: 'optimisticOracleV3',
+            }),
+        ]);
+        const minimumBond = await publicClient.readContract({
+            address: optimisticOracle,
+            abi: optimisticOracleAbi,
+            functionName: 'getMinimumBond',
+            args: [collateral],
+        });
+
+        const requiredBond = bondAmount > minimumBond ? bondAmount : minimumBond;
+        const collateralBalance = await publicClient.readContract({
+            address: collateral,
+            abi: erc20Abi,
+            functionName: 'balanceOf',
+            args: [account.address],
+        });
+        const nativeBalance = await publicClient.getBalance({ address: account.address });
+
+        console.log('[agent] OG funding status:', {
+            proposer: account.address,
+            collateral,
+            bondAmount: bondAmount.toString(),
+            minimumBond: minimumBond.toString(),
+            requiredBond: requiredBond.toString(),
+            collateralBalance: collateralBalance.toString(),
+            nativeBalance: nativeBalance.toString(),
+            optimisticOracle,
+        });
+    } catch (error) {
+        console.warn('[agent] Failed to log OG funding status:', error);
+    }
+}
+
 async function primeBalances(blockNumber) {
     if (!config.watchNativeBalance) return;
 
@@ -140,39 +206,176 @@ async function primeBalances(blockNumber) {
 }
 
 async function postBondAndPropose(transactions) {
+    const proposerBalance = await publicClient.getBalance({ address: account.address });
     const [collateral, bondAmount, optimisticOracle] = await Promise.all([
         publicClient.readContract({
             address: config.ogModule,
-            abi: optimisticGovernorAbi,
+            abi: optimisticGovernorAbiV1,
             functionName: 'collateral',
         }),
         publicClient.readContract({
             address: config.ogModule,
-            abi: optimisticGovernorAbi,
+            abi: optimisticGovernorAbiV1,
             functionName: 'bondAmount',
         }),
         publicClient.readContract({
             address: config.ogModule,
-            abi: optimisticGovernorAbi,
+            abi: optimisticGovernorAbiV1,
             functionName: 'optimisticOracleV3',
         }),
     ]);
 
-    if (bondAmount > 0n) {
-        await walletClient.writeContract({
-            address: collateral,
-            abi: erc20Abi,
-            functionName: 'approve',
-            args: [optimisticOracle, bondAmount],
+    let minimumBond = 0n;
+    try {
+        minimumBond = await publicClient.readContract({
+            address: optimisticOracle,
+            abi: optimisticOracleAbi,
+            functionName: 'getMinimumBond',
+            args: [collateral],
         });
+    } catch (error) {
+        console.warn('[agent] Failed to fetch minimum bond from optimistic oracle:', error);
     }
 
-    const proposalHash = await walletClient.writeContract({
-        address: config.ogModule,
-        abi: optimisticGovernorAbi,
-        functionName: 'proposeTransactions',
-        args: [transactions],
+    const requiredBond = bondAmount > minimumBond ? bondAmount : minimumBond;
+
+    if (requiredBond > 0n) {
+        const collateralBalance = await publicClient.readContract({
+            address: collateral,
+            abi: erc20Abi,
+            functionName: 'balanceOf',
+            args: [account.address],
+        });
+        if (collateralBalance < requiredBond) {
+            throw new Error(
+                `Insufficient bond collateral balance: need ${requiredBond.toString()} wei, have ${collateralBalance.toString()}.`
+            );
+        }
+        const spenders = [];
+        if (config.bondSpender === 'og' || config.bondSpender === 'both') {
+            spenders.push(config.ogModule);
+        }
+        if (config.bondSpender === 'oo' || config.bondSpender === 'both') {
+            spenders.push(optimisticOracle);
+        }
+
+        for (const spender of spenders) {
+            const approveHash = await walletClient.writeContract({
+                address: collateral,
+                abi: erc20Abi,
+                functionName: 'approve',
+                args: [spender, requiredBond],
+            });
+            await publicClient.waitForTransactionReceipt({ hash: approveHash });
+            const allowance = await publicClient.readContract({
+                address: collateral,
+                abi: erc20Abi,
+                functionName: 'allowance',
+                args: [account.address, spender],
+            });
+            if (allowance < requiredBond) {
+                throw new Error(
+                    `Insufficient bond allowance: need ${requiredBond.toString()} wei, have ${allowance.toString()} for spender ${spender}.`
+                );
+            }
+        }
+    }
+
+    if (proposerBalance === 0n) {
+        throw new Error(
+            `Proposer ${account.address} has 0 native balance; cannot pay gas to propose.`
+        );
+    }
+
+    const [allowanceOg, allowanceOo] = await Promise.all([
+        publicClient.readContract({
+            address: collateral,
+            abi: erc20Abi,
+            functionName: 'allowance',
+            args: [account.address, config.ogModule],
+        }),
+        publicClient.readContract({
+            address: collateral,
+            abi: erc20Abi,
+            functionName: 'allowance',
+            args: [account.address, optimisticOracle],
+        }),
+    ]);
+
+    console.log('[agent] Propose preflight:', {
+        proposer: account.address,
+        ogModule: config.ogModule,
+        optimisticOracle,
+        collateral,
+        bondAmount: bondAmount.toString(),
+        minimumBond: minimumBond.toString(),
+        requiredBond: requiredBond.toString(),
+        collateralBalance: (
+            await publicClient.readContract({
+                address: collateral,
+                abi: erc20Abi,
+                functionName: 'balanceOf',
+                args: [account.address],
+            })
+        ).toString(),
+        allowanceOg: allowanceOg.toString(),
+        allowanceOo: allowanceOo.toString(),
     });
+
+    const proposalContext = {
+        ogModule: config.ogModule,
+        proposer: account.address,
+        collateral,
+        bondAmount: bondAmount.toString(),
+        minimumBond: minimumBond.toString(),
+        requiredBond: requiredBond.toString(),
+        optimisticOracle,
+    };
+
+    let proposalHash;
+    const explanation = 'Agent serving Oya commitment.';
+    try {
+        console.log('[agent] Propose signature: V2 (transactions, explanation)');
+        await publicClient.simulateContract({
+            address: config.ogModule,
+            abi: optimisticGovernorAbiV2,
+            functionName: 'proposeTransactions',
+            args: [transactions, explanation],
+            account: account.address,
+        });
+        proposalHash = await walletClient.writeContract({
+            address: config.ogModule,
+            abi: optimisticGovernorAbiV2,
+            functionName: 'proposeTransactions',
+            args: [transactions, explanation],
+        });
+    } catch (errorV2) {
+        try {
+            console.log('[agent] Propose signature: V1 (transactions)');
+            await publicClient.simulateContract({
+                address: config.ogModule,
+                abi: optimisticGovernorAbiV1,
+                functionName: 'proposeTransactions',
+                args: [transactions],
+                account: account.address,
+            });
+            proposalHash = await walletClient.writeContract({
+                address: config.ogModule,
+                abi: optimisticGovernorAbiV1,
+                functionName: 'proposeTransactions',
+                args: [transactions],
+            });
+        } catch (errorV1) {
+            const message =
+                errorV1?.shortMessage ??
+                errorV1?.message ??
+                errorV2?.shortMessage ??
+                errorV2?.message ??
+                String(errorV1 ?? errorV2);
+            console.warn('[agent] Propose simulation context:', proposalContext);
+            throw new Error(`Propose simulation failed: ${message}`);
+        }
+    }
 
     return { proposalHash, bondAmount, collateral, optimisticOracle };
 }
@@ -322,6 +525,7 @@ async function startAgent() {
     console.log('[agent] initializing...');
     await loadOptimisticGovernorDefaults();
     await loadOgContext();
+    await logOgFundingStatus();
 
     if (lastCheckedBlock === undefined) {
         lastCheckedBlock = await publicClient.getBlockNumber();
@@ -337,7 +541,7 @@ async function startAgent() {
 
 async function callAgent(signals, context) {
     const systemPrompt =
-        'You are an agent monitoring an onchain commitment (Safe + Optimistic Governor). Given signals and rules, recommend a course of action. Prefer no-op when unsure. If an onchain action is needed, call a tool. Use build_og_transactions to construct proposal payloads, then post_bond_and_propose. If no action is needed, output strict JSON with keys: action (propose|deposit|ignore|other) and rationale (string).';
+        'You are an agent monitoring an onchain commitment (Safe + Optimistic Governor). Your own address is provided in the input as agentAddress; use it when rules refer to “the agent/themselves”. Given signals and rules, recommend a course of action. Prefer no-op when unsure. If an onchain action is needed, call a tool. Use build_og_transactions to construct proposal payloads, then post_bond_and_propose. If no action is needed, output strict JSON with keys: action (propose|deposit|ignore|other) and rationale (string).';
 
     const safeSignals = signals.map((signal) => ({
         ...signal,
@@ -367,6 +571,7 @@ async function callAgent(signals, context) {
                 content: JSON.stringify({
                     commitmentSafe: config.commitmentSafe,
                     ogModule: config.ogModule,
+                    agentAddress,
                     ogContext: safeContext,
                     signals: safeSignals,
                 }),
@@ -477,42 +682,51 @@ function toolDefinitions() {
                                         'Action type: erc20_transfer | native_transfer | contract_call',
                                 },
                                 token: {
-                                    type: 'string',
+                                    type: ['string', 'null'],
                                     description:
                                         'ERC20 token address for erc20_transfer.',
                                 },
                                 to: {
-                                    type: 'string',
+                                    type: ['string', 'null'],
                                     description: 'Recipient or target contract address.',
                                 },
                                 amountWei: {
-                                    type: 'string',
+                                    type: ['string', 'null'],
                                     description:
                                         'Amount in wei as a string. For erc20_transfer and native_transfer.',
                                 },
                                 valueWei: {
-                                    type: 'string',
+                                    type: ['string', 'null'],
                                     description:
                                         'ETH value to send in contract_call (default 0).',
                                 },
                                 abi: {
-                                    type: 'string',
+                                    type: ['string', 'null'],
                                     description:
                                         'Function signature for contract_call, e.g. "setOwner(address)".',
                                 },
                                 args: {
-                                    type: 'array',
+                                    type: ['array', 'null'],
                                     description:
                                         'Arguments for contract_call in order, JSON-serializable.',
-                                    items: {},
+                                    items: { type: 'string' },
                                 },
                                 operation: {
-                                    type: 'integer',
+                                    type: ['integer', 'null'],
                                     description:
                                         'Safe operation (0=CALL,1=DELEGATECALL). Defaults to 0.',
                                 },
                             },
-                            required: ['kind'],
+                            required: [
+                                'kind',
+                                'token',
+                                'to',
+                                'amountWei',
+                                'valueWei',
+                                'abi',
+                                'args',
+                                'operation',
+                            ],
                         },
                     },
                 },
@@ -577,6 +791,8 @@ function toolDefinitions() {
 
 async function executeToolCalls(toolCalls) {
     const outputs = [];
+    const hasPostProposal = toolCalls.some((call) => call.name === 'post_bond_and_propose');
+    let builtTransactions;
     for (const call of toolCalls) {
         const args = parseToolArguments(call.arguments);
         if (!args) {
@@ -587,6 +803,7 @@ async function executeToolCalls(toolCalls) {
         if (call.name === 'build_og_transactions') {
             try {
                 const transactions = buildOgTransactions(args.actions ?? []);
+                builtTransactions = transactions;
                 outputs.push({
                     callId: call.callId,
                     output: JSON.stringify({ status: 'ok', transactions }),
@@ -641,6 +858,10 @@ async function executeToolCalls(toolCalls) {
             callId: call.callId,
             output: JSON.stringify({ status: 'skipped', reason: 'unknown tool' }),
         });
+    }
+    if (builtTransactions && !hasPostProposal) {
+        const result = await postBondAndPropose(builtTransactions);
+        console.log('[agent] Auto-proposed via OG:', result);
     }
     return outputs.filter((item) => item.callId);
 }
@@ -732,8 +953,14 @@ async function explainToolCalls(previousResponseId, toolOutputs) {
             output: item.output,
         })),
         {
-            type: 'input_text',
-            text: 'Summarize the actions you took and why.',
+            type: 'message',
+            role: 'user',
+            content: [
+                {
+                    type: 'input_text',
+                    text: 'Summarize the actions you took and why.',
+                },
+            ],
         },
     ];
 
