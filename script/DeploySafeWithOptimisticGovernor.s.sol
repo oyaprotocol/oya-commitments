@@ -173,13 +173,20 @@ contract DeploySafeWithOptimisticGovernor is Script {
         config.bondAmount = vm.envUint("OG_BOND_AMOUNT");
         config.liveness = uint64(vm.envOr("OG_LIVENESS", uint256(2 days))); // seconds
 
-        // Identifier (bytes32). Default "ASSERT_TRUTH2" for UMA Optimistic Oracle. :contentReference[oaicite:14]{index=14}
-        string memory identifierStr = vm.envOr("OG_IDENTIFIER_STR", string("ASSERT_TRUTH2"));
+        // Identifier (bytes32). Default "ASSERT_TRUTH" on Sepolia, "ASSERT_TRUTH2" elsewhere. :contentReference[oaicite:14]{index=14}
+        string memory identifierStr = vm.envOr("OG_IDENTIFIER_STR", defaultIdentifierStr());
         config.identifier = bytes32(bytes(identifierStr)); // "ZODIAC" fits in 32 bytes.
 
         // salts
         config.safeSaltNonce = vm.envOr("SAFE_SALT_NONCE", uint256(1));
         config.ogSaltNonce = vm.envOr("OG_SALT_NONCE", uint256(1));
+    }
+
+    function defaultIdentifierStr() internal view returns (string memory) {
+        if (block.chainid == 11155111) {
+            return "ASSERT_TRUTH";
+        }
+        return "ASSERT_TRUTH2";
     }
 
     function resolveModuleProxyFactory() internal returns (address moduleProxyFactory) {

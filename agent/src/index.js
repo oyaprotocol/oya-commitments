@@ -8,6 +8,7 @@ import {
     http,
     parseAbi,
     parseAbiItem,
+    stringToHex,
     zeroAddress,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
@@ -148,7 +149,12 @@ async function loadOgContext() {
 
 async function logOgFundingStatus() {
     try {
-        const [collateral, bondAmount, optimisticOracle] = await Promise.all([
+        const chainId = await publicClient.getChainId();
+        const expectedIdentifierStr =
+            chainId === 11155111 ? 'ASSERT_TRUTH' : 'ASSERT_TRUTH2';
+        const expectedIdentifier = stringToHex(expectedIdentifierStr, { size: 32 });
+
+        const [collateral, bondAmount, optimisticOracle, identifier] = await Promise.all([
             publicClient.readContract({
                 address: config.ogModule,
                 abi: optimisticGovernorAbiV1,
@@ -163,6 +169,11 @@ async function logOgFundingStatus() {
                 address: config.ogModule,
                 abi: optimisticGovernorAbiV1,
                 functionName: 'optimisticOracleV3',
+            }),
+            publicClient.readContract({
+                address: config.ogModule,
+                abi: optimisticGovernorAbiV1,
+                functionName: 'identifier',
             }),
         ]);
         const minimumBond = await publicClient.readContract({
@@ -190,7 +201,16 @@ async function logOgFundingStatus() {
             collateralBalance: collateralBalance.toString(),
             nativeBalance: nativeBalance.toString(),
             optimisticOracle,
+            chainId,
+            identifier,
+            expectedIdentifier,
         });
+
+        if (identifier !== expectedIdentifier) {
+            console.warn(
+                `[agent] OG identifier mismatch: expected ${expectedIdentifierStr}, onchain ${identifier}`
+            );
+        }
     } catch (error) {
         console.warn('[agent] Failed to log OG funding status:', error);
     }
