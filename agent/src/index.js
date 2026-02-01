@@ -13,24 +13,16 @@ import {
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
-const optimisticGovernorAbiV1 = parseAbi([
-    'function proposeTransactions((address to,uint256 value,bytes data,uint8 operation)[] transactions) returns (bytes32 proposalHash)',
+const optimisticGovernorAbi = parseAbi([
+    'function proposeTransactions((address to,uint8 operation,uint256 value,bytes data)[] transactions, bytes explanation)',
+    'function executeProposal((address to,uint8 operation,uint256 value,bytes data)[] transactions)',
     'function collateral() view returns (address)',
     'function bondAmount() view returns (uint256)',
     'function optimisticOracleV3() view returns (address)',
     'function rules() view returns (string)',
     'function identifier() view returns (bytes32)',
     'function liveness() view returns (uint64)',
-]);
-
-const optimisticGovernorAbiV2 = parseAbi([
-    'function proposeTransactions((address to,uint256 value,bytes data,uint8 operation)[] transactions, bytes explanation) returns (bytes32 proposalHash)',
-    'function collateral() view returns (address)',
-    'function bondAmount() view returns (uint256)',
-    'function optimisticOracleV3() view returns (address)',
-    'function rules() view returns (string)',
-    'function identifier() view returns (bytes32)',
-    'function liveness() view returns (uint64)',
+    'function assertionIds(bytes32) view returns (bytes32)',
 ]);
 
 const optimisticOracleAbi = parseAbi([
@@ -39,6 +31,15 @@ const optimisticOracleAbi = parseAbi([
 
 const transferEvent = parseAbiItem(
     'event Transfer(address indexed from, address indexed to, uint256 value)'
+);
+const transactionsProposedEvent = parseAbiItem(
+    'event TransactionsProposed(address indexed proposer,uint256 indexed proposalTime,bytes32 indexed assertionId,((address to,uint8 operation,uint256 value,bytes data)[] transactions,uint256 requestTime) proposal,bytes32 proposalHash,bytes explanation,string rules,uint256 challengeWindowEnds)'
+);
+const proposalExecutedEvent = parseAbiItem(
+    'event ProposalExecuted(bytes32 indexed proposalHash, bytes32 indexed assertionId)'
+);
+const proposalDeletedEvent = parseAbiItem(
+    'event ProposalDeleted(bytes32 indexed proposalHash, bytes32 indexed assertionId)'
 );
 
 function mustGetEnv(key) {
@@ -81,6 +82,11 @@ const config = {
     openAiApiKey: process.env.OPENAI_API_KEY,
     openAiModel: process.env.OPENAI_MODEL ?? 'gpt-4.1-mini',
     openAiBaseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
+    allowProposeOnSimulationFail: true,
+    proposeGasLimit: process.env.PROPOSE_GAS_LIMIT
+        ? BigInt(process.env.PROPOSE_GAS_LIMIT)
+        : 2_000_000n,
+    executeRetryMs: Number(process.env.EXECUTE_RETRY_MS ?? 60_000),
 };
 
 const account = privateKeyToAccount(config.privateKey);
@@ -90,13 +96,16 @@ const walletClient = createWalletClient({ account, transport: http(config.rpcUrl
 
 const trackedAssets = new Set(config.watchAssets);
 let lastCheckedBlock = config.startBlock;
+let lastProposalCheckedBlock = config.startBlock;
 let lastNativeBalance;
 let ogContext;
+const proposalsByHash = new Map();
+const zeroBytes32 = `0x${'0'.repeat(64)}`;
 
 async function loadOptimisticGovernorDefaults() {
     const collateral = await publicClient.readContract({
         address: config.ogModule,
-        abi: optimisticGovernorAbiV1,
+        abi: optimisticGovernorAbi,
         functionName: 'collateral',
     });
 
@@ -107,32 +116,32 @@ async function loadOgContext() {
     const [collateral, bondAmount, optimisticOracle, rules, identifier, liveness] = await Promise.all([
         publicClient.readContract({
             address: config.ogModule,
-            abi: optimisticGovernorAbiV1,
+            abi: optimisticGovernorAbi,
             functionName: 'collateral',
         }),
         publicClient.readContract({
             address: config.ogModule,
-            abi: optimisticGovernorAbiV1,
+            abi: optimisticGovernorAbi,
             functionName: 'bondAmount',
         }),
         publicClient.readContract({
             address: config.ogModule,
-            abi: optimisticGovernorAbiV1,
+            abi: optimisticGovernorAbi,
             functionName: 'optimisticOracleV3',
         }),
         publicClient.readContract({
             address: config.ogModule,
-            abi: optimisticGovernorAbiV1,
+            abi: optimisticGovernorAbi,
             functionName: 'rules',
         }),
         publicClient.readContract({
             address: config.ogModule,
-            abi: optimisticGovernorAbiV1,
+            abi: optimisticGovernorAbi,
             functionName: 'identifier',
         }),
         publicClient.readContract({
             address: config.ogModule,
-            abi: optimisticGovernorAbiV1,
+            abi: optimisticGovernorAbi,
             functionName: 'liveness',
         }),
     ]);
@@ -157,22 +166,22 @@ async function logOgFundingStatus() {
         const [collateral, bondAmount, optimisticOracle, identifier] = await Promise.all([
             publicClient.readContract({
                 address: config.ogModule,
-                abi: optimisticGovernorAbiV1,
+                abi: optimisticGovernorAbi,
                 functionName: 'collateral',
             }),
             publicClient.readContract({
                 address: config.ogModule,
-                abi: optimisticGovernorAbiV1,
+                abi: optimisticGovernorAbi,
                 functionName: 'bondAmount',
             }),
             publicClient.readContract({
                 address: config.ogModule,
-                abi: optimisticGovernorAbiV1,
+                abi: optimisticGovernorAbi,
                 functionName: 'optimisticOracleV3',
             }),
             publicClient.readContract({
                 address: config.ogModule,
-                abi: optimisticGovernorAbiV1,
+                abi: optimisticGovernorAbi,
                 functionName: 'identifier',
             }),
         ]);
@@ -191,20 +200,6 @@ async function logOgFundingStatus() {
             args: [account.address],
         });
         const nativeBalance = await publicClient.getBalance({ address: account.address });
-
-        console.log('[agent] OG funding status:', {
-            proposer: account.address,
-            collateral,
-            bondAmount: bondAmount.toString(),
-            minimumBond: minimumBond.toString(),
-            requiredBond: requiredBond.toString(),
-            collateralBalance: collateralBalance.toString(),
-            nativeBalance: nativeBalance.toString(),
-            optimisticOracle,
-            chainId,
-            identifier,
-            expectedIdentifier,
-        });
 
         if (identifier !== expectedIdentifier) {
             console.warn(
@@ -226,25 +221,25 @@ async function primeBalances(blockNumber) {
 }
 
 async function postBondAndPropose(transactions) {
+    const normalizedTransactions = normalizeOgTransactions(transactions);
     const proposerBalance = await publicClient.getBalance({ address: account.address });
     const [collateral, bondAmount, optimisticOracle] = await Promise.all([
         publicClient.readContract({
             address: config.ogModule,
-            abi: optimisticGovernorAbiV1,
+            abi: optimisticGovernorAbi,
             functionName: 'collateral',
         }),
         publicClient.readContract({
             address: config.ogModule,
-            abi: optimisticGovernorAbiV1,
+            abi: optimisticGovernorAbi,
             functionName: 'bondAmount',
         }),
         publicClient.readContract({
             address: config.ogModule,
-            abi: optimisticGovernorAbiV1,
+            abi: optimisticGovernorAbi,
             functionName: 'optimisticOracleV3',
         }),
     ]);
-
     let minimumBond = 0n;
     try {
         minimumBond = await publicClient.readContract({
@@ -307,97 +302,104 @@ async function postBondAndPropose(transactions) {
         );
     }
 
-    const [allowanceOg, allowanceOo] = await Promise.all([
-        publicClient.readContract({
-            address: collateral,
-            abi: erc20Abi,
-            functionName: 'allowance',
-            args: [account.address, config.ogModule],
-        }),
-        publicClient.readContract({
-            address: collateral,
-            abi: erc20Abi,
-            functionName: 'allowance',
-            args: [account.address, optimisticOracle],
-        }),
-    ]);
-
-    console.log('[agent] Propose preflight:', {
-        proposer: account.address,
-        ogModule: config.ogModule,
-        optimisticOracle,
-        collateral,
-        bondAmount: bondAmount.toString(),
-        minimumBond: minimumBond.toString(),
-        requiredBond: requiredBond.toString(),
-        collateralBalance: (
-            await publicClient.readContract({
-                address: collateral,
-                abi: erc20Abi,
-                functionName: 'balanceOf',
-                args: [account.address],
-            })
-        ).toString(),
-        allowanceOg: allowanceOg.toString(),
-        allowanceOo: allowanceOo.toString(),
-    });
-
-    const proposalContext = {
-        ogModule: config.ogModule,
-        proposer: account.address,
-        collateral,
-        bondAmount: bondAmount.toString(),
-        minimumBond: minimumBond.toString(),
-        requiredBond: requiredBond.toString(),
-        optimisticOracle,
-    };
-
     let proposalHash;
     const explanation = 'Agent serving Oya commitment.';
+    const explanationBytes = stringToHex(explanation);
+    const proposalData = encodeFunctionData({
+        abi: optimisticGovernorAbi,
+        functionName: 'proposeTransactions',
+        args: [normalizedTransactions, explanationBytes],
+    });
+    let simulationError;
+    let submissionError;
     try {
-        console.log('[agent] Propose signature: V2 (transactions, explanation)');
         await publicClient.simulateContract({
             address: config.ogModule,
-            abi: optimisticGovernorAbiV2,
+            abi: optimisticGovernorAbi,
             functionName: 'proposeTransactions',
-            args: [transactions, explanation],
+            args: [normalizedTransactions, explanationBytes],
             account: account.address,
         });
-        proposalHash = await walletClient.writeContract({
-            address: config.ogModule,
-            abi: optimisticGovernorAbiV2,
-            functionName: 'proposeTransactions',
-            args: [transactions, explanation],
-        });
-    } catch (errorV2) {
-        try {
-            console.log('[agent] Propose signature: V1 (transactions)');
-            await publicClient.simulateContract({
-                address: config.ogModule,
-                abi: optimisticGovernorAbiV1,
-                functionName: 'proposeTransactions',
-                args: [transactions],
-                account: account.address,
-            });
-            proposalHash = await walletClient.writeContract({
-                address: config.ogModule,
-                abi: optimisticGovernorAbiV1,
-                functionName: 'proposeTransactions',
-                args: [transactions],
-            });
-        } catch (errorV1) {
-            const message =
-                errorV1?.shortMessage ??
-                errorV1?.message ??
-                errorV2?.shortMessage ??
-                errorV2?.message ??
-                String(errorV1 ?? errorV2);
-            console.warn('[agent] Propose simulation context:', proposalContext);
-            throw new Error(`Propose simulation failed: ${message}`);
+    } catch (error) {
+        simulationError = error;
+        if (!config.allowProposeOnSimulationFail) {
+            throw error;
         }
+        console.warn('[agent] Simulation failed; attempting to propose anyway.');
     }
 
-    return { proposalHash, bondAmount, collateral, optimisticOracle };
+    try {
+        if (simulationError) {
+            proposalHash = await walletClient.sendTransaction({
+                account,
+                to: config.ogModule,
+                data: proposalData,
+                value: 0n,
+                gas: config.proposeGasLimit,
+            });
+        } else {
+            proposalHash = await walletClient.writeContract({
+                address: config.ogModule,
+                abi: optimisticGovernorAbi,
+                functionName: 'proposeTransactions',
+                args: [normalizedTransactions, explanationBytes],
+            });
+        }
+    } catch (error) {
+        submissionError = error;
+        const message =
+            error?.shortMessage ??
+            error?.message ??
+            simulationError?.shortMessage ??
+            simulationError?.message ??
+            String(error ?? simulationError);
+        console.warn('[agent] Propose submission failed:', message);
+    }
+
+    if (proposalHash) {
+        console.log('[agent] Proposal submitted:', proposalHash);
+    }
+
+    return {
+        proposalHash,
+        bondAmount,
+        collateral,
+        optimisticOracle,
+        submissionError: submissionError ? summarizeViemError(submissionError) : null,
+    };
+}
+
+function normalizeOgTransactions(transactions) {
+    if (!Array.isArray(transactions)) {
+        throw new Error('transactions must be an array');
+    }
+
+    return transactions.map((tx, index) => {
+        if (!tx || !tx.to) {
+            throw new Error(`transactions[${index}] missing to`);
+        }
+
+        return {
+            to: getAddress(tx.to),
+            value: BigInt(tx.value ?? 0),
+            data: tx.data ?? '0x',
+            operation: Number(tx.operation ?? 0),
+        };
+    });
+}
+
+function summarizeViemError(error) {
+    if (!error) return null;
+
+    return {
+        name: error.name,
+        shortMessage: error.shortMessage,
+        message: error.message,
+        details: error.details,
+        metaMessages: error.metaMessages,
+        data: error.data ?? error.cause?.data,
+        cause: error.cause?.shortMessage ?? error.cause?.message ?? error.cause,
+    };
 }
 
 async function makeDeposit({ asset, amountWei }) {
@@ -486,14 +488,146 @@ async function pollCommitmentChanges() {
     return deposits;
 }
 
-async function decideOnSignals(signals) {
-    console.log(`[agent] ${signals.length} change(s) detected.`);
+async function pollProposalChanges() {
+    const latestBlock = await publicClient.getBlockNumber();
+    if (lastProposalCheckedBlock === undefined) {
+        lastProposalCheckedBlock = latestBlock;
+        return;
+    }
 
-    if (!config.openAiApiKey) {
-        console.log('[agent] OPENAI_API_KEY not set; logging signals only.');
-        for (const signal of signals) {
-            console.log(signal);
+    if (latestBlock <= lastProposalCheckedBlock) {
+        return;
+    }
+
+    const fromBlock = lastProposalCheckedBlock + 1n;
+    const toBlock = latestBlock;
+
+    const [proposedLogs, executedLogs, deletedLogs] = await Promise.all([
+        publicClient.getLogs({
+            address: config.ogModule,
+            event: transactionsProposedEvent,
+            fromBlock,
+            toBlock,
+        }),
+        publicClient.getLogs({
+            address: config.ogModule,
+            event: proposalExecutedEvent,
+            fromBlock,
+            toBlock,
+        }),
+        publicClient.getLogs({
+            address: config.ogModule,
+            event: proposalDeletedEvent,
+            fromBlock,
+            toBlock,
+        }),
+    ]);
+
+    for (const log of proposedLogs) {
+        const proposalHash = log.args?.proposalHash;
+        const assertionId = log.args?.assertionId;
+        const proposal = log.args?.proposal;
+        const challengeWindowEnds = log.args?.challengeWindowEnds;
+        if (!proposalHash || !proposal?.transactions) continue;
+
+        const transactions = proposal.transactions.map((tx) => ({
+            to: getAddress(tx.to),
+            operation: Number(tx.operation ?? 0),
+            value: BigInt(tx.value ?? 0),
+            data: tx.data ?? '0x',
+        }));
+
+        proposalsByHash.set(proposalHash, {
+            proposalHash,
+            assertionId,
+            challengeWindowEnds: BigInt(challengeWindowEnds ?? 0),
+            transactions,
+            lastAttemptMs: 0,
+        });
+    }
+
+    for (const log of executedLogs) {
+        const proposalHash = log.args?.proposalHash;
+        if (proposalHash) {
+            proposalsByHash.delete(proposalHash);
         }
+    }
+
+    for (const log of deletedLogs) {
+        const proposalHash = log.args?.proposalHash;
+        if (proposalHash) {
+            proposalsByHash.delete(proposalHash);
+        }
+    }
+
+    lastProposalCheckedBlock = toBlock;
+}
+
+async function executeReadyProposals() {
+    if (proposalsByHash.size === 0) return;
+
+    const latestBlock = await publicClient.getBlockNumber();
+    const block = await publicClient.getBlock({ blockNumber: latestBlock });
+    const now = BigInt(block.timestamp);
+    const nowMs = Date.now();
+
+    for (const proposal of proposalsByHash.values()) {
+        if (!proposal?.transactions?.length) continue;
+        if (proposal.challengeWindowEnds === undefined) continue;
+        if (now < proposal.challengeWindowEnds) continue;
+        if (proposal.lastAttemptMs && nowMs - proposal.lastAttemptMs < config.executeRetryMs) {
+            continue;
+        }
+
+        proposal.lastAttemptMs = nowMs;
+
+        let assertionId;
+        try {
+            assertionId = await publicClient.readContract({
+                address: config.ogModule,
+                abi: optimisticGovernorAbi,
+                functionName: 'assertionIds',
+                args: [proposal.proposalHash],
+            });
+        } catch (error) {
+            console.warn('[agent] Failed to read assertionId:', error);
+            continue;
+        }
+
+        if (!assertionId || assertionId === zeroBytes32) {
+            proposalsByHash.delete(proposal.proposalHash);
+            continue;
+        }
+
+        try {
+            await publicClient.simulateContract({
+                address: config.ogModule,
+                abi: optimisticGovernorAbi,
+                functionName: 'executeProposal',
+                args: [proposal.transactions],
+                account: account.address,
+            });
+        } catch (error) {
+            console.warn('[agent] Proposal not executable yet:', proposal.proposalHash);
+            continue;
+        }
+
+        try {
+            const txHash = await walletClient.writeContract({
+                address: config.ogModule,
+                abi: optimisticGovernorAbi,
+                functionName: 'executeProposal',
+                args: [proposal.transactions],
+            });
+            console.log('[agent] Proposal execution submitted:', txHash);
+        } catch (error) {
+            console.warn('[agent] Proposal execution failed:', error?.shortMessage ?? error?.message ?? error);
+        }
+    }
+}
+
+async function decideOnSignals(signals) {
+    if (!config.openAiApiKey) {
         return;
     }
 
@@ -504,7 +638,6 @@ async function decideOnSignals(signals) {
     try {
         const decision = await callAgent(signals, ogContext);
         if (decision.toolCalls.length > 0) {
-            console.log('[agent] Agent tool calls:', decision.toolCalls);
             const toolOutputs = await executeToolCalls(decision.toolCalls);
             if (decision.responseId && toolOutputs.length > 0) {
                 const explanation = await explainToolCalls(
@@ -517,23 +650,21 @@ async function decideOnSignals(signals) {
             }
             return;
         }
-        console.log('[agent] Agent decision:', decision.textDecision);
     } catch (error) {
-        console.error('[agent] Agent call failed; logging signals', error);
-        for (const signal of signals) {
-            console.log(signal);
-        }
+        console.error('[agent] Agent call failed', error);
     }
 }
 
 async function agentLoop() {
     try {
-        console.log(`[agent] loop tick @ ${new Date().toISOString()}`);
         const signals = await pollCommitmentChanges();
+        await pollProposalChanges();
 
         if (signals.length > 0) {
             await decideOnSignals(signals);
         }
+
+        await executeReadyProposals();
     } catch (error) {
         console.error('[agent] loop error', error);
     }
@@ -542,7 +673,6 @@ async function agentLoop() {
 }
 
 async function startAgent() {
-    console.log('[agent] initializing...');
     await loadOptimisticGovernorDefaults();
     await loadOgContext();
     await logOgFundingStatus();
@@ -550,11 +680,13 @@ async function startAgent() {
     if (lastCheckedBlock === undefined) {
         lastCheckedBlock = await publicClient.getBlockNumber();
     }
+    if (lastProposalCheckedBlock === undefined) {
+        lastProposalCheckedBlock = lastCheckedBlock;
+    }
 
     await primeBalances(lastCheckedBlock);
 
-    console.log('[agent] watching assets:', [...trackedAssets].join(', '));
-    console.log('[agent] starting loop with interval', config.pollIntervalMs, 'ms');
+    console.log('[agent] running...');
 
     agentLoop();
 }
@@ -881,7 +1013,6 @@ async function executeToolCalls(toolCalls) {
     }
     if (builtTransactions && !hasPostProposal) {
         const result = await postBondAndPropose(builtTransactions);
-        console.log('[agent] Auto-proposed via OG:', result);
     }
     return outputs.filter((item) => item.callId);
 }

@@ -10,9 +10,9 @@ interface IERC20 {
 interface IOptimisticGovernor {
     struct Transaction {
         address to;
+        uint8 operation;
         uint256 value;
         bytes data;
-        uint8 operation;
     }
 
     function proposeTransactions(Transaction[] calldata transactions) external returns (bytes32 proposalHash);
