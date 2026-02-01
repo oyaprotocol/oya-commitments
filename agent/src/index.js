@@ -16,6 +16,9 @@ const optimisticGovernorAbi = parseAbi([
     'function collateral() view returns (address)',
     'function bondAmount() view returns (uint256)',
     'function optimisticOracleV3() view returns (address)',
+    'function rules() view returns (string)',
+    'function identifier() view returns (bytes32)',
+    'function liveness() view returns (uint64)',
 ]);
 
 const transferEvent = parseAbiItem(
@@ -58,6 +61,9 @@ const config = {
     defaultDepositAmountWei: process.env.DEFAULT_DEPOSIT_AMOUNT_WEI
         ? BigInt(process.env.DEFAULT_DEPOSIT_AMOUNT_WEI)
         : undefined,
+    openAiApiKey: process.env.OPENAI_API_KEY,
+    openAiModel: process.env.OPENAI_MODEL ?? 'gpt-4.1-mini',
+    openAiBaseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
 };
 
 const account = privateKeyToAccount(config.privateKey);
@@ -67,6 +73,7 @@ const walletClient = createWalletClient({ account, transport: http(config.rpcUrl
 const trackedAssets = new Set(config.watchAssets);
 let lastCheckedBlock = config.startBlock;
 let lastNativeBalance;
+let ogContext;
 
 async function loadOptimisticGovernorDefaults() {
     const collateral = await publicClient.readContract({
@@ -76,6 +83,50 @@ async function loadOptimisticGovernorDefaults() {
     });
 
     trackedAssets.add(getAddress(collateral));
+}
+
+async function loadOgContext() {
+    const [collateral, bondAmount, optimisticOracle, rules, identifier, liveness] = await Promise.all([
+        publicClient.readContract({
+            address: config.ogModule,
+            abi: optimisticGovernorAbi,
+            functionName: 'collateral',
+        }),
+        publicClient.readContract({
+            address: config.ogModule,
+            abi: optimisticGovernorAbi,
+            functionName: 'bondAmount',
+        }),
+        publicClient.readContract({
+            address: config.ogModule,
+            abi: optimisticGovernorAbi,
+            functionName: 'optimisticOracleV3',
+        }),
+        publicClient.readContract({
+            address: config.ogModule,
+            abi: optimisticGovernorAbi,
+            functionName: 'rules',
+        }),
+        publicClient.readContract({
+            address: config.ogModule,
+            abi: optimisticGovernorAbi,
+            functionName: 'identifier',
+        }),
+        publicClient.readContract({
+            address: config.ogModule,
+            abi: optimisticGovernorAbi,
+            functionName: 'liveness',
+        }),
+    ]);
+
+    ogContext = {
+        collateral,
+        bondAmount,
+        optimisticOracle,
+        rules,
+        identifier,
+        liveness,
+    };
 }
 
 async function primeBalances(blockNumber) {
@@ -212,10 +263,29 @@ async function pollCommitmentChanges() {
 }
 
 async function decideOnSignals(signals) {
-    // Hook for LLM/decision making; left generic on purpose.
-    console.log(`[agent] ${signals.length} change(s) detected; plug in decision logic here.`);
-    for (const signal of signals) {
-        console.log(signal);
+    console.log(`[agent] ${signals.length} change(s) detected.`);
+
+    if (!config.openAiApiKey) {
+        console.log('[agent] OPENAI_API_KEY not set; logging signals only.');
+        for (const signal of signals) {
+            console.log(signal);
+        }
+        return;
+    }
+
+    if (!ogContext) {
+        await loadOgContext();
+    }
+
+    try {
+        const decision = await callAgent(signals, ogContext);
+        console.log('[agent] Agent decision:', decision);
+        // Map decision to actions here (e.g., postBondAndPropose/makeDeposit) after validation.
+    } catch (error) {
+        console.error('[agent] Agent call failed; logging signals', error);
+        for (const signal of signals) {
+            console.log(signal);
+        }
     }
 }
 
@@ -237,6 +307,7 @@ async function agentLoop() {
 async function startAgent() {
     console.log('[agent] initializing...');
     await loadOptimisticGovernorDefaults();
+    await loadOgContext();
 
     if (lastCheckedBlock === undefined) {
         lastCheckedBlock = await publicClient.getBlockNumber();
@@ -248,6 +319,86 @@ async function startAgent() {
     console.log('[agent] starting loop with interval', config.pollIntervalMs, 'ms');
 
     agentLoop();
+}
+
+async function callAgent(signals, context) {
+    const systemPrompt =
+        'You are an agent monitoring an onchain commitment (Safe + Optimistic Governor). Given signals and rules, recommend a course of action. Prefer no-op when unsure. Output strict JSON with keys: action (propose|deposit|ignore|other), rationale (string), transactions (optional array of {to,value,data,operation}), deposit (optional {asset,amountWei}).';
+
+    const safeSignals = signals.map((signal) => ({
+        ...signal,
+        amount: signal.amount !== undefined ? signal.amount.toString() : undefined,
+        blockNumber: signal.blockNumber !== undefined ? signal.blockNumber.toString() : undefined,
+        transactionHash: signal.transactionHash ? String(signal.transactionHash) : undefined,
+    }));
+
+    const safeContext = {
+        rules: context?.rules,
+        identifier: context?.identifier ? String(context.identifier) : undefined,
+        liveness: context?.liveness !== undefined ? context.liveness.toString() : undefined,
+        collateral: context?.collateral,
+        bondAmount: context?.bondAmount !== undefined ? context.bondAmount.toString() : undefined,
+        optimisticOracle: context?.optimisticOracle,
+    };
+
+    const payload = {
+        model: config.openAiModel,
+        input: [
+            {
+                role: 'system',
+                content: systemPrompt,
+            },
+            {
+                role: 'user',
+                content: JSON.stringify({
+                    commitmentSafe: config.commitmentSafe,
+                    ogModule: config.ogModule,
+                    ogContext: safeContext,
+                    signals: safeSignals,
+                }),
+            },
+        ],
+        text: { format: { type: 'json_object' } },
+    };
+
+    const res = await fetch(`${config.openAiBaseUrl}/responses`, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${config.openAiApiKey}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`OpenAI API error: ${res.status} ${text}`);
+    }
+
+    const json = await res.json();
+    const raw = extractFirstText(json);
+    try {
+        return JSON.parse(raw);
+    } catch (error) {
+        throw new Error(`Failed to parse OpenAI JSON: ${raw}`);
+    }
+}
+
+function extractFirstText(responseJson) {
+    // Responses API structure: output -> [{ content: [{ type: 'output_text', text: '...' }, ...] }, ...]
+    const outputs = responseJson?.output;
+    if (!Array.isArray(outputs)) return '';
+
+    for (const item of outputs) {
+        if (!item?.content) continue;
+        for (const chunk of item.content) {
+            if (chunk?.text) return chunk.text;
+            if (chunk?.output_text) return chunk.output_text?.text ?? '';
+            if (chunk?.text?.value) return chunk.text.value; // older shape
+        }
+    }
+
+    return '';
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
