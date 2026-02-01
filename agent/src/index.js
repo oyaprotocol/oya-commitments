@@ -2,6 +2,7 @@ import 'dotenv/config';
 import {
     createPublicClient,
     createWalletClient,
+    encodeFunctionData,
     erc20Abi,
     getAddress,
     http,
@@ -336,7 +337,7 @@ async function startAgent() {
 
 async function callAgent(signals, context) {
     const systemPrompt =
-        'You are an agent monitoring an onchain commitment (Safe + Optimistic Governor). Given signals and rules, recommend a course of action. Prefer no-op when unsure. If an onchain action is needed, call a tool. If no action is needed, output strict JSON with keys: action (propose|deposit|ignore|other) and rationale (string).';
+        'You are an agent monitoring an onchain commitment (Safe + Optimistic Governor). Given signals and rules, recommend a course of action. Prefer no-op when unsure. If an onchain action is needed, call a tool. Use build_og_transactions to construct proposal payloads, then post_bond_and_propose. If no action is needed, output strict JSON with keys: action (propose|deposit|ignore|other) and rationale (string).';
 
     const safeSignals = signals.map((signal) => ({
         ...signal,
@@ -456,6 +457,70 @@ function toolDefinitions() {
     return [
         {
             type: 'function',
+            name: 'build_og_transactions',
+            description:
+                'Build Optimistic Governor transaction payloads from high-level intents. Returns array of {to,value,data,operation} with value as string wei.',
+            strict: true,
+            parameters: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                    actions: {
+                        type: 'array',
+                        items: {
+                            type: 'object',
+                            additionalProperties: false,
+                            properties: {
+                                kind: {
+                                    type: 'string',
+                                    description:
+                                        'Action type: erc20_transfer | native_transfer | contract_call',
+                                },
+                                token: {
+                                    type: 'string',
+                                    description:
+                                        'ERC20 token address for erc20_transfer.',
+                                },
+                                to: {
+                                    type: 'string',
+                                    description: 'Recipient or target contract address.',
+                                },
+                                amountWei: {
+                                    type: 'string',
+                                    description:
+                                        'Amount in wei as a string. For erc20_transfer and native_transfer.',
+                                },
+                                valueWei: {
+                                    type: 'string',
+                                    description:
+                                        'ETH value to send in contract_call (default 0).',
+                                },
+                                abi: {
+                                    type: 'string',
+                                    description:
+                                        'Function signature for contract_call, e.g. "setOwner(address)".',
+                                },
+                                args: {
+                                    type: 'array',
+                                    description:
+                                        'Arguments for contract_call in order, JSON-serializable.',
+                                    items: {},
+                                },
+                                operation: {
+                                    type: 'integer',
+                                    description:
+                                        'Safe operation (0=CALL,1=DELEGATECALL). Defaults to 0.',
+                                },
+                            },
+                            required: ['kind'],
+                        },
+                    },
+                },
+                required: ['actions'],
+            },
+        },
+        {
+            type: 'function',
             name: 'make_deposit',
             description:
                 'Deposit funds into the commitment Safe. Use asset=0x000...000 for native ETH. amountWei must be a string of the integer wei amount.',
@@ -519,6 +584,25 @@ async function executeToolCalls(toolCalls) {
             continue;
         }
 
+        if (call.name === 'build_og_transactions') {
+            try {
+                const transactions = buildOgTransactions(args.actions ?? []);
+                outputs.push({
+                    callId: call.callId,
+                    output: JSON.stringify({ status: 'ok', transactions }),
+                });
+            } catch (error) {
+                outputs.push({
+                    callId: call.callId,
+                    output: JSON.stringify({
+                        status: 'error',
+                        message: error?.message ?? String(error),
+                    }),
+                });
+            }
+            continue;
+        }
+
         if (call.name === 'make_deposit') {
             const txHash = await makeDeposit({
                 asset: args.asset,
@@ -559,6 +643,72 @@ async function executeToolCalls(toolCalls) {
         });
     }
     return outputs.filter((item) => item.callId);
+}
+
+function buildOgTransactions(actions) {
+    if (!Array.isArray(actions) || actions.length === 0) {
+        throw new Error('actions must be a non-empty array');
+    }
+
+    return actions.map((action) => {
+        const operation = action.operation !== undefined ? Number(action.operation) : 0;
+
+        if (action.kind === 'erc20_transfer') {
+            if (!action.token || !action.to || action.amountWei === undefined) {
+                throw new Error('erc20_transfer requires token, to, amountWei');
+            }
+
+            const data = encodeFunctionData({
+                abi: erc20Abi,
+                functionName: 'transfer',
+                args: [getAddress(action.to), BigInt(action.amountWei)],
+            });
+
+            return {
+                to: getAddress(action.token),
+                value: '0',
+                data,
+                operation,
+            };
+        }
+
+        if (action.kind === 'native_transfer') {
+            if (!action.to || action.amountWei === undefined) {
+                throw new Error('native_transfer requires to, amountWei');
+            }
+
+            return {
+                to: getAddress(action.to),
+                value: BigInt(action.amountWei).toString(),
+                data: '0x',
+                operation,
+            };
+        }
+
+        if (action.kind === 'contract_call') {
+            if (!action.to || !action.abi) {
+                throw new Error('contract_call requires to, abi');
+            }
+
+            const abi = parseAbi([`function ${action.abi}`]);
+            const args = Array.isArray(action.args) ? action.args : [];
+            const data = encodeFunctionData({
+                abi,
+                functionName: action.abi.split('(')[0],
+                args,
+            });
+            const value = action.valueWei !== undefined ? BigInt(action.valueWei).toString() : '0';
+
+            return {
+                to: getAddress(action.to),
+                value,
+                data,
+                operation,
+            };
+        }
+
+        throw new Error(`Unknown action kind: ${action.kind}`);
+    });
 }
 
 function parseToolArguments(raw) {
