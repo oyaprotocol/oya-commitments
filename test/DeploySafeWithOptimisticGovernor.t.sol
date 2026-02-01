@@ -32,6 +32,23 @@ contract SafeMock {
         lastEnabledModule = module;
     }
 
+    function addOwnerWithThreshold(address owner, uint256 _threshold) external {
+        owners.push(owner);
+        threshold = _threshold;
+    }
+
+    function removeOwner(address, address owner, uint256 _threshold) external {
+        // remove matching owner (simple linear scan for mock)
+        for (uint256 i = 0; i < owners.length; i++) {
+            if (owners[i] == owner) {
+                owners[i] = owners[owners.length - 1];
+                owners.pop();
+                break;
+            }
+        }
+        threshold = _threshold;
+    }
+
     function getTransactionHash(
         address,
         uint256,
@@ -100,6 +117,8 @@ contract OptimisticGovernorMock {
 }
 
 contract DeploySafeWithOptimisticGovernorTest is Test {
+    address internal constant BURN_OWNER = 0x000000000000000000000000000000000000dEaD;
+
     SafeProxyFactoryMock private safeProxyFactory;
     OptimisticGovernorMock private ogMasterCopy;
     ModuleProxyFactory private moduleProxyFactory;
@@ -135,8 +154,8 @@ contract DeploySafeWithOptimisticGovernorTest is Test {
         assertTrue(safeProxy != address(0));
 
         SafeMock safe = SafeMock(safeProxy);
-        assertEq(safe.owners(0), vm.addr(1));
-        assertEq(safe.threshold(), 1);
+        assertEq(safe.owners(0), BURN_OWNER);
+        assertEq(safe.threshold(), 1); // burn address set as sole owner
         assertEq(safe.fallbackHandler(), address(0xFA11));
 
         address module = safe.lastEnabledModule();
