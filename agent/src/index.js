@@ -474,7 +474,7 @@ function toolDefinitions() {
                         description: 'Amount in wei as a string.',
                     },
                 },
-                required: ['amountWei'],
+                required: ['asset', 'amountWei'],
             },
         },
         {
