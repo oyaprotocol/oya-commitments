@@ -279,8 +279,21 @@ async function decideOnSignals(signals) {
 
     try {
         const decision = await callAgent(signals, ogContext);
-        console.log('[agent] Agent decision:', decision);
-        // Map decision to actions here (e.g., postBondAndPropose/makeDeposit) after validation.
+        if (decision.toolCalls.length > 0) {
+            console.log('[agent] Agent tool calls:', decision.toolCalls);
+            const toolOutputs = await executeToolCalls(decision.toolCalls);
+            if (decision.responseId && toolOutputs.length > 0) {
+                const explanation = await explainToolCalls(
+                    decision.responseId,
+                    toolOutputs
+                );
+                if (explanation) {
+                    console.log('[agent] Agent explanation:', explanation);
+                }
+            }
+            return;
+        }
+        console.log('[agent] Agent decision:', decision.textDecision);
     } catch (error) {
         console.error('[agent] Agent call failed; logging signals', error);
         for (const signal of signals) {
@@ -323,7 +336,7 @@ async function startAgent() {
 
 async function callAgent(signals, context) {
     const systemPrompt =
-        'You are an agent monitoring an onchain commitment (Safe + Optimistic Governor). Given signals and rules, recommend a course of action. Prefer no-op when unsure. Output strict JSON with keys: action (propose|deposit|ignore|other), rationale (string), transactions (optional array of {to,value,data,operation}), deposit (optional {asset,amountWei}).';
+        'You are an agent monitoring an onchain commitment (Safe + Optimistic Governor). Given signals and rules, recommend a course of action. Prefer no-op when unsure. If an onchain action is needed, call a tool. If no action is needed, output strict JSON with keys: action (propose|deposit|ignore|other) and rationale (string).';
 
     const safeSignals = signals.map((signal) => ({
         ...signal,
@@ -358,6 +371,9 @@ async function callAgent(signals, context) {
                 }),
             },
         ],
+        tools: toolDefinitions(),
+        tool_choice: 'auto',
+        parallel_tool_calls: false,
         text: { format: { type: 'json_object' } },
     };
 
@@ -376,12 +392,18 @@ async function callAgent(signals, context) {
     }
 
     const json = await res.json();
+    const toolCalls = extractToolCalls(json);
     const raw = extractFirstText(json);
-    try {
-        return JSON.parse(raw);
-    } catch (error) {
-        throw new Error(`Failed to parse OpenAI JSON: ${raw}`);
+    let textDecision;
+    if (raw) {
+        try {
+            textDecision = JSON.parse(raw);
+        } catch (error) {
+            throw new Error(`Failed to parse OpenAI JSON: ${raw}`);
+        }
     }
+
+    return { toolCalls, textDecision, responseId: json?.id };
 }
 
 function extractFirstText(responseJson) {
@@ -399,6 +421,192 @@ function extractFirstText(responseJson) {
     }
 
     return '';
+}
+
+function extractToolCalls(responseJson) {
+    const outputs = responseJson?.output;
+    if (!Array.isArray(outputs)) return [];
+
+    const toolCalls = [];
+    for (const item of outputs) {
+        if (item?.type === 'tool_call' || item?.type === 'function_call') {
+            toolCalls.push({
+                name: item?.name ?? item?.function?.name,
+                arguments: item?.arguments ?? item?.function?.arguments,
+                callId: item?.call_id ?? item?.id,
+            });
+            continue;
+        }
+
+        if (Array.isArray(item?.tool_calls)) {
+            for (const call of item.tool_calls) {
+                toolCalls.push({
+                    name: call?.name ?? call?.function?.name,
+                    arguments: call?.arguments ?? call?.function?.arguments,
+                    callId: call?.call_id ?? call?.id,
+                });
+            }
+        }
+    }
+
+    return toolCalls.filter((call) => call.name);
+}
+
+function toolDefinitions() {
+    return [
+        {
+            type: 'function',
+            name: 'make_deposit',
+            description:
+                'Deposit funds into the commitment Safe. Use asset=0x000...000 for native ETH. amountWei must be a string of the integer wei amount.',
+            strict: true,
+            parameters: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                    asset: {
+                        type: 'string',
+                        description:
+                            'Asset address (ERC20) or 0x0000000000000000000000000000000000000000 for native.',
+                    },
+                    amountWei: {
+                        type: 'string',
+                        description: 'Amount in wei as a string.',
+                    },
+                },
+                required: ['amountWei'],
+            },
+        },
+        {
+            type: 'function',
+            name: 'post_bond_and_propose',
+            description:
+                'Post bond (if required) and propose transactions to the Optimistic Governor.',
+            strict: true,
+            parameters: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                    transactions: {
+                        type: 'array',
+                        description:
+                            'Safe transaction batch to propose. Use value as string wei.',
+                        items: {
+                            type: 'object',
+                            additionalProperties: false,
+                            properties: {
+                                to: { type: 'string' },
+                                value: { type: 'string' },
+                                data: { type: 'string' },
+                                operation: { type: 'integer' },
+                            },
+                            required: ['to', 'value', 'data', 'operation'],
+                        },
+                    },
+                },
+                required: ['transactions'],
+            },
+        },
+    ];
+}
+
+async function executeToolCalls(toolCalls) {
+    const outputs = [];
+    for (const call of toolCalls) {
+        const args = parseToolArguments(call.arguments);
+        if (!args) {
+            console.warn('[agent] Skipping tool call with invalid args:', call);
+            continue;
+        }
+
+        if (call.name === 'make_deposit') {
+            const txHash = await makeDeposit({
+                asset: args.asset,
+                amountWei: BigInt(args.amountWei),
+            });
+            outputs.push({
+                callId: call.callId,
+                output: JSON.stringify({
+                    status: 'submitted',
+                    transactionHash: String(txHash),
+                }),
+            });
+            continue;
+        }
+
+        if (call.name === 'post_bond_and_propose') {
+            const transactions = args.transactions.map((tx) => ({
+                to: getAddress(tx.to),
+                value: BigInt(tx.value),
+                data: tx.data,
+                operation: Number(tx.operation),
+            }));
+            const result = await postBondAndPropose(transactions);
+            outputs.push({
+                callId: call.callId,
+                output: JSON.stringify({
+                    status: 'submitted',
+                    ...result,
+                }),
+            });
+            continue;
+        }
+
+        console.warn('[agent] Unknown tool call:', call.name);
+        outputs.push({
+            callId: call.callId,
+            output: JSON.stringify({ status: 'skipped', reason: 'unknown tool' }),
+        });
+    }
+    return outputs.filter((item) => item.callId);
+}
+
+function parseToolArguments(raw) {
+    if (!raw) return null;
+    if (typeof raw === 'object') return raw;
+    if (typeof raw === 'string') {
+        try {
+            return JSON.parse(raw);
+        } catch (error) {
+            return null;
+        }
+    }
+    return null;
+}
+
+async function explainToolCalls(previousResponseId, toolOutputs) {
+    const input = [
+        ...toolOutputs.map((item) => ({
+            type: 'function_call_output',
+            call_id: item.callId,
+            output: item.output,
+        })),
+        {
+            type: 'input_text',
+            text: 'Summarize the actions you took and why.',
+        },
+    ];
+
+    const res = await fetch(`${config.openAiBaseUrl}/responses`, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${config.openAiApiKey}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            model: config.openAiModel,
+            previous_response_id: previousResponseId,
+            input,
+        }),
+    });
+
+    if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`OpenAI API error: ${res.status} ${text}`);
+    }
+
+    const json = await res.json();
+    return extractFirstText(json);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
