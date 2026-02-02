@@ -2,6 +2,10 @@
 
 Lightweight web UI for configuring and deploying a commitment (Safe + Optimistic Governor module). It mirrors the Foundry deployment flow and helps craft the same onchain calls from a browser wallet.
 
+## Beta Disclaimer
+
+This is beta software provided “as is.” Use at your own risk. No guarantees of safety, correctness, or fitness for any purpose.
+
 ## Prerequisites
 
 - Node.js 18+

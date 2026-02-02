@@ -2,6 +2,10 @@
 
 This repo contains everything needed to set up **Oya commitments**: smart contracts controlled by natural language rules and the agents that serve them. It includes the Solidity contracts, deployment scripts, an optional web UI, and an offchain agent scaffold.
 
+## Beta Disclaimer
+
+This is beta software provided “as is.” Use at your own risk. No guarantees of safety, correctness, or fitness for any purpose.
+
 ## What Is a Commitment?
 
 A commitment is a Safe controlled by an Optimistic Governor module. The commitment rules are written in natural language (stored onchain or via a URI) and enforced through the Optimistic Governor challenge process. Agents can observe incoming deposits and propose compliant transfers.

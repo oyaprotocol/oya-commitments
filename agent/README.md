@@ -2,6 +2,10 @@
 
 Generic offchain agent wiring for monitoring an Oya commitment and acting through the Optimistic Governor. It exposes only the core tools needed to serve commitments; add commitment-specific logic, prompts, and extra tools as needed.
 
+## Beta Disclaimer
+
+This is beta software provided “as is.” Use at your own risk. No guarantees of safety, correctness, or fitness for any purpose.
+
 ## Prerequisites
 
 - Node.js 18+
