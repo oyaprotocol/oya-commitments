@@ -208,19 +208,6 @@ function App() {
     safe: '',
     ogModule: '',
   });
-  const [agentForm, setAgentForm] = useState({
-    rpcUrl: '',
-    privateKey: '',
-    commitmentSafe: '',
-    ogModule: '',
-    watchAssets: '',
-    watchNativeBalance: true,
-    pollIntervalMs: '60000',
-    startBlock: '',
-    defaultDepositAsset: '',
-    defaultDepositAmountWei: '',
-  });
-  const [agentCopyStatus, setAgentCopyStatus] = useState('');
   const [txHashes, setTxHashes] = useState({
     moduleProxyFactory: '',
     safeProxy: '',
@@ -238,14 +225,6 @@ function App() {
   const onChange = (event) => {
     const { name, value } = event.target;
     setForm((prev) => ({ ...prev, [name]: value }));
-  };
-
-  const onAgentChange = (event) => {
-    const { name, type, checked, value } = event.target;
-    setAgentForm((prev) => ({
-      ...prev,
-      [name]: type === 'checkbox' ? checked : value,
-    }));
   };
 
   const validatedAddresses = useMemo(() => {
@@ -580,68 +559,6 @@ function App() {
     }
   };
 
-  useEffect(() => {
-    setAgentForm((prev) => ({
-      ...prev,
-      commitmentSafe: prev.commitmentSafe || deployment.safe,
-      ogModule: prev.ogModule || deployment.ogModule,
-    }));
-  }, [deployment.safe, deployment.ogModule]);
-
-  const agentEnvPreview = useMemo(() => {
-    const lines = [
-      `RPC_URL=${agentForm.rpcUrl || '<rpc_url>'}`,
-      `PRIVATE_KEY=${agentForm.privateKey || '<agent_private_key>'}`,
-      `COMMITMENT_SAFE=${agentForm.commitmentSafe || deployment.safe || '<safe_address>'}`,
-      `OG_MODULE=${agentForm.ogModule || deployment.ogModule || '<og_module>'}`,
-      `WATCH_ASSETS=${agentForm.watchAssets || '<erc20s_comma_separated>'}`,
-      `POLL_INTERVAL_MS=${agentForm.pollIntervalMs || '60000'}`,
-      `WATCH_NATIVE_BALANCE=${agentForm.watchNativeBalance ? 'true' : 'false'}`,
-    ];
-
-    if (agentForm.startBlock) {
-      lines.push(`START_BLOCK=${agentForm.startBlock}`);
-    }
-
-    if (agentForm.defaultDepositAsset) {
-      lines.push(`DEFAULT_DEPOSIT_ASSET=${agentForm.defaultDepositAsset}`);
-    }
-
-    if (agentForm.defaultDepositAmountWei) {
-      lines.push(`DEFAULT_DEPOSIT_AMOUNT_WEI=${agentForm.defaultDepositAmountWei}`);
-    }
-
-    return lines.join('\n');
-  }, [
-    agentForm.commitmentSafe,
-    agentForm.defaultDepositAmountWei,
-    agentForm.defaultDepositAsset,
-    agentForm.ogModule,
-    agentForm.pollIntervalMs,
-    agentForm.privateKey,
-    agentForm.rpcUrl,
-    agentForm.startBlock,
-    agentForm.watchAssets,
-    agentForm.watchNativeBalance,
-    deployment.ogModule,
-    deployment.safe,
-  ]);
-
-  const copyAgentEnv = async () => {
-    try {
-      await navigator.clipboard.writeText(agentEnvPreview);
-      setAgentCopyStatus('Copied env to clipboard.');
-      setTimeout(() => setAgentCopyStatus(''), 2000);
-    } catch (err) {
-      setAgentCopyStatus('Copy failed.');
-      setTimeout(() => setAgentCopyStatus(''), 2000);
-    }
-  };
-
-  const agentEnvDownloadUrl = useMemo(() => {
-    return `data:text/plain;charset=utf-8,${encodeURIComponent(agentEnvPreview)}`;
-  }, [agentEnvPreview]);
-
   return (
     <div className="page">
       <header className="header">
@@ -766,109 +683,6 @@ function App() {
         </div>
       </section>
 
-      <section className="card">
-        <h2>Agent Config (offchain)</h2>
-        <p className="subtext">
-          Prepare the `.env` for the agent scaffold in <code>agent/</code>. Secrets stay in your browser; copy or download
-          the file and run the agent locally.
-        </p>
-        <div className="grid">
-          <label>
-            RPC URL
-            <input name="rpcUrl" value={agentForm.rpcUrl} onChange={onAgentChange} placeholder="https://..." />
-          </label>
-          <label>
-            Agent Private Key
-            <input
-              name="privateKey"
-              value={agentForm.privateKey}
-              onChange={onAgentChange}
-              placeholder="0x..."
-              type="password"
-            />
-            <span className="hint">Never stored or sent; used only to render .env.</span>
-          </label>
-          <label>
-            Commitment Safe Address
-            <input
-              name="commitmentSafe"
-              value={agentForm.commitmentSafe}
-              onChange={onAgentChange}
-              placeholder={deployment.safe || '0x...'}
-            />
-          </label>
-          <label>
-            OG Module Address
-            <input
-              name="ogModule"
-              value={agentForm.ogModule}
-              onChange={onAgentChange}
-              placeholder={deployment.ogModule || '0x...'}
-            />
-          </label>
-          <label>
-            Watch Assets (ERC20s, comma-separated)
-            <input
-              name="watchAssets"
-              value={agentForm.watchAssets}
-              onChange={onAgentChange}
-              placeholder="0xToken1,0xToken2"
-            />
-            <span className="hint">OG collateral auto-added; include other tokens to monitor deposits.</span>
-          </label>
-          <label>
-            Poll Interval (ms)
-            <input name="pollIntervalMs" value={agentForm.pollIntervalMs} onChange={onAgentChange} />
-          </label>
-          <label>
-            Start Block (optional)
-            <input name="startBlock" value={agentForm.startBlock} onChange={onAgentChange} placeholder="latest by default" />
-          </label>
-          <label>
-            Default Deposit Asset (optional)
-            <input
-              name="defaultDepositAsset"
-              value={agentForm.defaultDepositAsset}
-              onChange={onAgentChange}
-              placeholder="0x... or 0x000... for native"
-            />
-          </label>
-          <label>
-            Default Deposit Amount (wei, optional)
-            <input
-              name="defaultDepositAmountWei"
-              value={agentForm.defaultDepositAmountWei}
-              onChange={onAgentChange}
-              placeholder="0"
-            />
-          </label>
-          <label className="checkbox-row">
-            <input
-              type="checkbox"
-              name="watchNativeBalance"
-              checked={agentForm.watchNativeBalance}
-              onChange={onAgentChange}
-            />
-            Watch native balance increases
-          </label>
-        </div>
-
-        <div className="agent-actions">
-          <div className="agent-env">
-            <pre>{agentEnvPreview}</pre>
-          </div>
-          <div className="actions">
-            <button type="button" onClick={copyAgentEnv}>Copy .env</button>
-            <a className="button-link" href={agentEnvDownloadUrl} download=".env">
-              Download .env
-            </a>
-            <div className="status">
-              <p className="hint">Run: <code>cd agent && npm install && npm start</code></p>
-              {agentCopyStatus && <p className="hint">{agentCopyStatus}</p>}
-            </div>
-          </div>
-        </div>
-      </section>
     </div>
   );
 }

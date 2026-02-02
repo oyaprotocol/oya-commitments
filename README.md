@@ -63,7 +63,7 @@ Add more tools for a specific commitment beside these generics; keep the default
 
 The web frontend is a lightweight UI for filling in Safe + Optimistic Governor parameters and launching the same deployment flow as the script. It can be hosted as a static site and uses RPC endpoints to read chain state and craft the deployment payloads.
 
-It also prepares `.env` files for the offchain agent scaffold (in `agent/`) so you can deploy a commitment and immediately configure an agent to serve it.
+It mirrors the deploy script flow with a UI-driven parameter set.
 
 ### Dependencies
 
@@ -79,10 +79,7 @@ npm install
 npm run dev
 ```
 
-Agent `.env` prep (in the UI):
-
-- Fill RPC, agent key, and addresses (Safe + OG) — the UI auto-fills addresses from the deployment section.
-- Copy or download the rendered `.env`, then run the agent locally: `cd agent && npm install && npm start`.
+Agent setup is documented separately in `agent/README.md`.
 
 ### Required Environment Variables
 
@@ -144,6 +141,42 @@ OG_MASTER_COPY=0x5555555555555555555555555555555555555555
 SAFE_SINGLETON=0x6666666666666666666666666666666666666666
 SAFE_FALLBACK_HANDLER=0x7777777777777777777777777777777777777777
 ```
+
+### Signer Options (CLI Scripts)
+
+Forge scripts still require a private key env var (e.g., `DEPLOYER_PK`, `PROPOSER_PK`, `EXECUTOR_PK`). If you don't want to store raw keys in `.env`, use `agent/with-signer.mjs` to resolve a signer at runtime and inject the env var:
+
+```shell
+# Private key from env
+SIGNER_TYPE=env PRIVATE_KEY=0x... \
+  node agent/with-signer.mjs --env DEPLOYER_PK -- \
+  forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimisticGovernor \
+    --rpc-url $MAINNET_RPC_URL \
+    --broadcast
+
+# Encrypted keystore
+SIGNER_TYPE=keystore KEYSTORE_PATH=./keys/deployer.json KEYSTORE_PASSWORD=... \
+  node agent/with-signer.mjs --env DEPLOYER_PK -- \
+  forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimisticGovernor \
+    --rpc-url $MAINNET_RPC_URL \
+    --broadcast
+
+# OS keychain
+SIGNER_TYPE=keychain KEYCHAIN_SERVICE=og-deployer KEYCHAIN_ACCOUNT=deployer \
+  node agent/with-signer.mjs --env DEPLOYER_PK -- \
+  forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimisticGovernor \
+    --rpc-url $MAINNET_RPC_URL \
+    --broadcast
+
+# Vault KV (private key stored as a secret)
+SIGNER_TYPE=vault VAULT_ADDR=https://vault.example.com VAULT_TOKEN=... VAULT_SECRET_PATH=secret/data/og-deployer \
+  node agent/with-signer.mjs --env DEPLOYER_PK -- \
+  forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimisticGovernor \
+    --rpc-url $MAINNET_RPC_URL \
+    --broadcast
+```
+
+For KMS/Vault signing without exporting private keys, use an RPC signer proxy that exposes `eth_sendTransaction` (set `SIGNER_RPC_URL` and `SIGNER_ADDRESS`). The agent supports this directly (see `agent/README.md`); Forge scripts need a proxy that can export or inject keys.
 
 ## Common Commands
 

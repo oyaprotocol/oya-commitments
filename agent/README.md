@@ -12,10 +12,15 @@ Generic offchain agent wiring for monitoring a commitment and acting through the
 
 1. Copy `.env.example` to `.env` and fill in:
    - `RPC_URL`: RPC the agent should use
-   - `PRIVATE_KEY`: agent signer (never commit this)
    - `COMMITMENT_SAFE`: Safe address holding assets
    - `OG_MODULE`: Optimistic Governor module address
    - `WATCH_ASSETS`: Comma-separated ERC20s to monitor (the OG collateral is auto-added)
+   - Signer selection: `SIGNER_TYPE` (default `env`)
+     - `env`: `PRIVATE_KEY`
+     - `keystore`: `KEYSTORE_PATH`, `KEYSTORE_PASSWORD`
+     - `keychain`: `KEYCHAIN_SERVICE`, `KEYCHAIN_ACCOUNT` (macOS Keychain or Linux Secret Service)
+     - `vault`: `VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_SECRET_PATH`, optional `VAULT_SECRET_KEY` (default `private_key`)
+     - `kms`/`vault-signer`/`rpc`: `SIGNER_RPC_URL`, `SIGNER_ADDRESS` (JSON-RPC signer that accepts `eth_sendTransaction`)
    - Optional tuning: `POLL_INTERVAL_MS`, `START_BLOCK`, `WATCH_NATIVE_BALANCE`, `DEFAULT_DEPOSIT_*`
    - Optional LLM: `OPENAI_API_KEY`, `OPENAI_MODEL` (default `gpt-4.1-mini`), `OPENAI_BASE_URL`
 2. Install deps and start the loop:
