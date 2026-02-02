@@ -1,6 +1,6 @@
-# Commitment Agent Scaffold
+# Oya Commitment Agent
 
-Generic offchain agent wiring for monitoring a commitment and acting through the Optimistic Governor. It exposes only the core tools needed to serve commitments; add commitment-specific logic, prompts, and extra tools as needed.
+Generic offchain agent wiring for monitoring an Oya commitment and acting through the Optimistic Governor. It exposes only the core tools needed to serve commitments; add commitment-specific logic, prompts, and extra tools as needed.
 
 ## Prerequisites
 
