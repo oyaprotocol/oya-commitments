@@ -8,7 +8,7 @@ This is beta software provided “as is.” Use at your own risk. No guarantees 
 
 ## What Is a Commitment?
 
-A commitment is a Safe controlled by an Optimistic Governor module. The commitment rules are written in natural language (stored onchain or via a URI) and enforced through the Optimistic Governor challenge process. Agents can observe incoming deposits and propose compliant transfers.
+A commitment is a Safe controlled by an Optimistic Governor module. The commitment rules are written in natural language (stored onchain or via a URI) and enforced through the Optimistic Governor challenge process. Agents (which can be either AI-driven or deterministic) can interpret onchain and offchain signals and propose valid transactions baed on the commitment's rules.
 
 ## Concepts (How It Works)
 
