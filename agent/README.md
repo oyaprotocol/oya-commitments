@@ -34,6 +34,28 @@ npm install
 npm start
 ```
 
+## Alternative Signing Methods for Forge Scripts
+
+You can reuse the agent’s signer helpers to inject a private key env var for Forge scripts without storing raw keys in `.env`.
+
+```shell
+# Private key from env
+SIGNER_TYPE=env PRIVATE_KEY=0x... \
+  node agent/with-signer.mjs --env DEPLOYER_PK -- \
+  forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimisticGovernor \
+    --rpc-url $MAINNET_RPC_URL \
+    --broadcast
+
+# Encrypted keystore
+SIGNER_TYPE=keystore KEYSTORE_PATH=./keys/deployer.json KEYSTORE_PASSWORD=... \
+  node agent/with-signer.mjs --env DEPLOYER_PK -- \
+  forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimisticGovernor \
+    --rpc-url $MAINNET_RPC_URL \
+    --broadcast
+```
+
+For interactions, swap the env var (e.g., `PROPOSER_PK`, `EXECUTOR_PK`). For signing without exporting a key, use an RPC signer proxy (`SIGNER_RPC_URL`, `SIGNER_ADDRESS`) that supports `eth_sendTransaction`.
+
 ## What the Agent Does
 
 - **Polls for deposits**: Checks ERC20 `Transfer` logs into the commitment and (optionally) native balance increases. If nothing changed, no LLM/decision code runs.
