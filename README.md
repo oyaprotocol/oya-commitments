@@ -1,18 +1,32 @@
-## OG Deployer
+# Oya Commitments Monorepo
 
-Command-line tooling for deploying onchain Commitments: a Safe with an Optimistic Governor module configured with natural language rules. Use it to spin up a new Safe, connect the Optimistic Governor module, and set the rules/bond/collateral in one script run.
+This repo contains everything needed to set up **Oya commitments**: smart contracts controlled by natural language rules and the agents that serve them. It includes the Solidity contracts, deployment scripts, an optional web UI, and an offchain agent scaffold.
 
-## What This Repo Does
+## What Is a Commitment?
 
-- Deploys a Safe and the Optimistic Governor module in one flow.
-- Encodes natural language rules into the module configuration.
-- Supports env-var overrides for Safe and OG parameters.
-- Uses Foundry for scripting, testing, and deployments.
+A commitment is a Safe controlled by an Optimistic Governor module. The commitment rules are written in natural language (stored onchain or via a URI) and enforced through the Optimistic Governor challenge process. Agents can observe incoming deposits and propose compliant transfers.
 
-## Quick Start
+## Concepts (How It Works)
+
+1. **Rules**: You define natural language rules for what the commitment may do.
+2. **Control**: A Safe is deployed and wired to an Optimistic Governor module with those rules.
+3. **Proposals**: An agent (or user) proposes transfers via the module and posts the bond.
+4. **Challenge Window**: If no one challenges during the period, the proposal can be executed.
+5. **Execution**: The Safe executes the approved transfer.
+
+## Repo Layout
+
+- `src/` Solidity contracts
+- `script/` Foundry deployment and ops scripts
+- `test/` Foundry tests
+- `agent/` Offchain agent scaffold
+- `frontend/` Web UI for configuring and deploying commitments
+- `lib/` External dependencies (Foundry)
+
+## Quick Start (Deploy a Commitment)
 
 1. Install Foundry: https://book.getfoundry.sh/
-2. Set environment variables in your shell or `.env` file (load via `direnv` or `dotenvx` if desired).
+2. Set required environment variables.
 3. Run the deployment script.
 
 ```shell
@@ -21,29 +35,6 @@ forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimis
   --broadcast \
   --private-key <your_private_key>
 ```
-
-## Commitment Agent Tooling
-
-Use the offchain agent scaffold in `agent/` to serve commitments by posting bonds, proposing transactions, monitoring deposits, and making deposits on behalf of the commitment. It ships only generic tools; add commitment-specific behavior in your own prompts or handlers.
-
-### Setup & Run
-
-```shell
-cd agent
-npm install
-cp .env.example .env # fill in RPC_URL, PRIVATE_KEY, COMMITMENT_SAFE, OG_MODULE, WATCH_ASSETS
-npm start
-```
-
-The loop polls every `POLL_INTERVAL_MS` (default 60s) for ERC20 transfers into the commitment (and optional native balance increases). If nothing changes, the LLM/decision hook is not invoked. When signals are found, `decideOnSignals` is called—extend that function to route context into your system prompt and custom tools.
-
-### Built-in Agent Tools
-
-- `postBondAndPropose`: Approves the Optimistic Oracle for the module bond and calls `proposeTransactions` on the Optimistic Governor.
-- `makeDeposit`: Sends ERC20 or native deposits into the commitment Safe using the agent key.
-- `pollCommitmentChanges`: Watches configured assets (plus the OG collateral by default) for new deposits.
-
-Add more tools for a specific commitment beside these generics; keep the default agent lean.
 
 ## Required Environment Variables
 
@@ -59,62 +50,34 @@ Add more tools for a specific commitment beside these generics; keep the default
 - `OG_MASTER_COPY`, `SAFE_SINGLETON`, `SAFE_FALLBACK_HANDLER`
 - `MODULE_PROXY_FACTORY`
 
-## Web Frontend
+## Offchain Agent (Serve a Commitment)
 
-The web frontend is a lightweight UI for filling in Safe + Optimistic Governor parameters and launching the same deployment flow as the script. It can be hosted as a static site and uses RPC endpoints to read chain state and craft the deployment payloads.
-
-It mirrors the deploy script flow with a UI-driven parameter set.
-
-### Dependencies
-
-- Node.js 18+ (or newer)
-- npm, pnpm, or yarn for package management
-
-### Local Development
-
-From the web frontend directory (if you keep it alongside this repo), install dependencies and start the dev server:
+The agent in `agent/` can watch deposits and propose or execute transfers via the Optimistic Governor module. It ships with generic tools; customize the decision logic to match your commitment rules.
 
 ```shell
+cd agent
+npm install
+cp .env.example .env # fill in RPC_URL, PRIVATE_KEY, COMMITMENT_SAFE, OG_MODULE, WATCH_ASSETS
+npm start
+```
+
+Built-in tools include:
+
+- `postBondAndPropose`
+- `makeDeposit`
+- `pollCommitmentChanges`
+
+## Web Frontend
+
+`frontend/` provides a lightweight UI for entering Safe + Optimistic Governor parameters and generating the same deployment flow as the script. It uses the connected wallet to submit transactions.
+
+```shell
+cd frontend
 npm install
 npm run dev
 ```
 
-Agent setup is documented separately in `agent/README.md`.
-
-### Required Environment Variables
-
-Expose these values to the frontend build (for example via `.env` in the frontend project) so the UI can prefill defaults and target the correct network:
-
-- `MAINNET_RPC_URL` or `SEPOLIA_RPC_URL` (or another network-specific RPC URL)
-- Default addresses (optional but recommended for prefill):
-  - `SAFE_SINGLETON`
-  - `SAFE_PROXY_FACTORY`
-  - `SAFE_FALLBACK_HANDLER`
-  - `OG_MASTER_COPY`
-  - `MODULE_PROXY_FACTORY`
-
-### Form Fields → On-Chain Parameters
-
-Use the same inputs as the deploy script; the UI should map them directly to the on-chain deployment parameters:
-
-- **Safe Owners** → `SAFE_OWNERS`
-- **Safe Threshold** → `SAFE_THRESHOLD`
-- **Safe Salt Nonce** → `SAFE_SALT_NONCE`
-- **OG Collateral Token** → `OG_COLLATERAL`
-- **OG Bond Amount** → `OG_BOND_AMOUNT`
-- **OG Rules (Natural Language)** → `OG_RULES`
-- **OG Challenge Period** → `OG_CHALLENGE_PERIOD`
-- **OG Rules URI** → `OG_RULES_URI`
-- **OG Salt Nonce** → `OG_SALT_NONCE`
-- **Safe Singleton** → `SAFE_SINGLETON`
-- **Safe Proxy Factory** → `SAFE_PROXY_FACTORY`
-- **Safe Fallback Handler** → `SAFE_FALLBACK_HANDLER`
-- **OG Master Copy** → `OG_MASTER_COPY`
-- **Module Proxy Factory** → `MODULE_PROXY_FACTORY`
-
-### Deployment Note
-
-Build output is static (e.g., `dist/` or `build/`, depending on your frontend tooling) and can be hosted on any static host (Netlify, Vercel static output, S3/CloudFront, etc.). Ensure the RPC URLs and default addresses are configured for the target network before deploying the static bundle.
+Environment overrides are minimal today. The UI supports `MODULE_PROXY_FACTORY` (optionally with `VITE_` or `NEXT_PUBLIC_` prefixes). Other defaults are currently hardcoded in `frontend/src/App.jsx` and can be edited there or wired to env vars.
 
 ## Example `.env`
 
@@ -142,42 +105,6 @@ SAFE_SINGLETON=0x6666666666666666666666666666666666666666
 SAFE_FALLBACK_HANDLER=0x7777777777777777777777777777777777777777
 ```
 
-### Signer Options (CLI Scripts)
-
-Forge scripts still require a private key env var (e.g., `DEPLOYER_PK`, `PROPOSER_PK`, `EXECUTOR_PK`). If you don't want to store raw keys in `.env`, use `agent/with-signer.mjs` to resolve a signer at runtime and inject the env var:
-
-```shell
-# Private key from env
-SIGNER_TYPE=env PRIVATE_KEY=0x... \
-  node agent/with-signer.mjs --env DEPLOYER_PK -- \
-  forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimisticGovernor \
-    --rpc-url $MAINNET_RPC_URL \
-    --broadcast
-
-# Encrypted keystore
-SIGNER_TYPE=keystore KEYSTORE_PATH=./keys/deployer.json KEYSTORE_PASSWORD=... \
-  node agent/with-signer.mjs --env DEPLOYER_PK -- \
-  forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimisticGovernor \
-    --rpc-url $MAINNET_RPC_URL \
-    --broadcast
-
-# OS keychain
-SIGNER_TYPE=keychain KEYCHAIN_SERVICE=og-deployer KEYCHAIN_ACCOUNT=deployer \
-  node agent/with-signer.mjs --env DEPLOYER_PK -- \
-  forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimisticGovernor \
-    --rpc-url $MAINNET_RPC_URL \
-    --broadcast
-
-# Vault KV (private key stored as a secret)
-SIGNER_TYPE=vault VAULT_ADDR=https://vault.example.com VAULT_TOKEN=... VAULT_SECRET_PATH=secret/data/og-deployer \
-  node agent/with-signer.mjs --env DEPLOYER_PK -- \
-  forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimisticGovernor \
-    --rpc-url $MAINNET_RPC_URL \
-    --broadcast
-```
-
-For KMS/Vault signing without exporting private keys, use an RPC signer proxy that exposes `eth_sendTransaction` (set `SIGNER_RPC_URL` and `SIGNER_ADDRESS`). The agent supports this directly (see `agent/README.md`); Forge scripts need a proxy that can export or inject keys.
-
 ## Common Commands
 
 ```shell
@@ -186,7 +113,7 @@ forge test
 forge fmt
 ```
 
-## Local Testing
+## Local Testing (Anvil)
 
 Dry-run (no broadcast):
 
@@ -244,23 +171,6 @@ Optional overrides:
 
 - `TRANSFER_OPERATION` (default `0` for `CALL`)
 - `TRANSFER_VALUE` (default `0`)
-
-### Anvil Test Key + USDC Funding (Fork)
-
-Start Anvil with the default test mnemonic and grab one of the printed private keys:
-
-```shell
-anvil --fork-url $MAINNET_RPC_URL --mnemonic "test test test test test test test test test test test junk"
-```
-
-Fund the test account with USDC by impersonating a whale on the fork:
-
-```shell
-cast rpc anvil_impersonateAccount <whale_address>
-cast rpc anvil_setBalance <whale_address> 0x3635C9ADC5DEA00000
-cast send <usdc_contract> "transfer(address,uint256)" <your_account> <amount> --from <whale_address>
-cast rpc anvil_stopImpersonatingAccount <whale_address>
-```
 
 ## Network Env Files
 
