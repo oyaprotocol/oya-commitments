@@ -56,7 +56,7 @@ forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimis
 
 ## Offchain Agent (Serve a Commitment)
 
-The agent in `agent/` can watch deposits and propose or execute transfers via the Optimistic Governor module. It ships with generic tools; customize the decision logic to match your commitment rules.
+The agent in `agent/` can propose and execute transactions via the Optimistic Governor module. It ships with generic tools; customize the decision logic, signal monitoring, and overall behavior to match your commitment rules.
 
 ```shell
 cd agent
@@ -70,6 +70,8 @@ Built-in tools include:
 - `postBondAndPropose`
 - `makeDeposit`
 - `pollCommitmentChanges`
+
+We will be building a library of agents showcasing different types of commitments, and welcome community contributions!
 
 ## Web Frontend
 
