@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createPublicClient, http } from 'viem';
 import { buildConfig } from './lib/config.js';
 import { createSignerClient } from './lib/signer.js';
@@ -20,8 +20,12 @@ import { callAgent, explainToolCalls } from './lib/llm.js';
 import { executeToolCalls, toolDefinitions } from './lib/tools.js';
 import { makeDeposit, postBondAndDispute, postBondAndPropose } from './lib/tx.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const repoRoot = path.resolve(__dirname, '../..');
+
 dotenv.config();
-dotenv.config({ path: path.resolve(process.cwd(), 'agent/.env') });
+dotenv.config({ path: path.resolve(repoRoot, 'agent/.env') });
 
 const config = buildConfig();
 const publicClient = createPublicClient({ transport: http(config.rpcUrl) });
@@ -37,7 +41,7 @@ const proposalsByHash = new Map();
 
 async function loadAgentModule() {
     const modulePath = config.agentModule ?? 'agent-library/agents/default/agent.js';
-    const resolvedPath = path.resolve(process.cwd(), modulePath);
+    const resolvedPath = path.resolve(repoRoot, modulePath);
     const moduleUrl = pathToFileURL(resolvedPath).href;
     const agentModule = await import(moduleUrl);
 
