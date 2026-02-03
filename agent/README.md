@@ -25,7 +25,7 @@ This is beta software provided “as is.” Use at your own risk. No guarantees 
      - `keychain`: `KEYCHAIN_SERVICE`, `KEYCHAIN_ACCOUNT` (macOS Keychain or Linux Secret Service)
      - `vault`: `VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_SECRET_PATH`, optional `VAULT_SECRET_KEY` (default `private_key`)
      - `kms`/`vault-signer`/`rpc`: `SIGNER_RPC_URL`, `SIGNER_ADDRESS` (JSON-RPC signer that accepts `eth_sendTransaction`)
-   - Optional tuning: `POLL_INTERVAL_MS`, `START_BLOCK`, `WATCH_NATIVE_BALANCE`, `DEFAULT_DEPOSIT_*`
+   - Optional tuning: `POLL_INTERVAL_MS`, `START_BLOCK`, `WATCH_NATIVE_BALANCE`, `DEFAULT_DEPOSIT_*`, `AGENT_MODULE`
    - Optional proposals: `PROPOSE_ENABLED` (default true)
    - Optional disputes: `DISPUTE_ENABLED` (default true), `DISPUTE_RETRY_MS` (default 60000)
    - Optional LLM: `OPENAI_API_KEY`, `OPENAI_MODEL` (default `gpt-4.1-mini`), `OPENAI_BASE_URL`
@@ -65,9 +65,9 @@ For interactions, swap the env var (e.g., `PROPOSER_PK`, `EXECUTOR_PK`). For sig
 - **Monitors proposals**: Watches for Optimistic Governor proposals and routes them to the LLM for rule checks.
 - **Disputes assertions**: When the LLM flags a proposal as violating the rules, the agent posts the Oracle V3 bond and disputes the associated assertion. A human-readable rationale is logged locally.
 - **Deposits**: `makeDeposit` can send ERC20 or native assets into the commitment.
-- **Optional LLM decisions**: If `OPENAI_API_KEY` is set, `decideOnSignals` will call the OpenAI Responses API with signals and OG context and expect strict-JSON actions (propose/deposit/ignore). Wire your own validation/broadcast of any suggested actions.
+- **Optional LLM decisions**: If `OPENAI_API_KEY` is set, the runner will call the OpenAI Responses API with signals and OG context and expect strict-JSON actions (propose/deposit/ignore). Wire your own validation/broadcast of any suggested actions in the agent module.
 
-All other behavior is intentionally left out. Implement your own `decideOnSignals` in `src/index.js` to add commitment-specific logic and tool use.
+All other behavior is intentionally left out. Implement your own agent in `agent-library/agents/<name>/agent.js` to add commitment-specific logic and tool use.
 
 ### Propose vs Dispute Modes
 
@@ -76,6 +76,17 @@ Set `PROPOSE_ENABLED` and `DISPUTE_ENABLED` to control behavior:
 - Only `PROPOSE_ENABLED=true`: propose only, never dispute.
 - Only `DISPUTE_ENABLED=true`: dispute only, never propose.
 - Both false: monitor and log opinions only; no on-chain actions.
+
+### Agent Modules & Commitments
+
+Use `AGENT_MODULE` to point to an agent implementation under `agent-library/agents/<name>/agent.js`.
+Each agent directory must include a `commitment.txt` with the plain language commitment the agent is designed to serve.
+
+You can validate a module quickly:
+
+```bash
+node agent/scripts/validate-agent.mjs --module=agent-library/agents/default/agent.js
+```
 
 ## Local Dispute Simulation
 
