@@ -64,6 +64,10 @@ async function pollCommitmentChanges({
                 amount: log.args.value,
                 blockNumber: log.blockNumber,
                 transactionHash: log.transactionHash,
+                logIndex: log.logIndex,
+                id: log.transactionHash
+                    ? `${log.transactionHash}:${log.logIndex ?? '0'}`
+                    : `${log.blockNumber.toString()}:${log.logIndex ?? '0'}`,
             });
         }
     }
@@ -83,6 +87,8 @@ async function pollCommitmentChanges({
                 amount: nativeBalance - lastNativeBalance,
                 blockNumber: toBlock,
                 transactionHash: undefined,
+                logIndex: undefined,
+                id: `native:${toBlock.toString()}:${(nativeBalance - lastNativeBalance).toString()}`,
             });
         }
 
