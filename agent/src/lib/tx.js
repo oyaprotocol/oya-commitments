@@ -1,0 +1,405 @@
+import {
+    encodeFunctionData,
+    erc20Abi,
+    getAddress,
+    parseAbi,
+    stringToHex,
+    zeroAddress,
+} from 'viem';
+import { optimisticGovernorAbi, optimisticOracleAbi } from './og.js';
+import { normalizeAssertion } from './og.js';
+import { summarizeViemError } from './utils.js';
+
+async function postBondAndPropose({
+    publicClient,
+    walletClient,
+    account,
+    config,
+    ogModule,
+    transactions,
+}) {
+    if (!config.proposeEnabled) {
+        throw new Error('Proposals disabled via PROPOSE_ENABLED.');
+    }
+
+    const normalizedTransactions = normalizeOgTransactions(transactions);
+    const proposerBalance = await publicClient.getBalance({ address: account.address });
+    const [collateral, bondAmount, optimisticOracle] = await Promise.all([
+        publicClient.readContract({
+            address: ogModule,
+            abi: optimisticGovernorAbi,
+            functionName: 'collateral',
+        }),
+        publicClient.readContract({
+            address: ogModule,
+            abi: optimisticGovernorAbi,
+            functionName: 'bondAmount',
+        }),
+        publicClient.readContract({
+            address: ogModule,
+            abi: optimisticGovernorAbi,
+            functionName: 'optimisticOracleV3',
+        }),
+    ]);
+    let minimumBond = 0n;
+    try {
+        minimumBond = await publicClient.readContract({
+            address: optimisticOracle,
+            abi: optimisticOracleAbi,
+            functionName: 'getMinimumBond',
+            args: [collateral],
+        });
+    } catch (error) {
+        console.warn('[agent] Failed to fetch minimum bond from optimistic oracle:', error);
+    }
+
+    const requiredBond = bondAmount > minimumBond ? bondAmount : minimumBond;
+
+    if (requiredBond > 0n) {
+        const collateralBalance = await publicClient.readContract({
+            address: collateral,
+            abi: erc20Abi,
+            functionName: 'balanceOf',
+            args: [account.address],
+        });
+        if (collateralBalance < requiredBond) {
+            throw new Error(
+                `Insufficient bond collateral balance: need ${requiredBond.toString()} wei, have ${collateralBalance.toString()}.`
+            );
+        }
+        const spenders = [];
+        if (config.bondSpender === 'og' || config.bondSpender === 'both') {
+            spenders.push(ogModule);
+        }
+        if (config.bondSpender === 'oo' || config.bondSpender === 'both') {
+            spenders.push(optimisticOracle);
+        }
+
+        for (const spender of spenders) {
+            const approveHash = await walletClient.writeContract({
+                address: collateral,
+                abi: erc20Abi,
+                functionName: 'approve',
+                args: [spender, requiredBond],
+            });
+            await publicClient.waitForTransactionReceipt({ hash: approveHash });
+            const allowance = await publicClient.readContract({
+                address: collateral,
+                abi: erc20Abi,
+                functionName: 'allowance',
+                args: [account.address, spender],
+            });
+            if (allowance < requiredBond) {
+                throw new Error(
+                    `Insufficient bond allowance: need ${requiredBond.toString()} wei, have ${allowance.toString()} for spender ${spender}.`
+                );
+            }
+        }
+    }
+
+    if (proposerBalance === 0n) {
+        throw new Error(
+            `Proposer ${account.address} has 0 native balance; cannot pay gas to propose.`
+        );
+    }
+
+    let proposalHash;
+    const explanation = 'Agent serving Oya commitment.';
+    const explanationBytes = stringToHex(explanation);
+    const proposalData = encodeFunctionData({
+        abi: optimisticGovernorAbi,
+        functionName: 'proposeTransactions',
+        args: [normalizedTransactions, explanationBytes],
+    });
+    let simulationError;
+    let submissionError;
+    try {
+        await publicClient.simulateContract({
+            address: ogModule,
+            abi: optimisticGovernorAbi,
+            functionName: 'proposeTransactions',
+            args: [normalizedTransactions, explanationBytes],
+            account: account.address,
+        });
+    } catch (error) {
+        simulationError = error;
+        if (!config.allowProposeOnSimulationFail) {
+            throw error;
+        }
+        console.warn('[agent] Simulation failed; attempting to propose anyway.');
+    }
+
+    try {
+        if (simulationError) {
+            proposalHash = await walletClient.sendTransaction({
+                account,
+                to: ogModule,
+                data: proposalData,
+                value: 0n,
+                gas: config.proposeGasLimit,
+            });
+        } else {
+            proposalHash = await walletClient.writeContract({
+                address: ogModule,
+                abi: optimisticGovernorAbi,
+                functionName: 'proposeTransactions',
+                args: [normalizedTransactions, explanationBytes],
+            });
+        }
+    } catch (error) {
+        submissionError = error;
+        const message =
+            error?.shortMessage ??
+            error?.message ??
+            simulationError?.shortMessage ??
+            simulationError?.message ??
+            String(error ?? simulationError);
+        console.warn('[agent] Propose submission failed:', message);
+    }
+
+    if (proposalHash) {
+        console.log('[agent] Proposal submitted:', proposalHash);
+    }
+
+    return {
+        proposalHash,
+        bondAmount,
+        collateral,
+        optimisticOracle,
+        submissionError: submissionError ? summarizeViemError(submissionError) : null,
+    };
+}
+
+async function postBondAndDispute({
+    publicClient,
+    walletClient,
+    account,
+    config,
+    ogContext,
+    assertionId,
+    explanation,
+}) {
+    if (!config.disputeEnabled) {
+        throw new Error('Disputes disabled via DISPUTE_ENABLED.');
+    }
+
+    const proposerBalance = await publicClient.getBalance({ address: account.address });
+    if (proposerBalance === 0n) {
+        throw new Error(
+            `Disputer ${account.address} has 0 native balance; cannot pay gas to dispute.`
+        );
+    }
+
+    const optimisticOracle = ogContext?.optimisticOracle;
+    if (!optimisticOracle) {
+        throw new Error('Missing optimistic oracle address.');
+    }
+
+    const assertionRaw = await publicClient.readContract({
+        address: optimisticOracle,
+        abi: optimisticOracleAbi,
+        functionName: 'getAssertion',
+        args: [assertionId],
+    });
+    const assertion = normalizeAssertion(assertionRaw);
+
+    const nowBlock = await publicClient.getBlock();
+    const now = BigInt(nowBlock.timestamp);
+    const expirationTime = BigInt(assertion.expirationTime ?? 0);
+    const disputer = assertion.disputer ? getAddress(assertion.disputer) : zeroAddress;
+    const settled = Boolean(assertion.settled);
+    if (settled) {
+        throw new Error(`Assertion ${assertionId} already settled.`);
+    }
+    if (expirationTime !== 0n && now >= expirationTime) {
+        throw new Error(`Assertion ${assertionId} expired at ${expirationTime}.`);
+    }
+    if (disputer !== zeroAddress) {
+        throw new Error(`Assertion ${assertionId} already disputed by ${disputer}.`);
+    }
+
+    const bond = BigInt(assertion.bond ?? 0);
+    const currency = assertion.currency ? getAddress(assertion.currency) : zeroAddress;
+    if (currency === zeroAddress) {
+        throw new Error('Assertion currency is zero address; cannot post bond.');
+    }
+
+    if (bond > 0n) {
+        const collateralBalance = await publicClient.readContract({
+            address: currency,
+            abi: erc20Abi,
+            functionName: 'balanceOf',
+            args: [account.address],
+        });
+        if (collateralBalance < bond) {
+            throw new Error(
+                `Insufficient dispute bond balance: need ${bond.toString()} wei, have ${collateralBalance.toString()}.`
+            );
+        }
+
+        const approveHash = await walletClient.writeContract({
+            address: currency,
+            abi: erc20Abi,
+            functionName: 'approve',
+            args: [optimisticOracle, bond],
+        });
+        await publicClient.waitForTransactionReceipt({ hash: approveHash });
+    }
+
+    let disputeHash;
+    try {
+        await publicClient.simulateContract({
+            address: optimisticOracle,
+            abi: optimisticOracleAbi,
+            functionName: 'disputeAssertion',
+            args: [assertionId, account.address],
+            account: account.address,
+        });
+        disputeHash = await walletClient.writeContract({
+            address: optimisticOracle,
+            abi: optimisticOracleAbi,
+            functionName: 'disputeAssertion',
+            args: [assertionId, account.address],
+        });
+    } catch (error) {
+        const message = error?.shortMessage ?? error?.message ?? String(error);
+        throw new Error(`Dispute submission failed: ${message}`);
+    }
+
+    if (explanation) {
+        console.log(`[agent] Dispute rationale: ${explanation}`);
+    }
+
+    console.log('[agent] Dispute submitted:', disputeHash);
+
+    return {
+        disputeHash,
+        bondAmount: bond,
+        collateral: currency,
+        optimisticOracle,
+    };
+}
+
+function normalizeOgTransactions(transactions) {
+    if (!Array.isArray(transactions)) {
+        throw new Error('transactions must be an array');
+    }
+
+    return transactions.map((tx, index) => {
+        if (!tx || !tx.to) {
+            throw new Error(`transactions[${index}] missing to`);
+        }
+
+        return {
+            to: getAddress(tx.to),
+            value: BigInt(tx.value ?? 0),
+            data: tx.data ?? '0x',
+            operation: Number(tx.operation ?? 0),
+        };
+    });
+}
+
+function buildOgTransactions(actions) {
+    if (!Array.isArray(actions) || actions.length === 0) {
+        throw new Error('actions must be a non-empty array');
+    }
+
+    return actions.map((action) => {
+        const operation = action.operation !== undefined ? Number(action.operation) : 0;
+
+        if (action.kind === 'erc20_transfer') {
+            if (!action.token || !action.to || action.amountWei === undefined) {
+                throw new Error('erc20_transfer requires token, to, amountWei');
+            }
+
+            const data = encodeFunctionData({
+                abi: erc20Abi,
+                functionName: 'transfer',
+                args: [getAddress(action.to), BigInt(action.amountWei)],
+            });
+
+            return {
+                to: getAddress(action.token),
+                value: '0',
+                data,
+                operation,
+            };
+        }
+
+        if (action.kind === 'native_transfer') {
+            if (!action.to || action.amountWei === undefined) {
+                throw new Error('native_transfer requires to, amountWei');
+            }
+
+            return {
+                to: getAddress(action.to),
+                value: BigInt(action.amountWei).toString(),
+                data: '0x',
+                operation,
+            };
+        }
+
+        if (action.kind === 'contract_call') {
+            if (!action.to || !action.abi) {
+                throw new Error('contract_call requires to, abi');
+            }
+
+            const abi = parseAbi([`function ${action.abi}`]);
+            const args = Array.isArray(action.args) ? action.args : [];
+            const data = encodeFunctionData({
+                abi,
+                functionName: action.abi.split('(')[0],
+                args,
+            });
+            const value = action.valueWei !== undefined ? BigInt(action.valueWei).toString() : '0';
+
+            return {
+                to: getAddress(action.to),
+                value,
+                data,
+                operation,
+            };
+        }
+
+        throw new Error(`Unknown action kind: ${action.kind}`);
+    });
+}
+
+async function makeDeposit({
+    walletClient,
+    account,
+    config,
+    asset,
+    amountWei,
+}) {
+    const depositAsset = asset ? getAddress(asset) : config.defaultDepositAsset;
+    const depositAmount =
+        amountWei !== undefined ? amountWei : config.defaultDepositAmountWei;
+
+    if (!depositAsset || depositAmount === undefined) {
+        throw new Error('Deposit requires asset and amount (wei).');
+    }
+
+    if (depositAsset === zeroAddress) {
+        return walletClient.sendTransaction({
+            account,
+            to: config.commitmentSafe,
+            value: BigInt(depositAmount),
+        });
+    }
+
+    return walletClient.writeContract({
+        address: depositAsset,
+        abi: erc20Abi,
+        functionName: 'transfer',
+        args: [config.commitmentSafe, BigInt(depositAmount)],
+    });
+}
+
+export {
+    buildOgTransactions,
+    makeDeposit,
+    normalizeOgTransactions,
+    postBondAndDispute,
+    postBondAndPropose,
+};
