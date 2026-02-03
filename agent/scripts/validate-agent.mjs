@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 function getArgValue(prefix) {
     const arg = process.argv.find((value) => value.startsWith(prefix));
@@ -9,8 +9,14 @@ function getArgValue(prefix) {
 
 async function main() {
     const moduleArg = getArgValue('--module=');
-    const modulePath = moduleArg ?? process.env.AGENT_MODULE ?? 'agent-library/agents/default/agent.js';
-    const resolvedPath = path.resolve(process.cwd(), modulePath);
+    const modulePath =
+        moduleArg ?? process.env.AGENT_MODULE ?? 'agent-library/agents/default/agent.js';
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const repoRoot = path.resolve(__dirname, '../..');
+    const resolvedPath = path.isAbsolute(modulePath)
+        ? modulePath
+        : path.resolve(repoRoot, modulePath);
 
     const agentModule = await import(pathToFileURL(resolvedPath).href);
     if (typeof agentModule.getSystemPrompt !== 'function') {
