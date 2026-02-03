@@ -679,10 +679,14 @@ async function pollProposalChanges() {
         const rules = log.args?.rules;
         let explanation;
         if (explanationHex && typeof explanationHex === 'string') {
-            try {
-                explanation = hexToString(explanationHex);
-            } catch (error) {
-                explanation = undefined;
+            if (explanationHex.startsWith('0x')) {
+                try {
+                    explanation = hexToString(explanationHex);
+                } catch (error) {
+                    explanation = undefined;
+                }
+            } else {
+                explanation = explanationHex;
             }
         }
 
