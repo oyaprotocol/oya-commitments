@@ -1,4 +1,4 @@
-# Oya Commitments Monorepo
+# Oya Commitments
 
 This repo contains everything needed to set up **Oya commitments**: smart contracts controlled by plain language rules and the agents that serve them. It includes the Solidity contracts, deployment scripts, an optional web UI, and an offchain agent scaffold.
 
