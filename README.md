@@ -1,6 +1,6 @@
 # Oya Commitments Monorepo
 
-This repo contains everything needed to set up **Oya commitments**: smart contracts controlled by natural language rules and the agents that serve them. It includes the Solidity contracts, deployment scripts, an optional web UI, and an offchain agent scaffold.
+This repo contains everything needed to set up **Oya commitments**: smart contracts controlled by plain language rules and the agents that serve them. It includes the Solidity contracts, deployment scripts, an optional web UI, and an offchain agent scaffold.
 
 ## Beta Disclaimer
 
@@ -8,11 +8,11 @@ This is beta software provided “as is.” Use at your own risk. No guarantees 
 
 ## What Is a Commitment?
 
-A commitment is a Safe controlled by an Optimistic Governor module. The commitment rules are written in natural language (stored onchain or via a URI) and enforced through the Optimistic Governor challenge process. Agents (which can be either AI-driven or deterministic) can interpret onchain and offchain signals and propose valid transactions baed on the commitment's rules.
+A commitment is a Safe controlled by an Optimistic Governor module. The commitment rules are written in plain language (stored onchain or via a URI) and enforced through the Optimistic Governor challenge process. Agents (which can be either AI-driven or deterministic) can interpret onchain and offchain signals and propose valid transactions baed on the commitment's rules.
 
 ## Concepts (How It Works)
 
-1. **Rules**: You define natural language rules for what the commitment may do.
+1. **Rules**: You define plain language rules for what the commitment may do.
 2. **Control**: A Safe is deployed and wired to an Optimistic Governor module with those rules.
 3. **Proposals**: An agent (or user) proposes transfers via the module and posts the bond.
 4. **Challenge Window**: If no one challenges during the period, the proposal can be executed.
@@ -45,7 +45,7 @@ forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimis
 - `DEPLOYER_PK`: Private key for the deployer.
 - `OG_COLLATERAL`: Address of the ERC20 collateral token.
 - `OG_BOND_AMOUNT`: Bond amount for challenges.
-- `OG_RULES`: Natural language rules for the commitment.
+- `OG_RULES`: Plain language rules for the commitment.
 
 ## Alternative Signing Methods
 
