@@ -10,7 +10,7 @@ This is beta software provided “as is.” Use at your own risk. No guarantees 
 
 - Node.js 18+
 - RPC endpoint the agent can reach
-- Private key funded for gas and permissions to propose through the Optimistic Governor
+- Private key funded for gas and bond currency to propose through the Optimistic Governor
 
 ## Configure
 
