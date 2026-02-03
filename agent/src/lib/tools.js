@@ -53,7 +53,7 @@ function toolDefinitions({ proposeEnabled, disputeEnabled }) {
                                     type: ['array', 'null'],
                                     description:
                                         'Arguments for contract_call in order, JSON-serializable.',
-                                    items: { type: 'string' },
+                                    items: {},
                                 },
                                 operation: {
                                     type: ['integer', 'null'],
