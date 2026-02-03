@@ -9,6 +9,7 @@ import {
     encodeFunctionData,
     erc20Abi,
     getAddress,
+    hexToString,
     http,
     parseAbi,
     parseAbiItem,
@@ -30,7 +31,9 @@ const optimisticGovernorAbi = parseAbi([
 ]);
 
 const optimisticOracleAbi = parseAbi([
+    'function disputeAssertion(bytes32 assertionId, address disputer)',
     'function getMinimumBond(address collateral) view returns (uint256)',
+    'function getAssertion(bytes32 assertionId) view returns ((bool arbitrateViaEscalationManager,bool discardOracle,bool validateDisputers,address assertingCaller,address escalationManager) escalationManagerSettings,address asserter,uint64 assertionTime,bool settled,address currency,uint64 expirationTime,bool settlementResolution,bytes32 domainId,bytes32 identifier,uint256 bond,address callbackRecipient,address disputer)',
 ]);
 
 const transferEvent = parseAbiItem(
@@ -163,6 +166,15 @@ const config = {
         ? BigInt(process.env.PROPOSE_GAS_LIMIT)
         : 2_000_000n,
     executeRetryMs: Number(process.env.EXECUTE_RETRY_MS ?? 60_000),
+    proposeEnabled:
+        process.env.PROPOSE_ENABLED === undefined
+            ? true
+            : process.env.PROPOSE_ENABLED.toLowerCase() !== 'false',
+    disputeEnabled:
+        process.env.DISPUTE_ENABLED === undefined
+            ? true
+            : process.env.DISPUTE_ENABLED.toLowerCase() !== 'false',
+    disputeRetryMs: Number(process.env.DISPUTE_RETRY_MS ?? 60_000),
 };
 
 const publicClient = createPublicClient({ transport: http(config.rpcUrl) });
@@ -349,6 +361,10 @@ async function primeBalances(blockNumber) {
 }
 
 async function postBondAndPropose(transactions) {
+    if (!config.proposeEnabled) {
+        throw new Error('Proposals disabled via PROPOSE_ENABLED.');
+    }
+
     const normalizedTransactions = normalizeOgTransactions(transactions);
     const proposerBalance = await publicClient.getBalance({ address: account.address });
     const [collateral, bondAmount, optimisticOracle] = await Promise.all([
@@ -620,11 +636,11 @@ async function pollProposalChanges() {
     const latestBlock = await publicClient.getBlockNumber();
     if (lastProposalCheckedBlock === undefined) {
         lastProposalCheckedBlock = latestBlock;
-        return;
+        return [];
     }
 
     if (latestBlock <= lastProposalCheckedBlock) {
-        return;
+        return [];
     }
 
     const fromBlock = lastProposalCheckedBlock + 1n;
@@ -651,12 +667,28 @@ async function pollProposalChanges() {
         }),
     ]);
 
+    const newProposals = [];
     for (const log of proposedLogs) {
         const proposalHash = log.args?.proposalHash;
         const assertionId = log.args?.assertionId;
         const proposal = log.args?.proposal;
         const challengeWindowEnds = log.args?.challengeWindowEnds;
         if (!proposalHash || !proposal?.transactions) continue;
+        const proposer = log.args?.proposer;
+        const explanationHex = log.args?.explanation;
+        const rules = log.args?.rules;
+        let explanation;
+        if (explanationHex && typeof explanationHex === 'string') {
+            if (explanationHex.startsWith('0x')) {
+                try {
+                    explanation = hexToString(explanationHex);
+                } catch (error) {
+                    explanation = undefined;
+                }
+            } else {
+                explanation = explanationHex;
+            }
+        }
 
         const transactions = proposal.transactions.map((tx) => ({
             to: getAddress(tx.to),
@@ -665,13 +697,19 @@ async function pollProposalChanges() {
             data: tx.data ?? '0x',
         }));
 
-        proposalsByHash.set(proposalHash, {
+        const proposalRecord = {
             proposalHash,
             assertionId,
+            proposer: proposer ? getAddress(proposer) : undefined,
             challengeWindowEnds: BigInt(challengeWindowEnds ?? 0),
             transactions,
             lastAttemptMs: 0,
-        });
+            disputeAttemptMs: 0,
+            rules,
+            explanation,
+        };
+        proposalsByHash.set(proposalHash, proposalRecord);
+        newProposals.push(proposalRecord);
     }
 
     for (const log of executedLogs) {
@@ -689,6 +727,7 @@ async function pollProposalChanges() {
     }
 
     lastProposalCheckedBlock = toBlock;
+    return newProposals;
 }
 
 async function executeReadyProposals() {
@@ -754,8 +793,143 @@ async function executeReadyProposals() {
     }
 }
 
+async function postBondAndDispute({ assertionId, explanation }) {
+    if (!config.disputeEnabled) {
+        throw new Error('Disputes disabled via DISPUTE_ENABLED.');
+    }
+
+    if (!ogContext) {
+        await loadOgContext();
+    }
+
+    const proposerBalance = await publicClient.getBalance({ address: account.address });
+    if (proposerBalance === 0n) {
+        throw new Error(
+            `Disputer ${account.address} has 0 native balance; cannot pay gas to dispute.`
+        );
+    }
+
+    const optimisticOracle = ogContext?.optimisticOracle;
+    if (!optimisticOracle) {
+        throw new Error('Missing optimistic oracle address.');
+    }
+
+    const assertionRaw = await publicClient.readContract({
+        address: optimisticOracle,
+        abi: optimisticOracleAbi,
+        functionName: 'getAssertion',
+        args: [assertionId],
+    });
+    const assertion = normalizeAssertion(assertionRaw);
+
+    const nowBlock = await publicClient.getBlock();
+    const now = BigInt(nowBlock.timestamp);
+    const expirationTime = BigInt(assertion.expirationTime ?? 0);
+    const disputer = assertion.disputer ? getAddress(assertion.disputer) : zeroAddress;
+    const settled = Boolean(assertion.settled);
+    if (settled) {
+        throw new Error(`Assertion ${assertionId} already settled.`);
+    }
+    if (expirationTime !== 0n && now >= expirationTime) {
+        throw new Error(`Assertion ${assertionId} expired at ${expirationTime}.`);
+    }
+    if (disputer !== zeroAddress) {
+        throw new Error(`Assertion ${assertionId} already disputed by ${disputer}.`);
+    }
+
+    const bond = BigInt(assertion.bond ?? 0);
+    const currency = assertion.currency ? getAddress(assertion.currency) : zeroAddress;
+    if (currency === zeroAddress) {
+        throw new Error('Assertion currency is zero address; cannot post bond.');
+    }
+
+    if (bond > 0n) {
+        const collateralBalance = await publicClient.readContract({
+            address: currency,
+            abi: erc20Abi,
+            functionName: 'balanceOf',
+            args: [account.address],
+        });
+        if (collateralBalance < bond) {
+            throw new Error(
+                `Insufficient dispute bond balance: need ${bond.toString()} wei, have ${collateralBalance.toString()}.`
+            );
+        }
+
+        const approveHash = await walletClient.writeContract({
+            address: currency,
+            abi: erc20Abi,
+            functionName: 'approve',
+            args: [optimisticOracle, bond],
+        });
+        await publicClient.waitForTransactionReceipt({ hash: approveHash });
+    }
+
+    let disputeHash;
+    try {
+        await publicClient.simulateContract({
+            address: optimisticOracle,
+            abi: optimisticOracleAbi,
+            functionName: 'disputeAssertion',
+            args: [assertionId, account.address],
+            account: account.address,
+        });
+        disputeHash = await walletClient.writeContract({
+            address: optimisticOracle,
+            abi: optimisticOracleAbi,
+            functionName: 'disputeAssertion',
+            args: [assertionId, account.address],
+        });
+    } catch (error) {
+        const message = error?.shortMessage ?? error?.message ?? String(error);
+        throw new Error(`Dispute submission failed: ${message}`);
+    }
+
+    if (explanation) {
+        console.log(`[agent] Dispute rationale: ${explanation}`);
+    }
+
+    console.log('[agent] Dispute submitted:', disputeHash);
+
+    return {
+        disputeHash,
+        bondAmount: bond,
+        collateral: currency,
+        optimisticOracle,
+    };
+}
+
+function normalizeAssertion(assertion) {
+    if (!assertion) return {};
+    if (typeof assertion === 'object' && !Array.isArray(assertion)) {
+        return assertion;
+    }
+
+    // viem can return tuple arrays; map indices to named fields.
+    const tuple = Array.isArray(assertion) ? assertion : [];
+    return {
+        escalationManagerSettings: tuple[0],
+        asserter: tuple[1],
+        assertionTime: tuple[2],
+        settled: tuple[3],
+        currency: tuple[4],
+        expirationTime: tuple[5],
+        settlementResolution: tuple[6],
+        domainId: tuple[7],
+        identifier: tuple[8],
+        bond: tuple[9],
+        callbackRecipient: tuple[10],
+        disputer: tuple[11],
+    };
+}
+
 async function decideOnSignals(signals) {
     if (!config.openAiApiKey) {
+        return;
+    }
+
+    if (!config.proposeEnabled && !config.disputeEnabled) {
+        console.log('[agent] Proposals and disputes are disabled; skipping onchain actions.');
         return;
     }
 
@@ -786,10 +960,22 @@ async function decideOnSignals(signals) {
 async function agentLoop() {
     try {
         const signals = await pollCommitmentChanges();
-        await pollProposalChanges();
+        const proposalSignals = await pollProposalChanges();
+        const combinedSignals = signals.concat(
+            proposalSignals.map((proposal) => ({
+                kind: 'proposal',
+                proposalHash: proposal.proposalHash,
+                assertionId: proposal.assertionId,
+                proposer: proposal.proposer,
+                challengeWindowEnds: proposal.challengeWindowEnds,
+                transactions: proposal.transactions,
+                rules: proposal.rules,
+                explanation: proposal.explanation,
+            }))
+        );
 
-        if (signals.length > 0) {
-            await decideOnSignals(signals);
+        if (combinedSignals.length > 0) {
+            await decideOnSignals(combinedSignals);
         }
 
         await executeReadyProposals();
@@ -821,14 +1007,32 @@ async function startAgent() {
 
 async function callAgent(signals, context) {
     const systemPrompt =
-        'You are an agent monitoring an onchain commitment (Safe + Optimistic Governor). Your own address is provided in the input as agentAddress; use it when rules refer to “the agent/themselves”. Given signals and rules, recommend a course of action. Prefer no-op when unsure. If an onchain action is needed, call a tool. Use build_og_transactions to construct proposal payloads, then post_bond_and_propose. If no action is needed, output strict JSON with keys: action (propose|deposit|ignore|other) and rationale (string).';
+        'You are an agent monitoring an onchain commitment (Safe + Optimistic Governor). Your own address is provided in the input as agentAddress; use it when rules refer to “the agent/themselves”. Given signals and rules, recommend a course of action. Default to disputing proposals that violate the rules; prefer no-op when unsure. If an onchain action is needed, call a tool. Use build_og_transactions to construct proposal payloads, then post_bond_and_propose. Use dispute_assertion with a short human-readable explanation when disputing. If no action is needed, output strict JSON with keys: action (propose|deposit|dispute|ignore|other) and rationale (string).';
 
-    const safeSignals = signals.map((signal) => ({
-        ...signal,
-        amount: signal.amount !== undefined ? signal.amount.toString() : undefined,
-        blockNumber: signal.blockNumber !== undefined ? signal.blockNumber.toString() : undefined,
-        transactionHash: signal.transactionHash ? String(signal.transactionHash) : undefined,
-    }));
+    const safeSignals = signals.map((signal) => {
+        if (signal?.kind === 'proposal') {
+            return {
+                ...signal,
+                challengeWindowEnds:
+                    signal.challengeWindowEnds !== undefined
+                        ? signal.challengeWindowEnds.toString()
+                        : undefined,
+                transactions: Array.isArray(signal.transactions)
+                    ? signal.transactions.map((tx) => ({
+                          ...tx,
+                          value: tx.value !== undefined ? tx.value.toString() : undefined,
+                      }))
+                    : undefined,
+            };
+        }
+
+        return {
+            ...signal,
+            amount: signal.amount !== undefined ? signal.amount.toString() : undefined,
+            blockNumber: signal.blockNumber !== undefined ? signal.blockNumber.toString() : undefined,
+            transactionHash: signal.transactionHash ? String(signal.transactionHash) : undefined,
+        };
+    });
 
     const safeContext = {
         rules: context?.rules,
@@ -939,7 +1143,7 @@ function extractToolCalls(responseJson) {
 }
 
 function toolDefinitions() {
-    return [
+    const tools = [
         {
             type: 'function',
             name: 'build_og_transactions',
@@ -1036,7 +1240,10 @@ function toolDefinitions() {
                 required: ['asset', 'amountWei'],
             },
         },
-        {
+    ];
+
+    if (config.proposeEnabled) {
+        tools.push({
             type: 'function',
             name: 'post_bond_and_propose',
             description:
@@ -1065,8 +1272,35 @@ function toolDefinitions() {
                 },
                 required: ['transactions'],
             },
-        },
-    ];
+        });
+    }
+
+    if (config.disputeEnabled) {
+        tools.push({
+            type: 'function',
+            name: 'dispute_assertion',
+            description:
+                'Post bond (if required) and dispute an assertion on the Optimistic Oracle. Provide a short human-readable explanation.',
+            strict: true,
+            parameters: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                    assertionId: {
+                        type: 'string',
+                        description: 'Assertion ID to dispute.',
+                    },
+                    explanation: {
+                        type: 'string',
+                        description: 'Short human-readable dispute rationale.',
+                    },
+                },
+                required: ['assertionId', 'explanation'],
+            },
+        });
+    }
+
+    return tools;
 }
 
 async function executeToolCalls(toolCalls) {
@@ -1116,6 +1350,17 @@ async function executeToolCalls(toolCalls) {
         }
 
         if (call.name === 'post_bond_and_propose') {
+            if (!config.proposeEnabled) {
+                outputs.push({
+                    callId: call.callId,
+                    output: JSON.stringify({
+                        status: 'skipped',
+                        reason: 'proposals disabled',
+                    }),
+                });
+                continue;
+            }
+
             const transactions = args.transactions.map((tx) => ({
                 to: getAddress(tx.to),
                 value: BigInt(tx.value),
@@ -1133,6 +1378,42 @@ async function executeToolCalls(toolCalls) {
             continue;
         }
 
+        if (call.name === 'dispute_assertion') {
+            if (!config.disputeEnabled) {
+                outputs.push({
+                    callId: call.callId,
+                    output: JSON.stringify({
+                        status: 'skipped',
+                        reason: 'disputes disabled',
+                    }),
+                });
+                continue;
+            }
+
+            try {
+                const result = await postBondAndDispute({
+                    assertionId: args.assertionId,
+                    explanation: args.explanation,
+                });
+                outputs.push({
+                    callId: call.callId,
+                    output: JSON.stringify({
+                        status: 'submitted',
+                        ...result,
+                    }),
+                });
+            } catch (error) {
+                outputs.push({
+                    callId: call.callId,
+                    output: JSON.stringify({
+                        status: 'error',
+                        message: error?.message ?? String(error),
+                    }),
+                });
+            }
+            continue;
+        }
+
         console.warn('[agent] Unknown tool call:', call.name);
         outputs.push({
             callId: call.callId,
@@ -1140,7 +1421,11 @@ async function executeToolCalls(toolCalls) {
         });
     }
     if (builtTransactions && !hasPostProposal) {
-        const result = await postBondAndPropose(builtTransactions);
+        if (!config.proposeEnabled) {
+            console.log('[agent] Built transactions but proposals are disabled; skipping propose.');
+        } else {
+            await postBondAndPropose(builtTransactions);
+        }
     }
     return outputs.filter((item) => item.callId);
 }
@@ -1272,4 +1557,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     });
 }
 
-export { makeDeposit, postBondAndPropose, startAgent };
+export { makeDeposit, postBondAndDispute, postBondAndPropose, startAgent };
