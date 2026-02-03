@@ -166,6 +166,10 @@ const config = {
         ? BigInt(process.env.PROPOSE_GAS_LIMIT)
         : 2_000_000n,
     executeRetryMs: Number(process.env.EXECUTE_RETRY_MS ?? 60_000),
+    proposeEnabled:
+        process.env.PROPOSE_ENABLED === undefined
+            ? true
+            : process.env.PROPOSE_ENABLED.toLowerCase() !== 'false',
     disputeEnabled:
         process.env.DISPUTE_ENABLED === undefined
             ? true
@@ -357,6 +361,10 @@ async function primeBalances(blockNumber) {
 }
 
 async function postBondAndPropose(transactions) {
+    if (!config.proposeEnabled) {
+        throw new Error('Proposals disabled via PROPOSE_ENABLED.');
+    }
+
     const normalizedTransactions = normalizeOgTransactions(transactions);
     const proposerBalance = await publicClient.getBalance({ address: account.address });
     const [collateral, bondAmount, optimisticOracle] = await Promise.all([
@@ -916,6 +924,11 @@ async function decideOnSignals(signals) {
         return;
     }
 
+    if (!config.proposeEnabled && !config.disputeEnabled) {
+        console.log('[agent] Proposals and disputes are disabled; skipping onchain actions.');
+        return;
+    }
+
     if (!ogContext) {
         await loadOgContext();
     }
@@ -1126,7 +1139,7 @@ function extractToolCalls(responseJson) {
 }
 
 function toolDefinitions() {
-    return [
+    const tools = [
         {
             type: 'function',
             name: 'build_og_transactions',
@@ -1223,7 +1236,10 @@ function toolDefinitions() {
                 required: ['asset', 'amountWei'],
             },
         },
-        {
+    ];
+
+    if (config.proposeEnabled) {
+        tools.push({
             type: 'function',
             name: 'post_bond_and_propose',
             description:
@@ -1252,8 +1268,11 @@ function toolDefinitions() {
                 },
                 required: ['transactions'],
             },
-        },
-        {
+        });
+    }
+
+    if (config.disputeEnabled) {
+        tools.push({
             type: 'function',
             name: 'dispute_assertion',
             description:
@@ -1274,8 +1293,10 @@ function toolDefinitions() {
                 },
                 required: ['assertionId', 'explanation'],
             },
-        },
-    ];
+        });
+    }
+
+    return tools;
 }
 
 async function executeToolCalls(toolCalls) {
@@ -1325,6 +1346,17 @@ async function executeToolCalls(toolCalls) {
         }
 
         if (call.name === 'post_bond_and_propose') {
+            if (!config.proposeEnabled) {
+                outputs.push({
+                    callId: call.callId,
+                    output: JSON.stringify({
+                        status: 'skipped',
+                        reason: 'proposals disabled',
+                    }),
+                });
+                continue;
+            }
+
             const transactions = args.transactions.map((tx) => ({
                 to: getAddress(tx.to),
                 value: BigInt(tx.value),
@@ -1343,6 +1375,17 @@ async function executeToolCalls(toolCalls) {
         }
 
         if (call.name === 'dispute_assertion') {
+            if (!config.disputeEnabled) {
+                outputs.push({
+                    callId: call.callId,
+                    output: JSON.stringify({
+                        status: 'skipped',
+                        reason: 'disputes disabled',
+                    }),
+                });
+                continue;
+            }
+
             try {
                 const result = await postBondAndDispute({
                     assertionId: args.assertionId,
@@ -1374,7 +1417,11 @@ async function executeToolCalls(toolCalls) {
         });
     }
     if (builtTransactions && !hasPostProposal) {
-        const result = await postBondAndPropose(builtTransactions);
+        if (!config.proposeEnabled) {
+            console.log('[agent] Built transactions but proposals are disabled; skipping propose.');
+        } else {
+            await postBondAndPropose(builtTransactions);
+        }
     }
     return outputs.filter((item) => item.callId);
 }
