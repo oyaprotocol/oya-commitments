@@ -67,3 +67,25 @@ For interactions, swap the env var (e.g., `PROPOSER_PK`, `EXECUTOR_PK`). For sig
 - **Optional LLM decisions**: If `OPENAI_API_KEY` is set, `decideOnSignals` will call the OpenAI Responses API with signals and OG context and expect strict-JSON actions (propose/deposit/ignore). Wire your own validation/broadcast of any suggested actions.
 
 All other behavior is intentionally left out. Implement your own `decideOnSignals` in `src/index.js` to add commitment-specific logic and tool use.
+
+## Local Dispute Simulation
+
+Use this to validate the dispute path against local mock contracts.
+
+```bash
+# 1) Start anvil in another terminal
+anvil
+
+# 2) Build the Solidity artifacts (includes mock OO/OG/ERC20)
+forge build
+
+# 3) Run the no-dispute case (assertion remains undisputed)
+RPC_URL=http://127.0.0.1:8545 \
+PRIVATE_KEY=<anvil-private-key> \
+node agent/scripts/simulate-dispute.mjs --case=no-dispute
+
+# 4) Run the dispute case (assertion disputed, bond transferred)
+RPC_URL=http://127.0.0.1:8545 \
+PRIVATE_KEY=<anvil-private-key> \
+node agent/scripts/simulate-dispute.mjs --case=dispute
+```

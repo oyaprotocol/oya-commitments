@@ -802,12 +802,13 @@ async function postBondAndDispute({ assertionId, explanation }) {
         throw new Error('Missing optimistic oracle address.');
     }
 
-    const assertion = await publicClient.readContract({
+    const assertionRaw = await publicClient.readContract({
         address: optimisticOracle,
         abi: optimisticOracleAbi,
         functionName: 'getAssertion',
         args: [assertionId],
     });
+    const assertion = normalizeAssertion(assertionRaw);
 
     const nowBlock = await publicClient.getBlock();
     const now = BigInt(nowBlock.timestamp);
@@ -883,6 +884,30 @@ async function postBondAndDispute({ assertionId, explanation }) {
         bondAmount: bond,
         collateral: currency,
         optimisticOracle,
+    };
+}
+
+function normalizeAssertion(assertion) {
+    if (!assertion) return {};
+    if (typeof assertion === 'object' && !Array.isArray(assertion)) {
+        return assertion;
+    }
+
+    // viem can return tuple arrays; map indices to named fields.
+    const tuple = Array.isArray(assertion) ? assertion : [];
+    return {
+        escalationManagerSettings: tuple[0],
+        asserter: tuple[1],
+        assertionTime: tuple[2],
+        settled: tuple[3],
+        currency: tuple[4],
+        expirationTime: tuple[5],
+        settlementResolution: tuple[6],
+        domainId: tuple[7],
+        identifier: tuple[8],
+        bond: tuple[9],
+        callbackRecipient: tuple[10],
+        disputer: tuple[11],
     };
 }
 
@@ -1481,4 +1506,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     });
 }
 
-export { makeDeposit, postBondAndPropose, startAgent };
+export { makeDeposit, postBondAndDispute, postBondAndPropose, startAgent };
