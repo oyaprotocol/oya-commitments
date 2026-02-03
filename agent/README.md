@@ -69,6 +69,14 @@ For interactions, swap the env var (e.g., `PROPOSER_PK`, `EXECUTOR_PK`). For sig
 
 All other behavior is intentionally left out. Implement your own `decideOnSignals` in `src/index.js` to add commitment-specific logic and tool use.
 
+### Propose vs Dispute Modes
+
+Set `PROPOSE_ENABLED` and `DISPUTE_ENABLED` to control behavior:
+- Both true: propose and dispute as needed (default).
+- Only `PROPOSE_ENABLED=true`: propose only, never dispute.
+- Only `DISPUTE_ENABLED=true`: dispute only, never propose.
+- Both false: monitor and log opinions only; no on-chain actions.
+
 ## Local Dispute Simulation
 
 Use this to validate the dispute path against local mock contracts.
