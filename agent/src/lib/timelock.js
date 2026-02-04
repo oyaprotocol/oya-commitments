@@ -66,7 +66,8 @@ function extractAbsoluteTimelocks(rulesText) {
             }
         }
         if (!hasTimezone && Number.isFinite(parsed)) {
-            const dateOnlyMatch = cleanedDateOnly(trimmed);
+            const hasTime = /\b\d{1,2}:\d{2}(\s*[AP]M)?\b/i.test(trimmed);
+            const dateOnlyMatch = hasTime ? null : cleanedDateOnly(trimmed);
             const withUtc = dateOnlyMatch
                 ? `${dateOnlyMatch} 00:00 UTC`
                 : `${trimmed} UTC`;
