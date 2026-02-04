@@ -54,10 +54,17 @@ async function main() {
     const agentJsonPath = path.resolve(repoRoot, agentDir, 'agent.json');
 
     const agentUriArg = getArgValue('--agent-uri=');
-    const agentBranch = process.env.AGENT_BRANCH ?? 'erc-8004';
+    const agentOrg = process.env.AGENT_ORG ?? 'oyaprotocol';
+    const agentRepo = process.env.AGENT_REPO ?? 'oya-commitments';
+    const agentBranch = process.env.AGENT_BRANCH;
+    if (!agentBranch && !process.env.AGENT_URI_BASE && !process.env.AGENT_URI) {
+        throw new Error('Missing AGENT_BRANCH (or provide AGENT_URI / AGENT_URI_BASE).');
+    }
     const agentUriBase =
         process.env.AGENT_URI_BASE ??
-        `https://raw.githubusercontent.com/oyaprotocol/oya-commitments/${agentBranch}/agent-library/agents`;
+        (agentBranch
+            ? `https://raw.githubusercontent.com/${agentOrg}/${agentRepo}/${agentBranch}/agent-library/agents`
+            : null);
     const agentUri =
         agentUriArg ??
         process.env.AGENT_URI ??
