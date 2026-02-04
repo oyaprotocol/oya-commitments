@@ -80,13 +80,13 @@ Set `PROPOSE_ENABLED` and `DISPUTE_ENABLED` to control behavior:
 
 ### Agent Modules & Commitments
 
-Use `AGENT_MODULE` to point to an agent implementation under `agent-library/agents/<name>/agent.js`.
+Use `AGENT_MODULE` to point to an agent implementation name (e.g., `default`, `timelock-withdraw`). The runner will load `agent-library/agents/<name>/agent.js`.
 Each agent directory must include a `commitment.txt` with the plain language commitment the agent is designed to serve.
 
 You can validate a module quickly:
 
 ```bash
-node agent/scripts/validate-agent.mjs --module=agent-library/agents/default/agent.js
+node agent/scripts/validate-agent.mjs --module=default
 ```
 
 Default agent smoke test:
@@ -112,7 +112,7 @@ node agent-library/agents/timelock-withdraw/simulate-timelock.mjs
 Run the timelock agent:
 
 ```bash
-AGENT_MODULE=agent-library/agents/timelock-withdraw/agent.js \
+AGENT_MODULE=timelock-withdraw \
 node agent/src/index.js
 ```
 

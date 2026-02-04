@@ -44,7 +44,10 @@ const blockTimestampCache = new Map();
 const timelockTriggers = new Map();
 
 async function loadAgentModule() {
-    const modulePath = config.agentModule ?? 'agent-library/agents/default/agent.js';
+    const agentRef = config.agentModule ?? 'default';
+    const modulePath = agentRef.includes('/')
+        ? agentRef
+        : `agent-library/agents/${agentRef}/agent.js`;
     const resolvedPath = path.resolve(repoRoot, modulePath);
     const moduleUrl = pathToFileURL(resolvedPath).href;
     const agentModule = await import(moduleUrl);
