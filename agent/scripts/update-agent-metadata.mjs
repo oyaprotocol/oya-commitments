@@ -1,6 +1,14 @@
+import dotenv from 'dotenv';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const repoRoot = path.resolve(__dirname, '../..');
+
+dotenv.config();
+dotenv.config({ path: path.resolve(repoRoot, 'agent/.env') });
 
 function getArgValue(prefix) {
     const arg = process.argv.find((value) => value.startsWith(prefix));
@@ -22,7 +30,7 @@ async function main() {
             ? path.dirname(agentRef)
             : agentRef
         : `agent-library/agents/${agentName}`;
-    const agentJsonPath = path.resolve(process.cwd(), agentDir, 'agent.json');
+    const agentJsonPath = path.resolve(repoRoot, agentDir, 'agent.json');
 
     const agentIdArg = getArgValue('--agent-id=');
     const agentId = agentIdArg ?? process.env.AGENT_ID;
