@@ -1,0 +1,18 @@
+{
+  "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+  "name": "Oya Default Agent",
+  "description": "Default Oya commitment agent that monitors deposits and proposals, and can propose or dispute actions based on the commitment rules.",
+  "image": "https://raw.githubusercontent.com/oya-commitments/oya-commitments/main/agent-library/agents/default/agent.png",
+  "endpoints": [
+    {
+      "name": "agentWallet",
+      "endpoint": "eip155:11155111:0x0000000000000000000000000000000000000000"
+    }
+  ],
+  "registrations": [
+    {
+      "agentId": 0,
+      "agentRegistry": "eip155:11155111:0x8004A818BFB912233c491871b3d84c89A494BD9e"
+    }
+  ]
+}
