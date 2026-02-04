@@ -206,6 +206,7 @@ async function main() {
         json.endpoints.push({ name: 'agentWallet', endpoint: walletEndpoint });
     }
 
+    const agentIdValue = String(agentId);
     json.registrations = Array.isArray(json.registrations) ? json.registrations : [];
     const normalizedRegistrations = [];
     let updated = false;
@@ -215,7 +216,7 @@ async function main() {
         if (normalizedRegistry === registryEndpoint) {
             if (!updated) {
                 normalizedRegistrations.push({
-                    agentId: Number(agentId),
+                    agentId: agentIdValue,
                     agentRegistry: registryEndpoint,
                 });
                 updated = true;
@@ -229,7 +230,7 @@ async function main() {
     }
     if (!updated) {
         normalizedRegistrations.push({
-            agentId: Number(agentId),
+            agentId: agentIdValue,
             agentRegistry: registryEndpoint,
         });
     }
@@ -238,7 +239,7 @@ async function main() {
     await writeFile(agentJsonPath, `${JSON.stringify(json, null, 2)}\n`, 'utf8');
 
     console.log('[agent] Registered:', {
-        agentId: Number(agentId),
+        agentId: agentIdValue,
         agentRegistry: registryEndpoint,
         agentURI: agentUri,
         txHash,

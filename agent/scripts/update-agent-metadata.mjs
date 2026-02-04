@@ -63,6 +63,7 @@ async function main() {
 
     json.registrations = Array.isArray(json.registrations) ? json.registrations : [];
     const registryEndpoint = formatCaip10(chainId, registry).toLowerCase();
+    const agentIdValue = String(agentId);
     const normalizedRegistrations = [];
     let updated = false;
     for (const entry of json.registrations) {
@@ -71,7 +72,7 @@ async function main() {
         if (normalizedRegistry === registryEndpoint) {
             if (!updated) {
                 normalizedRegistrations.push({
-                    agentId: Number(agentId),
+                    agentId: agentIdValue,
                     agentRegistry: registryEndpoint,
                 });
                 updated = true;
@@ -85,7 +86,7 @@ async function main() {
     }
     if (!updated) {
         normalizedRegistrations.push({
-            agentId: Number(agentId),
+            agentId: agentIdValue,
             agentRegistry: registryEndpoint,
         });
     }
