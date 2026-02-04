@@ -13,10 +13,12 @@ function formatCaip10(chainId, address) {
 }
 
 async function main() {
-    const moduleArg = getArgValue('--agent=');
-    const agentName = moduleArg ?? process.env.AGENT_MODULE ?? 'default';
-    const agentDir = agentName.includes('/')
-        ? agentName
+    const agentRef = getArgValue('--agent=') ?? process.env.AGENT_MODULE ?? 'default';
+    const agentName = agentRef.includes('/')
+        ? path.basename(agentRef.endsWith('.js') ? path.dirname(agentRef) : agentRef)
+        : agentRef;
+    const agentDir = agentRef.includes('/')
+        ? agentRef
         : `agent-library/agents/${agentName}`;
     const agentJsonPath = path.resolve(process.cwd(), agentDir, 'agent.json');
 
@@ -50,18 +52,34 @@ async function main() {
     }
 
     json.registrations = Array.isArray(json.registrations) ? json.registrations : [];
-    const registryEndpoint = formatCaip10(chainId, registry);
-    const existingRegistration = json.registrations.find(
-        (item) => item?.agentRegistry === registryEndpoint
-    );
-    if (existingRegistration) {
-        existingRegistration.agentId = Number(agentId);
-    } else {
-        json.registrations.push({
+    const registryEndpoint = formatCaip10(chainId, registry).toLowerCase();
+    const normalizedRegistrations = [];
+    let updated = false;
+    for (const entry of json.registrations) {
+        if (!entry?.agentRegistry) continue;
+        const normalizedRegistry = String(entry.agentRegistry).toLowerCase();
+        if (normalizedRegistry === registryEndpoint) {
+            if (!updated) {
+                normalizedRegistrations.push({
+                    agentId: Number(agentId),
+                    agentRegistry: registryEndpoint,
+                });
+                updated = true;
+            }
+            continue;
+        }
+        normalizedRegistrations.push({
+            ...entry,
+            agentRegistry: normalizedRegistry,
+        });
+    }
+    if (!updated) {
+        normalizedRegistrations.push({
             agentId: Number(agentId),
             agentRegistry: registryEndpoint,
         });
     }
+    json.registrations = normalizedRegistrations;
 
     await writeFile(agentJsonPath, `${JSON.stringify(json, null, 2)}\n`, 'utf8');
 

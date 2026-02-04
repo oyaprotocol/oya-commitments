@@ -22,6 +22,13 @@ function formatCaip10(chainId, address) {
     return `eip155:${chainId}:${address.toLowerCase()}`;
 }
 
+function normalizeAgentName(agentRef) {
+    if (!agentRef) return 'default';
+    if (!agentRef.includes('/')) return agentRef;
+    const trimmed = agentRef.endsWith('.js') ? path.dirname(agentRef) : agentRef;
+    return path.basename(trimmed);
+}
+
 const IDENTITY_REGISTRY_BY_CHAIN = {
     11155111: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
 };
@@ -48,9 +55,10 @@ const identityRegistryAbi = [
 
 async function main() {
     const agentRef = getArgValue('--agent=') ?? process.env.AGENT_MODULE ?? 'default';
+    const agentName = normalizeAgentName(agentRef);
     const agentDir = agentRef.includes('/')
         ? agentRef
-        : `agent-library/agents/${agentRef}`;
+        : `agent-library/agents/${agentName}`;
     const agentJsonPath = path.resolve(repoRoot, agentDir, 'agent.json');
 
     const agentUriArg = getArgValue('--agent-uri=');
@@ -68,7 +76,7 @@ async function main() {
     const agentUri =
         agentUriArg ??
         process.env.AGENT_URI ??
-        (agentUriBase ? `${agentUriBase}/${agentRef}/agent.json` : null);
+        (agentUriBase ? `${agentUriBase}/${agentName}/agent.json` : null);
     if (!agentUri) {
         throw new Error('Missing --agent-uri or AGENT_URI (or AGENT_URI_BASE).');
     }
@@ -124,7 +132,7 @@ async function main() {
     }
 
     const wallet = getArgValue('--agent-wallet=') ?? process.env.AGENT_WALLET ?? account.address;
-    const registryEndpoint = formatCaip10(chainId, registry);
+    const registryEndpoint = formatCaip10(chainId, registry).toLowerCase();
     const walletEndpoint = formatCaip10(chainId, wallet);
 
     const raw = await readFile(agentJsonPath, 'utf8');
@@ -138,17 +146,33 @@ async function main() {
     }
 
     json.registrations = Array.isArray(json.registrations) ? json.registrations : [];
-    const existingRegistration = json.registrations.find(
-        (item) => item?.agentRegistry === registryEndpoint
-    );
-    if (existingRegistration) {
-        existingRegistration.agentId = Number(agentId);
-    } else {
-        json.registrations.push({
+    const normalizedRegistrations = [];
+    let updated = false;
+    for (const entry of json.registrations) {
+        if (!entry?.agentRegistry) continue;
+        const normalizedRegistry = String(entry.agentRegistry).toLowerCase();
+        if (normalizedRegistry === registryEndpoint) {
+            if (!updated) {
+                normalizedRegistrations.push({
+                    agentId: Number(agentId),
+                    agentRegistry: registryEndpoint,
+                });
+                updated = true;
+            }
+            continue;
+        }
+        normalizedRegistrations.push({
+            ...entry,
+            agentRegistry: normalizedRegistry,
+        });
+    }
+    if (!updated) {
+        normalizedRegistrations.push({
             agentId: Number(agentId),
             agentRegistry: registryEndpoint,
         });
     }
+    json.registrations = normalizedRegistrations;
 
     await writeFile(agentJsonPath, `${JSON.stringify(json, null, 2)}\n`, 'utf8');
 
