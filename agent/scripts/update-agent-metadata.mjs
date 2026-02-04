@@ -18,7 +18,9 @@ async function main() {
         ? path.basename(agentRef.endsWith('.js') ? path.dirname(agentRef) : agentRef)
         : agentRef;
     const agentDir = agentRef.includes('/')
-        ? agentRef
+        ? agentRef.endsWith('.js')
+            ? path.dirname(agentRef)
+            : agentRef
         : `agent-library/agents/${agentName}`;
     const agentJsonPath = path.resolve(process.cwd(), agentDir, 'agent.json');
 

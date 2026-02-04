@@ -57,7 +57,9 @@ async function main() {
     const agentRef = getArgValue('--agent=') ?? process.env.AGENT_MODULE ?? 'default';
     const agentName = normalizeAgentName(agentRef);
     const agentDir = agentRef.includes('/')
-        ? agentRef
+        ? agentRef.endsWith('.js')
+            ? path.dirname(agentRef)
+            : agentRef
         : `agent-library/agents/${agentName}`;
     const agentJsonPath = path.resolve(repoRoot, agentDir, 'agent.json');
 
