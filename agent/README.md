@@ -95,6 +95,27 @@ Default agent smoke test:
 node agent-library/agents/default/test-default-agent.mjs
 ```
 
+Update ERC-8004 metadata after registration:
+
+```bash
+AGENT_ID=1 AGENT_WALLET=0x... \
+node agent/scripts/update-agent-metadata.mjs --agent=default
+```
+
+Register an agent on Sepolia (and update metadata in-place):
+
+```bash
+AGENT_MODULE=default \
+AGENT_BRANCH=<branch> \
+AGENT_NETWORK=ethereum-sepolia \
+node agent/scripts/register-erc8004.mjs
+```
+
+The script infers `AGENT_URI` as:
+`https://raw.githubusercontent.com/<org>/<repo>/<branch>/agent-library/agents/<agent>/agent.json`
+Defaults: `AGENT_ORG=oyaprotocol`, `AGENT_REPO=oya-commitments`
+Override with `AGENT_URI` or `AGENT_URI_BASE` if needed.
+
 ### Timelock Agent Testing
 
 Unit test (plain JS):
