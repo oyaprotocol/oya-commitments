@@ -19,6 +19,7 @@ import {
 import { callAgent, explainToolCalls } from './lib/llm.js';
 import { executeToolCalls, toolDefinitions } from './lib/tools.js';
 import { makeDeposit, postBondAndDispute, postBondAndPropose } from './lib/tx.js';
+import { extractTimelockTriggers } from './lib/timelock.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,9 +39,15 @@ let lastProposalCheckedBlock = config.startBlock;
 let lastNativeBalance;
 let ogContext;
 const proposalsByHash = new Map();
+const depositHistory = [];
+const blockTimestampCache = new Map();
+const timelockTriggers = new Map();
 
 async function loadAgentModule() {
-    const modulePath = config.agentModule ?? 'agent-library/agents/default/agent.js';
+    const agentRef = config.agentModule ?? 'default';
+    const modulePath = agentRef.includes('/')
+        ? agentRef
+        : `agent-library/agents/${agentRef}/agent.js`;
     const resolvedPath = path.resolve(repoRoot, modulePath);
     const moduleUrl = pathToFileURL(resolvedPath).href;
     const agentModule = await import(moduleUrl);
@@ -58,9 +65,54 @@ async function loadAgentModule() {
 
 const { agentModule, commitmentText } = await loadAgentModule();
 
+async function getBlockTimestampMs(blockNumber) {
+    if (!blockNumber) return undefined;
+    const key = blockNumber.toString();
+    if (blockTimestampCache.has(key)) {
+        return blockTimestampCache.get(key);
+    }
+    const block = await publicClient.getBlock({ blockNumber });
+    const timestampMs = Number(block.timestamp) * 1000;
+    blockTimestampCache.set(key, timestampMs);
+    return timestampMs;
+}
+
+function updateTimelockSchedule({ rulesText }) {
+    const triggers = extractTimelockTriggers({
+        rulesText,
+        deposits: depositHistory,
+    });
+
+    for (const trigger of triggers) {
+        if (!timelockTriggers.has(trigger.id)) {
+            timelockTriggers.set(trigger.id, { ...trigger, fired: false });
+        }
+    }
+}
+
+function collectDueTimelocks(nowMs) {
+    const due = [];
+    for (const trigger of timelockTriggers.values()) {
+        if (trigger.fired) continue;
+        if (trigger.timestampMs <= nowMs) {
+            due.push(trigger);
+        }
+    }
+    return due;
+}
+
+function markTimelocksFired(triggers) {
+    for (const trigger of triggers) {
+        const existing = timelockTriggers.get(trigger.id);
+        if (existing) {
+            existing.fired = true;
+        }
+    }
+}
+
 async function decideOnSignals(signals) {
     if (!config.openAiApiKey) {
-        return;
+        return false;
     }
 
     if (!ogContext) {
@@ -97,7 +149,7 @@ async function decideOnSignals(signals) {
 
         if (!allowTools && decision?.textDecision) {
             console.log('[agent] Opinion:', decision.textDecision);
-            return;
+            return true;
         }
 
         if (decision.toolCalls.length > 0) {
@@ -119,19 +171,26 @@ async function decideOnSignals(signals) {
                     console.log('[agent] Agent explanation:', explanation);
                 }
             }
-            return;
+            return true;
         }
 
         if (decision?.textDecision) {
             console.log('[agent] Decision:', decision.textDecision);
+            return true;
         }
     } catch (error) {
         console.error('[agent] Agent call failed', error);
     }
+
+    return false;
 }
 
 async function agentLoop() {
     try {
+        const latestBlock = await publicClient.getBlockNumber();
+        const latestBlockData = await publicClient.getBlock({ blockNumber: latestBlock });
+        const nowMs = Number(latestBlockData.timestamp) * 1000;
+
         const { deposits, lastCheckedBlock: nextCheckedBlock, lastNativeBalance: nextNative } =
             await pollCommitmentChanges({
                 publicClient,
@@ -144,6 +203,14 @@ async function agentLoop() {
         lastCheckedBlock = nextCheckedBlock;
         lastNativeBalance = nextNative;
 
+        for (const deposit of deposits) {
+            const timestampMs = await getBlockTimestampMs(deposit.blockNumber);
+            depositHistory.push({
+                ...deposit,
+                timestampMs,
+            });
+        }
+
         const { newProposals, lastProposalCheckedBlock: nextProposalBlock } =
             await pollProposalChanges({
                 publicClient,
@@ -152,6 +219,10 @@ async function agentLoop() {
                 proposalsByHash,
             });
         lastProposalCheckedBlock = nextProposalBlock;
+
+        const rulesText = ogContext?.rules ?? commitmentText ?? '';
+        updateTimelockSchedule({ rulesText });
+        const dueTimelocks = collectDueTimelocks(nowMs);
 
         const combinedSignals = deposits.concat(
             newProposals.map((proposal) => ({
@@ -166,8 +237,22 @@ async function agentLoop() {
             }))
         );
 
+        for (const trigger of dueTimelocks) {
+            combinedSignals.push({
+                kind: 'timelock',
+                triggerId: trigger.id,
+                triggerTimestampMs: trigger.timestampMs,
+                source: trigger.source,
+                anchor: trigger.anchor,
+                deposit: trigger.deposit,
+            });
+        }
+
         if (combinedSignals.length > 0) {
-            await decideOnSignals(combinedSignals);
+            const decisionOk = await decideOnSignals(combinedSignals);
+            if (decisionOk && dueTimelocks.length > 0) {
+                markTimelocksFired(dueTimelocks);
+            }
         }
 
         await executeReadyProposals({

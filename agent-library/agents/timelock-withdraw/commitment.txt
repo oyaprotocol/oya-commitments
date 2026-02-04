@@ -1,0 +1,1 @@
+Funds may be withdrawn by the agent to the agent's own address one minute after deposit. Before that time, no withdrawals are permitted.

@@ -77,6 +77,12 @@ async function callAgent({
             amount: signal.amount !== undefined ? signal.amount.toString() : undefined,
             blockNumber: signal.blockNumber !== undefined ? signal.blockNumber.toString() : undefined,
             transactionHash: signal.transactionHash ? String(signal.transactionHash) : undefined,
+            timestampMs:
+                signal.timestampMs !== undefined ? signal.timestampMs.toString() : undefined,
+            triggerTimestampMs:
+                signal.triggerTimestampMs !== undefined
+                    ? signal.triggerTimestampMs.toString()
+                    : undefined,
         };
     });
 
@@ -98,14 +104,17 @@ async function callAgent({
             },
             {
                 role: 'user',
-                content: JSON.stringify({
-                    commitmentSafe: config.commitmentSafe,
-                    ogModule: config.ogModule,
-                    agentAddress,
-                    ogContext: safeContext,
-                    commitment: commitmentText,
-                    signals: safeSignals,
-                }),
+                content: JSON.stringify(
+                    {
+                        commitmentSafe: config.commitmentSafe,
+                        ogModule: config.ogModule,
+                        agentAddress,
+                        ogContext: safeContext,
+                        commitment: commitmentText,
+                        signals: safeSignals,
+                    },
+                    (_, value) => (typeof value === 'bigint' ? value.toString() : value)
+                ),
             },
         ],
         tools: allowTools ? tools : [],

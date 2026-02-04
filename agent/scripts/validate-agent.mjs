@@ -9,8 +9,10 @@ function getArgValue(prefix) {
 
 async function main() {
     const moduleArg = getArgValue('--module=');
-    const modulePath =
-        moduleArg ?? process.env.AGENT_MODULE ?? 'agent-library/agents/default/agent.js';
+    const agentRef = moduleArg ?? process.env.AGENT_MODULE ?? 'default';
+    const modulePath = agentRef.includes('/')
+        ? agentRef
+        : `agent-library/agents/${agentRef}/agent.js`;
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
     const repoRoot = path.resolve(__dirname, '../..');

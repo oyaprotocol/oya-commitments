@@ -66,6 +66,7 @@ For interactions, swap the env var (e.g., `PROPOSER_PK`, `EXECUTOR_PK`). For sig
 - **Disputes assertions**: When the LLM flags a proposal as violating the rules, the agent posts the Oracle V3 bond and disputes the associated assertion. A human-readable rationale is logged locally.
 - **Deposits**: `makeDeposit` can send ERC20 or native assets into the commitment.
 - **Optional LLM decisions**: If `OPENAI_API_KEY` is set, the runner will call the OpenAI Responses API with signals and OG context and expect strict-JSON actions (propose/deposit/ignore). Wire your own validation/broadcast of any suggested actions in the agent module.
+- **Timelock triggers**: Parses plain language timelocks in rules (absolute dates or “X minutes after deposit”) and emits `timelock` signals when due.
 
 All other behavior is intentionally left out. Implement your own agent in `agent-library/agents/<name>/agent.js` to add commitment-specific logic and tool use.
 
@@ -79,13 +80,40 @@ Set `PROPOSE_ENABLED` and `DISPUTE_ENABLED` to control behavior:
 
 ### Agent Modules & Commitments
 
-Use `AGENT_MODULE` to point to an agent implementation under `agent-library/agents/<name>/agent.js`.
+Use `AGENT_MODULE` to point to an agent implementation name (e.g., `default`, `timelock-withdraw`). The runner will load `agent-library/agents/<name>/agent.js`.
 Each agent directory must include a `commitment.txt` with the plain language commitment the agent is designed to serve.
 
 You can validate a module quickly:
 
 ```bash
-node agent/scripts/validate-agent.mjs --module=agent-library/agents/default/agent.js
+node agent/scripts/validate-agent.mjs --module=default
+```
+
+Default agent smoke test:
+
+```bash
+node agent-library/agents/default/test-default-agent.mjs
+```
+
+### Timelock Agent Testing
+
+Unit test (plain JS):
+
+```bash
+node agent-library/agents/timelock-withdraw/test-timelock.mjs
+```
+
+Simulation (prints due triggers):
+
+```bash
+node agent-library/agents/timelock-withdraw/simulate-timelock.mjs
+```
+
+Run the timelock agent:
+
+```bash
+AGENT_MODULE=timelock-withdraw \
+node agent/src/index.js
 ```
 
 ## Local Dispute Simulation
