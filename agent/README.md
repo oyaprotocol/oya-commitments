@@ -107,6 +107,7 @@ Register an agent on Sepolia (and update metadata in-place):
 ```bash
 AGENT_MODULE=default \
 AGENT_BRANCH=<branch> \
+AGENT_NETWORK=ethereum-sepolia \
 node agent/scripts/register-erc8004.mjs
 ```
 

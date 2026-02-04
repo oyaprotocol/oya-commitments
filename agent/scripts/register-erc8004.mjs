@@ -29,8 +29,59 @@ function normalizeAgentName(agentRef) {
     return path.basename(trimmed);
 }
 
-const IDENTITY_REGISTRY_BY_CHAIN = {
-    11155111: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
+const REGISTRY_BY_NETWORK = {
+    ethereum: {
+        identityRegistry: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+        reputationRegistry: '0x8004BAa17C55a88189AE136b182e5fdA19dE9b63',
+    },
+    'ethereum-sepolia': {
+        identityRegistry: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
+        reputationRegistry: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
+    },
+    base: {
+        identityRegistry: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+        reputationRegistry: '0x8004BAa17C55a88189AE136b182e5fdA19dE9b63',
+    },
+    'base-sepolia': {
+        identityRegistry: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
+        reputationRegistry: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
+    },
+    polygon: {
+        identityRegistry: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+        reputationRegistry: '0x8004BAa17C55a88189AE136b182e5fdA19dE9b63',
+    },
+    'polygon-amoy': {
+        identityRegistry: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
+        reputationRegistry: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
+    },
+    gnosis: {
+        identityRegistry: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
+        reputationRegistry: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
+    },
+    scroll: {
+        identityRegistry: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+        reputationRegistry: '0x8004BAa17C55a88189AE136b182e5fdA19dE9b63',
+    },
+    'scroll-testnet': {
+        identityRegistry: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
+        reputationRegistry: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
+    },
+    monad: {
+        identityRegistry: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+        reputationRegistry: '0x8004BAa17C55a88189AE136b182e5fdA19dE9b63',
+    },
+    'monad-testnet': {
+        identityRegistry: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
+        reputationRegistry: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
+    },
+    bsc: {
+        identityRegistry: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+        reputationRegistry: '0x8004BAa17C55a88189AE136b182e5fdA19dE9b63',
+    },
+    'bsc-testnet': {
+        identityRegistry: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
+        reputationRegistry: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
+    },
 };
 
 const identityRegistryAbi = [
@@ -96,11 +147,19 @@ async function main() {
         Number(process.env.CHAIN_ID) ||
         (await publicClient.getChainId());
     const registryOverride = getArgValue('--agent-registry=') ?? process.env.AGENT_REGISTRY;
+    const network =
+        getArgValue('--network=') ??
+        process.env.AGENT_NETWORK ??
+        (chainId === 1
+            ? 'ethereum'
+            : chainId === 11155111
+              ? 'ethereum-sepolia'
+              : undefined);
     const registry =
-        registryOverride ?? IDENTITY_REGISTRY_BY_CHAIN[chainId];
+        registryOverride ?? (network ? REGISTRY_BY_NETWORK[network]?.identityRegistry : undefined);
     if (!registry) {
         throw new Error(
-            `No IdentityRegistry configured for chainId ${chainId}. Provide --agent-registry.`
+            `No IdentityRegistry configured for chainId ${chainId}. Provide --agent-registry or set AGENT_NETWORK.`
         );
     }
 
