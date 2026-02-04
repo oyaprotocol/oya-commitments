@@ -102,6 +102,14 @@ AGENT_ID=1 AGENT_WALLET=0x... \
 node agent/scripts/update-agent-metadata.mjs --agent=default
 ```
 
+Register an agent on Sepolia (and update metadata in-place):
+
+```bash
+AGENT_MODULE=default \
+AGENT_URI=https://raw.githubusercontent.com/<org>/<repo>/<branch>/agent-library/agents/default/agent.json \
+node agent/scripts/register-erc8004.mjs
+```
+
 ### Timelock Agent Testing
 
 Unit test (plain JS):

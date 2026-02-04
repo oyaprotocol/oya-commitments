@@ -6,13 +6,17 @@
   "endpoints": [
     {
       "name": "agentWallet",
-      "endpoint": "eip155:11155111:0x0000000000000000000000000000000000000000"
+      "endpoint": "eip155:11155111:0x2967c076182f0303037072670e744e26ed4a830f"
     }
   ],
   "registrations": [
     {
       "agentId": 0,
       "agentRegistry": "eip155:11155111:0x8004A818BFB912233c491871b3d84c89A494BD9e"
+    },
+    {
+      "agentId": 900,
+      "agentRegistry": "eip155:11155111:0x8004a818bfb912233c491871b3d84c89a494bd9e"
     }
   ]
 }
