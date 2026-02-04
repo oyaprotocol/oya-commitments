@@ -11,7 +11,7 @@
   ],
   "registrations": [
     {
-      "agentId": 901,
+      "agentId": 903,
       "agentRegistry": "eip155:11155111:0x8004a818bfb912233c491871b3d84c89a494bd9e"
     }
   ]
