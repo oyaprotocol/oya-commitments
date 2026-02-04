@@ -106,9 +106,14 @@ Register an agent on Sepolia (and update metadata in-place):
 
 ```bash
 AGENT_MODULE=default \
-AGENT_URI=https://raw.githubusercontent.com/<org>/<repo>/<branch>/agent-library/agents/default/agent.json \
+AGENT_BRANCH=<branch> \
 node agent/scripts/register-erc8004.mjs
 ```
+
+The script infers `AGENT_URI` as:
+`https://raw.githubusercontent.com/<org>/<repo>/<branch>/agent-library/agents/<agent>/agent.json`
+Defaults: `AGENT_ORG=oyaprotocol`, `AGENT_REPO=oya-commitments`
+Override with `AGENT_URI` or `AGENT_URI_BASE` if needed.
 
 ### Timelock Agent Testing
 
