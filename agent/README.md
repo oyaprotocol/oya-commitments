@@ -95,6 +95,13 @@ Default agent smoke test:
 node agent-library/agents/default/test-default-agent.mjs
 ```
 
+Update ERC-8004 metadata after registration:
+
+```bash
+AGENT_ID=1 AGENT_WALLET=0x... \
+node agent/scripts/update-agent-metadata.mjs --agent=default
+```
+
 ### Timelock Agent Testing
 
 Unit test (plain JS):
