@@ -92,16 +92,24 @@ function collectDueTimelocks(nowMs) {
     for (const trigger of timelockTriggers.values()) {
         if (trigger.fired) continue;
         if (trigger.timestampMs <= nowMs) {
-            trigger.fired = true;
             due.push(trigger);
         }
     }
     return due;
 }
 
+function markTimelocksFired(triggers) {
+    for (const trigger of triggers) {
+        const existing = timelockTriggers.get(trigger.id);
+        if (existing) {
+            existing.fired = true;
+        }
+    }
+}
+
 async function decideOnSignals(signals) {
     if (!config.openAiApiKey) {
-        return;
+        return false;
     }
 
     if (!ogContext) {
@@ -138,7 +146,7 @@ async function decideOnSignals(signals) {
 
         if (!allowTools && decision?.textDecision) {
             console.log('[agent] Opinion:', decision.textDecision);
-            return;
+            return true;
         }
 
         if (decision.toolCalls.length > 0) {
@@ -160,15 +168,18 @@ async function decideOnSignals(signals) {
                     console.log('[agent] Agent explanation:', explanation);
                 }
             }
-            return;
+            return true;
         }
 
         if (decision?.textDecision) {
             console.log('[agent] Decision:', decision.textDecision);
+            return true;
         }
     } catch (error) {
         console.error('[agent] Agent call failed', error);
     }
+
+    return false;
 }
 
 async function agentLoop() {
@@ -235,7 +246,10 @@ async function agentLoop() {
         }
 
         if (combinedSignals.length > 0) {
-            await decideOnSignals(combinedSignals);
+            const decisionOk = await decideOnSignals(combinedSignals);
+            if (decisionOk && dueTimelocks.length > 0) {
+                markTimelocksFired(dueTimelocks);
+            }
         }
 
         await executeReadyProposals({

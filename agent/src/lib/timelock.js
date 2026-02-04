@@ -51,8 +51,9 @@ function extractAbsoluteTimelocks(rulesText) {
     let match;
     while ((match = regex.exec(rulesText)) !== null) {
         const phrase = match[0];
-        const raw = phrase.replace(/^(after|on or after)\\s+/i, '').trim();
-        const trimmed = raw.replace(/[\\s.]+$/g, '');
+        const raw = phrase.replace(/^(after|on or after)\s+/i, '').trim();
+        const trimmed = raw.replace(/[\s.]+$/g, '');
+        const hasTimezone = /\b(PST|PDT|UTC|GMT|Z)\b/i.test(trimmed);
         let parsed = Date.parse(trimmed);
         if (!Number.isFinite(parsed)) {
             const cleaned = trimmed.replace(/\s+(PST|PDT|UTC|GMT)\b/i, '');
@@ -62,6 +63,16 @@ function extractAbsoluteTimelocks(rulesText) {
             const dateOnlyMatch = cleanedDateOnly(trimmed);
             if (dateOnlyMatch) {
                 parsed = Date.parse(dateOnlyMatch);
+            }
+        }
+        if (!hasTimezone && Number.isFinite(parsed)) {
+            const dateOnlyMatch = cleanedDateOnly(trimmed);
+            const withUtc = dateOnlyMatch
+                ? `${dateOnlyMatch} 00:00 UTC`
+                : `${trimmed} UTC`;
+            const utcParsed = Date.parse(withUtc);
+            if (Number.isFinite(utcParsed)) {
+                parsed = utcParsed;
             }
         }
         if (Number.isFinite(parsed)) {
