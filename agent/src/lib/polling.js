@@ -110,11 +110,21 @@ async function pollCommitmentChanges({
 async function pollProposalChanges({ publicClient, ogModule, lastProposalCheckedBlock, proposalsByHash }) {
     const latestBlock = await publicClient.getBlockNumber();
     if (lastProposalCheckedBlock === undefined) {
-        return { newProposals: [], lastProposalCheckedBlock: latestBlock };
+        return {
+            newProposals: [],
+            executedProposals: [],
+            deletedProposals: [],
+            lastProposalCheckedBlock: latestBlock,
+        };
     }
 
     if (latestBlock <= lastProposalCheckedBlock) {
-        return { newProposals: [], lastProposalCheckedBlock };
+        return {
+            newProposals: [],
+            executedProposals: [],
+            deletedProposals: [],
+            lastProposalCheckedBlock,
+        };
     }
 
     const fromBlock = lastProposalCheckedBlock + 1n;
@@ -202,21 +212,25 @@ async function pollProposalChanges({ publicClient, ogModule, lastProposalChecked
         newProposals.push(proposalRecord);
     }
 
+    const executedProposals = [];
     for (const log of executedLogs) {
         const proposalHash = log.args?.proposalHash;
         if (proposalHash) {
             proposalsByHash.delete(proposalHash);
+            executedProposals.push(proposalHash);
         }
     }
 
+    const deletedProposals = [];
     for (const log of deletedLogs) {
         const proposalHash = log.args?.proposalHash;
         if (proposalHash) {
             proposalsByHash.delete(proposalHash);
+            deletedProposals.push(proposalHash);
         }
     }
 
-    return { newProposals, lastProposalCheckedBlock: toBlock };
+    return { newProposals, executedProposals, deletedProposals, lastProposalCheckedBlock: toBlock };
 }
 
 async function executeReadyProposals({

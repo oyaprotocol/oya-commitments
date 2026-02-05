@@ -254,14 +254,25 @@ async function agentLoop() {
             });
         }
 
-        const { newProposals, lastProposalCheckedBlock: nextProposalBlock } =
-            await pollProposalChanges({
+        const {
+            newProposals,
+            executedProposals,
+            deletedProposals,
+            lastProposalCheckedBlock: nextProposalBlock,
+        } = await pollProposalChanges({
                 publicClient,
                 ogModule: config.ogModule,
                 lastProposalCheckedBlock,
                 proposalsByHash,
             });
         lastProposalCheckedBlock = nextProposalBlock;
+        const executedProposalCount = executedProposals?.length ?? 0;
+        const deletedProposalCount = deletedProposals?.length ?? 0;
+        if (isDcaAgent && (executedProposalCount > 0 || deletedProposalCount > 0)) {
+            dcaState.proposalPosted = false;
+            dcaState.proposalBuilt = false;
+            dcaState.depositConfirmed = false;
+        }
 
         const rulesText = ogContext?.rules ?? commitmentText ?? '';
         updateTimelockSchedule({ rulesText });
