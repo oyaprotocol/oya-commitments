@@ -1,0 +1,6 @@
+I would like to DCA (Dollar Cost Average) into Ethereum by purchasing a fixed USD amount of WETH periodically.
+Every 45 seconds, an agent may send $0.10 worth of WETH to this Safe to receive reimbursement of exactly $0.10 USDC.
+The agent should use the latest Chainlink ETH/USD price at the time of proposal to determine the amount of WETH to transfer.
+The Safe will transfer $0.10 USDC to the agent's address if the proposal is valid.
+No other transactions are permitted.
+If the Safe has insufficient USDC balance, the agent should not propose.
