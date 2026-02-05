@@ -197,10 +197,6 @@ async function decideOnSignals(signals) {
                         dcaState.proposalPosted = true;
                         dcaState.depositConfirmed = false;
                         dcaState.proposalBuilt = false;
-                        dcaState.cyclesCompleted = Math.min(
-                            DCA_MAX_CYCLES,
-                            dcaState.cyclesCompleted + 1
-                        );
                     }
                 }
             }
@@ -268,7 +264,19 @@ async function agentLoop() {
         lastProposalCheckedBlock = nextProposalBlock;
         const executedProposalCount = executedProposals?.length ?? 0;
         const deletedProposalCount = deletedProposals?.length ?? 0;
-        if (isDcaAgent && (executedProposalCount > 0 || deletedProposalCount > 0)) {
+        if (isDcaAgent && executedProposalCount > 0) {
+            dcaState.proposalPosted = false;
+            dcaState.proposalBuilt = false;
+            dcaState.depositConfirmed = false;
+            dcaState.cyclesCompleted = Math.min(
+                DCA_MAX_CYCLES,
+                dcaState.cyclesCompleted + executedProposalCount
+            );
+            if (agentModule?.markDcaExecuted) {
+                agentModule.markDcaExecuted();
+            }
+        }
+        if (isDcaAgent && deletedProposalCount > 0) {
             dcaState.proposalPosted = false;
             dcaState.proposalBuilt = false;
             dcaState.depositConfirmed = false;
