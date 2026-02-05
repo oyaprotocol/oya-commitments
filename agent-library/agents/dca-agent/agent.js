@@ -24,6 +24,7 @@ function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
         'Example: if ETH is $2242.51, then 0.10 / 2242.51 = 0.0000446... WETH = 44600000000000 wei.',
         'First, read Safe USDC and Self WETH balances from signals.balances (note: 100000 micro-USDC = 0.10 USDC).',
         'Second, read signals.dcaState to see which steps already completed: depositConfirmed, proposalBuilt, proposalPosted, cyclesCompleted.',
+        'If signals.pendingProposal is true, output action=ignore and do not call post_bond_and_propose until it becomes false.',
         `Third, if timeSinceLastDca >= ${DCA_INTERVAL_SECONDS} seconds and balances are sufficient and depositConfirmed=false, perform a single chained action in ONE response: (a) make_deposit with asset=WETH_ADDRESS and amountWei=calculated amount (waits for confirmation), then (b) build_og_transactions for one erc20_transfer of 100000 micro-USDC to agentAddress, then (c) post_bond_and_propose with those transactions.`,
         'Fourth, if depositConfirmed=true and proposalBuilt=false, call build_og_transactions and post_bond_and_propose in the same response.',
         'Fifth, if proposalBuilt=true and proposalPosted=false, call post_bond_and_propose.',

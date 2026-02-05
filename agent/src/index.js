@@ -354,6 +354,7 @@ async function agentLoop() {
                 const safeUsdcHuman = Number(safeUsdcWei) / 10 ** Number(DCA_USDC_DECIMALS);
                 const selfWethHuman = Number(selfWethWei) / 1e18;
 
+                const pendingProposal = proposalsByHash.size > 0;
                 for (const signal of signalsToProcess) {
                     if (signal.kind === 'timer') {
                         signal.balances = {
@@ -367,6 +368,7 @@ async function agentLoop() {
                                 Number(DCA_USDC_MIN_WEI) / 10 ** Number(DCA_USDC_DECIMALS),
                         };
                         signal.dcaState = { ...dcaState };
+                        signal.pendingProposal = pendingProposal;
                     }
                 }
             } catch (error) {
