@@ -90,7 +90,7 @@ async function logOgFundingStatus({ publicClient, ogModule, account }) {
     try {
         const chainId = await publicClient.getChainId();
         const expectedIdentifierStr =
-            chainId === 11155111 ? 'ASSERT_TRUTH' : 'ASSERT_TRUTH2';
+            chainId === 11155111 ? 'ASSERT_TRUTH2' : 'ASSERT_TRUTH2';
         const expectedIdentifier = stringToHex(expectedIdentifierStr, { size: 32 });
 
         const [collateral, bondAmount, optimisticOracle, identifier] = await Promise.all([
