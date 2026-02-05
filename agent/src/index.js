@@ -71,11 +71,14 @@ const DCA_USDC_ADDRESS = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238';
 const DCA_USDC_DECIMALS = 6n;
 const DCA_USDC_MIN_WEI = 100000n; // 0.10 USDC (6 decimals)
 const DCA_MAX_CYCLES = 2;
+const DCA_PROPOSAL_CONFIRM_TIMEOUT_MS = 60000;
 const dcaState = {
     depositConfirmed: false,
     proposalBuilt: false,
     proposalPosted: false,
     cyclesCompleted: 0,
+    proposalSubmitHash: null,
+    proposalSubmitMs: null,
 };
 
 async function getBlockTimestampMs(blockNumber) {
@@ -197,6 +200,8 @@ async function decideOnSignals(signals) {
                         dcaState.proposalPosted = true;
                         dcaState.depositConfirmed = false;
                         dcaState.proposalBuilt = false;
+                        dcaState.proposalSubmitHash = parsed.proposalHash ?? null;
+                        dcaState.proposalSubmitMs = Date.now();
                     }
                 }
             }
@@ -268,6 +273,8 @@ async function agentLoop() {
             dcaState.proposalPosted = false;
             dcaState.proposalBuilt = false;
             dcaState.depositConfirmed = false;
+            dcaState.proposalSubmitHash = null;
+            dcaState.proposalSubmitMs = null;
             dcaState.cyclesCompleted = Math.min(
                 DCA_MAX_CYCLES,
                 dcaState.cyclesCompleted + executedProposalCount
@@ -280,6 +287,36 @@ async function agentLoop() {
             dcaState.proposalPosted = false;
             dcaState.proposalBuilt = false;
             dcaState.depositConfirmed = false;
+            dcaState.proposalSubmitHash = null;
+            dcaState.proposalSubmitMs = null;
+        }
+        if (
+            isDcaAgent &&
+            dcaState.proposalPosted &&
+            dcaState.proposalSubmitHash &&
+            dcaState.proposalSubmitMs
+        ) {
+            try {
+                const receipt = await publicClient.getTransactionReceipt({
+                    hash: dcaState.proposalSubmitHash,
+                });
+                if (receipt?.status === 0n || receipt?.status === 'reverted') {
+                    dcaState.proposalPosted = false;
+                    dcaState.proposalBuilt = false;
+                    dcaState.proposalSubmitHash = null;
+                    dcaState.proposalSubmitMs = null;
+                }
+            } catch (error) {
+                if (
+                    Date.now() - dcaState.proposalSubmitMs >
+                    DCA_PROPOSAL_CONFIRM_TIMEOUT_MS
+                ) {
+                    dcaState.proposalPosted = false;
+                    dcaState.proposalBuilt = false;
+                    dcaState.proposalSubmitHash = null;
+                    dcaState.proposalSubmitMs = null;
+                }
+            }
         }
 
         const rulesText = ogContext?.rules ?? commitmentText ?? '';
@@ -362,7 +399,8 @@ async function agentLoop() {
                 const safeUsdcHuman = Number(safeUsdcWei) / 10 ** Number(DCA_USDC_DECIMALS);
                 const selfWethHuman = Number(selfWethWei) / 1e18;
 
-                const pendingProposal = proposalsByHash.size > 0;
+                const pendingProposal =
+                    proposalsByHash.size > 0 || dcaState.proposalPosted === true;
                 for (const signal of signalsToProcess) {
                     if (signal.kind === 'timer') {
                         signal.balances = {
