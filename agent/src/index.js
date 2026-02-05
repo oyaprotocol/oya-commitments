@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { createPublicClient, http } from 'viem';
+import { createPublicClient, erc20Abi, http } from 'viem';
 import { buildConfig } from './lib/config.js';
 import { createSignerClient } from './lib/signer.js';
 import {
@@ -20,6 +20,7 @@ import { callAgent, explainToolCalls } from './lib/llm.js';
 import { executeToolCalls, toolDefinitions } from './lib/tools.js';
 import { makeDeposit, postBondAndDispute, postBondAndPropose } from './lib/tx.js';
 import { extractTimelockTriggers } from './lib/timelock.js';
+import { getEthPriceUSD, getEthPriceUSDFallback } from './lib/price.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -63,7 +64,22 @@ async function loadAgentModule() {
     return { agentModule, commitmentText, resolvedPath };
 }
 
-const { agentModule, commitmentText } = await loadAgentModule();
+const { agentModule, commitmentText, resolvedPath } = await loadAgentModule();
+const isDcaAgent = resolvedPath.endsWith('agent-library/agents/dca-agent/agent.js');
+const DCA_WETH_ADDRESS = '0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9';
+const DCA_USDC_ADDRESS = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238';
+const DCA_USDC_DECIMALS = 6n;
+const DCA_USDC_MIN_WEI = 100000n; // 0.10 USDC (6 decimals)
+const DCA_MAX_CYCLES = 2;
+const DCA_PROPOSAL_CONFIRM_TIMEOUT_MS = 60000;
+const dcaState = {
+    depositConfirmed: false,
+    proposalBuilt: false,
+    proposalPosted: false,
+    cyclesCompleted: 0,
+    proposalSubmitHash: null,
+    proposalSubmitMs: null,
+};
 
 async function getBlockTimestampMs(blockNumber) {
     if (!blockNumber) return undefined;
@@ -161,6 +177,34 @@ async function decideOnSignals(signals) {
                 config,
                 ogContext,
             });
+            if (isDcaAgent && toolOutputs.length > 0) {
+                for (const output of toolOutputs) {
+                    if (!output?.name || !output?.output) continue;
+                    let parsed;
+                    try {
+                        parsed = JSON.parse(output.output);
+                    } catch (error) {
+                        parsed = null;
+                    }
+                    if (!parsed || parsed.status === 'error') continue;
+
+                    if (output.name === 'make_deposit' && parsed.status === 'confirmed') {
+                        dcaState.depositConfirmed = true;
+                        dcaState.proposalBuilt = false;
+                        dcaState.proposalPosted = false;
+                    }
+                    if (output.name === 'build_og_transactions' && parsed.status === 'ok') {
+                        dcaState.proposalBuilt = true;
+                    }
+                    if (output.name === 'post_bond_and_propose' && parsed.status === 'submitted') {
+                        dcaState.proposalPosted = true;
+                        dcaState.depositConfirmed = false;
+                        dcaState.proposalBuilt = false;
+                        dcaState.proposalSubmitHash = parsed.proposalHash ?? null;
+                        dcaState.proposalSubmitMs = Date.now();
+                    }
+                }
+            }
             if (decision.responseId && toolOutputs.length > 0) {
                 const explanation = await explainToolCalls({
                     config,
@@ -211,14 +255,69 @@ async function agentLoop() {
             });
         }
 
-        const { newProposals, lastProposalCheckedBlock: nextProposalBlock } =
-            await pollProposalChanges({
+        const {
+            newProposals,
+            executedProposals,
+            deletedProposals,
+            lastProposalCheckedBlock: nextProposalBlock,
+        } = await pollProposalChanges({
                 publicClient,
                 ogModule: config.ogModule,
                 lastProposalCheckedBlock,
                 proposalsByHash,
             });
         lastProposalCheckedBlock = nextProposalBlock;
+        const executedProposalCount = executedProposals?.length ?? 0;
+        const deletedProposalCount = deletedProposals?.length ?? 0;
+        if (isDcaAgent && executedProposalCount > 0) {
+            dcaState.proposalPosted = false;
+            dcaState.proposalBuilt = false;
+            dcaState.depositConfirmed = false;
+            dcaState.proposalSubmitHash = null;
+            dcaState.proposalSubmitMs = null;
+            dcaState.cyclesCompleted = Math.min(
+                DCA_MAX_CYCLES,
+                dcaState.cyclesCompleted + executedProposalCount
+            );
+            if (agentModule?.markDcaExecuted) {
+                agentModule.markDcaExecuted();
+            }
+        }
+        if (isDcaAgent && deletedProposalCount > 0) {
+            dcaState.proposalPosted = false;
+            dcaState.proposalBuilt = false;
+            dcaState.depositConfirmed = false;
+            dcaState.proposalSubmitHash = null;
+            dcaState.proposalSubmitMs = null;
+        }
+        if (
+            isDcaAgent &&
+            dcaState.proposalPosted &&
+            dcaState.proposalSubmitHash &&
+            dcaState.proposalSubmitMs
+        ) {
+            try {
+                const receipt = await publicClient.getTransactionReceipt({
+                    hash: dcaState.proposalSubmitHash,
+                });
+                if (receipt?.status === 0n || receipt?.status === 'reverted') {
+                    dcaState.proposalPosted = false;
+                    dcaState.proposalBuilt = false;
+                    dcaState.proposalSubmitHash = null;
+                    dcaState.proposalSubmitMs = null;
+                }
+            } catch (error) {
+                if (
+                    Date.now() - dcaState.proposalSubmitMs >
+                    DCA_PROPOSAL_CONFIRM_TIMEOUT_MS
+                ) {
+                    dcaState.proposalPosted = false;
+                    dcaState.proposalBuilt = false;
+                    dcaState.proposalSubmitHash = null;
+                    dcaState.proposalSubmitMs = null;
+                }
+            }
+        }
 
         const rulesText = ogContext?.rules ?? commitmentText ?? '';
         updateTimelockSchedule({ rulesText });
@@ -248,8 +347,83 @@ async function agentLoop() {
             });
         }
 
-        if (combinedSignals.length > 0) {
-            const decisionOk = await decideOnSignals(combinedSignals);
+        // Allow agent module to augment signals (e.g., add timer signals)
+        let signalsToProcess = combinedSignals;
+        if (agentModule?.augmentSignals) {
+            signalsToProcess = agentModule.augmentSignals(combinedSignals, {
+                nowMs,
+                latestBlock,
+            });
+        }
+
+        // Fetch ETH price and add to timer signal (if present)
+        if (signalsToProcess.some((signal) => signal.kind === 'timer')) {
+            try {
+                let ethPriceUSD;
+                try {
+                    ethPriceUSD = await getEthPriceUSD(publicClient, config.chainlinkPriceFeed);
+                } catch (error) {
+                    console.warn('[agent] Chainlink price fetch failed, using Coingecko fallback');
+                    ethPriceUSD = await getEthPriceUSDFallback();
+                }
+
+                for (const signal of signalsToProcess) {
+                    if (signal.kind === 'timer') {
+                        signal.ethPriceUSD = ethPriceUSD;
+                    }
+                }
+            } catch (error) {
+                console.error('[agent] Failed to fetch ETH price:', error);
+            }
+        }
+
+        // Deterministic balance checks for DCA agent (inject into timer signals)
+        if (isDcaAgent && signalsToProcess.some((signal) => signal.kind === 'timer')) {
+            try {
+                const [safeUsdcWei, selfWethWei] = await Promise.all([
+                    publicClient.readContract({
+                        address: DCA_USDC_ADDRESS,
+                        abi: erc20Abi,
+                        functionName: 'balanceOf',
+                        args: [config.commitmentSafe],
+                    }),
+                    publicClient.readContract({
+                        address: DCA_WETH_ADDRESS,
+                        abi: erc20Abi,
+                        functionName: 'balanceOf',
+                        args: [account.address],
+                    }),
+                ]);
+
+                const safeUsdcSufficient = safeUsdcWei >= DCA_USDC_MIN_WEI;
+                const safeUsdcHuman = Number(safeUsdcWei) / 10 ** Number(DCA_USDC_DECIMALS);
+                const selfWethHuman = Number(selfWethWei) / 1e18;
+
+                const pendingProposal =
+                    proposalsByHash.size > 0 || dcaState.proposalPosted === true;
+                for (const signal of signalsToProcess) {
+                    if (signal.kind === 'timer') {
+                        signal.balances = {
+                            safeUsdcWei: safeUsdcWei.toString(),
+                            selfWethWei: selfWethWei.toString(),
+                            safeUsdcHuman,
+                            selfWethHuman,
+                            safeUsdcSufficient,
+                            minSafeUsdcWei: DCA_USDC_MIN_WEI.toString(),
+                            minSafeUsdcHuman:
+                                Number(DCA_USDC_MIN_WEI) / 10 ** Number(DCA_USDC_DECIMALS),
+                        };
+                        signal.dcaState = { ...dcaState };
+                        signal.pendingProposal = pendingProposal;
+                    }
+                }
+            } catch (error) {
+                console.error('[agent] Failed to fetch DCA balances:', error);
+            }
+        }
+
+        if (signalsToProcess.length > 0) {
+            const decisionOk = await decideOnSignals(signalsToProcess);
             if (decisionOk && dueTimelocks.length > 0) {
                 markTimelocksFired(dueTimelocks);
             }
