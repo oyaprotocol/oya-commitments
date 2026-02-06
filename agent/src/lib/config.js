@@ -1,6 +1,19 @@
 import { getAddress } from 'viem';
 import { mustGetEnv, parseAddressList } from './utils.js';
 
+function parseFeeTierList(raw) {
+    if (!raw) return [500, 3000, 10000];
+    const values = raw
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .map((value) => Number(value));
+    if (values.some((value) => !Number.isInteger(value) || value <= 0)) {
+        throw new Error('UNISWAP_V3_FEE_TIERS must be comma-separated positive integers');
+    }
+    return values;
+}
+
 function buildConfig() {
     return {
         rpcUrl: mustGetEnv('RPC_URL'),
@@ -38,6 +51,10 @@ function buildConfig() {
                 : process.env.DISPUTE_ENABLED.toLowerCase() !== 'false',
         disputeRetryMs: Number(process.env.DISPUTE_RETRY_MS ?? 60_000),
         agentModule: process.env.AGENT_MODULE,
+        uniswapV3Factory: process.env.UNISWAP_V3_FACTORY
+            ? getAddress(process.env.UNISWAP_V3_FACTORY)
+            : undefined,
+        uniswapV3FeeTiers: parseFeeTierList(process.env.UNISWAP_V3_FEE_TIERS),
     };
 }
 

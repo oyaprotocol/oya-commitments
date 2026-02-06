@@ -20,6 +20,7 @@ import { callAgent, explainToolCalls } from './lib/llm.js';
 import { executeToolCalls, toolDefinitions } from './lib/tools.js';
 import { makeDeposit, postBondAndDispute, postBondAndPropose } from './lib/tx.js';
 import { extractTimelockTriggers } from './lib/timelock.js';
+import { collectPriceTriggerSignals } from './lib/uniswapV3Price.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -42,6 +43,10 @@ const proposalsByHash = new Map();
 const depositHistory = [];
 const blockTimestampCache = new Map();
 const timelockTriggers = new Map();
+const priceTriggerState = new Map();
+const tokenMetaCache = new Map();
+const poolMetaCache = new Map();
+const resolvedPoolCache = new Map();
 
 async function loadAgentModule() {
     const agentRef = config.agentModule ?? 'default';
@@ -108,6 +113,29 @@ function markTimelocksFired(triggers) {
             existing.fired = true;
         }
     }
+}
+
+function getActivePriceTriggers({ rulesText }) {
+    if (typeof agentModule?.getPriceTriggers === 'function') {
+        try {
+            const parsed = agentModule.getPriceTriggers({
+                commitmentText: rulesText,
+            });
+            if (Array.isArray(parsed)) {
+                return parsed;
+            }
+            console.warn('[agent] getPriceTriggers() returned non-array; ignoring.');
+            return [];
+        } catch (error) {
+            console.warn(
+                '[agent] getPriceTriggers() failed; skipping price triggers:',
+                error?.message ?? error
+            );
+            return [];
+        }
+    }
+
+    return [];
 }
 
 async function decideOnSignals(signals) {
@@ -223,6 +251,17 @@ async function agentLoop() {
         const rulesText = ogContext?.rules ?? commitmentText ?? '';
         updateTimelockSchedule({ rulesText });
         const dueTimelocks = collectDueTimelocks(nowMs);
+        const activePriceTriggers = getActivePriceTriggers({ rulesText });
+        const duePriceSignals = await collectPriceTriggerSignals({
+            publicClient,
+            config,
+            triggers: activePriceTriggers,
+            nowMs,
+            triggerState: priceTriggerState,
+            tokenMetaCache,
+            poolMetaCache,
+            resolvedPoolCache,
+        });
 
         const combinedSignals = deposits.concat(
             newProposals.map((proposal) => ({
@@ -247,6 +286,7 @@ async function agentLoop() {
                 deposit: trigger.deposit,
             });
         }
+        combinedSignals.push(...duePriceSignals);
 
         if (combinedSignals.length > 0) {
             const decisionOk = await decideOnSignals(combinedSignals);
