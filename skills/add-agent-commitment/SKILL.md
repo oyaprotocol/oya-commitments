@@ -57,6 +57,7 @@ To use it locally, register this folder in your assistant's skills path.
 Codex option (symlink into your local skills directory):
 
 ```bash
+export CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 mkdir -p "$CODEX_HOME/skills"
 ln -sfn "$(pwd)/skills/add-agent-commitment" "$CODEX_HOME/skills/add-agent-commitment"
 ```
