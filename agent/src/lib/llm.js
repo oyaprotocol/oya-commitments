@@ -87,6 +87,7 @@ async function callAgent({
                 signal.threshold !== undefined ? String(signal.threshold) : undefined,
             observedPrice:
                 signal.observedPrice !== undefined ? String(signal.observedPrice) : undefined,
+            poolFee: signal.poolFee !== undefined ? String(signal.poolFee) : undefined,
         };
     });
 

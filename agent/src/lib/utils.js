@@ -49,19 +49,9 @@ function parseToolArguments(raw) {
     return null;
 }
 
-function parseJsonEnv(raw, fallback) {
-    if (!raw) return fallback;
-    try {
-        return JSON.parse(raw);
-    } catch (error) {
-        throw new Error(`Invalid JSON env value: ${error?.message ?? String(error)}`);
-    }
-}
-
 export {
     mustGetEnv,
     normalizePrivateKey,
-    parseJsonEnv,
     parseAddressList,
     parseToolArguments,
     summarizeViemError,

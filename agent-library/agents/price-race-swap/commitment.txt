@@ -1,20 +1,20 @@
-Use any available USDC balance currently held by the commitment Safe at the time of execution.
+Use any available USDC balance currently held by the commitment Safe at execution time.
 
-Monitor two trigger conditions and execute exactly one branch:
+TOKEN_MAP:
+- USDC = 0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48
+- WETH = 0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2
+- UMA = 0x04Fa0d235C4abf4BcF4787aF4CF447DE572eF828
 
-1) ETH branch
-- If ETH/USDC >= 3200 first, buy ETH with all available USDC.
-- Execute on Uniswap.
-- If a specific pool is configured, use that pool; otherwise use a high-liquidity Uniswap pool.
+TRIGGERS:
+- id=eth-breakout | pair=WETH/USDC | comparator=>= | threshold=3200 | pool=0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8 | priority=0
+- id=uma-drop | pair=UMA/USDC | comparator=<= | threshold=2.10 | pool=high-liquidity | priority=1
 
-2) UMA branch
-- If UMA/USDC <= 2.10 first, buy UMA with all available USDC.
-- Execute on Uniswap.
-- If a specific pool is configured, use that pool; otherwise use a high-liquidity Uniswap pool.
+ACTIONS:
+- If eth-breakout wins first, buy WETH with all available USDC via Uniswap.
+- If uma-drop wins first, buy UMA with all available USDC via Uniswap.
 
-Global rules:
+GLOBAL_RULES:
 - First trigger wins.
 - Execute at most one swap total for this commitment.
-- If both triggers become true in the same evaluation cycle, prefer ETH branch.
 - Enforce max slippage of 0.50%.
 - If no valid route satisfies slippage and liquidity constraints, do not trade.

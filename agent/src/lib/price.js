@@ -1,16 +1,39 @@
-import { erc20Abi, getAddress, parseAbi } from 'viem';
+import { erc20Abi, getAddress, parseAbi, zeroAddress } from 'viem';
 
 const uniswapV3PoolAbi = parseAbi([
     'function token0() view returns (address)',
     'function token1() view returns (address)',
+    'function fee() view returns (uint24)',
+    'function liquidity() view returns (uint128)',
     'function slot0() view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)',
 ]);
+
+const uniswapV3FactoryAbi = parseAbi([
+    'function getPool(address tokenA, address tokenB, uint24 fee) view returns (address)',
+]);
+
+const defaultFactoryByChainId = new Map([
+    [1, '0x1F98431c8aD98523631AE4a59f267346ea31F984'],
+    [11155111, '0x0227628f3f023bb0b980b67d528dd8f8c1b5bf8f'],
+]);
+
+async function getFactoryAddress({ publicClient, configuredFactory }) {
+    if (configuredFactory) return configuredFactory;
+    const chainId = await publicClient.getChainId();
+    const factory = defaultFactoryByChainId.get(chainId);
+    if (!factory) {
+        throw new Error(
+            `No Uniswap V3 factory configured for chainId ${chainId}. Set UNISWAP_V3_FACTORY.`
+        );
+    }
+    return getAddress(factory);
+}
 
 async function loadPoolMeta({ publicClient, pool, tokenMetaCache, poolMetaCache }) {
     const cached = poolMetaCache.get(pool);
     if (cached) return cached;
 
-    const [token0, token1] = await Promise.all([
+    const [token0, token1, fee] = await Promise.all([
         publicClient.readContract({
             address: pool,
             abi: uniswapV3PoolAbi,
@@ -20,6 +43,11 @@ async function loadPoolMeta({ publicClient, pool, tokenMetaCache, poolMetaCache 
             address: pool,
             abi: uniswapV3PoolAbi,
             functionName: 'token1',
+        }),
+        publicClient.readContract({
+            address: pool,
+            abi: uniswapV3PoolAbi,
+            functionName: 'fee',
         }),
     ]);
 
@@ -43,9 +71,79 @@ async function loadPoolMeta({ publicClient, pool, tokenMetaCache, poolMetaCache 
     const meta = {
         token0: normalizedToken0,
         token1: normalizedToken1,
+        fee: Number(fee),
     };
     poolMetaCache.set(pool, meta);
     return meta;
+}
+
+async function resolvePoolForTrigger({
+    publicClient,
+    trigger,
+    config,
+    resolvedPoolCache,
+}) {
+    const baseToken = getAddress(trigger.baseToken);
+    const quoteToken = getAddress(trigger.quoteToken);
+    const cacheKey = `${baseToken}:${quoteToken}:${trigger.pool ?? trigger.poolSelection ?? ''}`;
+    if (resolvedPoolCache.has(cacheKey)) {
+        return resolvedPoolCache.get(cacheKey);
+    }
+
+    if (trigger.pool) {
+        const resolved = { pool: getAddress(trigger.pool) };
+        resolvedPoolCache.set(cacheKey, resolved);
+        return resolved;
+    }
+
+    if (trigger.poolSelection !== 'high-liquidity') {
+        throw new Error(
+            `Trigger ${trigger.id} must provide pool or poolSelection=high-liquidity`
+        );
+    }
+
+    const factory = await getFactoryAddress({
+        publicClient,
+        configuredFactory: config.uniswapV3Factory,
+    });
+
+    let best = null;
+    for (const feeTier of config.uniswapV3FeeTiers ?? [500, 3000, 10000]) {
+        const pool = await publicClient.readContract({
+            address: factory,
+            abi: uniswapV3FactoryAbi,
+            functionName: 'getPool',
+            args: [baseToken, quoteToken, Number(feeTier)],
+        });
+
+        if (!pool || getAddress(pool) === zeroAddress) {
+            continue;
+        }
+
+        const normalizedPool = getAddress(pool);
+        const liquidity = await publicClient.readContract({
+            address: normalizedPool,
+            abi: uniswapV3PoolAbi,
+            functionName: 'liquidity',
+        });
+
+        if (!best || BigInt(liquidity) > best.liquidity) {
+            best = {
+                pool: normalizedPool,
+                liquidity: BigInt(liquidity),
+            };
+        }
+    }
+
+    if (!best) {
+        throw new Error(
+            `No Uniswap V3 pool found for ${baseToken}/${quoteToken} across fee tiers.`
+        );
+    }
+
+    const resolved = { pool: best.pool };
+    resolvedPoolCache.set(cacheKey, resolved);
+    return resolved;
 }
 
 function quotePerBaseFromSqrtPriceX96({ sqrtPriceX96, token0Decimals, token1Decimals, baseIsToken0 }) {
@@ -76,11 +174,13 @@ function evaluateComparator({ comparator, price, threshold }) {
 
 async function collectPriceTriggerSignals({
     publicClient,
+    config,
     triggers,
     nowMs,
     triggerState,
     tokenMetaCache,
     poolMetaCache,
+    resolvedPoolCache,
 }) {
     if (!Array.isArray(triggers) || triggers.length === 0) {
         return [];
@@ -89,9 +189,23 @@ async function collectPriceTriggerSignals({
     const evaluations = [];
 
     for (const trigger of triggers) {
-        const pool = getAddress(trigger.pool);
         const baseToken = getAddress(trigger.baseToken);
         const quoteToken = getAddress(trigger.quoteToken);
+
+        let resolved;
+        try {
+            resolved = await resolvePoolForTrigger({
+                publicClient,
+                trigger,
+                config,
+                resolvedPoolCache,
+            });
+        } catch (error) {
+            console.warn(`[agent] Price trigger ${trigger.id} skipped:`, error?.message ?? error);
+            continue;
+        }
+
+        const pool = resolved.pool;
 
         const poolMeta = await loadPoolMeta({
             publicClient,
@@ -100,10 +214,8 @@ async function collectPriceTriggerSignals({
             poolMetaCache,
         });
 
-        const baseIsToken0 =
-            poolMeta.token0 === baseToken && poolMeta.token1 === quoteToken;
-        const baseIsToken1 =
-            poolMeta.token1 === baseToken && poolMeta.token0 === quoteToken;
+        const baseIsToken0 = poolMeta.token0 === baseToken && poolMeta.token1 === quoteToken;
+        const baseIsToken1 = poolMeta.token1 === baseToken && poolMeta.token0 === quoteToken;
 
         if (!baseIsToken0 && !baseIsToken1) {
             console.warn(
@@ -139,8 +251,7 @@ async function collectPriceTriggerSignals({
             lastMatched: false,
         };
 
-        const shouldEmit =
-            matches && (!prior.lastMatched || (!trigger.emitOnce && !prior.fired));
+        const shouldEmit = matches && (!prior.lastMatched || (!trigger.emitOnce && !prior.fired));
 
         triggerState.set(trigger.id, {
             fired: prior.fired || (matches && trigger.emitOnce),
@@ -157,6 +268,7 @@ async function collectPriceTriggerSignals({
             triggerLabel: trigger.label,
             priority: trigger.priority ?? 0,
             pool,
+            poolFee: poolMeta.fee,
             baseToken,
             quoteToken,
             comparator: trigger.comparator,

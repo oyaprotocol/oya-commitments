@@ -1,46 +1,17 @@
 import { getAddress } from 'viem';
-import { mustGetEnv, parseAddressList, parseJsonEnv } from './utils.js';
+import { mustGetEnv, parseAddressList } from './utils.js';
 
-function normalizePriceTrigger(trigger, index) {
-    if (!trigger || typeof trigger !== 'object') {
-        throw new Error(`PRICE_TRIGGERS_JSON[${index}] must be an object`);
+function parseFeeTierList(raw) {
+    if (!raw) return [500, 3000, 10000];
+    const values = raw
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .map((value) => Number(value));
+    if (values.some((value) => !Number.isInteger(value) || value <= 0)) {
+        throw new Error('UNISWAP_V3_FEE_TIERS must be comma-separated positive integers');
     }
-    if (!trigger.pool || !trigger.baseToken || !trigger.quoteToken) {
-        throw new Error(
-            `PRICE_TRIGGERS_JSON[${index}] requires pool, baseToken, and quoteToken`
-        );
-    }
-    if (!trigger.comparator || !['gte', 'lte'].includes(trigger.comparator)) {
-        throw new Error(`PRICE_TRIGGERS_JSON[${index}] comparator must be "gte" or "lte"`);
-    }
-    if (trigger.threshold === undefined || trigger.threshold === null) {
-        throw new Error(`PRICE_TRIGGERS_JSON[${index}] requires threshold`);
-    }
-
-    const threshold = Number(trigger.threshold);
-    if (!Number.isFinite(threshold)) {
-        throw new Error(`PRICE_TRIGGERS_JSON[${index}] threshold must be numeric`);
-    }
-
-    return {
-        id: trigger.id ?? `price-trigger-${index}`,
-        label: trigger.label,
-        pool: getAddress(trigger.pool),
-        baseToken: getAddress(trigger.baseToken),
-        quoteToken: getAddress(trigger.quoteToken),
-        comparator: trigger.comparator,
-        threshold,
-        priority: Number(trigger.priority ?? 0),
-        emitOnce: trigger.emitOnce === undefined ? true : Boolean(trigger.emitOnce),
-    };
-}
-
-function parsePriceTriggers(raw) {
-    const parsed = parseJsonEnv(raw, []);
-    if (!Array.isArray(parsed)) {
-        throw new Error('PRICE_TRIGGERS_JSON must be a JSON array');
-    }
-    return parsed.map(normalizePriceTrigger);
+    return values;
 }
 
 function buildConfig() {
@@ -80,7 +51,10 @@ function buildConfig() {
                 : process.env.DISPUTE_ENABLED.toLowerCase() !== 'false',
         disputeRetryMs: Number(process.env.DISPUTE_RETRY_MS ?? 60_000),
         agentModule: process.env.AGENT_MODULE,
-        priceTriggers: parsePriceTriggers(process.env.PRICE_TRIGGERS_JSON),
+        uniswapV3Factory: process.env.UNISWAP_V3_FACTORY
+            ? getAddress(process.env.UNISWAP_V3_FACTORY)
+            : undefined,
+        uniswapV3FeeTiers: parseFeeTierList(process.env.UNISWAP_V3_FEE_TIERS),
     };
 }
 
