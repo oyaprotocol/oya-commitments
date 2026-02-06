@@ -6,89 +6,70 @@ function normalizeAddress(raw) {
 }
 
 function normalizeComparator(raw) {
-    if (raw === 'gte' || raw === '>=') return 'gte';
-    if (raw === 'lte' || raw === '<=') return 'lte';
+    const normalized = String(raw).trim().toLowerCase();
+    if (normalized === 'gte' || normalized === '>=' || normalized === 'greater than or equal to') {
+        return 'gte';
+    }
+    if (normalized === 'lte' || normalized === '<=' || normalized === 'less than or equal to') {
+        return 'lte';
+    }
     throw new Error(`Unsupported comparator: ${raw}`);
 }
 
-function parseTokenMap(commitmentText) {
-    const tokenMap = new Map();
+function extractTokenAddress({ symbol, commitmentText }) {
+    const patterns = [
+        new RegExp(`\\b${symbol}\\b[^\\n.]{0,80}?(0x[a-fA-F0-9]{40})`, 'i'),
+        new RegExp(`(0x[a-fA-F0-9]{40})[^\\n.]{0,80}?\\b${symbol}\\b`, 'i'),
+    ];
+
+    for (const pattern of patterns) {
+        const match = commitmentText.match(pattern);
+        if (match?.[1]) {
+            return normalizeAddress(match[1]);
+        }
+    }
+
+    throw new Error(`Missing token address for symbol ${symbol} in commitment text.`);
+}
+
+function parseTriggerStatements(commitmentText) {
     const lines = commitmentText.split('\n');
-    for (const line of lines) {
-        const match = line.match(/^\s*-\s*([A-Z][A-Z0-9_]*)\s*=\s*(0x[a-fA-F0-9]{40})\s*$/);
-        if (!match) continue;
-        tokenMap.set(match[1], normalizeAddress(match[2]));
-    }
-    return tokenMap;
-}
+    const conditionRegex =
+        /\bIf\s+([A-Z][A-Z0-9_]*)\s*\/\s*([A-Z][A-Z0-9_]*)\s+(?:price\s+)?(?:is\s+)?(>=|<=|greater than or equal to|less than or equal to)\s*([0-9]+(?:\.[0-9]+)?)/i;
 
-function parseTriggerLine(line) {
-    const raw = line.replace(/^\s*-\s*/, '');
-    const fields = raw
-        .split('|')
-        .map((segment) => segment.trim())
-        .filter(Boolean);
-
-    const out = {};
-    for (const field of fields) {
-        const eq = field.indexOf('=');
-        if (eq <= 0) continue;
-        const key = field.slice(0, eq).trim();
-        const value = field.slice(eq + 1).trim();
-        out[key] = value;
-    }
-    return out;
-}
-
-function getPriceTriggers({ commitmentText }) {
-    if (!commitmentText) return [];
-
-    const tokenMap = parseTokenMap(commitmentText);
     const triggers = [];
+    for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index];
+        const match = line.match(conditionRegex);
+        if (!match) continue;
 
-    for (const line of commitmentText.split('\n')) {
-        if (!/^\s*-\s*id=/.test(line)) continue;
-
-        const fields = parseTriggerLine(line);
-        if (!fields.id || !fields.pair || !fields.comparator || !fields.threshold) {
-            throw new Error(`Malformed trigger line: ${line}`);
-        }
-
-        const [baseSymbol, quoteSymbol] = fields.pair.split('/').map((value) => value.trim());
-        if (!baseSymbol || !quoteSymbol) {
-            throw new Error(`Invalid pair in trigger line: ${line}`);
-        }
-
-        const baseToken = tokenMap.get(baseSymbol);
-        const quoteToken = tokenMap.get(quoteSymbol);
-        if (!baseToken || !quoteToken) {
-            throw new Error(
-                `Token address missing for pair ${fields.pair}. Define both symbols in TOKEN_MAP.`
-            );
-        }
-
-        const threshold = Number(fields.threshold);
+        const baseSymbol = match[1].trim();
+        const quoteSymbol = match[2].trim();
+        const comparator = normalizeComparator(match[3]);
+        const threshold = Number(match[4]);
         if (!Number.isFinite(threshold)) {
-            throw new Error(`Invalid threshold in trigger line: ${line}`);
+            throw new Error(`Invalid threshold in line: ${line}`);
         }
+
+        const context = [line, lines[index + 1] ?? '', lines[index + 2] ?? ''].join(' ');
+        const poolMatch = context.match(/pool(?:\s+address)?\s*(0x[a-fA-F0-9]{40})/i);
+        const hasHighLiquidity = /high[-\s]liquidity/i.test(context);
 
         const trigger = {
-            id: fields.id,
-            label: fields.label ?? `${fields.pair} ${fields.comparator} ${fields.threshold}`,
-            baseToken,
-            quoteToken,
-            comparator: normalizeComparator(fields.comparator),
+            id: `trigger-${triggers.length + 1}-${baseSymbol.toLowerCase()}-${quoteSymbol.toLowerCase()}`,
+            label: `${baseSymbol}/${quoteSymbol} ${comparator === 'gte' ? '>=' : '<='} ${threshold}`,
+            baseSymbol,
+            quoteSymbol,
+            comparator,
             threshold,
-            priority: fields.priority !== undefined ? Number(fields.priority) : 0,
-            emitOnce: fields.emitOnce === undefined ? true : fields.emitOnce !== 'false',
+            priority: triggers.length,
+            emitOnce: true,
         };
 
-        if (fields.pool) {
-            if (fields.pool.toLowerCase() === 'high-liquidity') {
-                trigger.poolSelection = 'high-liquidity';
-            } else {
-                trigger.pool = normalizeAddress(fields.pool);
-            }
+        if (poolMatch?.[1]) {
+            trigger.pool = normalizeAddress(poolMatch[1]);
+        } else if (hasHighLiquidity) {
+            trigger.poolSelection = 'high-liquidity';
         } else {
             trigger.poolSelection = 'high-liquidity';
         }
@@ -97,6 +78,23 @@ function getPriceTriggers({ commitmentText }) {
     }
 
     return triggers;
+}
+
+function getPriceTriggers({ commitmentText }) {
+    if (!commitmentText) return [];
+
+    const parsed = parseTriggerStatements(commitmentText);
+    return parsed.map((trigger) => ({
+        id: trigger.id,
+        label: trigger.label,
+        baseToken: extractTokenAddress({ symbol: trigger.baseSymbol, commitmentText }),
+        quoteToken: extractTokenAddress({ symbol: trigger.quoteSymbol, commitmentText }),
+        comparator: trigger.comparator,
+        threshold: trigger.threshold,
+        priority: trigger.priority,
+        emitOnce: trigger.emitOnce,
+        ...(trigger.pool ? { pool: trigger.pool } : { poolSelection: trigger.poolSelection }),
+    }));
 }
 
 function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
@@ -112,7 +110,7 @@ function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
         'You are a price-race swap agent for a commitment Safe controlled by an Optimistic Governor.',
         'Your own address is provided as agentAddress.',
         'Interpret the commitment as a multi-choice race and execute at most one winning branch.',
-        'Price trigger specs are parsed from the commitment text itself. Do not invent trigger values.',
+        'Price trigger specs are parsed from plain-language commitment text itself. Do not invent trigger values.',
         'First trigger wins. If both triggers appear true in one cycle, use trigger priority and then lexical triggerId order.',
         'Use all currently available USDC in the Safe for the winning branch swap.',
         'Preferred flow: build_og_transactions with uniswap_v3_exact_input_single actions, then post_bond_and_propose.',

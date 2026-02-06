@@ -17,10 +17,9 @@ function run() {
 
     const triggers = getPriceTriggers({ commitmentText });
     assert.equal(triggers.length, 2);
-    assert.equal(triggers[0].id, 'eth-breakout');
     assert.equal(triggers[0].comparator, 'gte');
     assert.equal(triggers[0].threshold, 3200);
-    assert.equal(triggers[1].id, 'uma-drop');
+    assert.equal(triggers[0].pool.toLowerCase(), '0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8');
     assert.equal(triggers[1].comparator, 'lte');
     assert.equal(triggers[1].poolSelection, 'high-liquidity');
 
