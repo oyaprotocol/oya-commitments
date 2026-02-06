@@ -5,6 +5,7 @@
 - `AGENTS.md`: normative instructions for coding agents and automation.
 - `README.md`: architecture, intent, and operational context for humans.
 - `CONTRIBUTING.md`: shared contributor workflow and policy across the repo.
+- `skills/add-agent-commitment/SKILL.md`: reusable workflow for adding new agent/commitment combos.
 - Precedence when instructions conflict:
 1. Closest file to the changed code path wins.
 2. `AGENTS.md` is authoritative for agent behavior.

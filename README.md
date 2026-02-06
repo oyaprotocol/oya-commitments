@@ -29,6 +29,7 @@ forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimis
 ## Documentation
 
 - Contribution workflow and policy: `CONTRIBUTING.md`
+- Skill for new agent/commitment combos: `skills/add-agent-commitment/SKILL.md`
 - Deployment and configuration: `docs/deployment.md`
 - Signer options and `with-signer` helper: `docs/signers.md`
 - Offchain agent usage: `docs/agent.md`
