@@ -28,9 +28,11 @@ forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimis
 
 ## Documentation
 
+- Contribution workflow and policy: `CONTRIBUTING.md`
 - Deployment and configuration: `docs/deployment.md`
 - Signer options and `with-signer` helper: `docs/signers.md`
 - Offchain agent usage: `docs/agent.md`
+- Agent extension decision rules: `docs/agent-extension-guidelines.md`
 - Web frontend: `docs/frontend.md`
 - Testing and common commands: `docs/testing.md`
 
