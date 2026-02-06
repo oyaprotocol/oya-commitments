@@ -4,6 +4,7 @@ This repository uses two kinds of contribution guidance:
 
 - `AGENTS.md` for machine-targeted, normative instructions.
 - `README.md` for human-oriented architecture and workflow context.
+- `skills/add-agent-commitment/SKILL.md` for creating new agent/commitment modules.
 
 ## Precedence Rules
 
