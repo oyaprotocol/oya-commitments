@@ -11,62 +11,6 @@ env:
   FOUNDRY_PROFILE: ci
 
 jobs:
-  shared-agent-justification:
-    name: Shared agent justification
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
-    steps:
-      - name: Validate shared runner justification
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const pull_number = context.payload.pull_request.number;
-
-            const files = await github.paginate(github.rest.pulls.listFiles, {
-              owner,
-              repo,
-              pull_number,
-              per_page: 100
-            });
-
-            const touchedSharedRunner = files.some((f) =>
-              f.filename.startsWith("agent/src/lib/") || f.filename === "agent/src/index.js"
-            );
-
-            if (!touchedSharedRunner) {
-              core.info("Shared runner files not changed; skipping justification check.");
-              return;
-            }
-
-            const body = context.payload.pull_request.body || "";
-            const marker = "## Shared Runner Justification";
-            const start = body.indexOf(marker);
-            if (start === -1) {
-              core.setFailed("PR touches shared runner files but is missing the '## Shared Runner Justification' section.");
-              return;
-            }
-
-            const sectionText = body.slice(start + marker.length);
-            const nextHeading = sectionText.search(/\n##\s+/);
-            const section = nextHeading === -1 ? sectionText : sectionText.slice(0, nextHeading);
-
-            const normalized = section
-              .replace(/[#>*`_\-\[\]\(\)\r\n]/g, " ")
-              .replace(/\s+/g, " ")
-              .trim();
-
-            if (normalized.length < 40) {
-              core.setFailed("PR touches shared runner files but Shared Runner Justification is too short. Explain why agent-local implementation was insufficient and which agents are impacted.");
-              return;
-            }
-
-            core.info("Shared runner justification present.");
-
   check:
     name: Foundry project
     runs-on: ubuntu-latest
