@@ -20,6 +20,7 @@ import { callAgent, explainToolCalls } from './lib/llm.js';
 import { executeToolCalls, toolDefinitions } from './lib/tools.js';
 import { makeDeposit, postBondAndDispute, postBondAndPropose } from './lib/tx.js';
 import { extractTimelockTriggers } from './lib/timelock.js';
+import { collectPriceTriggerSignals } from './lib/price.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -42,6 +43,9 @@ const proposalsByHash = new Map();
 const depositHistory = [];
 const blockTimestampCache = new Map();
 const timelockTriggers = new Map();
+const priceTriggerState = new Map();
+const tokenMetaCache = new Map();
+const poolMetaCache = new Map();
 
 async function loadAgentModule() {
     const agentRef = config.agentModule ?? 'default';
@@ -223,6 +227,14 @@ async function agentLoop() {
         const rulesText = ogContext?.rules ?? commitmentText ?? '';
         updateTimelockSchedule({ rulesText });
         const dueTimelocks = collectDueTimelocks(nowMs);
+        const duePriceSignals = await collectPriceTriggerSignals({
+            publicClient,
+            triggers: config.priceTriggers,
+            nowMs,
+            triggerState: priceTriggerState,
+            tokenMetaCache,
+            poolMetaCache,
+        });
 
         const combinedSignals = deposits.concat(
             newProposals.map((proposal) => ({
@@ -247,6 +259,7 @@ async function agentLoop() {
                 deposit: trigger.deposit,
             });
         }
+        combinedSignals.push(...duePriceSignals);
 
         if (combinedSignals.length > 0) {
             const decisionOk = await decideOnSignals(combinedSignals);

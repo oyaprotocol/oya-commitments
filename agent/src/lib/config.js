@@ -1,5 +1,47 @@
 import { getAddress } from 'viem';
-import { mustGetEnv, parseAddressList } from './utils.js';
+import { mustGetEnv, parseAddressList, parseJsonEnv } from './utils.js';
+
+function normalizePriceTrigger(trigger, index) {
+    if (!trigger || typeof trigger !== 'object') {
+        throw new Error(`PRICE_TRIGGERS_JSON[${index}] must be an object`);
+    }
+    if (!trigger.pool || !trigger.baseToken || !trigger.quoteToken) {
+        throw new Error(
+            `PRICE_TRIGGERS_JSON[${index}] requires pool, baseToken, and quoteToken`
+        );
+    }
+    if (!trigger.comparator || !['gte', 'lte'].includes(trigger.comparator)) {
+        throw new Error(`PRICE_TRIGGERS_JSON[${index}] comparator must be "gte" or "lte"`);
+    }
+    if (trigger.threshold === undefined || trigger.threshold === null) {
+        throw new Error(`PRICE_TRIGGERS_JSON[${index}] requires threshold`);
+    }
+
+    const threshold = Number(trigger.threshold);
+    if (!Number.isFinite(threshold)) {
+        throw new Error(`PRICE_TRIGGERS_JSON[${index}] threshold must be numeric`);
+    }
+
+    return {
+        id: trigger.id ?? `price-trigger-${index}`,
+        label: trigger.label,
+        pool: getAddress(trigger.pool),
+        baseToken: getAddress(trigger.baseToken),
+        quoteToken: getAddress(trigger.quoteToken),
+        comparator: trigger.comparator,
+        threshold,
+        priority: Number(trigger.priority ?? 0),
+        emitOnce: trigger.emitOnce === undefined ? true : Boolean(trigger.emitOnce),
+    };
+}
+
+function parsePriceTriggers(raw) {
+    const parsed = parseJsonEnv(raw, []);
+    if (!Array.isArray(parsed)) {
+        throw new Error('PRICE_TRIGGERS_JSON must be a JSON array');
+    }
+    return parsed.map(normalizePriceTrigger);
+}
 
 function buildConfig() {
     return {
@@ -38,6 +80,7 @@ function buildConfig() {
                 : process.env.DISPUTE_ENABLED.toLowerCase() !== 'false',
         disputeRetryMs: Number(process.env.DISPUTE_RETRY_MS ?? 60_000),
         agentModule: process.env.AGENT_MODULE,
+        priceTriggers: parsePriceTriggers(process.env.PRICE_TRIGGERS_JSON),
     };
 }
 
