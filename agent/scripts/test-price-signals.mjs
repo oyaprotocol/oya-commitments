@@ -39,6 +39,9 @@ function buildMockPublicClient() {
             if (functionName === 'slot0') {
                 return slot0ByPool.get(addr);
             }
+            if (functionName === 'fee') {
+                return 3000;
+            }
             if (functionName === 'decimals') {
                 if (addr === WETH.toLowerCase() || addr === UMA.toLowerCase()) return 18;
                 if (addr === USDC.toLowerCase()) return 6;
@@ -50,12 +53,17 @@ function buildMockPublicClient() {
 
 async function run() {
     const publicClient = buildMockPublicClient();
+    const config = {
+        uniswapV3FeeTiers: [500, 3000, 10000],
+    };
     const triggerState = new Map();
     const tokenMetaCache = new Map();
     const poolMetaCache = new Map();
+    const resolvedPoolCache = new Map();
 
     const signals = await collectPriceTriggerSignals({
         publicClient,
+        config,
         triggers: [
             {
                 id: 'eth-breakout',
@@ -84,6 +92,7 @@ async function run() {
         triggerState,
         tokenMetaCache,
         poolMetaCache,
+        resolvedPoolCache,
     });
 
     assert.equal(signals.length, 2);
@@ -92,6 +101,7 @@ async function run() {
 
     const secondPass = await collectPriceTriggerSignals({
         publicClient,
+        config,
         triggers: [
             {
                 id: 'eth-breakout',
@@ -108,6 +118,7 @@ async function run() {
         triggerState,
         tokenMetaCache,
         poolMetaCache,
+        resolvedPoolCache,
     });
 
     assert.equal(secondPass.length, 0);

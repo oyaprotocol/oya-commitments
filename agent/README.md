@@ -25,7 +25,7 @@ This is beta software provided “as is.” Use at your own risk. No guarantees 
      - `keychain`: `KEYCHAIN_SERVICE`, `KEYCHAIN_ACCOUNT` (macOS Keychain or Linux Secret Service)
      - `vault`: `VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_SECRET_PATH`, optional `VAULT_SECRET_KEY` (default `private_key`)
      - `kms`/`vault-signer`/`rpc`: `SIGNER_RPC_URL`, `SIGNER_ADDRESS` (JSON-RPC signer that accepts `eth_sendTransaction`)
-   - Optional tuning: `POLL_INTERVAL_MS`, `START_BLOCK`, `WATCH_NATIVE_BALANCE`, `DEFAULT_DEPOSIT_*`, `AGENT_MODULE`, `PRICE_TRIGGERS_JSON`
+   - Optional tuning: `POLL_INTERVAL_MS`, `START_BLOCK`, `WATCH_NATIVE_BALANCE`, `DEFAULT_DEPOSIT_*`, `AGENT_MODULE`, `UNISWAP_V3_FACTORY`, `UNISWAP_V3_FEE_TIERS`
    - Optional proposals: `PROPOSE_ENABLED` (default true)
    - Optional disputes: `DISPUTE_ENABLED` (default true), `DISPUTE_RETRY_MS` (default 60000)
    - Optional LLM: `OPENAI_API_KEY`, `OPENAI_MODEL` (default `gpt-4.1-mini`), `OPENAI_BASE_URL`
@@ -67,34 +67,21 @@ For interactions, swap the env var (e.g., `PROPOSER_PK`, `EXECUTOR_PK`). For sig
 - **Deposits**: `makeDeposit` can send ERC20 or native assets into the commitment.
 - **Optional LLM decisions**: If `OPENAI_API_KEY` is set, the runner will call the OpenAI Responses API with signals and OG context and expect strict-JSON actions (propose/deposit/ignore). Wire your own validation/broadcast of any suggested actions in the agent module.
 - **Timelock triggers**: Parses plain language timelocks in rules (absolute dates or “X minutes after deposit”) and emits `timelock` signals when due.
-- **Price triggers**: Optionally evaluates configured Uniswap V3 pools and emits `priceTrigger` signals when `PRICE_TRIGGERS_JSON` thresholds are hit.
+- **Price triggers**: If your module exports `getPriceTriggers({ commitmentText })`, the runner evaluates those parsed Uniswap V3 thresholds and emits `priceTrigger` signals.
 
 All other behavior is intentionally left out. Implement your own agent in `agent-library/agents/<name>/agent.js` to add commitment-specific logic and tool use.
 
 ### Price Trigger Config
 
-Use `PRICE_TRIGGERS_JSON` to generate deterministic threshold-hit signals:
-
-```json
-[
-  {
-    "id": "eth-breakout",
-    "label": "ETH >= 3200",
-    "pool": "0xUniswapV3PoolAddress",
-    "baseToken": "0xWETH",
-    "quoteToken": "0xUSDC",
-    "comparator": "gte",
-    "threshold": 3200,
-    "priority": 0,
-    "emitOnce": true
-  }
-]
-```
-
-- `comparator`: `gte` or `lte`
-- `threshold`: quote-token price per one base token
-- `priority`: tie-break ordering when multiple triggers hit in the same cycle (lower first)
-- `emitOnce`: if true, emit only the first time the threshold condition turns true
+Parse trigger specs from commitment/rules text in your module by exporting `getPriceTriggers({ commitmentText })` from `agent-library/agents/<name>/agent.js`.
+Each returned trigger should include:
+- `id`
+- `baseToken`
+- `quoteToken`
+- `comparator` (`gte` or `lte`)
+- `threshold`
+- `priority` (optional)
+- `pool` or `poolSelection: "high-liquidity"`
 
 ### Uniswap Swap Action in `build_og_transactions`
 
