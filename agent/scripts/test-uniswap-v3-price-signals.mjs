@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { collectPriceTriggerSignals } from '../src/lib/price.js';
+import { collectPriceTriggerSignals } from '../src/lib/uniswapV3Price.js';
 
 const WETH = '0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2';
 const USDC = '0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
