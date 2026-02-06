@@ -1,9 +1,9 @@
-This commitment should use whatever USDC is available in the Safe at the moment of execution.
+This commitment should use whatever WETH is available in the Safe at the moment of execution.
 
-Token addresses for this commitment are as follows: USDC is 0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48, WETH is 0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2, and UNI is 0x1f9840a85d5af5bf1d1762f925bdaddc4201f984.
+Token addresses for this commitment are as follows: WETH is 0xfff9976782d46cc05630d1f6ebab18b2324d6b14, USDC is 0x1c7d4b196cb0c7b01d743fbc6116a902379c7238, and UNI is 0x1f9840a85d5af5bf1d1762f925bdaddc4201f984.
 
-If WETH/USDC is greater than or equal to 3200 and this is the first trigger that becomes true, buy WETH using all available USDC. For this WETH branch, use Uniswap V3 pool 0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8.
+If WETH/USDC is greater than or equal to 1800 and this is the first trigger that becomes true, swap all available WETH for USDC. For this WETH-to-USDC branch, use Uniswap V3 pool 0x6418eec70f50913ff0d756b48d32ce7c02b47c47.
 
-If UNI/USDC is less than or equal to 6.00 and this is the first trigger that becomes true, buy UNI using all available USDC. For this UNI branch, use a high-liquidity Uniswap pool.
+If UNI/WETH is less than or equal to 0.03 and this is the first trigger that becomes true, swap all available WETH for UNI. For this WETH-to-UNI branch, use Uniswap V3 pool 0x287b0e934ed0439e2a7b1d5f0fc25ea2c24b64f7.
 
 Only one branch may execute in total. First trigger wins. Enforce max slippage of 0.50%. If no valid route meets slippage and liquidity constraints, do not trade.
