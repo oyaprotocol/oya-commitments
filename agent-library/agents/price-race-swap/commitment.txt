@@ -1,0 +1,20 @@
+Use any available USDC balance currently held by the commitment Safe at the time of execution.
+
+Monitor two trigger conditions and execute exactly one branch:
+
+1) ETH branch
+- If ETH/USDC >= 3200 first, buy ETH with all available USDC.
+- Execute on Uniswap.
+- If a specific pool is configured, use that pool; otherwise use a high-liquidity Uniswap pool.
+
+2) UMA branch
+- If UMA/USDC <= 2.10 first, buy UMA with all available USDC.
+- Execute on Uniswap.
+- If a specific pool is configured, use that pool; otherwise use a high-liquidity Uniswap pool.
+
+Global rules:
+- First trigger wins.
+- Execute at most one swap total for this commitment.
+- If both triggers become true in the same evaluation cycle, prefer ETH branch.
+- Enforce max slippage of 0.50%.
+- If no valid route satisfies slippage and liquidity constraints, do not trade.
