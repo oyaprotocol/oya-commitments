@@ -1,8 +1,14 @@
 // DCA Agent - WETH reimbursement loop on Sepolia
 
+import { erc20Abi, parseAbi } from 'viem';
+
 let lastDcaTimestamp = Date.now();
 const DCA_INTERVAL_SECONDS = 200;
 const MAX_CYCLES = 2;
+const CHAINLINK_ETH_USD_FEED_SEPOLIA = '0x694AA1769357215DE4FAC081bf1f309aDC325306';
+const chainlinkAbi = parseAbi([
+    'function latestRoundData() external view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)',
+]);
 const DCA_POLICY = Object.freeze({
     wethAddress: '0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9',
     usdcAddress: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238',
@@ -77,6 +83,89 @@ function augmentSignals(signals) {
 
 function markDcaExecuted() {
     lastDcaTimestamp = Date.now();
+}
+
+async function getEthPriceUSD(publicClient, chainlinkFeedAddress) {
+    const result = await publicClient.readContract({
+        address: chainlinkFeedAddress,
+        abi: chainlinkAbi,
+        functionName: 'latestRoundData',
+    });
+    const answer = result[1];
+    if (answer <= 0n) {
+        throw new Error('Invalid Chainlink ETH/USD price');
+    }
+    return Number(answer) / 1e8;
+}
+
+async function getEthPriceUSDFallback() {
+    const response = await fetch(
+        'https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd'
+    );
+    if (!response.ok) {
+        throw new Error(`Coingecko API error: ${response.status}`);
+    }
+    const data = await response.json();
+    if (!data?.ethereum?.usd) {
+        throw new Error('Invalid Coingecko response');
+    }
+    return data.ethereum.usd;
+}
+
+async function enrichSignals(signals, { publicClient, config, account, onchainPendingProposal }) {
+    if (!signals.some((signal) => signal.kind === 'timer')) {
+        return signals;
+    }
+
+    let ethPriceUSD;
+    try {
+        const chainlinkFeedAddress =
+            config?.chainlinkPriceFeed ?? CHAINLINK_ETH_USD_FEED_SEPOLIA;
+        ethPriceUSD = await getEthPriceUSD(publicClient, chainlinkFeedAddress);
+    } catch (error) {
+        ethPriceUSD = await getEthPriceUSDFallback();
+    }
+
+    const [safeUsdcWei, selfWethWei] = await Promise.all([
+        publicClient.readContract({
+            address: DCA_POLICY.usdcAddress,
+            abi: erc20Abi,
+            functionName: 'balanceOf',
+            args: [config.commitmentSafe],
+        }),
+        publicClient.readContract({
+            address: DCA_POLICY.wethAddress,
+            abi: erc20Abi,
+            functionName: 'balanceOf',
+            args: [account.address],
+        }),
+    ]);
+
+    const safeUsdcSufficient = safeUsdcWei >= DCA_POLICY.minSafeUsdcWei;
+    const safeUsdcHuman = Number(safeUsdcWei) / 10 ** Number(DCA_POLICY.usdcDecimals);
+    const selfWethHuman = Number(selfWethWei) / 1e18;
+    const pendingProposal = getPendingProposal(onchainPendingProposal);
+    const currentDcaState = getDcaState();
+
+    return signals.map((signal) => {
+        if (signal.kind !== 'timer') return signal;
+        return {
+            ...signal,
+            ethPriceUSD,
+            balances: {
+                safeUsdcWei: safeUsdcWei.toString(),
+                selfWethWei: selfWethWei.toString(),
+                safeUsdcHuman,
+                selfWethHuman,
+                safeUsdcSufficient,
+                minSafeUsdcWei: DCA_POLICY.minSafeUsdcWei.toString(),
+                minSafeUsdcHuman:
+                    Number(DCA_POLICY.minSafeUsdcWei) / 10 ** Number(DCA_POLICY.usdcDecimals),
+            },
+            dcaState: currentDcaState,
+            pendingProposal,
+        };
+    });
 }
 
 function getDcaPolicy() {
@@ -173,4 +262,5 @@ export {
     onToolOutput,
     onProposalEvents,
     reconcileProposalSubmission,
+    enrichSignals,
 };

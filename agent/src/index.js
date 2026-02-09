@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { createPublicClient, erc20Abi, http } from 'viem';
+import { createPublicClient, http } from 'viem';
 import { buildConfig } from './lib/config.js';
 import { createSignerClient } from './lib/signer.js';
 import {
@@ -20,7 +20,6 @@ import { callAgent, explainToolCalls } from './lib/llm.js';
 import { executeToolCalls, toolDefinitions } from './lib/tools.js';
 import { makeDeposit, postBondAndDispute, postBondAndPropose } from './lib/tx.js';
 import { extractTimelockTriggers } from './lib/timelock.js';
-import { getEthPriceUSD, getEthPriceUSDFallback } from './lib/price.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -66,7 +65,6 @@ async function loadAgentModule() {
 
 const { agentModule, commitmentText, resolvedPath } = await loadAgentModule();
 const isDcaAgent = resolvedPath.endsWith('agent-library/agents/dca-agent/agent.js');
-const dcaPolicy = isDcaAgent ? agentModule?.getDcaPolicy?.() : undefined;
 
 async function getBlockTimestampMs(blockNumber) {
     if (!blockNumber) return undefined;
@@ -289,73 +287,18 @@ async function agentLoop() {
                 latestBlock,
             });
         }
-
-        // Fetch ETH price and add to timer signal (if present)
-        if (signalsToProcess.some((signal) => signal.kind === 'timer')) {
+        if (agentModule?.enrichSignals) {
             try {
-                let ethPriceUSD;
-                try {
-                    ethPriceUSD = await getEthPriceUSD(publicClient, config.chainlinkPriceFeed);
-                } catch (error) {
-                    console.warn('[agent] Chainlink price fetch failed, using Coingecko fallback');
-                    ethPriceUSD = await getEthPriceUSDFallback();
-                }
-
-                for (const signal of signalsToProcess) {
-                    if (signal.kind === 'timer') {
-                        signal.ethPriceUSD = ethPriceUSD;
-                    }
-                }
+                signalsToProcess = await agentModule.enrichSignals(signalsToProcess, {
+                    publicClient,
+                    config,
+                    account,
+                    onchainPendingProposal: proposalsByHash.size > 0,
+                    nowMs,
+                    latestBlock,
+                });
             } catch (error) {
-                console.error('[agent] Failed to fetch ETH price:', error);
-            }
-        }
-
-        // Deterministic balance checks for DCA agent (inject into timer signals)
-        if (isDcaAgent && dcaPolicy && signalsToProcess.some((signal) => signal.kind === 'timer')) {
-            try {
-                const [safeUsdcWei, selfWethWei] = await Promise.all([
-                    publicClient.readContract({
-                        address: dcaPolicy.usdcAddress,
-                        abi: erc20Abi,
-                        functionName: 'balanceOf',
-                        args: [config.commitmentSafe],
-                    }),
-                    publicClient.readContract({
-                        address: dcaPolicy.wethAddress,
-                        abi: erc20Abi,
-                        functionName: 'balanceOf',
-                        args: [account.address],
-                    }),
-                ]);
-
-                const safeUsdcSufficient = safeUsdcWei >= dcaPolicy.minSafeUsdcWei;
-                const safeUsdcHuman = Number(safeUsdcWei) / 10 ** Number(dcaPolicy.usdcDecimals);
-                const selfWethHuman = Number(selfWethWei) / 1e18;
-
-                const pendingProposal = agentModule?.getPendingProposal
-                    ? agentModule.getPendingProposal(proposalsByHash.size > 0)
-                    : proposalsByHash.size > 0;
-                const currentDcaState = agentModule?.getDcaState ? agentModule.getDcaState() : {};
-                for (const signal of signalsToProcess) {
-                    if (signal.kind === 'timer') {
-                        signal.balances = {
-                            safeUsdcWei: safeUsdcWei.toString(),
-                            selfWethWei: selfWethWei.toString(),
-                            safeUsdcHuman,
-                            selfWethHuman,
-                            safeUsdcSufficient,
-                            minSafeUsdcWei: dcaPolicy.minSafeUsdcWei.toString(),
-                            minSafeUsdcHuman:
-                                Number(dcaPolicy.minSafeUsdcWei) /
-                                10 ** Number(dcaPolicy.usdcDecimals),
-                        };
-                        signal.dcaState = currentDcaState;
-                        signal.pendingProposal = pendingProposal;
-                    }
-                }
-            } catch (error) {
-                console.error('[agent] Failed to fetch DCA balances:', error);
+                console.error('[agent] Failed to enrich signals:', error);
             }
         }
 
