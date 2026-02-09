@@ -1,0 +1,25 @@
+# <Area Name>
+
+## What This Area Contains
+
+Short description of responsibility for this folder.
+
+## When To Edit This Area
+
+- Use for `<type of change>`
+- Avoid for `<type of change>`
+
+## Extension Points
+
+- `<extension point 1>`
+- `<extension point 2>`
+
+## Anti-Patterns
+
+- `<anti-pattern 1>`
+- `<anti-pattern 2>`
+
+## How To Validate Changes
+
+- `<command 1>`
+- `<command 2>`

@@ -1,0 +1,20 @@
+# <Agent Name>
+
+## Purpose
+
+Describe the commitment or policy this agent is designed to serve.
+
+## Files
+
+- `agent.js`: agent-specific logic and decision flow.
+- `commitment.txt`: plain-language commitment/rules.
+- `agent.json`: metadata (if applicable).
+
+## Locality Rule
+
+Agent-specific behavior for this module must stay in this directory. Do not move single-agent logic into shared generalized files in `agent/src/lib/` or `agent/src/index.js`.
+
+## Validation
+
+- `<module-specific test command>`
+- `<simulation command>`
