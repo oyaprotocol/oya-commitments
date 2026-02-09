@@ -1,0 +1,25 @@
+# Area Guidelines
+
+## Scope
+
+This file applies to:
+
+- `<path-1>`
+- `<path-2>`
+
+## Purpose
+
+Describe what belongs in this area and how it fits the repository.
+
+## Rules
+
+- Keep changes local to this area unless they are clearly cross-cutting.
+- Reference root `AGENTS.md` and `CONTRIBUTING.md` for global expectations.
+
+## Locality Rule
+
+If this area includes agent implementations, keep agent-specific functionality in local agent files instead of shared generalized files.
+
+## Validation
+
+List the minimum checks contributors should run for changes in this area.
