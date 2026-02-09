@@ -1,3 +1,27 @@
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const TOKENS = Object.freeze({
+    WETH: '0xfff9976782d46cc05630d1f6ebab18b2324d6b14',
+    USDC: '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238',
+    UNI: '0x1f9840a85d5af5bf1d1762f925bdaddc4201f984',
+});
+
+const ALLOWED_POOLS = new Set([
+    '0x6418eec70f50913ff0d756b48d32ce7c02b47c47',
+    '0x287b0e934ed0439e2a7b1d5f0fc25ea2c24b64f7',
+]);
+
+const ALLOWED_ROUTERS = new Set([
+    '0xe592427a0aece92de3edee1f18e0157c05861564',
+    '0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45',
+]);
+
 const inferredTriggersCache = new Map();
 
 function isHexChar(char) {
@@ -21,7 +45,7 @@ function normalizeAddress(value) {
             throw new Error(`Invalid address: ${value}`);
         }
     }
-    return value;
+    return value.toLowerCase();
 }
 
 function normalizeComparator(value) {
@@ -47,6 +71,61 @@ function extractFirstText(responseJson) {
     return '';
 }
 
+function statePath() {
+    return process.env.PRICE_RACE_STATE_PATH
+        ? path.resolve(process.env.PRICE_RACE_STATE_PATH)
+        : path.join(__dirname, '.price-race-state.json');
+}
+
+function commitmentKey(commitmentText) {
+    return createHash('sha256').update(commitmentText ?? '').digest('hex');
+}
+
+function readState() {
+    const file = statePath();
+    if (!existsSync(file)) {
+        return { commitments: {} };
+    }
+
+    try {
+        const parsed = JSON.parse(readFileSync(file, 'utf8'));
+        if (!parsed || typeof parsed !== 'object') {
+            return { commitments: {} };
+        }
+        return {
+            commitments:
+                parsed.commitments && typeof parsed.commitments === 'object'
+                    ? parsed.commitments
+                    : {},
+        };
+    } catch (error) {
+        return { commitments: {} };
+    }
+}
+
+function writeState(state) {
+    writeFileSync(statePath(), JSON.stringify(state, null, 2));
+}
+
+function isCommitmentExecuted(commitmentText) {
+    if (!commitmentText) return false;
+    const key = commitmentKey(commitmentText);
+    const state = readState();
+    return Boolean(state.commitments?.[key]?.executed);
+}
+
+function markCommitmentExecuted(commitmentText, metadata = {}) {
+    if (!commitmentText) return;
+    const key = commitmentKey(commitmentText);
+    const state = readState();
+    state.commitments[key] = {
+        executed: true,
+        executedAt: new Date().toISOString(),
+        ...metadata,
+    };
+    writeState(state);
+}
+
 function sanitizeInferredTriggers(rawTriggers) {
     if (!Array.isArray(rawTriggers)) {
         return [];
@@ -59,7 +138,7 @@ function sanitizeInferredTriggers(rawTriggers) {
 
         const baseToken = normalizeAddress(String(trigger.baseToken));
         const quoteToken = normalizeAddress(String(trigger.quoteToken));
-        if (baseToken.toLowerCase() === quoteToken.toLowerCase()) {
+        if (baseToken === quoteToken) {
             throw new Error(`Inferred trigger ${index} uses the same base and quote token.`);
         }
 
@@ -86,9 +165,13 @@ function sanitizeInferredTriggers(rawTriggers) {
         };
 
         if (trigger.pool) {
-            out.pool = normalizeAddress(String(trigger.pool));
+            const pool = normalizeAddress(String(trigger.pool));
+            if (!ALLOWED_POOLS.has(pool)) {
+                throw new Error(`Inferred trigger ${out.id} references non-allowlisted pool ${pool}`);
+            }
+            out.pool = pool;
         } else {
-            out.poolSelection = 'high-liquidity';
+            throw new Error(`Inferred trigger ${out.id} must include an explicit pool address.`);
         }
 
         return out;
@@ -116,6 +199,10 @@ async function getPriceTriggers({ commitmentText, config }) {
         return [];
     }
 
+    if (isCommitmentExecuted(commitmentText)) {
+        return [];
+    }
+
     if (inferredTriggersCache.has(commitmentText)) {
         return inferredTriggersCache.get(commitmentText);
     }
@@ -126,7 +213,7 @@ async function getPriceTriggers({ commitmentText, config }) {
             {
                 role: 'system',
                 content:
-                    'Extract Uniswap V3 price race triggers from this plain-language commitment. Return strict JSON with shape {"triggers":[...]}. Each trigger must include: id, label, baseToken, quoteToken, comparator (gte|lte), threshold (number), priority (number), and optional pool (address). If no pool is explicit, omit pool and it will use high-liquidity selection. Use only addresses and conditions present in the commitment text.',
+                    'Extract exactly two Uniswap V3 price race triggers from this plain-language commitment. Return strict JSON: {"triggers":[...]}. Each trigger must include: id, label, baseToken, quoteToken, comparator (gte|lte), threshold (number), priority (number), and pool (address). Use only addresses and conditions present in the commitment text. Do not invent pools, tokens, or thresholds.',
             },
             {
                 role: 'user',
@@ -169,6 +256,121 @@ async function getPriceTriggers({ commitmentText, config }) {
     return triggers;
 }
 
+function parseCallArgs(call) {
+    if (call?.parsedArguments && typeof call.parsedArguments === 'object') {
+        return call.parsedArguments;
+    }
+    if (typeof call?.arguments === 'string') {
+        try {
+            return JSON.parse(call.arguments);
+        } catch (error) {
+            return null;
+        }
+    }
+    return null;
+}
+
+function isMatchingPriceSignal(signal, actionFee, tokenIn, tokenOut) {
+    if (!signal || signal.kind !== 'priceTrigger') return false;
+    if (!signal.pool || !ALLOWED_POOLS.has(String(signal.pool).toLowerCase())) return false;
+
+    const sBase = String(signal.baseToken ?? '').toLowerCase();
+    const sQuote = String(signal.quoteToken ?? '').toLowerCase();
+    const pairMatches =
+        (sBase === tokenIn && sQuote === tokenOut) ||
+        (sBase === tokenOut && sQuote === tokenIn);
+    if (!pairMatches) return false;
+
+    if (signal.poolFee === undefined || signal.poolFee === null) return false;
+    return Number(signal.poolFee) === actionFee;
+}
+
+async function validateToolCalls({ toolCalls, signals, commitmentText, commitmentSafe }) {
+    if (isCommitmentExecuted(commitmentText)) {
+        throw new Error('Commitment already executed; refusing additional swap proposals.');
+    }
+
+    const validated = [];
+    const safeAddress = commitmentSafe ? String(commitmentSafe).toLowerCase() : null;
+
+    for (const call of toolCalls) {
+        if (call.name === 'dispute_assertion') {
+            validated.push(call);
+            continue;
+        }
+
+        if (call.name === 'post_bond_and_propose') {
+            continue;
+        }
+
+        if (call.name !== 'build_og_transactions') {
+            continue;
+        }
+
+        const args = parseCallArgs(call);
+        if (!args || !Array.isArray(args.actions) || args.actions.length !== 1) {
+            throw new Error('build_og_transactions must include exactly one swap action.');
+        }
+
+        const action = args.actions[0];
+        if (action.kind !== 'uniswap_v3_exact_input_single') {
+            throw new Error('Only uniswap_v3_exact_input_single is allowed for this agent.');
+        }
+
+        const tokenIn = normalizeAddress(String(action.tokenIn));
+        const tokenOut = normalizeAddress(String(action.tokenOut));
+        const router = normalizeAddress(String(action.router));
+        const recipient = normalizeAddress(String(action.recipient));
+        const fee = Number(action.fee);
+        const amountIn = BigInt(action.amountInWei ?? '0');
+        const amountOutMin = BigInt(action.amountOutMinWei ?? '0');
+
+        if (tokenIn !== TOKENS.WETH) {
+            throw new Error('Swap tokenIn must be Sepolia WETH.');
+        }
+        if (tokenOut !== TOKENS.USDC && tokenOut !== TOKENS.UNI) {
+            throw new Error('Swap tokenOut must be Sepolia USDC or UNI.');
+        }
+        if (!ALLOWED_ROUTERS.has(router)) {
+            throw new Error(`Router ${router} is not allowlisted.`);
+        }
+        if (safeAddress && recipient !== safeAddress) {
+            throw new Error('Swap recipient must be the commitment Safe.');
+        }
+        if (!Number.isInteger(fee) || fee <= 0) {
+            throw new Error('Swap fee must be a positive integer.');
+        }
+        if (amountIn <= 0n) {
+            throw new Error('Swap amountInWei must be > 0.');
+        }
+        if (amountOutMin < 0n) {
+            throw new Error('Swap amountOutMinWei must be >= 0.');
+        }
+
+        const hasSignalMatch = Array.isArray(signals)
+            ? signals.some((signal) => isMatchingPriceSignal(signal, fee, tokenIn, tokenOut))
+            : false;
+        if (!hasSignalMatch) {
+            throw new Error(
+                'Swap action does not match an allowlisted priceTrigger signal in the current cycle.'
+            );
+        }
+
+        validated.push(call);
+    }
+
+    return validated;
+}
+
+async function onToolOutput({ name, parsedOutput, commitmentText }) {
+    if (name !== 'post_bond_and_propose') return;
+    if (parsedOutput?.status !== 'submitted') return;
+
+    markCommitmentExecuted(commitmentText, {
+        proposalHash: parsedOutput?.proposalHash ? String(parsedOutput.proposalHash) : null,
+    });
+}
+
 function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
     const mode = proposeEnabled && disputeEnabled
         ? 'You may propose and dispute.'
@@ -185,10 +387,10 @@ function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
         'Use your reasoning over the plain-language commitment and incoming signals. Do not depend on rigid text pattern matching.',
         'First trigger wins. If multiple triggers appear true in one cycle, use signal priority and then lexical triggerId order.',
         'Use all currently available WETH in the Safe for the winning branch swap.',
-        'Preferred flow: build_og_transactions with uniswap_v3_exact_input_single actions, then post_bond_and_propose.',
-        'When pool addresses are specified in the commitment/rules, use those pools. Otherwise use high-liquidity Uniswap routing that satisfies slippage constraints.',
+        'Preferred flow: build_og_transactions with one uniswap_v3_exact_input_single action, then rely on runner propose submission.',
+        'Only use allowlisted Sepolia addresses from the commitment context. Never execute both branches.',
         'Use the poolFee from a priceTrigger signal when preparing uniswap_v3_exact_input_single actions.',
-        'Never execute both branches, and never route purchased assets to addresses other than the commitment Safe unless explicitly required by the commitment.',
+        'Never route purchased assets to addresses other than the commitment Safe unless explicitly required by the commitment.',
         'If there is insufficient evidence that a trigger fired first, or route/liquidity/slippage constraints are not safely satisfiable, return ignore.',
         'Default to disputing proposals that violate these rules; prefer no-op when unsure.',
         mode,
@@ -199,4 +401,12 @@ function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
         .join(' ');
 }
 
-export { getPriceTriggers, getSystemPrompt, sanitizeInferredTriggers };
+export {
+    getPriceTriggers,
+    getSystemPrompt,
+    isCommitmentExecuted,
+    markCommitmentExecuted,
+    onToolOutput,
+    sanitizeInferredTriggers,
+    validateToolCalls,
+};

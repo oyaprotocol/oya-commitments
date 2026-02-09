@@ -16,7 +16,7 @@ import {
     pollProposalChanges,
     primeBalances,
 } from './lib/polling.js';
-import { callAgent, explainToolCalls } from './lib/llm.js';
+import { callAgent, explainToolCalls, parseToolArguments } from './lib/llm.js';
 import { executeToolCalls, toolDefinitions } from './lib/tools.js';
 import { makeDeposit, postBondAndDispute, postBondAndPropose } from './lib/tx.js';
 import { extractTimelockTriggers } from './lib/timelock.js';
@@ -182,8 +182,46 @@ async function decideOnSignals(signals) {
         }
 
         if (decision.toolCalls.length > 0) {
+            let approvedToolCalls = decision.toolCalls;
+            if (typeof agentModule?.validateToolCalls === 'function') {
+                try {
+                    const validated = await agentModule.validateToolCalls({
+                        toolCalls: decision.toolCalls.map((call) => ({
+                            ...call,
+                            parsedArguments: parseToolArguments(call.arguments),
+                        })),
+                        signals,
+                        commitmentText,
+                        commitmentSafe: config.commitmentSafe,
+                        agentAddress,
+                    });
+                    if (Array.isArray(validated)) {
+                        approvedToolCalls = validated.map((call) => ({
+                            name: call.name,
+                            callId: call.callId,
+                            arguments:
+                                call.arguments !== undefined
+                                    ? call.arguments
+                                    : JSON.stringify(call.parsedArguments ?? {}),
+                        }));
+                    } else {
+                        approvedToolCalls = [];
+                    }
+                } catch (error) {
+                    console.warn(
+                        '[agent] validateToolCalls rejected tool calls:',
+                        error?.message ?? error
+                    );
+                    approvedToolCalls = [];
+                }
+            }
+
+            if (approvedToolCalls.length === 0) {
+                return true;
+            }
+
             const toolOutputs = await executeToolCalls({
-                toolCalls: decision.toolCalls,
+                toolCalls: approvedToolCalls,
                 publicClient,
                 walletClient,
                 account,
@@ -199,9 +237,12 @@ async function decideOnSignals(signals) {
                     } catch (error) {
                         parsed = null;
                     }
-                    agentModule.onToolOutput({
+                    await agentModule.onToolOutput({
                         name: output.name,
                         parsedOutput: parsed,
+                        commitmentText,
+                        commitmentSafe: config.commitmentSafe,
+                        agentAddress,
                     });
                 }
             }
