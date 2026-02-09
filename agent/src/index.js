@@ -60,11 +60,10 @@ async function loadAgentModule() {
         console.warn('[agent] Missing commitment.txt next to agent module:', commitmentPath);
     }
 
-    return { agentModule, commitmentText, resolvedPath };
+    return { agentModule, commitmentText };
 }
 
-const { agentModule, commitmentText, resolvedPath } = await loadAgentModule();
-const isDcaAgent = resolvedPath.endsWith('agent-library/agents/dca-agent/agent.js');
+const { agentModule, commitmentText } = await loadAgentModule();
 
 async function getBlockTimestampMs(blockNumber) {
     if (!blockNumber) return undefined;
@@ -162,7 +161,7 @@ async function decideOnSignals(signals) {
                 config,
                 ogContext,
             });
-            if (isDcaAgent && toolOutputs.length > 0 && agentModule?.onToolOutput) {
+            if (toolOutputs.length > 0 && agentModule?.onToolOutput) {
                 for (const output of toolOutputs) {
                     if (!output?.name || !output?.output) continue;
                     let parsed;
@@ -241,13 +240,13 @@ async function agentLoop() {
         lastProposalCheckedBlock = nextProposalBlock;
         const executedProposalCount = executedProposals?.length ?? 0;
         const deletedProposalCount = deletedProposals?.length ?? 0;
-        if (isDcaAgent && agentModule?.onProposalEvents) {
+        if (agentModule?.onProposalEvents) {
             agentModule.onProposalEvents({
                 executedProposalCount,
                 deletedProposalCount,
             });
         }
-        if (isDcaAgent && agentModule?.reconcileProposalSubmission) {
+        if (agentModule?.reconcileProposalSubmission) {
             await agentModule.reconcileProposalSubmission({ publicClient });
         }
 
