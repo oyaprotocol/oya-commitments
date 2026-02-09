@@ -47,29 +47,38 @@ async function pollCommitmentChanges({
     const toBlock = latestBlock;
     const deposits = [];
 
-    for (const asset of trackedAssets) {
-        const logs = await publicClient.getLogs({
-            address: asset,
-            event: transferEvent,
-            args: { to: commitmentSafe },
-            fromBlock,
-            toBlock,
-        });
+    const maxRange = 10n;
+    let currentFrom = fromBlock;
+    while (currentFrom <= toBlock) {
+        const currentTo =
+            currentFrom + maxRange - 1n > toBlock ? toBlock : currentFrom + maxRange - 1n;
 
-        for (const log of logs) {
-            deposits.push({
-                kind: 'erc20Deposit',
-                asset,
-                from: log.args.from,
-                amount: log.args.value,
-                blockNumber: log.blockNumber,
-                transactionHash: log.transactionHash,
-                logIndex: log.logIndex,
-                id: log.transactionHash
-                    ? `${log.transactionHash}:${log.logIndex ?? '0'}`
-                    : `${log.blockNumber.toString()}:${log.logIndex ?? '0'}`,
+        for (const asset of trackedAssets) {
+            const logs = await publicClient.getLogs({
+                address: asset,
+                event: transferEvent,
+                args: { to: commitmentSafe },
+                fromBlock: currentFrom,
+                toBlock: currentTo,
             });
+
+            for (const log of logs) {
+                deposits.push({
+                    kind: 'erc20Deposit',
+                    asset,
+                    from: log.args.from,
+                    amount: log.args.value,
+                    blockNumber: log.blockNumber,
+                    transactionHash: log.transactionHash,
+                    logIndex: log.logIndex,
+                    id: log.transactionHash
+                        ? `${log.transactionHash}:${log.logIndex ?? '0'}`
+                        : `${log.blockNumber.toString()}:${log.logIndex ?? '0'}`,
+                });
+            }
         }
+
+        currentFrom = currentTo + 1n;
     }
 
     let nextNativeBalance = lastNativeBalance;
@@ -101,36 +110,62 @@ async function pollCommitmentChanges({
 async function pollProposalChanges({ publicClient, ogModule, lastProposalCheckedBlock, proposalsByHash }) {
     const latestBlock = await publicClient.getBlockNumber();
     if (lastProposalCheckedBlock === undefined) {
-        return { newProposals: [], lastProposalCheckedBlock: latestBlock };
+        return {
+            newProposals: [],
+            executedProposals: [],
+            deletedProposals: [],
+            lastProposalCheckedBlock: latestBlock,
+        };
     }
 
     if (latestBlock <= lastProposalCheckedBlock) {
-        return { newProposals: [], lastProposalCheckedBlock };
+        return {
+            newProposals: [],
+            executedProposals: [],
+            deletedProposals: [],
+            lastProposalCheckedBlock,
+        };
     }
 
     const fromBlock = lastProposalCheckedBlock + 1n;
     const toBlock = latestBlock;
 
-    const [proposedLogs, executedLogs, deletedLogs] = await Promise.all([
-        publicClient.getLogs({
-            address: ogModule,
-            event: transactionsProposedEvent,
-            fromBlock,
-            toBlock,
-        }),
-        publicClient.getLogs({
-            address: ogModule,
-            event: proposalExecutedEvent,
-            fromBlock,
-            toBlock,
-        }),
-        publicClient.getLogs({
-            address: ogModule,
-            event: proposalDeletedEvent,
-            fromBlock,
-            toBlock,
-        }),
-    ]);
+    const maxRange = 10n;
+    const proposedLogs = [];
+    const executedLogs = [];
+    const deletedLogs = [];
+    let currentFrom = fromBlock;
+    while (currentFrom <= toBlock) {
+        const currentTo =
+            currentFrom + maxRange - 1n > toBlock ? toBlock : currentFrom + maxRange - 1n;
+
+        const [chunkProposed, chunkExecuted, chunkDeleted] = await Promise.all([
+            publicClient.getLogs({
+                address: ogModule,
+                event: transactionsProposedEvent,
+                fromBlock: currentFrom,
+                toBlock: currentTo,
+            }),
+            publicClient.getLogs({
+                address: ogModule,
+                event: proposalExecutedEvent,
+                fromBlock: currentFrom,
+                toBlock: currentTo,
+            }),
+            publicClient.getLogs({
+                address: ogModule,
+                event: proposalDeletedEvent,
+                fromBlock: currentFrom,
+                toBlock: currentTo,
+            }),
+        ]);
+
+        proposedLogs.push(...chunkProposed);
+        executedLogs.push(...chunkExecuted);
+        deletedLogs.push(...chunkDeleted);
+
+        currentFrom = currentTo + 1n;
+    }
 
     const newProposals = [];
     for (const log of proposedLogs) {
@@ -177,21 +212,25 @@ async function pollProposalChanges({ publicClient, ogModule, lastProposalChecked
         newProposals.push(proposalRecord);
     }
 
+    const executedProposals = [];
     for (const log of executedLogs) {
         const proposalHash = log.args?.proposalHash;
         if (proposalHash) {
             proposalsByHash.delete(proposalHash);
+            executedProposals.push(proposalHash);
         }
     }
 
+    const deletedProposals = [];
     for (const log of deletedLogs) {
         const proposalHash = log.args?.proposalHash;
         if (proposalHash) {
             proposalsByHash.delete(proposalHash);
+            deletedProposals.push(proposalHash);
         }
     }
 
-    return { newProposals, lastProposalCheckedBlock: toBlock };
+    return { newProposals, executedProposals, deletedProposals, lastProposalCheckedBlock: toBlock };
 }
 
 async function executeReadyProposals({

@@ -2,6 +2,10 @@ import { getAddress } from 'viem';
 import { buildOgTransactions, makeDeposit, postBondAndDispute, postBondAndPropose } from './tx.js';
 import { parseToolArguments } from './utils.js';
 
+function safeStringify(value) {
+    return JSON.stringify(value, (_, item) => (typeof item === 'bigint' ? item.toString() : item));
+}
+
 function toolDefinitions({ proposeEnabled, disputeEnabled }) {
     const tools = [
         {
@@ -239,12 +243,14 @@ async function executeToolCalls({
                 builtTransactions = transactions;
                 outputs.push({
                     callId: call.callId,
-                    output: JSON.stringify({ status: 'ok', transactions }),
+                    name: call.name,
+                    output: safeStringify({ status: 'ok', transactions }),
                 });
             } catch (error) {
                 outputs.push({
                     callId: call.callId,
-                    output: JSON.stringify({
+                    name: call.name,
+                    output: safeStringify({
                         status: 'error',
                         message: error?.message ?? String(error),
                     }),
@@ -261,10 +267,12 @@ async function executeToolCalls({
                 asset: args.asset,
                 amountWei: BigInt(args.amountWei),
             });
+            await publicClient.waitForTransactionReceipt({ hash: txHash });
             outputs.push({
                 callId: call.callId,
-                output: JSON.stringify({
-                    status: 'submitted',
+                name: call.name,
+                output: safeStringify({
+                    status: 'confirmed',
                     transactionHash: String(txHash),
                 }),
             });
@@ -275,7 +283,8 @@ async function executeToolCalls({
             if (!config.proposeEnabled) {
                 outputs.push({
                     callId: call.callId,
-                    output: JSON.stringify({
+                    name: call.name,
+                    output: safeStringify({
                         status: 'skipped',
                         reason: 'proposals disabled',
                     }),
@@ -299,7 +308,8 @@ async function executeToolCalls({
             });
             outputs.push({
                 callId: call.callId,
-                output: JSON.stringify({
+                name: call.name,
+                output: safeStringify({
                     status: 'submitted',
                     ...result,
                 }),
@@ -311,7 +321,8 @@ async function executeToolCalls({
             if (!config.disputeEnabled) {
                 outputs.push({
                     callId: call.callId,
-                    output: JSON.stringify({
+                    name: call.name,
+                    output: safeStringify({
                         status: 'skipped',
                         reason: 'disputes disabled',
                     }),
@@ -331,7 +342,8 @@ async function executeToolCalls({
                 });
                 outputs.push({
                     callId: call.callId,
-                    output: JSON.stringify({
+                    name: call.name,
+                    output: safeStringify({
                         status: 'submitted',
                         ...result,
                     }),
@@ -339,7 +351,8 @@ async function executeToolCalls({
             } catch (error) {
                 outputs.push({
                     callId: call.callId,
-                    output: JSON.stringify({
+                    name: call.name,
+                    output: safeStringify({
                         status: 'error',
                         message: error?.message ?? String(error),
                     }),
@@ -351,7 +364,7 @@ async function executeToolCalls({
         console.warn('[agent] Unknown tool call:', call.name);
         outputs.push({
             callId: call.callId,
-            output: JSON.stringify({ status: 'skipped', reason: 'unknown tool' }),
+            output: safeStringify({ status: 'skipped', reason: 'unknown tool' }),
         });
     }
 

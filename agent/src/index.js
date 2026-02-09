@@ -65,7 +65,7 @@ async function loadAgentModule() {
         console.warn('[agent] Missing commitment.txt next to agent module:', commitmentPath);
     }
 
-    return { agentModule, commitmentText, resolvedPath };
+    return { agentModule, commitmentText };
 }
 
 const { agentModule, commitmentText } = await loadAgentModule();
@@ -189,6 +189,21 @@ async function decideOnSignals(signals) {
                 config,
                 ogContext,
             });
+            if (toolOutputs.length > 0 && agentModule?.onToolOutput) {
+                for (const output of toolOutputs) {
+                    if (!output?.name || !output?.output) continue;
+                    let parsed;
+                    try {
+                        parsed = JSON.parse(output.output);
+                    } catch (error) {
+                        parsed = null;
+                    }
+                    agentModule.onToolOutput({
+                        name: output.name,
+                        parsedOutput: parsed,
+                    });
+                }
+            }
             if (decision.responseId && toolOutputs.length > 0) {
                 const explanation = await explainToolCalls({
                     config,
@@ -239,14 +254,29 @@ async function agentLoop() {
             });
         }
 
-        const { newProposals, lastProposalCheckedBlock: nextProposalBlock } =
-            await pollProposalChanges({
+        const {
+            newProposals,
+            executedProposals,
+            deletedProposals,
+            lastProposalCheckedBlock: nextProposalBlock,
+        } = await pollProposalChanges({
                 publicClient,
                 ogModule: config.ogModule,
                 lastProposalCheckedBlock,
                 proposalsByHash,
             });
         lastProposalCheckedBlock = nextProposalBlock;
+        const executedProposalCount = executedProposals?.length ?? 0;
+        const deletedProposalCount = deletedProposals?.length ?? 0;
+        if (agentModule?.onProposalEvents) {
+            agentModule.onProposalEvents({
+                executedProposalCount,
+                deletedProposalCount,
+            });
+        }
+        if (agentModule?.reconcileProposalSubmission) {
+            await agentModule.reconcileProposalSubmission({ publicClient });
+        }
 
         const rulesText = ogContext?.rules ?? commitmentText ?? '';
         updateTimelockSchedule({ rulesText });
@@ -288,8 +318,31 @@ async function agentLoop() {
         }
         combinedSignals.push(...duePriceSignals);
 
-        if (combinedSignals.length > 0) {
-            const decisionOk = await decideOnSignals(combinedSignals);
+        // Allow agent module to augment signals (e.g., add timer signals)
+        let signalsToProcess = combinedSignals;
+        if (agentModule?.augmentSignals) {
+            signalsToProcess = agentModule.augmentSignals(combinedSignals, {
+                nowMs,
+                latestBlock,
+            });
+        }
+        if (agentModule?.enrichSignals) {
+            try {
+                signalsToProcess = await agentModule.enrichSignals(signalsToProcess, {
+                    publicClient,
+                    config,
+                    account,
+                    onchainPendingProposal: proposalsByHash.size > 0,
+                    nowMs,
+                    latestBlock,
+                });
+            } catch (error) {
+                console.error('[agent] Failed to enrich signals:', error);
+            }
+        }
+
+        if (signalsToProcess.length > 0) {
+            const decisionOk = await decideOnSignals(signalsToProcess);
             if (decisionOk && dueTimelocks.length > 0) {
                 markTimelocksFired(dueTimelocks);
             }

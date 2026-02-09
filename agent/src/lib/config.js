@@ -51,6 +51,9 @@ function buildConfig() {
                 : process.env.DISPUTE_ENABLED.toLowerCase() !== 'false',
         disputeRetryMs: Number(process.env.DISPUTE_RETRY_MS ?? 60_000),
         agentModule: process.env.AGENT_MODULE,
+        chainlinkPriceFeed: process.env.CHAINLINK_PRICE_FEED
+            ? getAddress(process.env.CHAINLINK_PRICE_FEED)
+            : undefined,
         uniswapV3Factory: process.env.UNISWAP_V3_FACTORY
             ? getAddress(process.env.UNISWAP_V3_FACTORY)
             : undefined,
