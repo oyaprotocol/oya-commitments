@@ -21,6 +21,7 @@ import { executeToolCalls, toolDefinitions } from './lib/tools.js';
 import { makeDeposit, postBondAndDispute, postBondAndPropose } from './lib/tx.js';
 import { extractTimelockTriggers } from './lib/timelock.js';
 import { collectPriceTriggerSignals } from './lib/uniswapV3Price.js';
+import { inferPriceTriggersFromCommitment } from './lib/priceTriggerInference.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -47,6 +48,8 @@ const priceTriggerState = new Map();
 const tokenMetaCache = new Map();
 const poolMetaCache = new Map();
 const resolvedPoolCache = new Map();
+const inferredPriceTriggersCache = new Map();
+let warnedPriceInferenceDisabled = false;
 
 async function loadAgentModule() {
     const agentRef = config.agentModule ?? 'default';
@@ -115,10 +118,10 @@ function markTimelocksFired(triggers) {
     }
 }
 
-function getActivePriceTriggers({ rulesText }) {
+async function getActivePriceTriggers({ rulesText }) {
     if (typeof agentModule?.getPriceTriggers === 'function') {
         try {
-            const parsed = agentModule.getPriceTriggers({
+            const parsed = await agentModule.getPriceTriggers({
                 commitmentText: rulesText,
             });
             if (Array.isArray(parsed)) {
@@ -133,6 +136,36 @@ function getActivePriceTriggers({ rulesText }) {
             );
             return [];
         }
+    }
+
+    if (!rulesText) return [];
+
+    if (inferredPriceTriggersCache.has(rulesText)) {
+        return inferredPriceTriggersCache.get(rulesText);
+    }
+
+    if (!config.openAiApiKey) {
+        if (!warnedPriceInferenceDisabled) {
+            console.warn(
+                '[agent] OPENAI_API_KEY is not set; cannot infer price triggers from commitment text.'
+            );
+            warnedPriceInferenceDisabled = true;
+        }
+        return [];
+    }
+
+    try {
+        const inferred = await inferPriceTriggersFromCommitment({
+            config,
+            commitmentText: rulesText,
+        });
+        inferredPriceTriggersCache.set(rulesText, inferred);
+        return inferred;
+    } catch (error) {
+        console.warn(
+            '[agent] Failed to infer price triggers from commitment text:',
+            error?.message ?? error
+        );
     }
 
     return [];
@@ -281,7 +314,7 @@ async function agentLoop() {
         const rulesText = ogContext?.rules ?? commitmentText ?? '';
         updateTimelockSchedule({ rulesText });
         const dueTimelocks = collectDueTimelocks(nowMs);
-        const activePriceTriggers = getActivePriceTriggers({ rulesText });
+        const activePriceTriggers = await getActivePriceTriggers({ rulesText });
         const duePriceSignals = await collectPriceTriggerSignals({
             publicClient,
             config,
