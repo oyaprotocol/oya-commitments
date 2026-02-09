@@ -15,6 +15,7 @@ function run() {
             comparator: 'lte',
             threshold: 0.03,
             priority: 1,
+            pool: '0x287b0e934ed0439e2a7b1d5f0fc25ea2c24b64f7',
         },
         {
             id: 'first',

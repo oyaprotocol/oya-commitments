@@ -1,25 +1,25 @@
-function pickWinningBranch({ ethPrice, umaPrice, ethThreshold, umaThreshold }) {
+function pickWinningBranch({ ethPrice, uniWethPrice, ethThreshold, uniWethThreshold }) {
     const ethTriggered = ethPrice >= ethThreshold;
-    const umaTriggered = umaPrice <= umaThreshold;
+    const uniTriggered = uniWethPrice <= uniWethThreshold;
 
-    if (ethTriggered && umaTriggered) {
+    if (ethTriggered && uniTriggered) {
         return {
-            winner: 'eth',
-            reason: 'tie-break: ETH wins when both are true in same evaluation cycle',
+            winner: 'weth-to-usdc',
+            reason: 'tie-break: WETH/USDC branch wins when both are true in same evaluation cycle',
         };
     }
 
     if (ethTriggered) {
         return {
-            winner: 'eth',
-            reason: `ETH/USDC ${ethPrice} >= ${ethThreshold}`,
+            winner: 'weth-to-usdc',
+            reason: `WETH/USDC ${ethPrice} >= ${ethThreshold}`,
         };
     }
 
-    if (umaTriggered) {
+    if (uniTriggered) {
         return {
-            winner: 'uma',
-            reason: `UMA/USDC ${umaPrice} <= ${umaThreshold}`,
+            winner: 'weth-to-uni',
+            reason: `UNI/WETH ${uniWethPrice} <= ${uniWethThreshold}`,
         };
     }
 
@@ -32,20 +32,20 @@ function pickWinningBranch({ ethPrice, umaPrice, ethThreshold, umaThreshold }) {
 function run() {
     const scenarios = [
         {
-            name: 'ETH wins',
-            input: { ethPrice: 3250, umaPrice: 2.8, ethThreshold: 3200, umaThreshold: 2.1 },
+            name: 'WETH->USDC wins',
+            input: { ethPrice: 1850, uniWethPrice: 0.05, ethThreshold: 1800, uniWethThreshold: 0.03 },
         },
         {
-            name: 'UMA wins',
-            input: { ethPrice: 3000, umaPrice: 2.0, ethThreshold: 3200, umaThreshold: 2.1 },
+            name: 'WETH->UNI wins',
+            input: { ethPrice: 1700, uniWethPrice: 0.02, ethThreshold: 1800, uniWethThreshold: 0.03 },
         },
         {
-            name: 'Tie -> ETH wins',
-            input: { ethPrice: 3200, umaPrice: 2.1, ethThreshold: 3200, umaThreshold: 2.1 },
+            name: 'Tie -> WETH->USDC wins',
+            input: { ethPrice: 1800, uniWethPrice: 0.03, ethThreshold: 1800, uniWethThreshold: 0.03 },
         },
         {
             name: 'No trigger',
-            input: { ethPrice: 3100, umaPrice: 2.4, ethThreshold: 3200, umaThreshold: 2.1 },
+            input: { ethPrice: 1700, uniWethPrice: 0.04, ethThreshold: 1800, uniWethThreshold: 0.03 },
         },
     ];
 

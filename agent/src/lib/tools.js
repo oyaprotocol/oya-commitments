@@ -364,6 +364,7 @@ async function executeToolCalls({
         console.warn('[agent] Unknown tool call:', call.name);
         outputs.push({
             callId: call.callId,
+            name: call.name,
             output: safeStringify({ status: 'skipped', reason: 'unknown tool' }),
         });
     }
@@ -372,13 +373,21 @@ async function executeToolCalls({
         if (!config.proposeEnabled) {
             console.log('[agent] Built transactions but proposals are disabled; skipping propose.');
         } else {
-            await postBondAndPropose({
+            const result = await postBondAndPropose({
                 publicClient,
                 walletClient,
                 account,
                 config,
                 ogModule: config.ogModule,
                 transactions: builtTransactions,
+            });
+            outputs.push({
+                callId: 'auto_post_bond_and_propose',
+                name: 'post_bond_and_propose',
+                output: safeStringify({
+                    status: 'submitted',
+                    ...result,
+                }),
             });
         }
     }
