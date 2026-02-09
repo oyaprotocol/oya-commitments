@@ -67,15 +67,13 @@ For interactions, swap the env var (e.g., `PROPOSER_PK`, `EXECUTOR_PK`). For sig
 - **Deposits**: `makeDeposit` can send ERC20 or native assets into the commitment.
 - **Optional LLM decisions**: If `OPENAI_API_KEY` is set, the runner will call the OpenAI Responses API with signals and OG context and expect strict-JSON actions (propose/deposit/ignore). Wire your own validation/broadcast of any suggested actions in the agent module.
 - **Timelock triggers**: Parses plain language timelocks in rules (absolute dates or “X minutes after deposit”) and emits `timelock` signals when due.
-- **Price triggers**: The runner can infer Uniswap V3 price triggers directly from plain-language commitment text using the LLM. If a module exports `getPriceTriggers({ commitmentText })`, that explicit parser takes precedence.
+- **Price triggers**: If a module exports `getPriceTriggers({ commitmentText, config })`, the runner evaluates those parsed/inferred Uniswap V3 thresholds and emits `priceTrigger` signals.
 
 All other behavior is intentionally left out. Implement your own agent in `agent-library/agents/<name>/agent.js` to add commitment-specific logic and tool use.
 
 ### Price Trigger Config
 
-Default behavior: infer trigger specs from commitment/rules text via LLM reasoning (requires `OPENAI_API_KEY`).
-
-Optional behavior: export `getPriceTriggers({ commitmentText })` from `agent-library/agents/<name>/agent.js` if you want deterministic module-owned parsing.
+Export `getPriceTriggers({ commitmentText, config })` from `agent-library/agents/<name>/agent.js` when your agent needs price-trigger behavior. This keeps commitment interpretation local to the module.
 
 ### Uniswap Swap Action in `build_og_transactions`
 

@@ -21,7 +21,6 @@ import { executeToolCalls, toolDefinitions } from './lib/tools.js';
 import { makeDeposit, postBondAndDispute, postBondAndPropose } from './lib/tx.js';
 import { extractTimelockTriggers } from './lib/timelock.js';
 import { collectPriceTriggerSignals } from './lib/uniswapV3Price.js';
-import { inferPriceTriggersFromCommitment } from './lib/priceTriggerInference.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -48,8 +47,6 @@ const priceTriggerState = new Map();
 const tokenMetaCache = new Map();
 const poolMetaCache = new Map();
 const resolvedPoolCache = new Map();
-const inferredPriceTriggersCache = new Map();
-let warnedPriceInferenceDisabled = false;
 
 async function loadAgentModule() {
     const agentRef = config.agentModule ?? 'default';
@@ -123,6 +120,7 @@ async function getActivePriceTriggers({ rulesText }) {
         try {
             const parsed = await agentModule.getPriceTriggers({
                 commitmentText: rulesText,
+                config,
             });
             if (Array.isArray(parsed)) {
                 return parsed;
@@ -136,36 +134,6 @@ async function getActivePriceTriggers({ rulesText }) {
             );
             return [];
         }
-    }
-
-    if (!rulesText) return [];
-
-    if (inferredPriceTriggersCache.has(rulesText)) {
-        return inferredPriceTriggersCache.get(rulesText);
-    }
-
-    if (!config.openAiApiKey) {
-        if (!warnedPriceInferenceDisabled) {
-            console.warn(
-                '[agent] OPENAI_API_KEY is not set; cannot infer price triggers from commitment text.'
-            );
-            warnedPriceInferenceDisabled = true;
-        }
-        return [];
-    }
-
-    try {
-        const inferred = await inferPriceTriggersFromCommitment({
-            config,
-            commitmentText: rulesText,
-        });
-        inferredPriceTriggersCache.set(rulesText, inferred);
-        return inferred;
-    } catch (error) {
-        console.warn(
-            '[agent] Failed to infer price triggers from commitment text:',
-            error?.message ?? error
-        );
     }
 
     return [];

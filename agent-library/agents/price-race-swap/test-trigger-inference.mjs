@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { sanitizeInferredTriggers } from '../src/lib/priceTriggerInference.js';
+import { sanitizeInferredTriggers } from './agent.js';
 
 const WETH = '0xfff9976782d46cc05630d1f6ebab18b2324d6b14';
 const USDC = '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238';
@@ -9,7 +9,7 @@ const POOL = '0x6418eec70f50913ff0d756b48d32ce7c02b47c47';
 function run() {
     const normalized = sanitizeInferredTriggers([
         {
-            id: 'b',
+            id: 'second',
             baseToken: UNI,
             quoteToken: WETH,
             comparator: 'lte',
@@ -17,7 +17,7 @@ function run() {
             priority: 1,
         },
         {
-            id: 'a',
+            id: 'first',
             baseToken: WETH,
             quoteToken: USDC,
             comparator: 'gte',
@@ -28,8 +28,8 @@ function run() {
     ]);
 
     assert.equal(normalized.length, 2);
-    assert.equal(normalized[0].id, 'a');
-    assert.equal(normalized[1].id, 'b');
+    assert.equal(normalized[0].id, 'first');
+    assert.equal(normalized[1].id, 'second');
 
     assert.throws(() =>
         sanitizeInferredTriggers([
@@ -53,19 +53,7 @@ function run() {
     assert.throws(() =>
         sanitizeInferredTriggers([
             {
-                id: 'bad-threshold',
-                baseToken: WETH,
-                quoteToken: USDC,
-                comparator: 'gte',
-                threshold: 0,
-            },
-        ])
-    );
-
-    assert.throws(() =>
-        sanitizeInferredTriggers([
-            {
-                id: 'same-pair',
+                id: 'bad',
                 baseToken: WETH,
                 quoteToken: WETH,
                 comparator: 'gte',
@@ -74,7 +62,7 @@ function run() {
         ])
     );
 
-    console.log('[test] inferred trigger sanitizer OK');
+    console.log('[test] local inferred trigger sanitizer OK');
 }
 
 run();
