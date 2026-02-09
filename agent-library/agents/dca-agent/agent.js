@@ -3,6 +3,22 @@
 let lastDcaTimestamp = Date.now();
 const DCA_INTERVAL_SECONDS = 200;
 const MAX_CYCLES = 2;
+const DCA_POLICY = Object.freeze({
+    wethAddress: '0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9',
+    usdcAddress: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238',
+    usdcDecimals: 6n,
+    minSafeUsdcWei: 100000n, // 0.10 USDC (6 decimals)
+    maxCycles: MAX_CYCLES,
+    proposalConfirmTimeoutMs: 60000,
+});
+let dcaState = {
+    depositConfirmed: false,
+    proposalBuilt: false,
+    proposalPosted: false,
+    cyclesCompleted: 0,
+    proposalSubmitHash: null,
+    proposalSubmitMs: null,
+};
 
 function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
     const mode = proposeEnabled && disputeEnabled
@@ -63,4 +79,98 @@ function markDcaExecuted() {
     lastDcaTimestamp = Date.now();
 }
 
-export { getSystemPrompt, augmentSignals, markDcaExecuted };
+function getDcaPolicy() {
+    return DCA_POLICY;
+}
+
+function getDcaState() {
+    return { ...dcaState };
+}
+
+function getPendingProposal(onchainPending) {
+    return Boolean(onchainPending || dcaState.proposalPosted);
+}
+
+function onToolOutput({ name, parsedOutput }) {
+    if (!name || !parsedOutput || parsedOutput.status === 'error') return;
+
+    if (name === 'make_deposit' && parsedOutput.status === 'confirmed') {
+        dcaState.depositConfirmed = true;
+        dcaState.proposalBuilt = false;
+        dcaState.proposalPosted = false;
+        return;
+    }
+
+    if (name === 'build_og_transactions' && parsedOutput.status === 'ok') {
+        dcaState.proposalBuilt = true;
+        return;
+    }
+
+    if (name === 'post_bond_and_propose' && parsedOutput.status === 'submitted') {
+        dcaState.proposalPosted = true;
+        dcaState.depositConfirmed = false;
+        dcaState.proposalBuilt = false;
+        dcaState.proposalSubmitHash = parsedOutput.proposalHash ?? null;
+        dcaState.proposalSubmitMs = Date.now();
+    }
+}
+
+function onProposalEvents({ executedProposalCount = 0, deletedProposalCount = 0 }) {
+    if (executedProposalCount > 0) {
+        dcaState.proposalPosted = false;
+        dcaState.proposalBuilt = false;
+        dcaState.depositConfirmed = false;
+        dcaState.proposalSubmitHash = null;
+        dcaState.proposalSubmitMs = null;
+        dcaState.cyclesCompleted = Math.min(
+            DCA_POLICY.maxCycles,
+            dcaState.cyclesCompleted + executedProposalCount
+        );
+        markDcaExecuted();
+    }
+
+    if (deletedProposalCount > 0) {
+        dcaState.proposalPosted = false;
+        dcaState.proposalBuilt = false;
+        dcaState.depositConfirmed = false;
+        dcaState.proposalSubmitHash = null;
+        dcaState.proposalSubmitMs = null;
+    }
+}
+
+async function reconcileProposalSubmission({ publicClient }) {
+    if (!dcaState.proposalPosted || !dcaState.proposalSubmitHash || !dcaState.proposalSubmitMs) {
+        return;
+    }
+
+    try {
+        const receipt = await publicClient.getTransactionReceipt({
+            hash: dcaState.proposalSubmitHash,
+        });
+        if (receipt?.status === 0n || receipt?.status === 'reverted') {
+            dcaState.proposalPosted = false;
+            dcaState.proposalBuilt = false;
+            dcaState.proposalSubmitHash = null;
+            dcaState.proposalSubmitMs = null;
+        }
+    } catch (error) {
+        if (Date.now() - dcaState.proposalSubmitMs > DCA_POLICY.proposalConfirmTimeoutMs) {
+            dcaState.proposalPosted = false;
+            dcaState.proposalBuilt = false;
+            dcaState.proposalSubmitHash = null;
+            dcaState.proposalSubmitMs = null;
+        }
+    }
+}
+
+export {
+    getSystemPrompt,
+    augmentSignals,
+    markDcaExecuted,
+    getDcaPolicy,
+    getDcaState,
+    getPendingProposal,
+    onToolOutput,
+    onProposalEvents,
+    reconcileProposalSubmission,
+};
