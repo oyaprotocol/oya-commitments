@@ -240,8 +240,6 @@ async function executeToolCalls({
                 output: safeStringify({
                     status: 'confirmed',
                     transactionHash: String(txHash),
-                    next_step:
-                        'Do not respond to the user with an update yet. Call build_og_transactions then use the output from build_og_transactions to call post_bond_and_propose.',
                 }),
             });
             continue;
