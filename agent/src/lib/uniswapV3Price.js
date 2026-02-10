@@ -189,6 +189,13 @@ async function collectPriceTriggerSignals({
     const evaluations = [];
 
     for (const trigger of triggers) {
+        const triggerId = trigger && typeof trigger === 'object' && trigger.id !== undefined
+            ? String(trigger.id)
+            : 'unknown-trigger';
+        if (!trigger || typeof trigger !== 'object') {
+            console.warn(`[agent] Price trigger ${triggerId} skipped: malformed trigger entry.`);
+            continue;
+        }
         try {
             const baseToken = getAddress(trigger.baseToken);
             const quoteToken = getAddress(trigger.quoteToken);
@@ -271,7 +278,7 @@ async function collectPriceTriggerSignals({
                 triggerTimestampMs: nowMs,
             });
         } catch (error) {
-            console.warn(`[agent] Price trigger ${trigger.id} skipped:`, error?.message ?? error);
+            console.warn(`[agent] Price trigger ${triggerId} skipped:`, error?.message ?? error);
             continue;
         }
     }
