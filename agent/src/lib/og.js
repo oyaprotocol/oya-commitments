@@ -38,7 +38,7 @@ async function loadOptimisticGovernorDefaults({ publicClient, ogModule, trackedA
         functionName: 'collateral',
     });
 
-    trackedAssets.add(getAddress(collateral));
+    trackedAssets.add(getAddress(collateral).toLowerCase());
 }
 
 async function loadOgContext({ publicClient, ogModule }) {

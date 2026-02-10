@@ -1,0 +1,260 @@
+import assert from 'node:assert/strict';
+import {
+    getSingleFireState,
+    onProposalEvents,
+    onToolOutput,
+    reconcileProposalSubmission,
+    resetSingleFireState,
+    validateToolCalls,
+} from './agent.js';
+
+const WETH = '0x7b79995e5f793a07bc00c21412e50ecae098e7f9';
+const USDC = '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238';
+const UNI = '0x1f9840a85d5af5bf1d1762f925bdaddc4201f984';
+const ROUTER = '0x3bfa4769fb09eefc5a80d6e87c3b9c650f7ae48e';
+const QUOTER = '0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3';
+const POOL = '0x6418eec70f50913ff0d756b48d32ce7c02b47c47';
+
+async function run() {
+    process.env.PRICE_RACE_SWAP_STATE_FILE = '/tmp/price-race-swap-state-test.json';
+    resetSingleFireState();
+
+    const toolCalls = [
+        {
+            name: 'build_og_transactions',
+            callId: '1',
+            parsedArguments: {
+                actions: [
+                    {
+                        kind: 'uniswap_v3_exact_input_single',
+                        router: ROUTER,
+                        tokenIn: WETH,
+                        tokenOut: USDC,
+                        fee: 3000,
+                        recipient: '0x1234000000000000000000000000000000000000',
+                        amountInWei: '1',
+                        amountOutMinWei: '0',
+                    },
+                ],
+            },
+        },
+    ];
+
+    const signals = [
+        {
+            kind: 'priceTrigger',
+            triggerId: 't1',
+            priority: 1,
+            pool: POOL,
+            poolFee: 3000,
+            baseToken: WETH,
+            quoteToken: USDC,
+        },
+        {
+            kind: 'erc20BalanceSnapshot',
+            asset: WETH,
+            amount: '30000',
+        },
+    ];
+
+    const ok = await validateToolCalls({
+        toolCalls,
+        signals,
+        commitmentText: 'x',
+        commitmentSafe: '0x1234000000000000000000000000000000000000',
+        publicClient: {
+            getChainId: async () => 11155111,
+            simulateContract: async ({ address }) => {
+                assert.equal(address.toLowerCase(), QUOTER.toLowerCase());
+                return { result: [1000000n, 0n, 0, 0n] };
+            },
+        },
+        config: {},
+    });
+    assert.equal(ok.length, 1);
+    assert.equal(ok[0].parsedArguments.actions[0].amountInWei, '30000');
+    assert.equal(ok[0].parsedArguments.actions[0].amountOutMinWei, '995000');
+
+    const noSnapshot = await validateToolCalls({
+        toolCalls,
+        signals: [signals[0]],
+        commitmentText: 'x-fallback',
+        commitmentSafe: '0x1234000000000000000000000000000000000000',
+        publicClient: {
+            getChainId: async () => 11155111,
+            readContract: async ({ functionName, address }) => {
+                assert.equal(functionName, 'balanceOf');
+                assert.equal(address.toLowerCase(), WETH);
+                return 30000n;
+            },
+            simulateContract: async ({ address }) => {
+                assert.equal(address.toLowerCase(), QUOTER.toLowerCase());
+                return { result: [1000000n, 0n, 0, 0n] };
+            },
+        },
+        config: {},
+    });
+    assert.equal(noSnapshot.length, 1);
+    assert.equal(noSnapshot[0].parsedArguments.actions[0].amountInWei, '30000');
+
+    const rewritten = await validateToolCalls({
+        toolCalls: [
+            {
+                ...toolCalls[0],
+                parsedArguments: {
+                    actions: [
+                        {
+                            ...toolCalls[0].parsedArguments.actions[0],
+                            router: '0x0000000000000000000000000000000000000001',
+                        },
+                    ],
+                },
+            },
+        ],
+        signals,
+        commitmentText: 'y',
+        commitmentSafe: '0x1234000000000000000000000000000000000000',
+        publicClient: {
+            getChainId: async () => 11155111,
+            simulateContract: async ({ address }) => {
+                assert.equal(address.toLowerCase(), QUOTER.toLowerCase());
+                return { result: [500000n, 0n, 0, 0n] };
+            },
+        },
+        config: {},
+    });
+    assert.equal(rewritten.length, 1);
+    assert.equal(rewritten[0].parsedArguments.actions[0].router, ROUTER);
+    assert.equal(rewritten[0].parsedArguments.actions[0].amountOutMinWei, '497500');
+    assert.equal(rewritten[0].parsedArguments.actions[0].operation, 0);
+
+    await assert.rejects(
+        () =>
+            validateToolCalls({
+                toolCalls: [
+                    {
+                        ...toolCalls[0],
+                        parsedArguments: {
+                            actions: [
+                                {
+                                    ...toolCalls[0].parsedArguments.actions[0],
+                                    operation: 1,
+                                },
+                            ],
+                        },
+                    },
+                ],
+                signals,
+                commitmentText: 'op-check',
+                commitmentSafe: '0x1234000000000000000000000000000000000000',
+                publicClient: {
+                    getChainId: async () => 11155111,
+                    simulateContract: async () => ({ result: [1000000n, 0n, 0, 0n] }),
+                },
+                config: {},
+            }),
+        /operation must be 0/
+    );
+
+    await assert.rejects(
+        () =>
+            validateToolCalls({
+                toolCalls: [
+                    {
+                        ...toolCalls[0],
+                        parsedArguments: {
+                            actions: [
+                                {
+                                    ...toolCalls[0].parsedArguments.actions[0],
+                                    tokenOut: UNI,
+                                    fee: 500,
+                                },
+                            ],
+                        },
+                    },
+                ],
+                signals: [
+                    ...signals,
+                    {
+                        kind: 'priceTrigger',
+                        triggerId: 't2',
+                        priority: 2,
+                        pool: '0x287b0e934ed0439e2a7b1d5f0fc25ea2c24b64f7',
+                        poolFee: 500,
+                        baseToken: UNI,
+                        quoteToken: WETH,
+                    },
+                ],
+                commitmentText: 'winner-check',
+                commitmentSafe: '0x1234000000000000000000000000000000000000',
+                publicClient: {
+                    getChainId: async () => 11155111,
+                    simulateContract: async () => ({ result: [1000000n, 0n, 0, 0n] }),
+                },
+                config: {},
+            }),
+        /must match the winning priceTrigger/
+    );
+
+    await onToolOutput({
+        name: 'post_bond_and_propose',
+        parsedOutput: {
+            status: 'submitted',
+            submissionError: { message: 'failed' },
+        },
+    });
+    assert.equal(getSingleFireState().proposalSubmitted, false);
+
+    await onToolOutput({
+        name: 'post_bond_and_propose',
+        parsedOutput: {
+            status: 'submitted',
+            proposalHash: '0x1234000000000000000000000000000000000000000000000000000000000000',
+        },
+    });
+
+    await assert.rejects(
+        () =>
+            validateToolCalls({
+                toolCalls,
+                signals,
+                commitmentText: 'z',
+                commitmentSafe: '0x1234000000000000000000000000000000000000',
+                publicClient: {
+                    getChainId: async () => 11155111,
+                    simulateContract: async () => ({ result: [1000000n, 0n, 0, 0n] }),
+                },
+                config: {},
+            }),
+        /Single-fire lock engaged/
+    );
+
+    resetSingleFireState();
+    process.env.OG_MODULE = '0x1234000000000000000000000000000000000000';
+    await reconcileProposalSubmission({
+        publicClient: {
+            getBlockNumber: async () => 100n,
+            getLogs: async () => [
+                {
+                    args: {
+                        proposalHash:
+                            '0xabcd000000000000000000000000000000000000000000000000000000000000',
+                    },
+                },
+            ],
+        },
+    });
+    assert.equal(getSingleFireState().proposalSubmitted, true);
+
+    resetSingleFireState();
+    onProposalEvents({ executedProposalCount: 1 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(getSingleFireState().proposalSubmitted, true);
+
+    console.log('[test] allowlist validation OK');
+}
+
+run().catch((error) => {
+    console.error(error);
+    process.exit(1);
+});
