@@ -75,8 +75,11 @@ async function collectAssetBalanceChangeSignals({
         const previous = nextAssetBalances.get(asset);
         nextAssetBalances.set(asset, current);
 
-        const hasChanged = previous === undefined || current !== previous;
-        const shouldEmit = emitBalanceSnapshotsEveryPoll ? current > 0n : hasChanged;
+        const hasChanged = previous !== undefined && current !== previous;
+        const isFirstObservationNonZero = previous === undefined && current > 0n;
+        const shouldEmit = emitBalanceSnapshotsEveryPoll
+            ? current > 0n
+            : hasChanged || isFirstObservationNonZero;
         if (shouldEmit) {
             signals.push({
                 kind: 'erc20BalanceSnapshot',
