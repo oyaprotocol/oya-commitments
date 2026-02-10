@@ -1,4 +1,4 @@
-import { erc20Abi, getAddress, hexToString, zeroAddress } from 'viem';
+import { erc20Abi, getAddress, hexToString, isAddressEqual, zeroAddress } from 'viem';
 import {
     optimisticGovernorAbi,
     proposalDeletedEvent,
@@ -19,6 +19,9 @@ async function primeBalances({ publicClient, commitmentSafe, watchNativeBalance,
 async function primeAssetBalanceSignals({ publicClient, trackedAssets, commitmentSafe, blockNumber }) {
     const balances = await Promise.all(
         Array.from(trackedAssets).map(async (asset) => {
+            if (isAddressEqual(asset, zeroAddress)) {
+                return { asset, balance: 0n };
+            }
             const balance = await publicClient.readContract({
                 address: asset,
                 abi: erc20Abi,
@@ -44,6 +47,47 @@ async function primeAssetBalanceSignals({ publicClient, trackedAssets, commitmen
         }));
 }
 
+async function collectAssetBalanceChangeSignals({
+    publicClient,
+    trackedAssets,
+    commitmentSafe,
+    blockNumber,
+    lastAssetBalances,
+}) {
+    const nextAssetBalances = new Map(lastAssetBalances ?? []);
+    const signals = [];
+
+    for (const asset of trackedAssets) {
+        if (isAddressEqual(asset, zeroAddress)) {
+            continue;
+        }
+        const current = await publicClient.readContract({
+            address: asset,
+            abi: erc20Abi,
+            functionName: 'balanceOf',
+            args: [commitmentSafe],
+            blockNumber,
+        });
+        const previous = nextAssetBalances.get(asset);
+        nextAssetBalances.set(asset, current);
+
+        if (current > 0n && (previous === undefined || current !== previous)) {
+            signals.push({
+                kind: 'erc20BalanceSnapshot',
+                asset,
+                from: 'snapshot',
+                amount: current,
+                blockNumber,
+                transactionHash: undefined,
+                logIndex: undefined,
+                id: `snapshot:${asset}:${blockNumber.toString()}`,
+            });
+        }
+    }
+
+    return { signals, nextAssetBalances };
+}
+
 async function pollCommitmentChanges({
     publicClient,
     trackedAssets,
@@ -51,6 +95,7 @@ async function pollCommitmentChanges({
     watchNativeBalance,
     lastCheckedBlock,
     lastNativeBalance,
+    lastAssetBalances,
 }) {
     const latestBlock = await publicClient.getBlockNumber();
     if (lastCheckedBlock === undefined) {
@@ -77,11 +122,16 @@ async function pollCommitmentChanges({
             deposits: initialAssetSignals,
             lastCheckedBlock: latestBlock,
             lastNativeBalance: nextNativeBalance,
+            lastAssetBalances:
+                lastAssetBalances ??
+                new Map(
+                    initialAssetSignals.map((signal) => [signal.asset, BigInt(signal.amount)])
+                ),
         };
     }
 
     if (latestBlock <= lastCheckedBlock) {
-        return { deposits: [], lastCheckedBlock, lastNativeBalance };
+        return { deposits: [], lastCheckedBlock, lastNativeBalance, lastAssetBalances };
     }
 
     const fromBlock = lastCheckedBlock + 1n;
@@ -145,7 +195,21 @@ async function pollCommitmentChanges({
         nextNativeBalance = nativeBalance;
     }
 
-    return { deposits, lastCheckedBlock: toBlock, lastNativeBalance: nextNativeBalance };
+    const { signals: balanceSignals, nextAssetBalances } = await collectAssetBalanceChangeSignals({
+        publicClient,
+        trackedAssets,
+        commitmentSafe,
+        blockNumber: toBlock,
+        lastAssetBalances,
+    });
+    deposits.push(...balanceSignals);
+
+    return {
+        deposits,
+        lastCheckedBlock: toBlock,
+        lastNativeBalance: nextNativeBalance,
+        lastAssetBalances: nextAssetBalances,
+    };
 }
 
 async function pollProposalChanges({ publicClient, ogModule, lastProposalCheckedBlock, proposalsByHash }) {

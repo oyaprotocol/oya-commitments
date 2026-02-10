@@ -38,6 +38,7 @@ const trackedAssets = new Set(config.watchAssets);
 let lastCheckedBlock = config.startBlock;
 let lastProposalCheckedBlock = config.startBlock;
 let lastNativeBalance;
+let lastAssetBalances = new Map();
 let ogContext;
 const proposalsByHash = new Map();
 const depositHistory = [];
@@ -283,7 +284,12 @@ async function agentLoop() {
         const latestBlockData = await publicClient.getBlock({ blockNumber: latestBlock });
         const nowMs = Number(latestBlockData.timestamp) * 1000;
 
-        const { deposits, lastCheckedBlock: nextCheckedBlock, lastNativeBalance: nextNative } =
+        const {
+            deposits,
+            lastCheckedBlock: nextCheckedBlock,
+            lastNativeBalance: nextNative,
+            lastAssetBalances: nextAssetBalances,
+        } =
             await pollCommitmentChanges({
                 publicClient,
                 trackedAssets,
@@ -291,9 +297,11 @@ async function agentLoop() {
                 watchNativeBalance: config.watchNativeBalance,
                 lastCheckedBlock,
                 lastNativeBalance,
+                lastAssetBalances,
             });
         lastCheckedBlock = nextCheckedBlock;
         lastNativeBalance = nextNative;
+        lastAssetBalances = nextAssetBalances ?? lastAssetBalances;
 
         for (const deposit of deposits) {
             const timestampMs = await getBlockTimestampMs(deposit.blockNumber);
