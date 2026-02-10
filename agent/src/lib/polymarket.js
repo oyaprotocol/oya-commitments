@@ -53,7 +53,7 @@ async function clobRequest({
 }) {
     const host = normalizeClobHost(config.polymarketClobHost);
     const bodyText = body === undefined ? '' : JSON.stringify(body);
-    const timestamp = Date.now();
+    const timestamp = Math.floor(Date.now() / 1000);
     const headers = {
         'Content-Type': 'application/json',
         ...buildClobAuthHeaders({
