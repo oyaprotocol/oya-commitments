@@ -157,7 +157,8 @@ function sanitizeInferredTriggers(rawTriggers) {
             comparator: normalizeComparator(trigger.comparator),
             threshold,
             priority,
-            emitOnce: trigger.emitOnce === undefined ? true : Boolean(trigger.emitOnce),
+            // Keep price conditions level-triggered so a later deposit can still act.
+            emitOnce: trigger.emitOnce === undefined ? false : Boolean(trigger.emitOnce),
         };
 
         if (trigger.pool) {
