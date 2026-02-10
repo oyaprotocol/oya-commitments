@@ -189,93 +189,91 @@ async function collectPriceTriggerSignals({
     const evaluations = [];
 
     for (const trigger of triggers) {
-        const baseToken = getAddress(trigger.baseToken);
-        const quoteToken = getAddress(trigger.quoteToken);
-
-        let resolved;
         try {
-            resolved = await resolvePoolForTrigger({
+            const baseToken = getAddress(trigger.baseToken);
+            const quoteToken = getAddress(trigger.quoteToken);
+
+            const resolved = await resolvePoolForTrigger({
                 publicClient,
                 trigger,
                 config,
                 resolvedPoolCache,
             });
+            const pool = resolved.pool;
+
+            const poolMeta = await loadPoolMeta({
+                publicClient,
+                pool,
+                tokenMetaCache,
+                poolMetaCache,
+            });
+
+            const baseIsToken0 = poolMeta.token0 === baseToken && poolMeta.token1 === quoteToken;
+            const baseIsToken1 = poolMeta.token1 === baseToken && poolMeta.token0 === quoteToken;
+
+            if (!baseIsToken0 && !baseIsToken1) {
+                console.warn(
+                    `[agent] Price trigger ${trigger.id} skipped: pool ${pool} does not match base/quote tokens.`
+                );
+                continue;
+            }
+
+            const slot0 = await publicClient.readContract({
+                address: pool,
+                abi: uniswapV3PoolAbi,
+                functionName: 'slot0',
+            });
+
+            const token0Meta = tokenMetaCache.get(poolMeta.token0);
+            const token1Meta = tokenMetaCache.get(poolMeta.token1);
+
+            const price = quotePerBaseFromSqrtPriceX96({
+                sqrtPriceX96: slot0[0],
+                token0Decimals: token0Meta.decimals,
+                token1Decimals: token1Meta.decimals,
+                baseIsToken0,
+            });
+
+            const matches = evaluateComparator({
+                comparator: trigger.comparator,
+                price,
+                threshold: trigger.threshold,
+            });
+
+            const prior = triggerState.get(trigger.id) ?? {
+                fired: false,
+                lastMatched: false,
+            };
+
+            const shouldEmit = matches && (!prior.lastMatched || (!trigger.emitOnce && !prior.fired));
+
+            triggerState.set(trigger.id, {
+                fired: prior.fired || (matches && trigger.emitOnce),
+                lastMatched: matches,
+            });
+
+            if (!shouldEmit || (trigger.emitOnce && prior.fired)) {
+                continue;
+            }
+
+            evaluations.push({
+                kind: 'priceTrigger',
+                triggerId: trigger.id,
+                triggerLabel: trigger.label,
+                priority: trigger.priority ?? 0,
+                pool,
+                poolFee: poolMeta.fee,
+                baseToken,
+                quoteToken,
+                comparator: trigger.comparator,
+                threshold: trigger.threshold,
+                observedPrice: price,
+                triggerTimestampMs: nowMs,
+            });
         } catch (error) {
             console.warn(`[agent] Price trigger ${trigger.id} skipped:`, error?.message ?? error);
             continue;
         }
-
-        const pool = resolved.pool;
-
-        const poolMeta = await loadPoolMeta({
-            publicClient,
-            pool,
-            tokenMetaCache,
-            poolMetaCache,
-        });
-
-        const baseIsToken0 = poolMeta.token0 === baseToken && poolMeta.token1 === quoteToken;
-        const baseIsToken1 = poolMeta.token1 === baseToken && poolMeta.token0 === quoteToken;
-
-        if (!baseIsToken0 && !baseIsToken1) {
-            console.warn(
-                `[agent] Price trigger ${trigger.id} skipped: pool ${pool} does not match base/quote tokens.`
-            );
-            continue;
-        }
-
-        const slot0 = await publicClient.readContract({
-            address: pool,
-            abi: uniswapV3PoolAbi,
-            functionName: 'slot0',
-        });
-
-        const token0Meta = tokenMetaCache.get(poolMeta.token0);
-        const token1Meta = tokenMetaCache.get(poolMeta.token1);
-
-        const price = quotePerBaseFromSqrtPriceX96({
-            sqrtPriceX96: slot0[0],
-            token0Decimals: token0Meta.decimals,
-            token1Decimals: token1Meta.decimals,
-            baseIsToken0,
-        });
-
-        const matches = evaluateComparator({
-            comparator: trigger.comparator,
-            price,
-            threshold: trigger.threshold,
-        });
-
-        const prior = triggerState.get(trigger.id) ?? {
-            fired: false,
-            lastMatched: false,
-        };
-
-        const shouldEmit = matches && (!prior.lastMatched || (!trigger.emitOnce && !prior.fired));
-
-        triggerState.set(trigger.id, {
-            fired: prior.fired || (matches && trigger.emitOnce),
-            lastMatched: matches,
-        });
-
-        if (!shouldEmit || (trigger.emitOnce && prior.fired)) {
-            continue;
-        }
-
-        evaluations.push({
-            kind: 'priceTrigger',
-            triggerId: trigger.id,
-            triggerLabel: trigger.label,
-            priority: trigger.priority ?? 0,
-            pool,
-            poolFee: poolMeta.fee,
-            baseToken,
-            quoteToken,
-            comparator: trigger.comparator,
-            threshold: trigger.threshold,
-            observedPrice: price,
-            triggerTimestampMs: nowMs,
-        });
     }
 
     evaluations.sort((a, b) => {
