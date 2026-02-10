@@ -144,10 +144,13 @@ async function pollCommitmentChanges({
         const currentTo =
             currentFrom + maxRange - 1n > toBlock ? toBlock : currentFrom + maxRange - 1n;
 
-        for (const asset of trackedAssets) {
-            const logs = await publicClient.getLogs({
-                address: asset,
-                event: transferEvent,
+    for (const asset of trackedAssets) {
+        if (isAddressEqual(asset, zeroAddress)) {
+            continue;
+        }
+        const logs = await publicClient.getLogs({
+            address: asset,
+            event: transferEvent,
                 args: { to: commitmentSafe },
                 fromBlock: currentFrom,
                 toBlock: currentTo,

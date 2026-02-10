@@ -34,7 +34,7 @@ const publicClient = createPublicClient({ transport: http(config.rpcUrl) });
 const { account, walletClient } = await createSignerClient({ rpcUrl: config.rpcUrl });
 const agentAddress = account.address;
 
-const trackedAssets = new Set(config.watchAssets);
+const trackedAssets = new Set(config.watchAssets.map((asset) => String(asset).toLowerCase()));
 let lastCheckedBlock = config.startBlock;
 let lastProposalCheckedBlock = config.startBlock;
 let lastNativeBalance;
@@ -276,8 +276,8 @@ async function agentLoop() {
         const triggerSeedRulesText = ogContext?.rules ?? commitmentText ?? '';
         const triggerSeed = await getActivePriceTriggers({ rulesText: triggerSeedRulesText });
         for (const trigger of triggerSeed) {
-            if (trigger?.baseToken) trackedAssets.add(trigger.baseToken);
-            if (trigger?.quoteToken) trackedAssets.add(trigger.quoteToken);
+            if (trigger?.baseToken) trackedAssets.add(String(trigger.baseToken).toLowerCase());
+            if (trigger?.quoteToken) trackedAssets.add(String(trigger.quoteToken).toLowerCase());
         }
 
         const latestBlock = await publicClient.getBlockNumber();
