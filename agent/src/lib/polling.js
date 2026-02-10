@@ -1,4 +1,4 @@
-import { getAddress, hexToString, zeroAddress } from 'viem';
+import { erc20Abi, getAddress, hexToString, isAddressEqual, zeroAddress } from 'viem';
 import {
     optimisticGovernorAbi,
     proposalDeletedEvent,
@@ -16,6 +16,87 @@ async function primeBalances({ publicClient, commitmentSafe, watchNativeBalance,
     });
 }
 
+async function primeAssetBalanceSignals({ publicClient, trackedAssets, commitmentSafe, blockNumber }) {
+    const balances = await Promise.all(
+        Array.from(trackedAssets).map(async (asset) => {
+            if (isAddressEqual(asset, zeroAddress)) {
+                return { asset, balance: 0n };
+            }
+            const balance = await publicClient.readContract({
+                address: asset,
+                abi: erc20Abi,
+                functionName: 'balanceOf',
+                args: [commitmentSafe],
+                blockNumber,
+            });
+            return { asset, balance };
+        })
+    );
+
+    const signals = balances
+        .filter((item) => item.balance > 0n)
+        .map((item) => ({
+            kind: 'erc20BalanceSnapshot',
+            asset: item.asset,
+            from: 'snapshot',
+            amount: item.balance,
+            blockNumber,
+            transactionHash: undefined,
+            logIndex: undefined,
+            id: `snapshot:${item.asset}:${blockNumber.toString()}`,
+        }));
+
+    const balanceMap = new Map(balances.map((item) => [item.asset, item.balance]));
+    return { signals, balanceMap };
+}
+
+async function collectAssetBalanceChangeSignals({
+    publicClient,
+    trackedAssets,
+    commitmentSafe,
+    blockNumber,
+    lastAssetBalances,
+    emitBalanceSnapshotsEveryPoll = false,
+}) {
+    const nextAssetBalances = new Map(lastAssetBalances ?? []);
+    const signals = [];
+
+    for (const asset of trackedAssets) {
+        if (isAddressEqual(asset, zeroAddress)) {
+            continue;
+        }
+        const current = await publicClient.readContract({
+            address: asset,
+            abi: erc20Abi,
+            functionName: 'balanceOf',
+            args: [commitmentSafe],
+            blockNumber,
+        });
+        const previous = nextAssetBalances.get(asset);
+        nextAssetBalances.set(asset, current);
+
+        const hasChanged = previous !== undefined && current !== previous;
+        const isFirstObservationNonZero = previous === undefined && current > 0n;
+        const shouldEmit = emitBalanceSnapshotsEveryPoll
+            ? current > 0n
+            : hasChanged || isFirstObservationNonZero;
+        if (shouldEmit) {
+            signals.push({
+                kind: 'erc20BalanceSnapshot',
+                asset,
+                from: 'snapshot',
+                amount: current,
+                blockNumber,
+                transactionHash: undefined,
+                logIndex: undefined,
+                id: `snapshot:${asset}:${blockNumber.toString()}`,
+            });
+        }
+    }
+
+    return { signals, nextAssetBalances };
+}
+
 async function pollCommitmentChanges({
     publicClient,
     trackedAssets,
@@ -23,6 +104,8 @@ async function pollCommitmentChanges({
     watchNativeBalance,
     lastCheckedBlock,
     lastNativeBalance,
+    lastAssetBalances,
+    emitBalanceSnapshotsEveryPoll = false,
 }) {
     const latestBlock = await publicClient.getBlockNumber();
     if (lastCheckedBlock === undefined) {
@@ -32,15 +115,38 @@ async function pollCommitmentChanges({
             watchNativeBalance,
             blockNumber: latestBlock,
         });
+        const { signals: initialAssetSignals, balanceMap: initialAssetBalanceMap } =
+            await primeAssetBalanceSignals({
+            publicClient,
+            trackedAssets,
+            commitmentSafe,
+            blockNumber: latestBlock,
+            });
+        if (initialAssetSignals.length > 0) {
+            console.log(
+                `[agent] Startup balance snapshot signals: ${initialAssetSignals
+                    .map((s) => `${s.asset}:${s.amount.toString()}`)
+                    .join(', ')}`
+            );
+        }
         return {
             deposits: [],
+            balanceSnapshots: initialAssetSignals,
             lastCheckedBlock: latestBlock,
             lastNativeBalance: nextNativeBalance,
+            lastAssetBalances:
+                lastAssetBalances ?? initialAssetBalanceMap,
         };
     }
 
     if (latestBlock <= lastCheckedBlock) {
-        return { deposits: [], lastCheckedBlock, lastNativeBalance };
+        return {
+            deposits: [],
+            balanceSnapshots: [],
+            lastCheckedBlock,
+            lastNativeBalance,
+            lastAssetBalances,
+        };
     }
 
     const fromBlock = lastCheckedBlock + 1n;
@@ -53,10 +159,13 @@ async function pollCommitmentChanges({
         const currentTo =
             currentFrom + maxRange - 1n > toBlock ? toBlock : currentFrom + maxRange - 1n;
 
-        for (const asset of trackedAssets) {
-            const logs = await publicClient.getLogs({
-                address: asset,
-                event: transferEvent,
+    for (const asset of trackedAssets) {
+        if (isAddressEqual(asset, zeroAddress)) {
+            continue;
+        }
+        const logs = await publicClient.getLogs({
+            address: asset,
+            event: transferEvent,
                 args: { to: commitmentSafe },
                 fromBlock: currentFrom,
                 toBlock: currentTo,
@@ -104,7 +213,22 @@ async function pollCommitmentChanges({
         nextNativeBalance = nativeBalance;
     }
 
-    return { deposits, lastCheckedBlock: toBlock, lastNativeBalance: nextNativeBalance };
+    const { signals: balanceSnapshots, nextAssetBalances } = await collectAssetBalanceChangeSignals({
+        publicClient,
+        trackedAssets,
+        commitmentSafe,
+        blockNumber: toBlock,
+        lastAssetBalances,
+        emitBalanceSnapshotsEveryPoll,
+    });
+
+    return {
+        deposits,
+        balanceSnapshots,
+        lastCheckedBlock: toBlock,
+        lastNativeBalance: nextNativeBalance,
+        lastAssetBalances: nextAssetBalances,
+    };
 }
 
 async function pollProposalChanges({ publicClient, ogModule, lastProposalCheckedBlock, proposalsByHash }) {
@@ -285,7 +409,10 @@ async function executeReadyProposals({
                 account: account.address,
             });
         } catch (error) {
-            console.warn('[agent] Proposal not executable yet:', proposal.proposalHash);
+            const reason = error?.shortMessage ?? error?.message ?? String(error);
+            console.warn(
+                `[agent] Proposal execution simulation failed for ${proposal.proposalHash}: ${reason}`
+            );
             continue;
         }
 

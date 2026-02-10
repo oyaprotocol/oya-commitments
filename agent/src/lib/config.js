@@ -1,6 +1,19 @@
 import { getAddress } from 'viem';
 import { mustGetEnv, parseAddressList } from './utils.js';
 
+function parseFeeTierList(raw) {
+    if (!raw) return [500, 3000, 10000];
+    const values = raw
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .map((value) => Number(value));
+    if (values.some((value) => !Number.isInteger(value) || value <= 0)) {
+        throw new Error('UNISWAP_V3_FEE_TIERS must be comma-separated positive integers');
+    }
+    return values;
+}
+
 function buildConfig() {
     return {
         rpcUrl: mustGetEnv('RPC_URL'),
@@ -23,7 +36,10 @@ function buildConfig() {
         openAiApiKey: process.env.OPENAI_API_KEY,
         openAiModel: process.env.OPENAI_MODEL ?? 'gpt-4.1-mini',
         openAiBaseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
-        allowProposeOnSimulationFail: true,
+        allowProposeOnSimulationFail:
+            process.env.ALLOW_PROPOSE_ON_SIMULATION_FAIL === undefined
+                ? false
+                : process.env.ALLOW_PROPOSE_ON_SIMULATION_FAIL.toLowerCase() === 'true',
         proposeGasLimit: process.env.PROPOSE_GAS_LIMIT
             ? BigInt(process.env.PROPOSE_GAS_LIMIT)
             : 2_000_000n,
@@ -53,6 +69,13 @@ function buildConfig() {
         polymarketClobApiKey: process.env.POLYMARKET_CLOB_API_KEY,
         polymarketClobApiSecret: process.env.POLYMARKET_CLOB_API_SECRET,
         polymarketClobApiPassphrase: process.env.POLYMARKET_CLOB_API_PASSPHRASE,
+        uniswapV3Factory: process.env.UNISWAP_V3_FACTORY
+            ? getAddress(process.env.UNISWAP_V3_FACTORY)
+            : undefined,
+        uniswapV3Quoter: process.env.UNISWAP_V3_QUOTER
+            ? getAddress(process.env.UNISWAP_V3_QUOTER)
+            : undefined,
+        uniswapV3FeeTiers: parseFeeTierList(process.env.UNISWAP_V3_FEE_TIERS),
     };
 }
 

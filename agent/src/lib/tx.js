@@ -131,6 +131,9 @@ async function postBondAndPropose({
         });
     } catch (error) {
         simulationError = error;
+        const simulationMessage =
+            error?.shortMessage ?? error?.message ?? summarizeViemError(error)?.message ?? String(error);
+        console.warn('[agent] Proposal simulation failed:', simulationMessage);
         if (!config.allowProposeOnSimulationFail) {
             throw error;
         }
@@ -314,7 +317,9 @@ function buildOgTransactions(actions, options = {}) {
 
     const config = options.config ?? {};
 
-    return actions.map((action) => {
+    const transactions = [];
+
+    for (const action of actions) {
         const operation = action.operation !== undefined ? Number(action.operation) : 0;
 
         if (action.kind === 'erc20_transfer') {
@@ -328,12 +333,13 @@ function buildOgTransactions(actions, options = {}) {
                 args: [getAddress(action.to), BigInt(action.amountWei)],
             });
 
-            return {
+            transactions.push({
                 to: getAddress(action.token),
                 value: '0',
                 data,
                 operation,
-            };
+            });
+            continue;
         }
 
         if (action.kind === 'native_transfer') {
@@ -341,12 +347,13 @@ function buildOgTransactions(actions, options = {}) {
                 throw new Error('native_transfer requires to, amountWei');
             }
 
-            return {
+            transactions.push({
                 to: getAddress(action.to),
                 value: BigInt(action.amountWei).toString(),
                 data: '0x',
                 operation,
-            };
+            });
+            continue;
         }
 
         if (action.kind === 'contract_call') {
@@ -363,12 +370,73 @@ function buildOgTransactions(actions, options = {}) {
             });
             const value = action.valueWei !== undefined ? BigInt(action.valueWei).toString() : '0';
 
-            return {
+            transactions.push({
                 to: getAddress(action.to),
                 value,
                 data,
                 operation,
-            };
+            });
+            continue;
+        }
+
+        if (action.kind === 'uniswap_v3_exact_input_single') {
+            if (
+                !action.router ||
+                !action.tokenIn ||
+                !action.tokenOut ||
+                action.fee === undefined ||
+                !action.recipient ||
+                action.amountInWei === undefined ||
+                action.amountOutMinWei === undefined
+            ) {
+                throw new Error(
+                    'uniswap_v3_exact_input_single requires router, tokenIn, tokenOut, fee, recipient, amountInWei, amountOutMinWei'
+                );
+            }
+
+            const router = getAddress(action.router);
+            const tokenIn = getAddress(action.tokenIn);
+            const tokenOut = getAddress(action.tokenOut);
+            const recipient = getAddress(action.recipient);
+            const fee = Number(action.fee);
+
+            const approveData = encodeFunctionData({
+                abi: erc20Abi,
+                functionName: 'approve',
+                args: [router, BigInt(action.amountInWei)],
+            });
+            transactions.push({
+                to: tokenIn,
+                value: '0',
+                data: approveData,
+                operation,
+            });
+
+            const swapAbi = parseAbi([
+                'function exactInputSingle((address tokenIn,address tokenOut,uint24 fee,address recipient,uint256 amountIn,uint256 amountOutMinimum,uint160 sqrtPriceLimitX96) params) payable returns (uint256 amountOut)',
+            ]);
+            const swapData = encodeFunctionData({
+                abi: swapAbi,
+                functionName: 'exactInputSingle',
+                args: [
+                    {
+                        tokenIn,
+                        tokenOut,
+                        fee,
+                        recipient,
+                        amountIn: BigInt(action.amountInWei),
+                        amountOutMinimum: BigInt(action.amountOutMinWei),
+                        sqrtPriceLimitX96: BigInt(action.sqrtPriceLimitX96 ?? 0),
+                    },
+                ],
+            });
+            transactions.push({
+                to: router,
+                value: '0',
+                data: swapData,
+                operation,
+            });
+            continue;
         }
 
         if (action.kind === 'ctf_split' || action.kind === 'ctf_merge') {
@@ -458,7 +526,9 @@ function buildOgTransactions(actions, options = {}) {
         }
 
         throw new Error(`Unknown action kind: ${action.kind}`);
-    });
+    }
+
+    return transactions;
 }
 
 async function makeDeposit({

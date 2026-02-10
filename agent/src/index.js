@@ -16,10 +16,11 @@ import {
     pollProposalChanges,
     primeBalances,
 } from './lib/polling.js';
-import { callAgent, explainToolCalls } from './lib/llm.js';
+import { callAgent, explainToolCalls, parseToolArguments } from './lib/llm.js';
 import { executeToolCalls, toolDefinitions } from './lib/tools.js';
 import { makeDeposit, postBondAndDispute, postBondAndPropose } from './lib/tx.js';
 import { extractTimelockTriggers } from './lib/timelock.js';
+import { collectPriceTriggerSignals } from './lib/uniswapV3Price.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,15 +34,20 @@ const publicClient = createPublicClient({ transport: http(config.rpcUrl) });
 const { account, walletClient } = await createSignerClient({ rpcUrl: config.rpcUrl });
 const agentAddress = account.address;
 
-const trackedAssets = new Set(config.watchAssets);
+const trackedAssets = new Set(config.watchAssets.map((asset) => String(asset).toLowerCase()));
 let lastCheckedBlock = config.startBlock;
 let lastProposalCheckedBlock = config.startBlock;
 let lastNativeBalance;
+let lastAssetBalances = new Map();
 let ogContext;
 const proposalsByHash = new Map();
 const depositHistory = [];
 const blockTimestampCache = new Map();
 const timelockTriggers = new Map();
+const priceTriggerState = new Map();
+const tokenMetaCache = new Map();
+const poolMetaCache = new Map();
+const resolvedPoolCache = new Map();
 
 async function loadAgentModule() {
     const agentRef = config.agentModule ?? 'default';
@@ -64,6 +70,17 @@ async function loadAgentModule() {
 }
 
 const { agentModule, commitmentText } = await loadAgentModule();
+const pollingOptions = (() => {
+    if (typeof agentModule?.getPollingOptions !== 'function') {
+        return {};
+    }
+    try {
+        return agentModule.getPollingOptions({ commitmentText }) ?? {};
+    } catch (error) {
+        console.warn('[agent] getPollingOptions() failed; using defaults.');
+        return {};
+    }
+})();
 
 async function getBlockTimestampMs(blockNumber) {
     if (!blockNumber) return undefined;
@@ -110,7 +127,31 @@ function markTimelocksFired(triggers) {
     }
 }
 
-async function decideOnSignals(signals) {
+async function getActivePriceTriggers({ rulesText }) {
+    if (typeof agentModule?.getPriceTriggers === 'function') {
+        try {
+            const parsed = await agentModule.getPriceTriggers({
+                commitmentText: rulesText,
+                config,
+            });
+            if (Array.isArray(parsed)) {
+                return parsed;
+            }
+            console.warn('[agent] getPriceTriggers() returned non-array; ignoring.');
+            return [];
+        } catch (error) {
+            console.warn(
+                '[agent] getPriceTriggers() failed; skipping price triggers:',
+                error?.message ?? error
+            );
+            return [];
+        }
+    }
+
+    return [];
+}
+
+async function decideOnSignals(signals, { onchainPendingProposal = false } = {}) {
     if (!config.openAiApiKey) {
         return false;
     }
@@ -155,8 +196,49 @@ async function decideOnSignals(signals) {
         }
 
         if (decision.toolCalls.length > 0) {
+            let approvedToolCalls = decision.toolCalls;
+            if (typeof agentModule?.validateToolCalls === 'function') {
+                try {
+                    const validated = await agentModule.validateToolCalls({
+                        toolCalls: decision.toolCalls.map((call) => ({
+                            ...call,
+                            parsedArguments: parseToolArguments(call.arguments),
+                        })),
+                        signals,
+                        commitmentText,
+                        commitmentSafe: config.commitmentSafe,
+                        agentAddress,
+                        publicClient,
+                        config,
+                        onchainPendingProposal,
+                    });
+                    if (Array.isArray(validated)) {
+                        approvedToolCalls = validated.map((call) => ({
+                            name: call.name,
+                            callId: call.callId,
+                            arguments:
+                                call.arguments !== undefined
+                                    ? call.arguments
+                                    : JSON.stringify(call.parsedArguments ?? {}),
+                        }));
+                    } else {
+                        approvedToolCalls = [];
+                    }
+                } catch (error) {
+                    console.warn(
+                        '[agent] validateToolCalls rejected tool calls:',
+                        error?.message ?? error
+                    );
+                    approvedToolCalls = [];
+                }
+            }
+
+            if (approvedToolCalls.length === 0) {
+                return false;
+            }
+
             const toolOutputs = await executeToolCalls({
-                toolCalls: decision.toolCalls,
+                toolCalls: approvedToolCalls,
                 publicClient,
                 walletClient,
                 account,
@@ -172,17 +254,29 @@ async function decideOnSignals(signals) {
                     } catch (error) {
                         parsed = null;
                     }
-                    agentModule.onToolOutput({
+                    await agentModule.onToolOutput({
                         name: output.name,
                         parsedOutput: parsed,
+                        commitmentText,
+                        commitmentSafe: config.commitmentSafe,
+                        agentAddress,
                     });
                 }
             }
-            if (decision.responseId && toolOutputs.length > 0) {
+            const modelCallIds = new Set(
+                approvedToolCalls
+                    .map((call) => call?.callId)
+                    .filter((callId) => typeof callId === 'string' && callId.length > 0)
+            );
+            const explainableOutputs = toolOutputs.filter(
+                (output) => output?.callId && modelCallIds.has(output.callId)
+            );
+
+            if (decision.responseId && explainableOutputs.length > 0) {
                 const explanation = await explainToolCalls({
                     config,
                     previousResponseId: decision.responseId,
-                    toolOutputs,
+                    toolOutputs: explainableOutputs,
                 });
                 if (explanation) {
                     console.log('[agent] Agent explanation:', explanation);
@@ -204,11 +298,24 @@ async function decideOnSignals(signals) {
 
 async function agentLoop() {
     try {
+        const triggerSeedRulesText = ogContext?.rules ?? commitmentText ?? '';
+        const triggerSeed = await getActivePriceTriggers({ rulesText: triggerSeedRulesText });
+        for (const trigger of triggerSeed) {
+            if (trigger?.baseToken) trackedAssets.add(String(trigger.baseToken).toLowerCase());
+            if (trigger?.quoteToken) trackedAssets.add(String(trigger.quoteToken).toLowerCase());
+        }
+
         const latestBlock = await publicClient.getBlockNumber();
         const latestBlockData = await publicClient.getBlock({ blockNumber: latestBlock });
         const nowMs = Number(latestBlockData.timestamp) * 1000;
 
-        const { deposits, lastCheckedBlock: nextCheckedBlock, lastNativeBalance: nextNative } =
+        const {
+            deposits,
+            balanceSnapshots,
+            lastCheckedBlock: nextCheckedBlock,
+            lastNativeBalance: nextNative,
+            lastAssetBalances: nextAssetBalances,
+        } =
             await pollCommitmentChanges({
                 publicClient,
                 trackedAssets,
@@ -216,9 +323,12 @@ async function agentLoop() {
                 watchNativeBalance: config.watchNativeBalance,
                 lastCheckedBlock,
                 lastNativeBalance,
+                lastAssetBalances,
+                emitBalanceSnapshotsEveryPoll: Boolean(pollingOptions.emitBalanceSnapshotsEveryPoll),
             });
         lastCheckedBlock = nextCheckedBlock;
         lastNativeBalance = nextNative;
+        lastAssetBalances = nextAssetBalances ?? lastAssetBalances;
 
         for (const deposit of deposits) {
             const timestampMs = await getBlockTimestampMs(deposit.blockNumber);
@@ -252,11 +362,32 @@ async function agentLoop() {
             await agentModule.reconcileProposalSubmission({ publicClient });
         }
 
+        await executeReadyProposals({
+            publicClient,
+            walletClient,
+            account,
+            ogModule: config.ogModule,
+            proposalsByHash,
+            executeRetryMs: config.executeRetryMs,
+        });
+
         const rulesText = ogContext?.rules ?? commitmentText ?? '';
         updateTimelockSchedule({ rulesText });
         const dueTimelocks = collectDueTimelocks(nowMs);
+        const activePriceTriggers = await getActivePriceTriggers({ rulesText });
+        const duePriceSignals = await collectPriceTriggerSignals({
+            publicClient,
+            config,
+            triggers: activePriceTriggers,
+            nowMs,
+            triggerState: priceTriggerState,
+            tokenMetaCache,
+            poolMetaCache,
+            resolvedPoolCache,
+        });
 
         const combinedSignals = deposits.concat(
+            balanceSnapshots,
             newProposals.map((proposal) => ({
                 kind: 'proposal',
                 proposalHash: proposal.proposalHash,
@@ -279,6 +410,7 @@ async function agentLoop() {
                 deposit: trigger.deposit,
             });
         }
+        combinedSignals.push(...duePriceSignals);
 
         // Allow agent module to augment signals (e.g., add timer signals)
         let signalsToProcess = combinedSignals;
@@ -304,20 +436,13 @@ async function agentLoop() {
         }
 
         if (signalsToProcess.length > 0) {
-            const decisionOk = await decideOnSignals(signalsToProcess);
+            const decisionOk = await decideOnSignals(signalsToProcess, {
+                onchainPendingProposal: proposalsByHash.size > 0,
+            });
             if (decisionOk && dueTimelocks.length > 0) {
                 markTimelocksFired(dueTimelocks);
             }
         }
-
-        await executeReadyProposals({
-            publicClient,
-            walletClient,
-            account,
-            ogModule: config.ogModule,
-            proposalsByHash,
-            executeRetryMs: config.executeRetryMs,
-        });
     } catch (error) {
         console.error('[agent] loop error', error);
     }
