@@ -12,15 +12,11 @@ const TOKENS = Object.freeze({
     UNI: '0x1f9840a85d5af5bf1d1762f925bdaddc4201f984',
 });
 
-const ALLOWED_POOLS = new Set([
-    '0x6418eec70f50913ff0d756b48d32ce7c02b47c47',
-    '0x287b0e934ed0439e2a7b1d5f0fc25ea2c24b64f7',
-]);
-
 const ALLOWED_ROUTERS = new Set([
     '0xe592427a0aece92de3edee1f18e0157c05861564',
     '0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45',
 ]);
+const ALLOWED_FEE_TIERS = new Set([500, 3000, 10000]);
 
 const inferredTriggersCache = new Map();
 
@@ -165,13 +161,9 @@ function sanitizeInferredTriggers(rawTriggers) {
         };
 
         if (trigger.pool) {
-            const pool = normalizeAddress(String(trigger.pool));
-            if (!ALLOWED_POOLS.has(pool)) {
-                throw new Error(`Inferred trigger ${out.id} references non-allowlisted pool ${pool}`);
-            }
-            out.pool = pool;
+            out.pool = normalizeAddress(String(trigger.pool));
         } else {
-            throw new Error(`Inferred trigger ${out.id} must include an explicit pool address.`);
+            out.poolSelection = 'high-liquidity';
         }
 
         return out;
@@ -213,7 +205,7 @@ async function getPriceTriggers({ commitmentText, config }) {
             {
                 role: 'system',
                 content:
-                    'Extract exactly two Uniswap V3 price race triggers from this plain-language commitment. Return strict JSON: {"triggers":[...]}. Each trigger must include: id, label, baseToken, quoteToken, comparator (gte|lte), threshold (number), priority (number), and pool (address). Use only addresses and conditions present in the commitment text. Do not invent pools, tokens, or thresholds.',
+                    'Extract exactly two Uniswap V3 price race triggers from this plain-language commitment. Return strict JSON: {"triggers":[...]}. Each trigger must include: id, label, baseToken, quoteToken, comparator (gte|lte), threshold (number), priority (number), and optional pool (address). If pool is not explicit in the commitment, omit it and high-liquidity pool selection will be used. Use only addresses and conditions present in the commitment text. Do not invent pools, tokens, or thresholds.',
             },
             {
                 role: 'user',
@@ -272,7 +264,6 @@ function parseCallArgs(call) {
 
 function isMatchingPriceSignal(signal, actionFee, tokenIn, tokenOut) {
     if (!signal || signal.kind !== 'priceTrigger') return false;
-    if (!signal.pool || !ALLOWED_POOLS.has(String(signal.pool).toLowerCase())) return false;
 
     const sBase = String(signal.baseToken ?? '').toLowerCase();
     const sQuote = String(signal.quoteToken ?? '').toLowerCase();
@@ -340,6 +331,9 @@ async function validateToolCalls({ toolCalls, signals, commitmentText, commitmen
         if (!Number.isInteger(fee) || fee <= 0) {
             throw new Error('Swap fee must be a positive integer.');
         }
+        if (!ALLOWED_FEE_TIERS.has(fee)) {
+            throw new Error('Swap fee tier is not allowlisted.');
+        }
         if (amountIn <= 0n) {
             throw new Error('Swap amountInWei must be > 0.');
         }
@@ -352,7 +346,7 @@ async function validateToolCalls({ toolCalls, signals, commitmentText, commitmen
             : false;
         if (!hasSignalMatch) {
             throw new Error(
-                'Swap action does not match an allowlisted priceTrigger signal in the current cycle.'
+                'Swap action does not match a current priceTrigger signal in the current cycle.'
             );
         }
 
