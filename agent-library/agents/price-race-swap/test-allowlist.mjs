@@ -8,6 +8,7 @@ import {
 
 const WETH = '0x7b79995e5f793a07bc00c21412e50ecae098e7f9';
 const USDC = '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238';
+const UNI = '0x1f9840a85d5af5bf1d1762f925bdaddc4201f984';
 const ROUTER = '0x3bfa4769fb09eefc5a80d6e87c3b9c650f7ae48e';
 const QUOTER = '0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3';
 const POOL = '0x6418eec70f50913ff0d756b48d32ce7c02b47c47';
@@ -39,6 +40,8 @@ async function run() {
     const signals = [
         {
             kind: 'priceTrigger',
+            triggerId: 't1',
+            priority: 1,
             pool: POOL,
             poolFee: 3000,
             baseToken: WETH,
@@ -126,6 +129,46 @@ async function run() {
                 config: {},
             }),
         /operation must be 0/
+    );
+
+    await assert.rejects(
+        () =>
+            validateToolCalls({
+                toolCalls: [
+                    {
+                        ...toolCalls[0],
+                        parsedArguments: {
+                            actions: [
+                                {
+                                    ...toolCalls[0].parsedArguments.actions[0],
+                                    tokenOut: UNI,
+                                    fee: 500,
+                                },
+                            ],
+                        },
+                    },
+                ],
+                signals: [
+                    ...signals,
+                    {
+                        kind: 'priceTrigger',
+                        triggerId: 't2',
+                        priority: 2,
+                        pool: '0x287b0e934ed0439e2a7b1d5f0fc25ea2c24b64f7',
+                        poolFee: 500,
+                        baseToken: UNI,
+                        quoteToken: WETH,
+                    },
+                ],
+                commitmentText: 'winner-check',
+                commitmentSafe: '0x1234000000000000000000000000000000000000',
+                publicClient: {
+                    getChainId: async () => 11155111,
+                    simulateContract: async () => ({ result: [1000000n, 0n, 0, 0n] }),
+                },
+                config: {},
+            }),
+        /must match the winning priceTrigger/
     );
 
     onToolOutput({

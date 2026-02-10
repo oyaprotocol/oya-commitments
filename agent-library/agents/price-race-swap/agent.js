@@ -522,12 +522,15 @@ async function validateToolCalls({
             throw new Error('Swap amountOutMinWei must be >= 0.');
         }
 
-        const hasSignalMatch = Array.isArray(signals)
-            ? signals.some((signal) => isMatchingPriceSignal(signal, fee, tokenIn, tokenOut))
-            : false;
-        if (!hasSignalMatch) {
+        const matchesWinningTrigger = isMatchingPriceSignal(
+            winningTrigger,
+            fee,
+            tokenIn,
+            tokenOut
+        );
+        if (!matchesWinningTrigger) {
             throw new Error(
-                'Swap action does not match a current priceTrigger signal in the current cycle.'
+                'Swap action must match the winning priceTrigger signal for this cycle.'
             );
         }
 
