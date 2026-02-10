@@ -13,7 +13,7 @@ function toolDefinitions({ proposeEnabled, disputeEnabled }) {
             name: 'build_og_transactions',
             description:
                 'Build Optimistic Governor transaction payloads from high-level intents. Returns array of {to,value,data,operation} with value as string wei.',
-            strict: true,
+            strict: false,
             parameters: {
                 type: 'object',
                 additionalProperties: false,
@@ -27,7 +27,7 @@ function toolDefinitions({ proposeEnabled, disputeEnabled }) {
                                 kind: {
                                     type: 'string',
                                     description:
-                                        'Action type: erc20_transfer | native_transfer | contract_call',
+                                        'Action type: erc20_transfer | native_transfer | contract_call | uniswap_v3_exact_input_single',
                                 },
                                 token: {
                                     type: ['string', 'null'],
@@ -81,6 +81,40 @@ function toolDefinitions({ proposeEnabled, disputeEnabled }) {
                                     type: ['integer', 'null'],
                                     description:
                                         'Safe operation (0=CALL,1=DELEGATECALL). Defaults to 0.',
+                                },
+                                router: {
+                                    type: ['string', 'null'],
+                                    description:
+                                        'Uniswap V3 router address for uniswap_v3_exact_input_single.',
+                                },
+                                tokenIn: {
+                                    type: ['string', 'null'],
+                                    description: 'Input ERC20 token for Uniswap swap action.',
+                                },
+                                tokenOut: {
+                                    type: ['string', 'null'],
+                                    description: 'Output ERC20 token for Uniswap swap action.',
+                                },
+                                fee: {
+                                    type: ['integer', 'null'],
+                                    description: 'Uniswap V3 pool fee tier (e.g. 500, 3000, 10000).',
+                                },
+                                recipient: {
+                                    type: ['string', 'null'],
+                                    description: 'Recipient of Uniswap swap output tokens.',
+                                },
+                                amountInWei: {
+                                    type: ['string', 'null'],
+                                    description: 'Input token amount for Uniswap swap in token wei.',
+                                },
+                                amountOutMinWei: {
+                                    type: ['string', 'null'],
+                                    description: 'Minimum output amount for Uniswap swap in token wei.',
+                                },
+                                sqrtPriceLimitX96: {
+                                    type: ['string', 'null'],
+                                    description:
+                                        'Optional Uniswap sqrtPriceLimitX96 guard (default 0 for no limit).',
                                 },
                             },
                             required: [
@@ -330,6 +364,7 @@ async function executeToolCalls({
         console.warn('[agent] Unknown tool call:', call.name);
         outputs.push({
             callId: call.callId,
+            name: call.name,
             output: safeStringify({ status: 'skipped', reason: 'unknown tool' }),
         });
     }
@@ -338,13 +373,21 @@ async function executeToolCalls({
         if (!config.proposeEnabled) {
             console.log('[agent] Built transactions but proposals are disabled; skipping propose.');
         } else {
-            await postBondAndPropose({
+            const result = await postBondAndPropose({
                 publicClient,
                 walletClient,
                 account,
                 config,
                 ogModule: config.ogModule,
                 transactions: builtTransactions,
+            });
+            outputs.push({
+                callId: 'auto_post_bond_and_propose',
+                name: 'post_bond_and_propose',
+                output: safeStringify({
+                    status: 'submitted',
+                    ...result,
+                }),
             });
         }
     }
