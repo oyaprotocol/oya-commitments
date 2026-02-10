@@ -14,7 +14,7 @@ const uniswapV3FactoryAbi = parseAbi([
 
 const defaultFactoryByChainId = new Map([
     [1, '0x1F98431c8aD98523631AE4a59f267346ea31F984'],
-    [11155111, '0x0227628f3f023bb0b980b67d528dd8f8c1b5bf8f'],
+    [11155111, '0x0227628f3F023bb0B980b67D528571c95c6DaC1c'],
 ]);
 
 async function getFactoryAddress({ publicClient, configuredFactory }) {

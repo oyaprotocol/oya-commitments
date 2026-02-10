@@ -7,7 +7,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const TOKENS = Object.freeze({
-    WETH: '0xfff9976782d46cc05630d1f6ebab18b2324d6b14',
+    WETH: '0x7b79995e5f793a07bc00c21412e50ecae098e7f9',
     USDC: '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238',
     UNI: '0x1f9840a85d5af5bf1d1762f925bdaddc4201f984',
 });
