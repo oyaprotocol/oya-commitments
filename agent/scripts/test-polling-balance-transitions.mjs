@@ -3,6 +3,7 @@ import { pollCommitmentChanges } from '../src/lib/polling.js';
 
 const TOKEN = '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238';
 const TOKEN_ZERO = '0x1f9840a85d5af5bf1d1762f925bdaddc4201f984';
+const TOKEN_NEW_ZERO = '0x7b79995e5f793a07bc00c21412e50ecae098e7f9';
 const SAFE = '0x1234000000000000000000000000000000000000';
 
 function createClient({ getTokenBalance }) {
@@ -23,6 +24,7 @@ async function run() {
         getTokenBalance: ({ block, address }) => {
             const token = String(address).toLowerCase();
             if (token === TOKEN_ZERO) return 0n;
+            if (token === TOKEN_NEW_ZERO) return 0n;
             if (block === 101n) return 30000n;
             if (block === 102n) return 30000n;
             if (block === 103n) return 25000n;
@@ -45,6 +47,7 @@ async function run() {
     assert.equal(firstSnapshots.length, 1);
     assert.equal(BigInt(firstSnapshots[0].amount), 30000n);
 
+    trackedAssets.add(TOKEN_NEW_ZERO);
     const second = await pollCommitmentChanges({
         publicClient,
         trackedAssets,
