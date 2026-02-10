@@ -440,12 +440,6 @@ function buildOgTransactions(actions, options = {}) {
         }
 
         if (action.kind === 'ctf_split' || action.kind === 'ctf_merge') {
-            const chainId = Number(action.chainId ?? config.polymarketChainId ?? 137);
-            if (chainId !== Number(config.polymarketChainId ?? 137)) {
-                throw new Error(
-                    `Unsupported chainId ${chainId} for CTF action. Expected ${Number(config.polymarketChainId ?? 137)}.`
-                );
-            }
             if (!action.collateralToken || !action.conditionId || action.amount === undefined) {
                 throw new Error(`${action.kind} requires collateralToken, conditionId, amount`);
             }
@@ -477,21 +471,16 @@ function buildOgTransactions(actions, options = {}) {
                 ],
             });
 
-            return {
+            transactions.push({
                 to: ctfContract,
                 value: '0',
                 data,
                 operation,
-            };
+            });
+            continue;
         }
 
         if (action.kind === 'ctf_redeem') {
-            const chainId = Number(action.chainId ?? config.polymarketChainId ?? 137);
-            if (chainId !== Number(config.polymarketChainId ?? 137)) {
-                throw new Error(
-                    `Unsupported chainId ${chainId} for CTF action. Expected ${Number(config.polymarketChainId ?? 137)}.`
-                );
-            }
             if (!action.collateralToken || !action.conditionId) {
                 throw new Error('ctf_redeem requires collateralToken and conditionId');
             }
@@ -517,12 +506,13 @@ function buildOgTransactions(actions, options = {}) {
                 ],
             });
 
-            return {
+            transactions.push({
                 to: ctfContract,
                 value: '0',
                 data,
                 operation,
-            };
+            });
+            continue;
         }
 
         throw new Error(`Unknown action kind: ${action.kind}`);
