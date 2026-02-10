@@ -278,7 +278,7 @@ async function validateToolCalls({ toolCalls, signals, commitmentText, commitmen
 
         const tokenIn = normalizeAddress(String(action.tokenIn ?? TOKENS.WETH));
         const tokenOut = normalizeAddress(String(action.tokenOut ?? inferredTokenOut));
-        const router = normalizeAddress(String(action.router ?? DEFAULT_ROUTER));
+        const router = DEFAULT_ROUTER;
         const recipient = normalizeAddress(String(action.recipient ?? safeAddress));
         const fee = Number(action.fee ?? winningTrigger.poolFee);
         const amountIn = BigInt(action.amountInWei ?? String(wethSnapshot.amount));
@@ -356,6 +356,7 @@ function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
         'First trigger wins. If multiple triggers appear true in one cycle, use signal priority and then lexical triggerId order.',
         'Use all currently available WETH in the Safe for the winning branch swap.',
         'Build one uniswap_v3_exact_input_single action where amountInWei equals the WETH snapshot amount.',
+        `Set router to Sepolia Uniswap V3 SwapRouter02 at ${DEFAULT_ROUTER}.`,
         'Compute amountOutMinWei using observedPrice and max slippage 0.50% (multiply expected output by 0.995).',
         'If tokenIn is the base token of observedPrice, expectedOut ~= amountIn * observedPrice adjusted for token decimals.',
         'If tokenIn is the quote token and tokenOut is base, expectedOut ~= amountIn / observedPrice adjusted for token decimals.',

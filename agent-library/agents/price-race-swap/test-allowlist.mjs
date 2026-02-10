@@ -51,26 +51,26 @@ async function run() {
     });
     assert.equal(ok.length, 1);
 
-    await assert.rejects(() =>
-        validateToolCalls({
-            toolCalls: [
-                {
-                    ...toolCalls[0],
-                    parsedArguments: {
-                        actions: [
-                            {
-                                ...toolCalls[0].parsedArguments.actions[0],
-                                router: '0x0000000000000000000000000000000000000001',
-                            },
-                        ],
-                    },
+    const rewritten = await validateToolCalls({
+        toolCalls: [
+            {
+                ...toolCalls[0],
+                parsedArguments: {
+                    actions: [
+                        {
+                            ...toolCalls[0].parsedArguments.actions[0],
+                            router: '0x0000000000000000000000000000000000000001',
+                        },
+                    ],
                 },
-            ],
-            signals,
-            commitmentText: 'y',
-            commitmentSafe: '0x1234000000000000000000000000000000000000',
-        })
-    );
+            },
+        ],
+        signals,
+        commitmentText: 'y',
+        commitmentSafe: '0x1234000000000000000000000000000000000000',
+    });
+    assert.equal(rewritten.length, 1);
+    assert.equal(rewritten[0].parsedArguments.actions[0].router, ROUTER);
 
     console.log('[test] allowlist validation OK');
 }
