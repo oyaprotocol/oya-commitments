@@ -232,7 +232,7 @@ async function decideOnSignals(signals, { onchainPendingProposal = false } = {})
             }
 
             if (approvedToolCalls.length === 0) {
-                return true;
+                return false;
             }
 
             const toolOutputs = await executeToolCalls({
