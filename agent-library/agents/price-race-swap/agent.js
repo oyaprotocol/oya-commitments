@@ -581,8 +581,12 @@ function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
 function onToolOutput({ name, parsedOutput }) {
     if (!name || !parsedOutput || parsedOutput.status !== 'submitted') return;
     if (name !== 'post_bond_and_propose' && name !== 'auto_post_bond_and_propose') return;
+    const proposalHash = typeof parsedOutput.proposalHash === 'string'
+        ? parsedOutput.proposalHash.trim()
+        : '';
+    if (!proposalHash) return;
     singleFireState.proposalSubmitted = true;
-    singleFireState.proposalHash = parsedOutput.proposalHash ?? null;
+    singleFireState.proposalHash = proposalHash;
 }
 
 function getSingleFireState() {

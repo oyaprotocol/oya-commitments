@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
-import { onToolOutput, resetSingleFireState, validateToolCalls } from './agent.js';
+import {
+    getSingleFireState,
+    onToolOutput,
+    resetSingleFireState,
+    validateToolCalls,
+} from './agent.js';
 
 const WETH = '0x7b79995e5f793a07bc00c21412e50ecae098e7f9';
 const USDC = '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238';
@@ -122,6 +127,15 @@ async function run() {
             }),
         /operation must be 0/
     );
+
+    onToolOutput({
+        name: 'post_bond_and_propose',
+        parsedOutput: {
+            status: 'submitted',
+            submissionError: { message: 'failed' },
+        },
+    });
+    assert.equal(getSingleFireState().proposalSubmitted, false);
 
     onToolOutput({
         name: 'post_bond_and_propose',
