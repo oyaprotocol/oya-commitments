@@ -11,6 +11,10 @@ const DEFAULT_ROUTER = '0x3bfa4769fb09eefc5a80d6e87c3b9c650f7ae48e';
 const ALLOWED_FEE_TIERS = new Set([500, 3000, 10000]);
 
 const inferredTriggersCache = new Map();
+const singleFireState = {
+    proposalSubmitted: false,
+    proposalHash: null,
+};
 
 function isHexChar(char) {
     const code = char.charCodeAt(0);
@@ -253,6 +257,9 @@ async function validateToolCalls({ toolCalls, signals, commitmentText, commitmen
         if (call.name !== 'build_og_transactions') {
             continue;
         }
+        if (singleFireState.proposalSubmitted) {
+            throw new Error('Single-fire lock engaged: a proposal was already submitted.');
+        }
 
         const args = parseCallArgs(call);
         if (!args || !Array.isArray(args.actions) || args.actions.length !== 1) {
@@ -349,6 +356,7 @@ function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
         'You are a price-race swap agent for a commitment Safe controlled by an Optimistic Governor.',
         'Your own address is provided as agentAddress.',
         'Interpret the commitment as a multi-choice race and execute at most one winning branch.',
+        'Single-fire mode is enabled: after one successful proposal submission, do not propose again.',
         'Use your reasoning over the plain-language commitment and incoming signals. Do not depend on rigid text pattern matching.',
         'Treat erc20BalanceSnapshot signals as authoritative current Safe balances for this cycle.',
         'If exactly one priceTrigger signal is present in this cycle, treat it as the winning branch for this cycle.',
@@ -374,9 +382,28 @@ function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
         .join(' ');
 }
 
+function onToolOutput({ name, parsedOutput }) {
+    if (!name || !parsedOutput || parsedOutput.status !== 'submitted') return;
+    if (name !== 'post_bond_and_propose' && name !== 'auto_post_bond_and_propose') return;
+    singleFireState.proposalSubmitted = true;
+    singleFireState.proposalHash = parsedOutput.proposalHash ?? null;
+}
+
+function getSingleFireState() {
+    return { ...singleFireState };
+}
+
+function resetSingleFireState() {
+    singleFireState.proposalSubmitted = false;
+    singleFireState.proposalHash = null;
+}
+
 export {
     getPriceTriggers,
     getSystemPrompt,
+    getSingleFireState,
+    onToolOutput,
+    resetSingleFireState,
     sanitizeInferredTriggers,
     validateToolCalls,
 };
