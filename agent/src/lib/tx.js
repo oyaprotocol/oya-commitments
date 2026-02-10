@@ -475,7 +475,7 @@ function buildOgTransactions(actions, options = {}) {
                     to: collateralToken,
                     value: '0',
                     data: resetApproveData,
-                    operation,
+                    operation: 0,
                 });
 
                 const approveData = encodeFunctionData({
@@ -487,7 +487,7 @@ function buildOgTransactions(actions, options = {}) {
                     to: collateralToken,
                     value: '0',
                     data: approveData,
-                    operation,
+                    operation: 0,
                 });
             }
 
@@ -508,7 +508,7 @@ function buildOgTransactions(actions, options = {}) {
                 to: ctfContract,
                 value: '0',
                 data,
-                operation,
+                operation: 0,
             });
             continue;
         }
@@ -543,7 +543,7 @@ function buildOgTransactions(actions, options = {}) {
                 to: ctfContract,
                 value: '0',
                 data,
-                operation,
+                operation: 0,
             });
             continue;
         }

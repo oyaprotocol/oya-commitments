@@ -71,6 +71,9 @@ function run() {
     assert.equal(ctfTxs[0].to.toLowerCase(), usdc.toLowerCase());
     assert.equal(ctfTxs[1].to.toLowerCase(), usdc.toLowerCase());
     assert.equal(ctfTxs[2].to.toLowerCase(), ctf.toLowerCase());
+    assert.equal(ctfTxs[0].operation, 0);
+    assert.equal(ctfTxs[1].operation, 0);
+    assert.equal(ctfTxs[2].operation, 0);
 
     const resetApproveCall = decodeFunctionData({
         abi: erc20Abi,
@@ -99,6 +102,22 @@ function run() {
     assert.equal(splitCall.args[2], conditionId);
     assert.deepEqual(splitCall.args[3], [1n, 2n]);
     assert.equal(splitCall.args[4], 250000n);
+
+    const ctfRedeemTxs = buildOgTransactions(
+        [
+            {
+                kind: 'ctf_redeem',
+                ctfContract: ctf,
+                collateralToken: usdc,
+                conditionId,
+                indexSets: [1, 2],
+                operation: 1,
+            },
+        ],
+        { config: {} }
+    );
+    assert.equal(ctfRedeemTxs.length, 1);
+    assert.equal(ctfRedeemTxs[0].operation, 0);
 
     console.log('[test] buildOgTransactions uniswap + ctf_split actions OK');
 }
