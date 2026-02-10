@@ -1,41 +1,74 @@
+import crypto from 'node:crypto';
+
 const DEFAULT_CLOB_HOST = 'https://clob.polymarket.com';
 
 function normalizeClobHost(host) {
     return (host ?? DEFAULT_CLOB_HOST).replace(/\/+$/, '');
 }
 
-function buildClobAuthHeaders(config) {
+function buildClobAuthHeaders({
+    config,
+    signingAddress,
+    timestamp,
+    method,
+    path,
+    bodyText,
+}) {
     const apiKey = config.polymarketClobApiKey;
     const apiSecret = config.polymarketClobApiSecret;
     const apiPassphrase = config.polymarketClobApiPassphrase;
+    if (!signingAddress) {
+        throw new Error('Missing signingAddress for CLOB auth headers.');
+    }
     if (!apiKey || !apiSecret || !apiPassphrase) {
         throw new Error(
             'Missing CLOB credentials. Set POLYMARKET_CLOB_API_KEY, POLYMARKET_CLOB_API_SECRET, and POLYMARKET_CLOB_API_PASSPHRASE.'
         );
     }
 
+    const payload = `${timestamp}${method.toUpperCase()}${path}${bodyText ?? ''}`;
+    const secretBytes = Buffer.from(apiSecret, 'base64');
+    const signature = crypto
+        .createHmac('sha256', secretBytes)
+        .update(payload)
+        .digest('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_');
+
     return {
+        'POLY_ADDRESS': signingAddress,
         'POLY_API_KEY': apiKey,
-        'POLY_SIGNATURE': apiSecret,
+        'POLY_SIGNATURE': signature,
+        'POLY_TIMESTAMP': String(timestamp),
         'POLY_PASSPHRASE': apiPassphrase,
     };
 }
 
 async function clobRequest({
     config,
+    signingAddress,
     path,
     method,
     body,
 }) {
     const host = normalizeClobHost(config.polymarketClobHost);
+    const bodyText = body === undefined ? '' : JSON.stringify(body);
+    const timestamp = Date.now();
     const headers = {
         'Content-Type': 'application/json',
-        ...buildClobAuthHeaders(config),
+        ...buildClobAuthHeaders({
+            config,
+            signingAddress,
+            timestamp,
+            method,
+            path,
+            bodyText,
+        }),
     };
     const response = await fetch(`${host}${path}`, {
         method,
         headers,
-        body: body === undefined ? undefined : JSON.stringify(body),
+        body: body === undefined ? undefined : bodyText,
     });
     const text = await response.text();
     let parsed;
@@ -56,6 +89,7 @@ async function clobRequest({
 
 async function placeClobOrder({
     config,
+    signingAddress,
     signedOrder,
     owner,
     orderType,
@@ -72,6 +106,7 @@ async function placeClobOrder({
 
     return clobRequest({
         config,
+        signingAddress,
         method: 'POST',
         path: '/order',
         body: {
@@ -84,6 +119,7 @@ async function placeClobOrder({
 
 async function cancelClobOrders({
     config,
+    signingAddress,
     mode,
     orderIds,
     market,
@@ -92,6 +128,7 @@ async function cancelClobOrders({
     if (mode === 'all') {
         return clobRequest({
             config,
+            signingAddress,
             method: 'DELETE',
             path: '/cancel-all',
         });
@@ -103,6 +140,7 @@ async function cancelClobOrders({
         }
         return clobRequest({
             config,
+            signingAddress,
             method: 'DELETE',
             path: '/cancel-market-orders',
             body: {
@@ -118,6 +156,7 @@ async function cancelClobOrders({
 
     return clobRequest({
         config,
+        signingAddress,
         method: 'DELETE',
         path: '/orders',
         body: {

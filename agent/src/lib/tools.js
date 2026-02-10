@@ -379,6 +379,7 @@ async function executeToolCalls({
                 }
                 const result = await placeClobOrder({
                     config,
+                    signingAddress: account.address,
                     signedOrder: args.signedOrder,
                     owner: args.owner,
                     orderType: args.orderType,
@@ -420,6 +421,7 @@ async function executeToolCalls({
             try {
                 const result = await cancelClobOrders({
                     config,
+                    signingAddress: account.address,
                     mode: args.mode,
                     orderIds: args.orderIds,
                     market: args.market,
