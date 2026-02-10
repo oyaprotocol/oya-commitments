@@ -470,7 +470,7 @@ async function validateToolCalls({
         const router = DEFAULT_ROUTER;
         const recipient = normalizeAddress(String(action.recipient ?? safeAddress));
         const fee = Number(action.fee ?? winningTrigger.poolFee);
-        const amountIn = BigInt(action.amountInWei ?? String(wethSnapshot.amount));
+        const amountIn = BigInt(String(wethSnapshot.amount));
         const quoted = await quoteMinOutWithSlippage({
             publicClient,
             config,

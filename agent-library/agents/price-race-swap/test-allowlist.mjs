@@ -61,6 +61,7 @@ async function run() {
         config: {},
     });
     assert.equal(ok.length, 1);
+    assert.equal(ok[0].parsedArguments.actions[0].amountInWei, '30000');
     assert.equal(ok[0].parsedArguments.actions[0].amountOutMinWei, '995000');
 
     const rewritten = await validateToolCalls({
