@@ -409,7 +409,15 @@ async function quoteMinOutWithSlippage({
     return { quoter: selectedQuoter, quotedAmountOut, minAmountOut };
 }
 
-async function validateToolCalls({ toolCalls, signals, commitmentText, commitmentSafe, publicClient, config }) {
+async function validateToolCalls({
+    toolCalls,
+    signals,
+    commitmentText,
+    commitmentSafe,
+    publicClient,
+    config,
+    onchainPendingProposal,
+}) {
     const validated = [];
     const safeAddress = commitmentSafe ? String(commitmentSafe).toLowerCase() : null;
     const winningTrigger = pickWinningPriceTrigger(signals);
@@ -427,6 +435,9 @@ async function validateToolCalls({ toolCalls, signals, commitmentText, commitmen
 
         if (call.name !== 'build_og_transactions') {
             continue;
+        }
+        if (onchainPendingProposal) {
+            throw new Error('Pending proposal exists onchain; execute it before creating a new proposal.');
         }
         if (singleFireState.proposalSubmitted) {
             throw new Error('Single-fire lock engaged: a proposal was already submitted.');

@@ -140,7 +140,7 @@ async function getActivePriceTriggers({ rulesText }) {
     return [];
 }
 
-async function decideOnSignals(signals) {
+async function decideOnSignals(signals, { onchainPendingProposal = false } = {}) {
     if (!config.openAiApiKey) {
         return false;
     }
@@ -197,6 +197,7 @@ async function decideOnSignals(signals) {
                         agentAddress,
                         publicClient,
                         config,
+                        onchainPendingProposal,
                     });
                     if (Array.isArray(validated)) {
                         approvedToolCalls = validated.map((call) => ({
@@ -346,6 +347,15 @@ async function agentLoop() {
             await agentModule.reconcileProposalSubmission({ publicClient });
         }
 
+        await executeReadyProposals({
+            publicClient,
+            walletClient,
+            account,
+            ogModule: config.ogModule,
+            proposalsByHash,
+            executeRetryMs: config.executeRetryMs,
+        });
+
         const rulesText = ogContext?.rules ?? commitmentText ?? '';
         updateTimelockSchedule({ rulesText });
         const dueTimelocks = collectDueTimelocks(nowMs);
@@ -410,20 +420,13 @@ async function agentLoop() {
         }
 
         if (signalsToProcess.length > 0) {
-            const decisionOk = await decideOnSignals(signalsToProcess);
+            const decisionOk = await decideOnSignals(signalsToProcess, {
+                onchainPendingProposal: proposalsByHash.size > 0,
+            });
             if (decisionOk && dueTimelocks.length > 0) {
                 markTimelocksFired(dueTimelocks);
             }
         }
-
-        await executeReadyProposals({
-            publicClient,
-            walletClient,
-            account,
-            ogModule: config.ogModule,
-            proposalsByHash,
-            executeRetryMs: config.executeRetryMs,
-        });
     } catch (error) {
         console.error('[agent] loop error', error);
     }
