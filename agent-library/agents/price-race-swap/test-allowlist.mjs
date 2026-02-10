@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import {
     getSingleFireState,
+    onProposalEvents,
     onToolOutput,
+    reconcileProposalSubmission,
     resetSingleFireState,
     validateToolCalls,
 } from './agent.js';
@@ -14,6 +16,7 @@ const QUOTER = '0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3';
 const POOL = '0x6418eec70f50913ff0d756b48d32ce7c02b47c47';
 
 async function run() {
+    process.env.PRICE_RACE_SWAP_STATE_FILE = '/tmp/price-race-swap-state-test.json';
     resetSingleFireState();
 
     const toolCalls = [
@@ -193,7 +196,7 @@ async function run() {
         /must match the winning priceTrigger/
     );
 
-    onToolOutput({
+    await onToolOutput({
         name: 'post_bond_and_propose',
         parsedOutput: {
             status: 'submitted',
@@ -202,11 +205,11 @@ async function run() {
     });
     assert.equal(getSingleFireState().proposalSubmitted, false);
 
-    onToolOutput({
+    await onToolOutput({
         name: 'post_bond_and_propose',
         parsedOutput: {
             status: 'submitted',
-            proposalHash: '0x1234',
+            proposalHash: '0x1234000000000000000000000000000000000000000000000000000000000000',
         },
     });
 
@@ -225,6 +228,28 @@ async function run() {
             }),
         /Single-fire lock engaged/
     );
+
+    resetSingleFireState();
+    process.env.OG_MODULE = '0x1234000000000000000000000000000000000000';
+    await reconcileProposalSubmission({
+        publicClient: {
+            getBlockNumber: async () => 100n,
+            getLogs: async () => [
+                {
+                    args: {
+                        proposalHash:
+                            '0xabcd000000000000000000000000000000000000000000000000000000000000',
+                    },
+                },
+            ],
+        },
+    });
+    assert.equal(getSingleFireState().proposalSubmitted, true);
+
+    resetSingleFireState();
+    onProposalEvents({ executedProposalCount: 1 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(getSingleFireState().proposalSubmitted, true);
 
     console.log('[test] allowlist validation OK');
 }
