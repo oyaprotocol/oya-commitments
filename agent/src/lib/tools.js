@@ -7,6 +7,50 @@ function safeStringify(value) {
     return JSON.stringify(value, (_, item) => (typeof item === 'bigint' ? item.toString() : item));
 }
 
+function normalizeOrderSide(value) {
+    if (typeof value !== 'string') return undefined;
+    const normalized = value.trim().toUpperCase();
+    return normalized === 'BUY' || normalized === 'SELL' ? normalized : undefined;
+}
+
+function getFirstString(values) {
+    for (const value of values) {
+        if (typeof value === 'string' && value.trim()) {
+            return value.trim();
+        }
+    }
+    return undefined;
+}
+
+function extractSignedOrderSideAndTokenId(signedOrder) {
+    if (!signedOrder || typeof signedOrder !== 'object') {
+        return { side: undefined, tokenId: undefined };
+    }
+
+    const container =
+        signedOrder.order && typeof signedOrder.order === 'object'
+            ? signedOrder.order
+            : signedOrder;
+
+    const side = normalizeOrderSide(container.side ?? signedOrder.side);
+    const tokenId = getFirstString([
+        container.tokenId,
+        container.tokenID,
+        container.token_id,
+        container.assetId,
+        container.assetID,
+        container.asset_id,
+        signedOrder.tokenId,
+        signedOrder.tokenID,
+        signedOrder.token_id,
+        signedOrder.assetId,
+        signedOrder.assetID,
+        signedOrder.asset_id,
+    ]);
+
+    return { side, tokenId };
+}
+
 function toolDefinitions({ proposeEnabled, disputeEnabled, clobEnabled }) {
     const tools = [
         {
@@ -376,6 +420,24 @@ async function executeToolCalls({
                 }
                 if (!args.tokenId) {
                     throw new Error('tokenId is required');
+                }
+                const declaredTokenId = String(args.tokenId).trim();
+                const { side: signedOrderSide, tokenId: signedOrderTokenId } =
+                    extractSignedOrderSideAndTokenId(args.signedOrder);
+                if (!signedOrderSide || !signedOrderTokenId) {
+                    throw new Error(
+                        'signedOrder must include embedded side and token id (side + tokenId/asset_id).'
+                    );
+                }
+                if (signedOrderSide !== args.side) {
+                    throw new Error(
+                        `signedOrder side mismatch: declared ${args.side}, signed order has ${signedOrderSide}.`
+                    );
+                }
+                if (signedOrderTokenId !== declaredTokenId) {
+                    throw new Error(
+                        `signedOrder token mismatch: declared ${declaredTokenId}, signed order has ${signedOrderTokenId}.`
+                    );
                 }
                 const result = await placeClobOrder({
                     config,
