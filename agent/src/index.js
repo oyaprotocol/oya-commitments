@@ -247,11 +247,20 @@ async function decideOnSignals(signals) {
                     });
                 }
             }
-            if (decision.responseId && toolOutputs.length > 0) {
+            const modelCallIds = new Set(
+                approvedToolCalls
+                    .map((call) => call?.callId)
+                    .filter((callId) => typeof callId === 'string' && callId.length > 0)
+            );
+            const explainableOutputs = toolOutputs.filter(
+                (output) => output?.callId && modelCallIds.has(output.callId)
+            );
+
+            if (decision.responseId && explainableOutputs.length > 0) {
                 const explanation = await explainToolCalls({
                     config,
                     previousResponseId: decision.responseId,
-                    toolOutputs,
+                    toolOutputs: explainableOutputs,
                 });
                 if (explanation) {
                     console.log('[agent] Agent explanation:', explanation);
