@@ -54,6 +54,15 @@ const quoterV1Abi = [
         outputs: [{ name: 'amountOut', type: 'uint256' }],
     },
 ];
+const erc20BalanceOfAbi = [
+    {
+        type: 'function',
+        name: 'balanceOf',
+        stateMutability: 'view',
+        inputs: [{ name: 'account', type: 'address' }],
+        outputs: [{ name: '', type: 'uint256' }],
+    },
+];
 
 const inferredTriggersCache = new Map();
 const singleFireState = {
@@ -283,6 +292,29 @@ function pickWethSnapshot(signals) {
     return null;
 }
 
+async function resolveWethAmount({
+    wethSnapshot,
+    publicClient,
+    commitmentSafe,
+}) {
+    if (wethSnapshot?.amount !== undefined && wethSnapshot?.amount !== null) {
+        return BigInt(String(wethSnapshot.amount));
+    }
+    if (!publicClient) {
+        throw new Error('No WETH balance snapshot and no public client available for fallback read.');
+    }
+    if (!commitmentSafe) {
+        throw new Error('No WETH balance snapshot and no commitment Safe address for fallback read.');
+    }
+    const current = await publicClient.readContract({
+        address: TOKENS.WETH,
+        abi: erc20BalanceOfAbi,
+        functionName: 'balanceOf',
+        args: [commitmentSafe],
+    });
+    return BigInt(current);
+}
+
 async function resolveQuoterCandidates({ publicClient, config }) {
     if (!publicClient) {
         throw new Error('publicClient is required for Uniswap quoter reads.');
@@ -456,10 +488,6 @@ async function validateToolCalls({
         if (!winningTrigger) {
             throw new Error('No priceTrigger signal available for this cycle.');
         }
-        if (!wethSnapshot?.amount) {
-            throw new Error('No WETH erc20BalanceSnapshot available for this cycle.');
-        }
-
         const inferredTokenOut =
             String(winningTrigger.baseToken ?? '').toLowerCase() === TOKENS.WETH
                 ? String(winningTrigger.quoteToken ?? '').toLowerCase()
@@ -471,7 +499,11 @@ async function validateToolCalls({
         const recipient = normalizeAddress(String(action.recipient ?? safeAddress));
         const operation = action.operation === undefined ? 0 : Number(action.operation);
         const fee = Number(action.fee ?? winningTrigger.poolFee);
-        const amountIn = BigInt(String(wethSnapshot.amount));
+        const amountIn = await resolveWethAmount({
+            wethSnapshot,
+            publicClient,
+            commitmentSafe: safeAddress,
+        });
         const quoted = await quoteMinOutWithSlippage({
             publicClient,
             config,
@@ -560,7 +592,7 @@ function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
         'Use your reasoning over the plain-language commitment and incoming signals. Do not depend on rigid text pattern matching.',
         'Treat erc20BalanceSnapshot signals as authoritative current Safe balances for this cycle.',
         'If exactly one priceTrigger signal is present in this cycle, treat it as the winning branch for this cycle.',
-        'When both a winning priceTrigger and a WETH erc20BalanceSnapshot are present, you have enough information to act.',
+        'When a winning priceTrigger is present, use the latest known Safe WETH balance (snapshot if present, otherwise current onchain balance).',
         'First trigger wins. If multiple triggers appear true in one cycle, use signal priority and then lexical triggerId order.',
         'Use all currently available WETH in the Safe for the winning branch swap.',
         'Build one uniswap_v3_exact_input_single action where amountInWei equals the WETH snapshot amount.',
