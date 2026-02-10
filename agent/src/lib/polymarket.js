@@ -104,13 +104,18 @@ async function placeClobOrder({
         throw new Error('orderType is required.');
     }
 
+    const normalizedOrder =
+        signedOrder.order && typeof signedOrder.order === 'object'
+            ? signedOrder.order
+            : signedOrder;
+
     return clobRequest({
         config,
         signingAddress,
         method: 'POST',
         path: '/order',
         body: {
-            order: signedOrder,
+            order: normalizedOrder,
             owner,
             orderType,
         },
