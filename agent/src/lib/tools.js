@@ -1,12 +1,13 @@
 import { getAddress } from 'viem';
 import { buildOgTransactions, makeDeposit, postBondAndDispute, postBondAndPropose } from './tx.js';
+import { cancelClobOrders, placeClobOrder } from './polymarket.js';
 import { parseToolArguments } from './utils.js';
 
 function safeStringify(value) {
     return JSON.stringify(value, (_, item) => (typeof item === 'bigint' ? item.toString() : item));
 }
 
-function toolDefinitions({ proposeEnabled, disputeEnabled }) {
+function toolDefinitions({ proposeEnabled, disputeEnabled, clobEnabled }) {
     const tools = [
         {
             type: 'function',
@@ -27,7 +28,7 @@ function toolDefinitions({ proposeEnabled, disputeEnabled }) {
                                 kind: {
                                     type: 'string',
                                     description:
-                                        'Action type: erc20_transfer | native_transfer | contract_call',
+                                        'Action type: erc20_transfer | native_transfer | contract_call | ctf_split | ctf_merge | ctf_redeem',
                                 },
                                 token: {
                                     type: ['string', 'null'],
@@ -82,17 +83,47 @@ function toolDefinitions({ proposeEnabled, disputeEnabled }) {
                                     description:
                                         'Safe operation (0=CALL,1=DELEGATECALL). Defaults to 0.',
                                 },
+                                chainId: {
+                                    type: ['integer', 'null'],
+                                    description: 'Chain id for CTF actions (defaults to POLYMARKET_CHAIN_ID).',
+                                },
+                                ctfContract: {
+                                    type: ['string', 'null'],
+                                    description:
+                                        'ConditionalTokens contract address override for CTF actions.',
+                                },
+                                collateralToken: {
+                                    type: ['string', 'null'],
+                                    description: 'Collateral token address for CTF actions.',
+                                },
+                                conditionId: {
+                                    type: ['string', 'null'],
+                                    description: 'Condition id bytes32 for CTF actions.',
+                                },
+                                parentCollectionId: {
+                                    type: ['string', 'null'],
+                                    description:
+                                        'Parent collection id bytes32 for CTF actions (default zero bytes32).',
+                                },
+                                partition: {
+                                    type: ['array', 'null'],
+                                    description:
+                                        'Index partition for ctf_split/ctf_merge. Defaults to [1,2].',
+                                    items: { type: 'integer' },
+                                },
+                                amount: {
+                                    type: ['string', 'null'],
+                                    description:
+                                        'Collateral/full-set amount in base units for ctf_split/ctf_merge.',
+                                },
+                                indexSets: {
+                                    type: ['array', 'null'],
+                                    description:
+                                        'Index sets for ctf_redeem. Defaults to [1,2].',
+                                    items: { type: 'integer' },
+                                },
                             },
-                            required: [
-                                'kind',
-                                'token',
-                                'to',
-                                'amountWei',
-                                'valueWei',
-                                'abi',
-                                'args',
-                                'operation',
-                            ],
+                            required: ['kind'],
                         },
                     },
                 },
@@ -181,6 +212,77 @@ function toolDefinitions({ proposeEnabled, disputeEnabled }) {
         });
     }
 
+    if (clobEnabled) {
+        tools.push(
+            {
+                type: 'function',
+                name: 'polymarket_clob_place_order',
+                description:
+                    'Submit a signed Polymarket CLOB order (BUY or SELL) to the CLOB API.',
+                strict: true,
+                parameters: {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                        owner: {
+                            type: 'string',
+                            description: 'EOA owner address associated with the signed order.',
+                        },
+                        side: {
+                            type: 'string',
+                            description: 'BUY or SELL.',
+                        },
+                        tokenId: {
+                            type: 'string',
+                            description: 'Polymarket token id for the order.',
+                        },
+                        orderType: {
+                            type: 'string',
+                            description: 'Order type, e.g. GTC, GTD, FOK, or FAK.',
+                        },
+                        signedOrder: {
+                            type: 'object',
+                            description:
+                                'Signed order payload expected by the CLOB API /order endpoint.',
+                        },
+                    },
+                    required: ['owner', 'side', 'tokenId', 'orderType', 'signedOrder'],
+                },
+            },
+            {
+                type: 'function',
+                name: 'polymarket_clob_cancel_orders',
+                description:
+                    'Cancel Polymarket CLOB orders by ids, by market, or cancel all open orders.',
+                strict: true,
+                parameters: {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                        mode: {
+                            type: 'string',
+                            description: 'ids | market | all',
+                        },
+                        orderIds: {
+                            type: ['array', 'null'],
+                            items: { type: 'string' },
+                            description: 'Order ids required when mode=ids.',
+                        },
+                        market: {
+                            type: ['string', 'null'],
+                            description: 'Market id used when mode=market.',
+                        },
+                        assetId: {
+                            type: ['string', 'null'],
+                            description: 'Optional asset id used when mode=market.',
+                        },
+                    },
+                    required: ['mode', 'orderIds', 'market', 'assetId'],
+                },
+            }
+        );
+    }
+
     return tools;
 }
 
@@ -205,12 +307,101 @@ async function executeToolCalls({
 
         if (call.name === 'build_og_transactions') {
             try {
-                const transactions = buildOgTransactions(args.actions ?? []);
+                const transactions = buildOgTransactions(args.actions ?? [], { config });
                 builtTransactions = transactions;
                 outputs.push({
                     callId: call.callId,
                     name: call.name,
                     output: safeStringify({ status: 'ok', transactions }),
+                });
+            } catch (error) {
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'error',
+                        message: error?.message ?? String(error),
+                    }),
+                });
+            }
+            continue;
+        }
+
+        if (call.name === 'polymarket_clob_place_order') {
+            if (!config.polymarketClobEnabled) {
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'skipped',
+                        reason: 'polymarket CLOB disabled',
+                    }),
+                });
+                continue;
+            }
+
+            try {
+                if (args.side !== 'BUY' && args.side !== 'SELL') {
+                    throw new Error('side must be BUY or SELL');
+                }
+                if (!args.tokenId) {
+                    throw new Error('tokenId is required');
+                }
+                const result = await placeClobOrder({
+                    config,
+                    signedOrder: args.signedOrder,
+                    owner: args.owner,
+                    orderType: args.orderType,
+                });
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'submitted',
+                        result,
+                    }),
+                });
+            } catch (error) {
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'error',
+                        message: error?.message ?? String(error),
+                    }),
+                });
+            }
+            continue;
+        }
+
+        if (call.name === 'polymarket_clob_cancel_orders') {
+            if (!config.polymarketClobEnabled) {
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'skipped',
+                        reason: 'polymarket CLOB disabled',
+                    }),
+                });
+                continue;
+            }
+
+            try {
+                const result = await cancelClobOrders({
+                    config,
+                    mode: args.mode,
+                    orderIds: args.orderIds,
+                    market: args.market,
+                    assetId: args.assetId,
+                });
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'submitted',
+                        result,
+                    }),
                 });
             } catch (error) {
                 outputs.push({

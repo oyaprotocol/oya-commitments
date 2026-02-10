@@ -10,6 +10,14 @@ import { optimisticGovernorAbi, optimisticOracleAbi } from './og.js';
 import { normalizeAssertion } from './og.js';
 import { summarizeViemError } from './utils.js';
 
+const conditionalTokensAbi = parseAbi([
+    'function splitPosition(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] partition, uint256 amount)',
+    'function mergePositions(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] partition, uint256 amount)',
+    'function redeemPositions(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] indexSets)',
+]);
+
+const ZERO_BYTES32 = '0x0000000000000000000000000000000000000000000000000000000000000000';
+
 async function postBondAndPropose({
     publicClient,
     walletClient,
@@ -299,10 +307,12 @@ function normalizeOgTransactions(transactions) {
     });
 }
 
-function buildOgTransactions(actions) {
+function buildOgTransactions(actions, options = {}) {
     if (!Array.isArray(actions) || actions.length === 0) {
         throw new Error('actions must be a non-empty array');
     }
+
+    const config = options.config ?? {};
 
     return actions.map((action) => {
         const operation = action.operation !== undefined ? Number(action.operation) : 0;
@@ -356,6 +366,92 @@ function buildOgTransactions(actions) {
             return {
                 to: getAddress(action.to),
                 value,
+                data,
+                operation,
+            };
+        }
+
+        if (action.kind === 'ctf_split' || action.kind === 'ctf_merge') {
+            const chainId = Number(action.chainId ?? config.polymarketChainId ?? 137);
+            if (chainId !== Number(config.polymarketChainId ?? 137)) {
+                throw new Error(
+                    `Unsupported chainId ${chainId} for CTF action. Expected ${Number(config.polymarketChainId ?? 137)}.`
+                );
+            }
+            if (!action.collateralToken || !action.conditionId || action.amount === undefined) {
+                throw new Error(`${action.kind} requires collateralToken, conditionId, amount`);
+            }
+            const ctfContract = action.ctfContract
+                ? getAddress(action.ctfContract)
+                : config.polymarketConditionalTokens;
+            if (!ctfContract) {
+                throw new Error(`${action.kind} requires ctfContract or POLYMARKET_CONDITIONAL_TOKENS`);
+            }
+            const parentCollectionId = action.parentCollectionId ?? ZERO_BYTES32;
+            const partition = Array.isArray(action.partition) && action.partition.length > 0
+                ? action.partition.map((value) => BigInt(value))
+                : [1n, 2n];
+            const amount = BigInt(action.amount);
+            if (amount <= 0n) {
+                throw new Error(`${action.kind} amount must be > 0`);
+            }
+
+            const functionName = action.kind === 'ctf_split' ? 'splitPosition' : 'mergePositions';
+            const data = encodeFunctionData({
+                abi: conditionalTokensAbi,
+                functionName,
+                args: [
+                    getAddress(action.collateralToken),
+                    parentCollectionId,
+                    action.conditionId,
+                    partition,
+                    amount,
+                ],
+            });
+
+            return {
+                to: ctfContract,
+                value: '0',
+                data,
+                operation,
+            };
+        }
+
+        if (action.kind === 'ctf_redeem') {
+            const chainId = Number(action.chainId ?? config.polymarketChainId ?? 137);
+            if (chainId !== Number(config.polymarketChainId ?? 137)) {
+                throw new Error(
+                    `Unsupported chainId ${chainId} for CTF action. Expected ${Number(config.polymarketChainId ?? 137)}.`
+                );
+            }
+            if (!action.collateralToken || !action.conditionId) {
+                throw new Error('ctf_redeem requires collateralToken and conditionId');
+            }
+            const ctfContract = action.ctfContract
+                ? getAddress(action.ctfContract)
+                : config.polymarketConditionalTokens;
+            if (!ctfContract) {
+                throw new Error('ctf_redeem requires ctfContract or POLYMARKET_CONDITIONAL_TOKENS');
+            }
+            const parentCollectionId = action.parentCollectionId ?? ZERO_BYTES32;
+            const indexSets = Array.isArray(action.indexSets) && action.indexSets.length > 0
+                ? action.indexSets.map((value) => BigInt(value))
+                : [1n, 2n];
+
+            const data = encodeFunctionData({
+                abi: conditionalTokensAbi,
+                functionName: 'redeemPositions',
+                args: [
+                    getAddress(action.collateralToken),
+                    parentCollectionId,
+                    action.conditionId,
+                    indexSets,
+                ],
+            });
+
+            return {
+                to: ctfContract,
+                value: '0',
                 data,
                 operation,
             };

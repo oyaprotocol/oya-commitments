@@ -134,8 +134,10 @@ async function decideOnSignals(signals) {
         const tools = toolDefinitions({
             proposeEnabled: config.proposeEnabled,
             disputeEnabled: config.disputeEnabled,
+            clobEnabled: config.polymarketClobEnabled,
         });
-        const allowTools = config.proposeEnabled || config.disputeEnabled;
+        const allowTools =
+            config.proposeEnabled || config.disputeEnabled || config.polymarketClobEnabled;
         const decision = await callAgent({
             config,
             systemPrompt,
