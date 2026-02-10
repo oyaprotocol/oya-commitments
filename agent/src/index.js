@@ -309,6 +309,7 @@ async function agentLoop() {
 
         const {
             deposits,
+            balanceSnapshots,
             lastCheckedBlock: nextCheckedBlock,
             lastNativeBalance: nextNative,
             lastAssetBalances: nextAssetBalances,
@@ -384,6 +385,7 @@ async function agentLoop() {
         });
 
         const combinedSignals = deposits.concat(
+            balanceSnapshots,
             newProposals.map((proposal) => ({
                 kind: 'proposal',
                 proposalHash: proposal.proposalHash,
