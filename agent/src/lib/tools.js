@@ -47,6 +47,17 @@ function getFirstString(values) {
     return undefined;
 }
 
+function maybeAddress(value) {
+    if (typeof value !== 'string') return undefined;
+    const trimmed = value.trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(trimmed)) return undefined;
+    try {
+        return getAddress(trimmed);
+    } catch (error) {
+        return undefined;
+    }
+}
+
 function extractSignedOrderSideAndTokenId(signedOrder) {
     if (!signedOrder || typeof signedOrder !== 'object') {
         return { side: undefined, tokenId: undefined };
@@ -74,6 +85,38 @@ function extractSignedOrderSideAndTokenId(signedOrder) {
     ]);
 
     return { side, tokenId };
+}
+
+function extractSignedOrderIdentityAddresses(signedOrder) {
+    if (!signedOrder || typeof signedOrder !== 'object') {
+        return [];
+    }
+
+    const container =
+        signedOrder.order && typeof signedOrder.order === 'object'
+            ? signedOrder.order
+            : signedOrder;
+    const candidates = [
+        container.signer,
+        container.signerAddress,
+        container.maker,
+        container.makerAddress,
+        container.funder,
+        container.funderAddress,
+        container.user,
+        container.userAddress,
+        signedOrder.signer,
+        signedOrder.signerAddress,
+        signedOrder.maker,
+        signedOrder.makerAddress,
+        signedOrder.funder,
+        signedOrder.funderAddress,
+        signedOrder.user,
+        signedOrder.userAddress,
+    ];
+
+    const normalized = candidates.map(maybeAddress).filter(Boolean);
+    return Array.from(new Set(normalized));
 }
 
 function toolDefinitions({ proposeEnabled, disputeEnabled, clobEnabled }) {
@@ -500,6 +543,16 @@ async function executeToolCalls({
                 if (signedOrderTokenId !== declaredTokenId) {
                     throw new Error(
                         `signedOrder token mismatch: declared ${declaredTokenId}, signed order has ${signedOrderTokenId}.`
+                    );
+                }
+                const signerAddress = getAddress(account.address);
+                const identityAddresses = extractSignedOrderIdentityAddresses(args.signedOrder);
+                if (
+                    identityAddresses.length > 0 &&
+                    !identityAddresses.some((address) => address === signerAddress)
+                ) {
+                    throw new Error(
+                        `signedOrder identity mismatch: expected ${signerAddress}, signed order contains ${identityAddresses.join(', ')}.`
                     );
                 }
                 const configuredOwnerApiKey = config.polymarketClobApiKey;

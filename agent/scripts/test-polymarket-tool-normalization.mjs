@@ -76,6 +76,33 @@ async function run() {
     assert.equal(normalizedOrderTypeOut.status, 'error');
     assert.match(normalizedOrderTypeOut.message, /Missing CLOB credentials/);
 
+    const mismatchedIdentity = await executeToolCalls({
+        toolCalls: [
+            {
+                callId: 'mismatched-identity',
+                name: 'polymarket_clob_place_order',
+                arguments: {
+                    side: 'BUY',
+                    tokenId: '123',
+                    orderType: 'GTC',
+                    signedOrder: {
+                        side: 'BUY',
+                        tokenId: '123',
+                        maker: '0x3333333333333333333333333333333333333333',
+                    },
+                },
+            },
+        ],
+        publicClient: {},
+        walletClient: {},
+        account: TEST_ACCOUNT,
+        config,
+        ogContext: null,
+    });
+    const mismatchedIdentityOut = parseToolOutput(mismatchedIdentity[0]);
+    assert.equal(mismatchedIdentityOut.status, 'error');
+    assert.match(mismatchedIdentityOut.message, /signedOrder identity mismatch/);
+
     const invalidCancelMode = await executeToolCalls({
         toolCalls: [
             {

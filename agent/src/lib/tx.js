@@ -464,6 +464,20 @@ function buildOgTransactions(actions, options = {}) {
             }
 
             if (action.kind === 'ctf_split') {
+                // Use zero-first approval for compatibility with ERC20 tokens that
+                // require allowance reset before setting a new non-zero allowance.
+                const resetApproveData = encodeFunctionData({
+                    abi: erc20Abi,
+                    functionName: 'approve',
+                    args: [ctfContract, 0n],
+                });
+                transactions.push({
+                    to: collateralToken,
+                    value: '0',
+                    data: resetApproveData,
+                    operation,
+                });
+
                 const approveData = encodeFunctionData({
                     abi: erc20Abi,
                     functionName: 'approve',
