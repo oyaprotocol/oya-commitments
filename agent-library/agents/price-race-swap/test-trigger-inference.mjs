@@ -15,7 +15,6 @@ function run() {
             comparator: 'lte',
             threshold: 0.03,
             priority: 1,
-            pool: '0x287b0e934ed0439e2a7b1d5f0fc25ea2c24b64f7',
         },
         {
             id: 'first',
@@ -31,6 +30,7 @@ function run() {
     assert.equal(normalized.length, 2);
     assert.equal(normalized[0].id, 'first');
     assert.equal(normalized[1].id, 'second');
+    assert.equal(normalized[1].poolSelection, 'high-liquidity');
 
     assert.throws(() =>
         sanitizeInferredTriggers([
