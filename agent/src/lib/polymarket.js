@@ -26,6 +26,14 @@ function shouldRetryError(error) {
     return false;
 }
 
+function canRetryRequest({ method, path }) {
+    const normalizedMethod = method.toUpperCase();
+    if (normalizedMethod === 'POST' && path === '/order') {
+        return false;
+    }
+    return true;
+}
+
 async function sleep(ms) {
     if (ms <= 0) return;
     await new Promise((resolve) => setTimeout(resolve, ms));
@@ -86,12 +94,13 @@ async function clobRequest({
         config.polymarketClobMaxRetries,
         DEFAULT_CLOB_MAX_RETRIES
     );
+    const retriesAllowed = canRetryRequest({ method, path }) ? maxRetries : 0;
     const retryDelayMs = normalizeNonNegativeInteger(
         config.polymarketClobRetryDelayMs,
         DEFAULT_CLOB_RETRY_DELAY_MS
     );
 
-    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    for (let attempt = 0; attempt <= retriesAllowed; attempt += 1) {
         const timestamp = Math.floor(Date.now() / 1000);
         const headers = {
             'Content-Type': 'application/json',
@@ -121,7 +130,7 @@ async function clobRequest({
             }
 
             if (!response.ok) {
-                if (attempt < maxRetries && shouldRetryResponseStatus(response.status)) {
+                if (attempt < retriesAllowed && shouldRetryResponseStatus(response.status)) {
                     await sleep(retryDelayMs);
                     continue;
                 }
@@ -132,7 +141,7 @@ async function clobRequest({
 
             return parsed;
         } catch (error) {
-            if (attempt < maxRetries && shouldRetryError(error)) {
+            if (attempt < retriesAllowed && shouldRetryError(error)) {
                 await sleep(retryDelayMs);
                 continue;
             }
