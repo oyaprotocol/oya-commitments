@@ -24,6 +24,7 @@ async function run() {
     assert.equal(makeErc1155DepositDef, undefined);
     assert.deepEqual(placeOrderDef.parameters.properties.orderType.enum, ['GTC', 'GTD', 'FOK', 'FAK']);
     assert.deepEqual(cancelOrdersDef.parameters.properties.mode.enum, ['ids', 'market', 'all']);
+    assert.deepEqual(cancelOrdersDef.parameters.required, ['mode']);
 
     const config = {
         polymarketClobEnabled: true,

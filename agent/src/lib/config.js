@@ -68,6 +68,11 @@ function buildConfig() {
         polymarketClobApiKey: process.env.POLYMARKET_CLOB_API_KEY,
         polymarketClobApiSecret: process.env.POLYMARKET_CLOB_API_SECRET,
         polymarketClobApiPassphrase: process.env.POLYMARKET_CLOB_API_PASSPHRASE,
+        polymarketClobRequestTimeoutMs: Number(
+            process.env.POLYMARKET_CLOB_REQUEST_TIMEOUT_MS ?? 15_000
+        ),
+        polymarketClobMaxRetries: Number(process.env.POLYMARKET_CLOB_MAX_RETRIES ?? 1),
+        polymarketClobRetryDelayMs: Number(process.env.POLYMARKET_CLOB_RETRY_DELAY_MS ?? 250),
         uniswapV3Factory: process.env.UNISWAP_V3_FACTORY
             ? getAddress(process.env.UNISWAP_V3_FACTORY)
             : undefined,
