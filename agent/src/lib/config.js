@@ -36,7 +36,10 @@ function buildConfig() {
         openAiApiKey: process.env.OPENAI_API_KEY,
         openAiModel: process.env.OPENAI_MODEL ?? 'gpt-4.1-mini',
         openAiBaseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
-        allowProposeOnSimulationFail: true,
+        allowProposeOnSimulationFail:
+            process.env.ALLOW_PROPOSE_ON_SIMULATION_FAIL === undefined
+                ? false
+                : process.env.ALLOW_PROPOSE_ON_SIMULATION_FAIL.toLowerCase() === 'true',
         proposeGasLimit: process.env.PROPOSE_GAS_LIMIT
             ? BigInt(process.env.PROPOSE_GAS_LIMIT)
             : 2_000_000n,

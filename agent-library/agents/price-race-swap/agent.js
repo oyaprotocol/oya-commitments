@@ -5,9 +5,9 @@ const TOKENS = Object.freeze({
 });
 
 const ALLOWED_ROUTERS = new Set([
-    '0xe592427a0aece92de3edee1f18e0157c05861564',
-    '0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45',
+    '0x3bfa4769fb09eefc5a80d6e87c3b9c650f7ae48e',
 ]);
+const DEFAULT_ROUTER = '0x3bfa4769fb09eefc5a80d6e87c3b9c650f7ae48e';
 const ALLOWED_FEE_TIERS = new Set([500, 3000, 10000]);
 
 const inferredTriggersCache = new Map();
@@ -210,9 +210,35 @@ function isMatchingPriceSignal(signal, actionFee, tokenIn, tokenOut) {
     return Number(signal.poolFee) === actionFee;
 }
 
+function pickWinningPriceTrigger(signals) {
+    const triggers = Array.isArray(signals)
+        ? signals.filter((signal) => signal?.kind === 'priceTrigger')
+        : [];
+    if (triggers.length === 0) return null;
+    const sorted = [...triggers].sort((a, b) => {
+        const pa = Number(a?.priority ?? Number.MAX_SAFE_INTEGER);
+        const pb = Number(b?.priority ?? Number.MAX_SAFE_INTEGER);
+        if (pa !== pb) return pa - pb;
+        return String(a?.triggerId ?? '').localeCompare(String(b?.triggerId ?? ''));
+    });
+    return sorted[0];
+}
+
+function pickWethSnapshot(signals) {
+    if (!Array.isArray(signals)) return null;
+    for (const signal of signals) {
+        if (signal?.kind !== 'erc20BalanceSnapshot') continue;
+        if (String(signal.asset ?? '').toLowerCase() !== TOKENS.WETH) continue;
+        return signal;
+    }
+    return null;
+}
+
 async function validateToolCalls({ toolCalls, signals, commitmentText, commitmentSafe }) {
     const validated = [];
     const safeAddress = commitmentSafe ? String(commitmentSafe).toLowerCase() : null;
+    const winningTrigger = pickWinningPriceTrigger(signals);
+    const wethSnapshot = pickWethSnapshot(signals);
 
     for (const call of toolCalls) {
         if (call.name === 'dispute_assertion') {
@@ -238,13 +264,34 @@ async function validateToolCalls({ toolCalls, signals, commitmentText, commitmen
             throw new Error('Only uniswap_v3_exact_input_single is allowed for this agent.');
         }
 
-        const tokenIn = normalizeAddress(String(action.tokenIn));
-        const tokenOut = normalizeAddress(String(action.tokenOut));
-        const router = normalizeAddress(String(action.router));
-        const recipient = normalizeAddress(String(action.recipient));
-        const fee = Number(action.fee);
-        const amountIn = BigInt(action.amountInWei ?? '0');
+        if (!winningTrigger) {
+            throw new Error('No priceTrigger signal available for this cycle.');
+        }
+        if (!wethSnapshot?.amount) {
+            throw new Error('No WETH erc20BalanceSnapshot available for this cycle.');
+        }
+
+        const inferredTokenOut =
+            String(winningTrigger.baseToken ?? '').toLowerCase() === TOKENS.WETH
+                ? String(winningTrigger.quoteToken ?? '').toLowerCase()
+                : String(winningTrigger.baseToken ?? '').toLowerCase();
+
+        const tokenIn = normalizeAddress(String(action.tokenIn ?? TOKENS.WETH));
+        const tokenOut = normalizeAddress(String(action.tokenOut ?? inferredTokenOut));
+        const router = normalizeAddress(String(action.router ?? DEFAULT_ROUTER));
+        const recipient = normalizeAddress(String(action.recipient ?? safeAddress));
+        const fee = Number(action.fee ?? winningTrigger.poolFee);
+        const amountIn = BigInt(action.amountInWei ?? String(wethSnapshot.amount));
         const amountOutMin = BigInt(action.amountOutMinWei ?? '0');
+
+        action.tokenIn = tokenIn;
+        action.tokenOut = tokenOut;
+        action.router = router;
+        action.recipient = recipient;
+        action.fee = fee;
+        action.amountInWei = amountIn.toString();
+        action.amountOutMinWei = amountOutMin.toString();
+        args.actions[0] = action;
 
         if (tokenIn !== TOKENS.WETH) {
             throw new Error('Swap tokenIn must be Sepolia WETH.');
@@ -280,7 +327,10 @@ async function validateToolCalls({ toolCalls, signals, commitmentText, commitmen
             );
         }
 
-        validated.push(call);
+        validated.push({
+            ...call,
+            parsedArguments: args,
+        });
     }
 
     return validated;

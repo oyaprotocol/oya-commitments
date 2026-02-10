@@ -123,6 +123,9 @@ async function postBondAndPropose({
         });
     } catch (error) {
         simulationError = error;
+        const simulationMessage =
+            error?.shortMessage ?? error?.message ?? summarizeViemError(error)?.message ?? String(error);
+        console.warn('[agent] Proposal simulation failed:', simulationMessage);
         if (!config.allowProposeOnSimulationFail) {
             throw error;
         }
