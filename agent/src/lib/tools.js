@@ -1,5 +1,11 @@
 import { getAddress } from 'viem';
-import { buildOgTransactions, makeDeposit, postBondAndDispute, postBondAndPropose } from './tx.js';
+import {
+    buildOgTransactions,
+    makeDeposit,
+    makeErc1155Deposit,
+    postBondAndDispute,
+    postBondAndPropose,
+} from './tx.js';
 import { cancelClobOrders, placeClobOrder } from './polymarket.js';
 import { parseToolArguments } from './utils.js';
 
@@ -244,6 +250,36 @@ function toolDefinitions({ proposeEnabled, disputeEnabled, clobEnabled }) {
                     },
                 },
                 required: ['asset', 'amountWei'],
+            },
+        },
+        {
+            type: 'function',
+            name: 'make_erc1155_deposit',
+            description:
+                'Deposit ERC1155 tokens into the commitment Safe using safeTransferFrom from the agent wallet.',
+            strict: true,
+            parameters: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                    token: {
+                        type: 'string',
+                        description: 'ERC1155 token contract address.',
+                    },
+                    tokenId: {
+                        type: 'string',
+                        description: 'ERC1155 token id as a base-10 string.',
+                    },
+                    amount: {
+                        type: 'string',
+                        description: 'ERC1155 amount as a base-10 string.',
+                    },
+                    data: {
+                        type: ['string', 'null'],
+                        description: 'Optional calldata bytes for safeTransferFrom, defaults to 0x.',
+                    },
+                },
+                required: ['token', 'tokenId', 'amount'],
             },
         },
     ];
@@ -561,6 +597,28 @@ async function executeToolCalls({
                 config,
                 asset: args.asset,
                 amountWei: BigInt(args.amountWei),
+            });
+            await publicClient.waitForTransactionReceipt({ hash: txHash });
+            outputs.push({
+                callId: call.callId,
+                name: call.name,
+                output: safeStringify({
+                    status: 'confirmed',
+                    transactionHash: String(txHash),
+                }),
+            });
+            continue;
+        }
+
+        if (call.name === 'make_erc1155_deposit') {
+            const txHash = await makeErc1155Deposit({
+                walletClient,
+                account,
+                config,
+                token: args.token,
+                tokenId: args.tokenId,
+                amount: args.amount,
+                data: args.data,
             });
             await publicClient.waitForTransactionReceipt({ hash: txHash });
             outputs.push({

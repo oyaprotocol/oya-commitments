@@ -16,6 +16,10 @@ const conditionalTokensAbi = parseAbi([
     'function redeemPositions(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] indexSets)',
 ]);
 
+const erc1155TransferAbi = parseAbi([
+    'function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data)',
+]);
+
 const ZERO_BYTES32 = '0x0000000000000000000000000000000000000000000000000000000000000000';
 
 async function postBondAndPropose({
@@ -567,8 +571,45 @@ async function makeDeposit({
     });
 }
 
+async function makeErc1155Deposit({
+    walletClient,
+    account,
+    config,
+    token,
+    tokenId,
+    amount,
+    data,
+}) {
+    if (!token || tokenId === undefined || amount === undefined) {
+        throw new Error('ERC1155 deposit requires token, tokenId, and amount.');
+    }
+
+    const normalizedToken = getAddress(token);
+    const normalizedTokenId = BigInt(tokenId);
+    const normalizedAmount = BigInt(amount);
+    if (normalizedAmount <= 0n) {
+        throw new Error('ERC1155 deposit amount must be > 0.');
+    }
+
+    const transferData = data ?? '0x';
+
+    return walletClient.writeContract({
+        address: normalizedToken,
+        abi: erc1155TransferAbi,
+        functionName: 'safeTransferFrom',
+        args: [
+            account.address,
+            config.commitmentSafe,
+            normalizedTokenId,
+            normalizedAmount,
+            transferData,
+        ],
+    });
+}
+
 export {
     buildOgTransactions,
+    makeErc1155Deposit,
     makeDeposit,
     normalizeOgTransactions,
     postBondAndDispute,
