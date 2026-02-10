@@ -13,7 +13,7 @@ function toolDefinitions({ proposeEnabled, disputeEnabled }) {
             name: 'build_og_transactions',
             description:
                 'Build Optimistic Governor transaction payloads from high-level intents. Returns array of {to,value,data,operation} with value as string wei.',
-            strict: true,
+            strict: false,
             parameters: {
                 type: 'object',
                 additionalProperties: false,
