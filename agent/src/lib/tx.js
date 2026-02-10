@@ -443,6 +443,7 @@ function buildOgTransactions(actions, options = {}) {
             if (!action.collateralToken || !action.conditionId || action.amount === undefined) {
                 throw new Error(`${action.kind} requires collateralToken, conditionId, amount`);
             }
+            const collateralToken = getAddress(action.collateralToken);
             const ctfContract = action.ctfContract
                 ? getAddress(action.ctfContract)
                 : config.polymarketConditionalTokens;
@@ -458,12 +459,26 @@ function buildOgTransactions(actions, options = {}) {
                 throw new Error(`${action.kind} amount must be > 0`);
             }
 
+            if (action.kind === 'ctf_split') {
+                const approveData = encodeFunctionData({
+                    abi: erc20Abi,
+                    functionName: 'approve',
+                    args: [ctfContract, amount],
+                });
+                transactions.push({
+                    to: collateralToken,
+                    value: '0',
+                    data: approveData,
+                    operation,
+                });
+            }
+
             const functionName = action.kind === 'ctf_split' ? 'splitPosition' : 'mergePositions';
             const data = encodeFunctionData({
                 abi: conditionalTokensAbi,
                 functionName,
                 args: [
-                    getAddress(action.collateralToken),
+                    collateralToken,
                     parentCollectionId,
                     action.conditionId,
                     partition,
