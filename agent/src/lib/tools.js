@@ -13,6 +13,25 @@ function normalizeOrderSide(value) {
     return normalized === 'BUY' || normalized === 'SELL' ? normalized : undefined;
 }
 
+function normalizeOrderType(value) {
+    if (typeof value !== 'string') return undefined;
+    const normalized = value.trim().toUpperCase();
+    return normalized === 'GTC' ||
+        normalized === 'GTD' ||
+        normalized === 'FOK' ||
+        normalized === 'FAK'
+        ? normalized
+        : undefined;
+}
+
+function normalizeCancelMode(value) {
+    if (typeof value !== 'string') return undefined;
+    const normalized = value.trim().toLowerCase();
+    return normalized === 'ids' || normalized === 'market' || normalized === 'all'
+        ? normalized
+        : undefined;
+}
+
 function getFirstString(values) {
     for (const value of values) {
         if (typeof value === 'string' && value.trim()) {
@@ -313,6 +332,7 @@ function toolDefinitions({ proposeEnabled, disputeEnabled, clobEnabled }) {
                         },
                         orderType: {
                             type: 'string',
+                            enum: ['GTC', 'GTD', 'FOK', 'FAK'],
                             description: 'Order type, e.g. GTC, GTD, FOK, or FAK.',
                         },
                         signedOrder: {
@@ -336,6 +356,7 @@ function toolDefinitions({ proposeEnabled, disputeEnabled, clobEnabled }) {
                     properties: {
                         mode: {
                             type: 'string',
+                            enum: ['ids', 'market', 'all'],
                             description: 'ids | market | all',
                         },
                         orderIds: {
@@ -424,6 +445,10 @@ async function executeToolCalls({
                     throw new Error('tokenId is required');
                 }
                 const declaredTokenId = String(args.tokenId).trim();
+                const orderType = normalizeOrderType(args.orderType);
+                if (!orderType) {
+                    throw new Error('orderType must be one of GTC, GTD, FOK, FAK');
+                }
                 const { side: signedOrderSide, tokenId: signedOrderTokenId } =
                     extractSignedOrderSideAndTokenId(args.signedOrder);
                 if (!signedOrderSide || !signedOrderTokenId) {
@@ -459,7 +484,7 @@ async function executeToolCalls({
                     signingAddress: account.address,
                     signedOrder: args.signedOrder,
                     ownerApiKey: configuredOwnerApiKey,
-                    orderType: args.orderType,
+                    orderType,
                 });
                 outputs.push({
                     callId: call.callId,
@@ -496,10 +521,14 @@ async function executeToolCalls({
             }
 
             try {
+                const mode = normalizeCancelMode(args.mode);
+                if (!mode) {
+                    throw new Error('mode must be one of ids, market, all');
+                }
                 const result = await cancelClobOrders({
                     config,
                     signingAddress: account.address,
-                    mode: args.mode,
+                    mode,
                     orderIds: args.orderIds,
                     market: args.market,
                     assetId: args.assetId,
