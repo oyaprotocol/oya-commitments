@@ -60,6 +60,9 @@ function buildConfig() {
         uniswapV3Factory: process.env.UNISWAP_V3_FACTORY
             ? getAddress(process.env.UNISWAP_V3_FACTORY)
             : undefined,
+        uniswapV3Quoter: process.env.UNISWAP_V3_QUOTER
+            ? getAddress(process.env.UNISWAP_V3_QUOTER)
+            : undefined,
         uniswapV3FeeTiers: parseFeeTierList(process.env.UNISWAP_V3_FEE_TIERS),
     };
 }

@@ -9,6 +9,51 @@ const ALLOWED_ROUTERS = new Set([
 ]);
 const DEFAULT_ROUTER = '0x3bfa4769fb09eefc5a80d6e87c3b9c650f7ae48e';
 const ALLOWED_FEE_TIERS = new Set([500, 3000, 10000]);
+const QUOTER_CANDIDATES_BY_CHAIN = new Map([
+    [1, ['0x61fFE014bA17989E743c5F6cB21bF9697530B21e', '0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6']],
+    [11155111, ['0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3', '0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6']],
+]);
+const quoterV2Abi = [
+    {
+        type: 'function',
+        name: 'quoteExactInputSingle',
+        stateMutability: 'nonpayable',
+        inputs: [
+            {
+                name: 'params',
+                type: 'tuple',
+                components: [
+                    { name: 'tokenIn', type: 'address' },
+                    { name: 'tokenOut', type: 'address' },
+                    { name: 'amountIn', type: 'uint256' },
+                    { name: 'fee', type: 'uint24' },
+                    { name: 'sqrtPriceLimitX96', type: 'uint160' },
+                ],
+            },
+        ],
+        outputs: [
+            { name: 'amountOut', type: 'uint256' },
+            { name: 'sqrtPriceX96After', type: 'uint160' },
+            { name: 'initializedTicksCrossed', type: 'uint32' },
+            { name: 'gasEstimate', type: 'uint256' },
+        ],
+    },
+];
+const quoterV1Abi = [
+    {
+        type: 'function',
+        name: 'quoteExactInputSingle',
+        stateMutability: 'view',
+        inputs: [
+            { name: 'tokenIn', type: 'address' },
+            { name: 'tokenOut', type: 'address' },
+            { name: 'fee', type: 'uint24' },
+            { name: 'amountIn', type: 'uint256' },
+            { name: 'sqrtPriceLimitX96', type: 'uint160' },
+        ],
+        outputs: [{ name: 'amountOut', type: 'uint256' }],
+    },
+];
 
 const inferredTriggersCache = new Map();
 const singleFireState = {
@@ -238,7 +283,133 @@ function pickWethSnapshot(signals) {
     return null;
 }
 
-async function validateToolCalls({ toolCalls, signals, commitmentText, commitmentSafe }) {
+async function resolveQuoterCandidates({ publicClient, config }) {
+    if (!publicClient) {
+        throw new Error('publicClient is required for Uniswap quoter reads.');
+    }
+    if (config?.uniswapV3Quoter) {
+        return [normalizeAddress(String(config.uniswapV3Quoter))];
+    }
+    const chainId = await publicClient.getChainId();
+    const byChain = QUOTER_CANDIDATES_BY_CHAIN.get(Number(chainId));
+    if (!Array.isArray(byChain) || byChain.length === 0) {
+        throw new Error(
+            `No Uniswap V3 quoter configured for chainId ${chainId}. Set UNISWAP_V3_QUOTER.`
+        );
+    }
+    return byChain.map((value) => normalizeAddress(value));
+}
+
+async function tryQuoteExactInputSingleV2({
+    publicClient,
+    quoter,
+    tokenIn,
+    tokenOut,
+    fee,
+    amountIn,
+}) {
+    const quoteCall = await publicClient.simulateContract({
+        address: quoter,
+        abi: quoterV2Abi,
+        functionName: 'quoteExactInputSingle',
+        args: [
+            {
+                tokenIn,
+                tokenOut,
+                fee,
+                amountIn,
+                sqrtPriceLimitX96: 0n,
+            },
+        ],
+    });
+    const result = quoteCall?.result;
+    return Array.isArray(result) && result.length > 0 ? BigInt(result[0]) : BigInt(result ?? 0n);
+}
+
+async function tryQuoteExactInputSingleV1({
+    publicClient,
+    quoter,
+    tokenIn,
+    tokenOut,
+    fee,
+    amountIn,
+}) {
+    const quoteCall = await publicClient.simulateContract({
+        address: quoter,
+        abi: quoterV1Abi,
+        functionName: 'quoteExactInputSingle',
+        args: [tokenIn, tokenOut, fee, amountIn, 0n],
+    });
+    return BigInt(quoteCall?.result ?? 0n);
+}
+
+async function quoteMinOutWithSlippage({
+    publicClient,
+    config,
+    tokenIn,
+    tokenOut,
+    fee,
+    amountIn,
+    slippageBps = 50,
+}) {
+    const quoters = await resolveQuoterCandidates({ publicClient, config });
+    let quotedAmountOut = 0n;
+    let selectedQuoter = null;
+    const failures = [];
+
+    for (const quoter of quoters) {
+        try {
+            quotedAmountOut = await tryQuoteExactInputSingleV2({
+                publicClient,
+                quoter,
+                tokenIn,
+                tokenOut,
+                fee,
+                amountIn,
+            });
+            selectedQuoter = quoter;
+            break;
+        } catch (v2Error) {
+            try {
+                quotedAmountOut = await tryQuoteExactInputSingleV1({
+                    publicClient,
+                    quoter,
+                    tokenIn,
+                    tokenOut,
+                    fee,
+                    amountIn,
+                });
+                selectedQuoter = quoter;
+                break;
+            } catch (v1Error) {
+                failures.push(
+                    `${quoter}: ${
+                        v1Error?.shortMessage ??
+                        v1Error?.message ??
+                        v2Error?.shortMessage ??
+                        v2Error?.message ??
+                        'quote failed'
+                    }`
+                );
+            }
+        }
+    }
+
+    if (!selectedQuoter) {
+        throw new Error(`No compatible Uniswap quoter found. Tried: ${failures.join(' | ')}`);
+    }
+
+    if (quotedAmountOut <= 0n) {
+        throw new Error('Uniswap quoter returned zero output for this swap.');
+    }
+    const minAmountOut = (quotedAmountOut * BigInt(10_000 - slippageBps)) / 10_000n;
+    if (minAmountOut <= 0n) {
+        throw new Error('Swap output is too small after slippage guard; refusing proposal.');
+    }
+    return { quoter: selectedQuoter, quotedAmountOut, minAmountOut };
+}
+
+async function validateToolCalls({ toolCalls, signals, commitmentText, commitmentSafe, publicClient, config }) {
     const validated = [];
     const safeAddress = commitmentSafe ? String(commitmentSafe).toLowerCase() : null;
     const winningTrigger = pickWinningPriceTrigger(signals);
@@ -289,7 +460,16 @@ async function validateToolCalls({ toolCalls, signals, commitmentText, commitmen
         const recipient = normalizeAddress(String(action.recipient ?? safeAddress));
         const fee = Number(action.fee ?? winningTrigger.poolFee);
         const amountIn = BigInt(action.amountInWei ?? String(wethSnapshot.amount));
-        const amountOutMin = BigInt(action.amountOutMinWei ?? '0');
+        const quoted = await quoteMinOutWithSlippage({
+            publicClient,
+            config,
+            tokenIn,
+            tokenOut,
+            fee,
+            amountIn,
+            slippageBps: 50,
+        });
+        const amountOutMin = quoted.minAmountOut;
 
         action.tokenIn = tokenIn;
         action.tokenOut = tokenOut;
@@ -365,9 +545,8 @@ function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
         'Use all currently available WETH in the Safe for the winning branch swap.',
         'Build one uniswap_v3_exact_input_single action where amountInWei equals the WETH snapshot amount.',
         `Set router to Sepolia Uniswap V3 SwapRouter02 at ${DEFAULT_ROUTER}.`,
-        'Compute amountOutMinWei using observedPrice and max slippage 0.50% (multiply expected output by 0.995).',
-        'If tokenIn is the base token of observedPrice, expectedOut ~= amountIn * observedPrice adjusted for token decimals.',
-        'If tokenIn is the quote token and tokenOut is base, expectedOut ~= amountIn / observedPrice adjusted for token decimals.',
+        'Do not estimate amountOutMinWei from observedPrice.',
+        'The runner validates and overwrites amountOutMinWei using Uniswap V3 Quoter with 0.50% slippage protection.',
         'Preferred flow: build_og_transactions with one uniswap_v3_exact_input_single action, then rely on runner propose submission.',
         'Only use allowlisted Sepolia addresses from the commitment context. Never execute both branches.',
         'Use the poolFee from a priceTrigger signal when preparing uniswap_v3_exact_input_single actions.',
