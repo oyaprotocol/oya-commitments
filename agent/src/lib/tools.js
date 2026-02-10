@@ -119,7 +119,12 @@ function extractSignedOrderIdentityAddresses(signedOrder) {
     return Array.from(new Set(normalized));
 }
 
-function toolDefinitions({ proposeEnabled, disputeEnabled, clobEnabled }) {
+function toolDefinitions({
+    proposeEnabled,
+    disputeEnabled,
+    clobEnabled,
+    onchainToolsEnabled = proposeEnabled || disputeEnabled,
+}) {
     const tools = [
         {
             type: 'function',
@@ -327,7 +332,11 @@ function toolDefinitions({ proposeEnabled, disputeEnabled, clobEnabled }) {
         },
     ];
 
-    if (proposeEnabled) {
+    if (!onchainToolsEnabled) {
+        tools.length = 0;
+    }
+
+    if (onchainToolsEnabled && proposeEnabled) {
         tools.push({
             type: 'function',
             name: 'post_bond_and_propose',
@@ -359,7 +368,7 @@ function toolDefinitions({ proposeEnabled, disputeEnabled, clobEnabled }) {
         });
     }
 
-    if (disputeEnabled) {
+    if (onchainToolsEnabled && disputeEnabled) {
         tools.push({
             type: 'function',
             name: 'dispute_assertion',
@@ -470,6 +479,7 @@ async function executeToolCalls({
     ogContext,
 }) {
     const outputs = [];
+    const onchainToolsEnabled = config.proposeEnabled || config.disputeEnabled;
     const hasPostProposal = toolCalls.some((call) => call.name === 'post_bond_and_propose');
     let builtTransactions;
 
@@ -644,6 +654,17 @@ async function executeToolCalls({
         }
 
         if (call.name === 'make_deposit') {
+            if (!onchainToolsEnabled) {
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'skipped',
+                        reason: 'onchain tools disabled',
+                    }),
+                });
+                continue;
+            }
             const txHash = await makeDeposit({
                 walletClient,
                 account,
@@ -664,6 +685,17 @@ async function executeToolCalls({
         }
 
         if (call.name === 'make_erc1155_deposit') {
+            if (!onchainToolsEnabled) {
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'skipped',
+                        reason: 'onchain tools disabled',
+                    }),
+                });
+                continue;
+            }
             const txHash = await makeErc1155Deposit({
                 walletClient,
                 account,

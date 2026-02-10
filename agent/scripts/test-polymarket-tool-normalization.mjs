@@ -15,9 +15,13 @@ async function run() {
     });
     const placeOrderDef = defs.find((tool) => tool.name === 'polymarket_clob_place_order');
     const cancelOrdersDef = defs.find((tool) => tool.name === 'polymarket_clob_cancel_orders');
+    const makeDepositDef = defs.find((tool) => tool.name === 'make_deposit');
+    const makeErc1155DepositDef = defs.find((tool) => tool.name === 'make_erc1155_deposit');
 
     assert.ok(placeOrderDef);
     assert.ok(cancelOrdersDef);
+    assert.equal(makeDepositDef, undefined);
+    assert.equal(makeErc1155DepositDef, undefined);
     assert.deepEqual(placeOrderDef.parameters.properties.orderType.enum, ['GTC', 'GTD', 'FOK', 'FAK']);
     assert.deepEqual(cancelOrdersDef.parameters.properties.mode.enum, ['ids', 'market', 'all']);
 
@@ -148,6 +152,39 @@ async function run() {
     const normalizedCancelModeOut = parseToolOutput(normalizedCancelMode[0]);
     assert.equal(normalizedCancelModeOut.status, 'error');
     assert.match(normalizedCancelModeOut.message, /Missing CLOB credentials/);
+
+    const blockedOnchainDeposit = await executeToolCalls({
+        toolCalls: [
+            {
+                callId: 'blocked-onchain-deposit',
+                name: 'make_deposit',
+                arguments: {
+                    asset: '0x0000000000000000000000000000000000000000',
+                    amountWei: '1',
+                },
+            },
+        ],
+        publicClient: {
+            async waitForTransactionReceipt() {
+                throw new Error('should not be called');
+            },
+        },
+        walletClient: {
+            async sendTransaction() {
+                throw new Error('should not be called');
+            },
+        },
+        account: TEST_ACCOUNT,
+        config: {
+            ...config,
+            proposeEnabled: false,
+            disputeEnabled: false,
+        },
+        ogContext: null,
+    });
+    const blockedOnchainDepositOut = parseToolOutput(blockedOnchainDeposit[0]);
+    assert.equal(blockedOnchainDepositOut.status, 'skipped');
+    assert.equal(blockedOnchainDepositOut.reason, 'onchain tools disabled');
 
     console.log('[test] polymarket tool normalization OK');
 }

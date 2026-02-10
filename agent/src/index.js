@@ -178,6 +178,7 @@ async function decideOnSignals(signals, { onchainPendingProposal = false } = {})
             proposeEnabled: config.proposeEnabled,
             disputeEnabled: config.disputeEnabled,
             clobEnabled: config.polymarketClobEnabled,
+            onchainToolsEnabled: config.proposeEnabled || config.disputeEnabled,
         });
         const allowTools = executableToolsEnabled;
         const decision = await callAgent({
