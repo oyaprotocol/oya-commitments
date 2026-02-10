@@ -1,3 +1,10 @@
+import { readFile, unlink, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const TOKENS = Object.freeze({
     WETH: '0x7b79995e5f793a07bc00c21412e50ecae098e7f9',
     USDC: '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238',
@@ -63,12 +70,108 @@ const erc20BalanceOfAbi = [
         outputs: [{ name: '', type: 'uint256' }],
     },
 ];
+const proposalExecutedEvent = {
+    type: 'event',
+    name: 'ProposalExecuted',
+    inputs: [
+        { indexed: true, name: 'proposalHash', type: 'bytes32' },
+        { indexed: true, name: 'assertionId', type: 'bytes32' },
+    ],
+    anonymous: false,
+};
 
 const inferredTriggersCache = new Map();
 const singleFireState = {
     proposalSubmitted: false,
     proposalHash: null,
 };
+let singleFireStateHydrated = false;
+let singleFireReconciledOnchain = false;
+
+function getSingleFireStatePath() {
+    const fromEnv = process.env.PRICE_RACE_SWAP_STATE_FILE;
+    if (fromEnv && String(fromEnv).trim().length > 0) {
+        return path.resolve(String(fromEnv).trim());
+    }
+    return path.join(__dirname, '.single-fire-state.json');
+}
+
+function normalizeHash(value) {
+    if (typeof value !== 'string') return null;
+    const v = value.trim();
+    if (!/^0x[0-9a-fA-F]{64}$/.test(v)) return null;
+    return v.toLowerCase();
+}
+
+async function persistSingleFireState() {
+    const payload = JSON.stringify(
+        {
+            proposalSubmitted: singleFireState.proposalSubmitted,
+            proposalHash: singleFireState.proposalHash,
+        },
+        null,
+        2
+    );
+    await writeFile(getSingleFireStatePath(), payload, 'utf8');
+}
+
+async function hydrateSingleFireState() {
+    if (singleFireStateHydrated) return;
+    singleFireStateHydrated = true;
+    try {
+        const raw = await readFile(getSingleFireStatePath(), 'utf8');
+        const parsed = JSON.parse(raw);
+        singleFireState.proposalSubmitted = Boolean(parsed?.proposalSubmitted);
+        singleFireState.proposalHash = normalizeHash(parsed?.proposalHash) ?? null;
+    } catch (error) {
+        // Missing/corrupt state file means unlocked unless chain reconciliation proves otherwise.
+    }
+}
+
+async function lockSingleFire({ proposalHash = null } = {}) {
+    singleFireState.proposalSubmitted = true;
+    singleFireState.proposalHash = normalizeHash(proposalHash) ?? singleFireState.proposalHash;
+    await persistSingleFireState();
+}
+
+async function reconcileSingleFireFromChain({ publicClient }) {
+    if (singleFireReconciledOnchain) return;
+    singleFireReconciledOnchain = true;
+    if (!publicClient || singleFireState.proposalSubmitted) return;
+
+    const rawOgModule = process.env.OG_MODULE;
+    if (!rawOgModule) return;
+
+    let ogModule;
+    try {
+        ogModule = normalizeAddress(String(rawOgModule));
+    } catch (error) {
+        return;
+    }
+
+    const latestBlock = await publicClient.getBlockNumber();
+    const configuredStart = process.env.START_BLOCK ? BigInt(process.env.START_BLOCK) : 0n;
+    const chunkSize = 50_000n;
+    let currentTo = latestBlock;
+
+    while (currentTo >= configuredStart) {
+        const minFrom = currentTo >= chunkSize - 1n ? currentTo - chunkSize + 1n : 0n;
+        const currentFrom = minFrom < configuredStart ? configuredStart : minFrom;
+        const logs = await publicClient.getLogs({
+            address: ogModule,
+            event: proposalExecutedEvent,
+            fromBlock: currentFrom,
+            toBlock: currentTo,
+        });
+        if (logs.length > 0) {
+            const hash = normalizeHash(logs[logs.length - 1]?.args?.proposalHash);
+            await lockSingleFire({ proposalHash: hash });
+            return;
+        }
+        if (currentFrom === configuredStart) break;
+        currentTo = currentFrom - 1n;
+    }
+}
 
 function isHexChar(char) {
     const code = char.charCodeAt(0);
@@ -450,6 +553,9 @@ async function validateToolCalls({
     config,
     onchainPendingProposal,
 }) {
+    await hydrateSingleFireState();
+    await reconcileSingleFireFromChain({ publicClient });
+
     const validated = [];
     const safeAddress = commitmentSafe ? String(commitmentSafe).toLowerCase() : null;
     const winningTrigger = pickWinningPriceTrigger(signals);
@@ -613,15 +719,18 @@ function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
         .join(' ');
 }
 
-function onToolOutput({ name, parsedOutput }) {
+async function onToolOutput({ name, parsedOutput }) {
     if (!name || !parsedOutput || parsedOutput.status !== 'submitted') return;
     if (name !== 'post_bond_and_propose' && name !== 'auto_post_bond_and_propose') return;
-    const proposalHash = typeof parsedOutput.proposalHash === 'string'
-        ? parsedOutput.proposalHash.trim()
-        : '';
+    const proposalHash = normalizeHash(parsedOutput.proposalHash);
     if (!proposalHash) return;
-    singleFireState.proposalSubmitted = true;
-    singleFireState.proposalHash = proposalHash;
+    await lockSingleFire({ proposalHash });
+}
+
+function onProposalEvents({ executedProposalCount = 0 }) {
+    if (executedProposalCount > 0) {
+        void lockSingleFire();
+    }
 }
 
 function getSingleFireState() {
@@ -631,6 +740,14 @@ function getSingleFireState() {
 function resetSingleFireState() {
     singleFireState.proposalSubmitted = false;
     singleFireState.proposalHash = null;
+    singleFireStateHydrated = true;
+    singleFireReconciledOnchain = false;
+    void unlink(getSingleFireStatePath()).catch(() => {});
+}
+
+async function reconcileProposalSubmission({ publicClient }) {
+    await hydrateSingleFireState();
+    await reconcileSingleFireFromChain({ publicClient });
 }
 
 export {
@@ -638,6 +755,8 @@ export {
     getSystemPrompt,
     getSingleFireState,
     onToolOutput,
+    onProposalEvents,
+    reconcileProposalSubmission,
     resetSingleFireState,
     sanitizeInferredTriggers,
     validateToolCalls,
