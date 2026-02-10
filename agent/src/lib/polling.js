@@ -123,7 +123,8 @@ async function pollCommitmentChanges({
             );
         }
         return {
-            deposits: initialAssetSignals,
+            deposits: [],
+            balanceSnapshots: initialAssetSignals,
             lastCheckedBlock: latestBlock,
             lastNativeBalance: nextNativeBalance,
             lastAssetBalances:
@@ -135,7 +136,13 @@ async function pollCommitmentChanges({
     }
 
     if (latestBlock <= lastCheckedBlock) {
-        return { deposits: [], lastCheckedBlock, lastNativeBalance, lastAssetBalances };
+        return {
+            deposits: [],
+            balanceSnapshots: [],
+            lastCheckedBlock,
+            lastNativeBalance,
+            lastAssetBalances,
+        };
     }
 
     const fromBlock = lastCheckedBlock + 1n;
@@ -202,7 +209,7 @@ async function pollCommitmentChanges({
         nextNativeBalance = nativeBalance;
     }
 
-    const { signals: balanceSignals, nextAssetBalances } = await collectAssetBalanceChangeSignals({
+    const { signals: balanceSnapshots, nextAssetBalances } = await collectAssetBalanceChangeSignals({
         publicClient,
         trackedAssets,
         commitmentSafe,
@@ -210,10 +217,10 @@ async function pollCommitmentChanges({
         lastAssetBalances,
         emitBalanceSnapshotsEveryPoll,
     });
-    deposits.push(...balanceSignals);
 
     return {
         deposits,
+        balanceSnapshots,
         lastCheckedBlock: toBlock,
         lastNativeBalance: nextNativeBalance,
         lastAssetBalances: nextAssetBalances,

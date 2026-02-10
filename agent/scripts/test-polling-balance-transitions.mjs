@@ -35,7 +35,8 @@ async function run() {
         lastNativeBalance: undefined,
         lastAssetBalances: undefined,
     });
-    const firstSnapshots = first.deposits.filter((s) => s.kind === 'erc20BalanceSnapshot');
+    const firstSnapshots = first.balanceSnapshots.filter((s) => s.kind === 'erc20BalanceSnapshot');
+    assert.equal(first.deposits.length, 0);
     assert.equal(firstSnapshots.length, 1);
     assert.equal(BigInt(firstSnapshots[0].amount), 30000n);
 
@@ -48,7 +49,8 @@ async function run() {
         lastNativeBalance: first.lastNativeBalance,
         lastAssetBalances: first.lastAssetBalances,
     });
-    const secondSnapshots = second.deposits.filter((s) => s.kind === 'erc20BalanceSnapshot');
+    const secondSnapshots = second.balanceSnapshots.filter((s) => s.kind === 'erc20BalanceSnapshot');
+    assert.equal(second.deposits.length, 0);
     assert.equal(secondSnapshots.length, 0);
 
     const third = await pollCommitmentChanges({
@@ -60,7 +62,8 @@ async function run() {
         lastNativeBalance: second.lastNativeBalance,
         lastAssetBalances: second.lastAssetBalances,
     });
-    const thirdSnapshots = third.deposits.filter((s) => s.kind === 'erc20BalanceSnapshot');
+    const thirdSnapshots = third.balanceSnapshots.filter((s) => s.kind === 'erc20BalanceSnapshot');
+    assert.equal(third.deposits.length, 0);
     assert.equal(thirdSnapshots.length, 1);
     assert.equal(BigInt(thirdSnapshots[0].amount), 25000n);
 
