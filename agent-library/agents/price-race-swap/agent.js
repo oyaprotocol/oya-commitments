@@ -469,6 +469,7 @@ async function validateToolCalls({
         const tokenOut = normalizeAddress(String(action.tokenOut ?? inferredTokenOut));
         const router = DEFAULT_ROUTER;
         const recipient = normalizeAddress(String(action.recipient ?? safeAddress));
+        const operation = action.operation === undefined ? 0 : Number(action.operation);
         const fee = Number(action.fee ?? winningTrigger.poolFee);
         const amountIn = BigInt(String(wethSnapshot.amount));
         const quoted = await quoteMinOutWithSlippage({
@@ -486,10 +487,15 @@ async function validateToolCalls({
         action.tokenOut = tokenOut;
         action.router = router;
         action.recipient = recipient;
+        action.operation = 0;
         action.fee = fee;
         action.amountInWei = amountIn.toString();
         action.amountOutMinWei = amountOutMin.toString();
         args.actions[0] = action;
+
+        if (!Number.isInteger(operation) || operation !== 0) {
+            throw new Error('Swap action operation must be 0 (CALL).');
+        }
 
         if (tokenIn !== TOKENS.WETH) {
             throw new Error('Swap tokenIn must be Sepolia WETH.');

@@ -93,6 +93,35 @@ async function run() {
     assert.equal(rewritten.length, 1);
     assert.equal(rewritten[0].parsedArguments.actions[0].router, ROUTER);
     assert.equal(rewritten[0].parsedArguments.actions[0].amountOutMinWei, '497500');
+    assert.equal(rewritten[0].parsedArguments.actions[0].operation, 0);
+
+    await assert.rejects(
+        () =>
+            validateToolCalls({
+                toolCalls: [
+                    {
+                        ...toolCalls[0],
+                        parsedArguments: {
+                            actions: [
+                                {
+                                    ...toolCalls[0].parsedArguments.actions[0],
+                                    operation: 1,
+                                },
+                            ],
+                        },
+                    },
+                ],
+                signals,
+                commitmentText: 'op-check',
+                commitmentSafe: '0x1234000000000000000000000000000000000000',
+                publicClient: {
+                    getChainId: async () => 11155111,
+                    simulateContract: async () => ({ result: [1000000n, 0n, 0, 0n] }),
+                },
+                config: {},
+            }),
+        /operation must be 0/
+    );
 
     onToolOutput({
         name: 'post_bond_and_propose',
