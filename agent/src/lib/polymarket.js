@@ -91,14 +91,14 @@ async function placeClobOrder({
     config,
     signingAddress,
     signedOrder,
-    owner,
+    ownerApiKey,
     orderType,
 }) {
     if (!signedOrder || typeof signedOrder !== 'object') {
         throw new Error('signedOrder is required and must be an object.');
     }
-    if (!owner) {
-        throw new Error('owner is required.');
+    if (!ownerApiKey) {
+        throw new Error('ownerApiKey is required.');
     }
     if (!orderType) {
         throw new Error('orderType is required.');
@@ -116,7 +116,7 @@ async function placeClobOrder({
         path: '/order',
         body: {
             order: normalizedOrder,
-            owner,
+            owner: ownerApiKey,
             orderType,
         },
     });
@@ -164,9 +164,7 @@ async function cancelClobOrders({
         signingAddress,
         method: 'DELETE',
         path: '/orders',
-        body: {
-            orderIDs: orderIds,
-        },
+        body: orderIds,
     });
 }
 

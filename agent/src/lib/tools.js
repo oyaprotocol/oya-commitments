@@ -299,8 +299,9 @@ function toolDefinitions({ proposeEnabled, disputeEnabled, clobEnabled }) {
                     additionalProperties: false,
                     properties: {
                         owner: {
-                            type: 'string',
-                            description: 'EOA owner address associated with the signed order.',
+                            type: ['string', 'null'],
+                            description:
+                                'Optional CLOB API key owner override; defaults to POLYMARKET_CLOB_API_KEY.',
                         },
                         side: {
                             type: 'string',
@@ -320,7 +321,7 @@ function toolDefinitions({ proposeEnabled, disputeEnabled, clobEnabled }) {
                                 'Signed order payload expected by the CLOB API /order endpoint.',
                         },
                     },
-                    required: ['owner', 'side', 'tokenId', 'orderType', 'signedOrder'],
+                    required: ['side', 'tokenId', 'orderType', 'signedOrder'],
                 },
             },
             {
@@ -440,11 +441,24 @@ async function executeToolCalls({
                         `signedOrder token mismatch: declared ${declaredTokenId}, signed order has ${signedOrderTokenId}.`
                     );
                 }
+                const configuredOwnerApiKey = config.polymarketClobApiKey;
+                if (!configuredOwnerApiKey) {
+                    throw new Error('Missing POLYMARKET_CLOB_API_KEY in runtime config.');
+                }
+                const requestedOwner =
+                    typeof args.owner === 'string' && args.owner.trim()
+                        ? args.owner.trim()
+                        : undefined;
+                if (requestedOwner && requestedOwner !== configuredOwnerApiKey) {
+                    throw new Error(
+                        'owner mismatch: provided owner does not match configured POLYMARKET_CLOB_API_KEY.'
+                    );
+                }
                 const result = await placeClobOrder({
                     config,
                     signingAddress: account.address,
                     signedOrder: args.signedOrder,
-                    owner: args.owner,
+                    ownerApiKey: configuredOwnerApiKey,
                     orderType: args.orderType,
                 });
                 outputs.push({
