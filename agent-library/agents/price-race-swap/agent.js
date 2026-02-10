@@ -1,11 +1,3 @@
-import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 const TOKENS = Object.freeze({
     WETH: '0x7b79995e5f793a07bc00c21412e50ecae098e7f9',
     USDC: '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238',
@@ -65,61 +57,6 @@ function extractFirstText(responseJson) {
     }
 
     return '';
-}
-
-function statePath() {
-    return process.env.PRICE_RACE_STATE_PATH
-        ? path.resolve(process.env.PRICE_RACE_STATE_PATH)
-        : path.join(__dirname, '.price-race-state.json');
-}
-
-function commitmentKey(commitmentText) {
-    return createHash('sha256').update(commitmentText ?? '').digest('hex');
-}
-
-function readState() {
-    const file = statePath();
-    if (!existsSync(file)) {
-        return { commitments: {} };
-    }
-
-    try {
-        const parsed = JSON.parse(readFileSync(file, 'utf8'));
-        if (!parsed || typeof parsed !== 'object') {
-            return { commitments: {} };
-        }
-        return {
-            commitments:
-                parsed.commitments && typeof parsed.commitments === 'object'
-                    ? parsed.commitments
-                    : {},
-        };
-    } catch (error) {
-        return { commitments: {} };
-    }
-}
-
-function writeState(state) {
-    writeFileSync(statePath(), JSON.stringify(state, null, 2));
-}
-
-function isCommitmentExecuted(commitmentText) {
-    if (!commitmentText) return false;
-    const key = commitmentKey(commitmentText);
-    const state = readState();
-    return Boolean(state.commitments?.[key]?.executed);
-}
-
-function markCommitmentExecuted(commitmentText, metadata = {}) {
-    if (!commitmentText) return;
-    const key = commitmentKey(commitmentText);
-    const state = readState();
-    state.commitments[key] = {
-        executed: true,
-        executedAt: new Date().toISOString(),
-        ...metadata,
-    };
-    writeState(state);
 }
 
 function sanitizeInferredTriggers(rawTriggers) {
@@ -189,10 +126,6 @@ function sanitizeInferredTriggers(rawTriggers) {
 
 async function getPriceTriggers({ commitmentText, config }) {
     if (!commitmentText || !config?.openAiApiKey) {
-        return [];
-    }
-
-    if (isCommitmentExecuted(commitmentText)) {
         return [];
     }
 
@@ -278,10 +211,6 @@ function isMatchingPriceSignal(signal, actionFee, tokenIn, tokenOut) {
 }
 
 async function validateToolCalls({ toolCalls, signals, commitmentText, commitmentSafe }) {
-    if (isCommitmentExecuted(commitmentText)) {
-        throw new Error('Commitment already executed; refusing additional swap proposals.');
-    }
-
     const validated = [];
     const safeAddress = commitmentSafe ? String(commitmentSafe).toLowerCase() : null;
 
@@ -357,15 +286,6 @@ async function validateToolCalls({ toolCalls, signals, commitmentText, commitmen
     return validated;
 }
 
-async function onToolOutput({ name, parsedOutput, commitmentText }) {
-    if (name !== 'post_bond_and_propose') return;
-    if (parsedOutput?.status !== 'submitted') return;
-
-    markCommitmentExecuted(commitmentText, {
-        proposalHash: parsedOutput?.proposalHash ? String(parsedOutput.proposalHash) : null,
-    });
-}
-
 function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
     const mode = proposeEnabled && disputeEnabled
         ? 'You may propose and dispute.'
@@ -406,9 +326,6 @@ function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
 export {
     getPriceTriggers,
     getSystemPrompt,
-    isCommitmentExecuted,
-    markCommitmentExecuted,
-    onToolOutput,
     sanitizeInferredTriggers,
     validateToolCalls,
 };
