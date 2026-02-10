@@ -1,0 +1,128 @@
+import assert from 'node:assert/strict';
+import { executeToolCalls, toolDefinitions } from '../src/lib/tools.js';
+
+const TEST_ACCOUNT = { address: '0x1111111111111111111111111111111111111111' };
+
+function parseToolOutput(output) {
+    return JSON.parse(output.output);
+}
+
+async function run() {
+    const defs = toolDefinitions({
+        proposeEnabled: false,
+        disputeEnabled: false,
+        clobEnabled: true,
+    });
+    const placeOrderDef = defs.find((tool) => tool.name === 'polymarket_clob_place_order');
+    const cancelOrdersDef = defs.find((tool) => tool.name === 'polymarket_clob_cancel_orders');
+
+    assert.ok(placeOrderDef);
+    assert.ok(cancelOrdersDef);
+    assert.deepEqual(placeOrderDef.parameters.properties.orderType.enum, ['GTC', 'GTD', 'FOK', 'FAK']);
+    assert.deepEqual(cancelOrdersDef.parameters.properties.mode.enum, ['ids', 'market', 'all']);
+
+    const config = {
+        polymarketClobEnabled: true,
+        polymarketClobHost: 'https://clob.polymarket.com',
+        polymarketClobApiKey: 'dummy-api-key',
+        // Keep secret/passphrase absent so calls fail before any network request.
+        polymarketClobApiSecret: undefined,
+        polymarketClobApiPassphrase: undefined,
+    };
+
+    const invalidOrderType = await executeToolCalls({
+        toolCalls: [
+            {
+                callId: 'invalid-order-type',
+                name: 'polymarket_clob_place_order',
+                arguments: {
+                    side: 'BUY',
+                    tokenId: '123',
+                    orderType: 'LIMIT',
+                    signedOrder: { side: 'BUY', tokenId: '123' },
+                },
+            },
+        ],
+        publicClient: {},
+        walletClient: {},
+        account: TEST_ACCOUNT,
+        config,
+        ogContext: null,
+    });
+    const invalidOrderTypeOut = parseToolOutput(invalidOrderType[0]);
+    assert.equal(invalidOrderTypeOut.status, 'error');
+    assert.match(invalidOrderTypeOut.message, /orderType must be one of/);
+
+    const normalizedOrderType = await executeToolCalls({
+        toolCalls: [
+            {
+                callId: 'normalized-order-type',
+                name: 'polymarket_clob_place_order',
+                arguments: {
+                    side: ' buy ',
+                    tokenId: '123',
+                    orderType: ' gtc ',
+                    signedOrder: { side: 'BUY', tokenId: '123' },
+                },
+            },
+        ],
+        publicClient: {},
+        walletClient: {},
+        account: TEST_ACCOUNT,
+        config,
+        ogContext: null,
+    });
+    const normalizedOrderTypeOut = parseToolOutput(normalizedOrderType[0]);
+    assert.equal(normalizedOrderTypeOut.status, 'error');
+    assert.match(normalizedOrderTypeOut.message, /Missing CLOB credentials/);
+
+    const invalidCancelMode = await executeToolCalls({
+        toolCalls: [
+            {
+                callId: 'invalid-cancel-mode',
+                name: 'polymarket_clob_cancel_orders',
+                arguments: {
+                    mode: 'nope',
+                    orderIds: ['order-1'],
+                    market: null,
+                    assetId: null,
+                },
+            },
+        ],
+        publicClient: {},
+        walletClient: {},
+        account: TEST_ACCOUNT,
+        config,
+        ogContext: null,
+    });
+    const invalidCancelModeOut = parseToolOutput(invalidCancelMode[0]);
+    assert.equal(invalidCancelModeOut.status, 'error');
+    assert.match(invalidCancelModeOut.message, /mode must be one of ids, market, all/);
+
+    const normalizedCancelMode = await executeToolCalls({
+        toolCalls: [
+            {
+                callId: 'normalized-cancel-mode',
+                name: 'polymarket_clob_cancel_orders',
+                arguments: {
+                    mode: ' IDS ',
+                    orderIds: ['order-1'],
+                    market: null,
+                    assetId: null,
+                },
+            },
+        ],
+        publicClient: {},
+        walletClient: {},
+        account: TEST_ACCOUNT,
+        config,
+        ogContext: null,
+    });
+    const normalizedCancelModeOut = parseToolOutput(normalizedCancelMode[0]);
+    assert.equal(normalizedCancelModeOut.status, 'error');
+    assert.match(normalizedCancelModeOut.message, /Missing CLOB credentials/);
+
+    console.log('[test] polymarket tool normalization OK');
+}
+
+run();
