@@ -1,9 +1,34 @@
 import crypto from 'node:crypto';
 
 const DEFAULT_CLOB_HOST = 'https://clob.polymarket.com';
+const DEFAULT_CLOB_REQUEST_TIMEOUT_MS = 15_000;
+const DEFAULT_CLOB_MAX_RETRIES = 1;
+const DEFAULT_CLOB_RETRY_DELAY_MS = 250;
+
+function normalizeNonNegativeInteger(value, fallback) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+    return Math.floor(parsed);
+}
 
 function normalizeClobHost(host) {
     return (host ?? DEFAULT_CLOB_HOST).replace(/\/+$/, '');
+}
+
+function shouldRetryResponseStatus(status) {
+    return status === 429 || status >= 500;
+}
+
+function shouldRetryError(error) {
+    if (!error) return false;
+    if (error.name === 'AbortError' || error.name === 'TimeoutError') return true;
+    if (error.name === 'TypeError') return true;
+    return false;
+}
+
+async function sleep(ms) {
+    if (ms <= 0) return;
+    await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function buildClobAuthHeaders({
@@ -53,38 +78,69 @@ async function clobRequest({
 }) {
     const host = normalizeClobHost(config.polymarketClobHost);
     const bodyText = body === undefined ? '' : JSON.stringify(body);
-    const timestamp = Math.floor(Date.now() / 1000);
-    const headers = {
-        'Content-Type': 'application/json',
-        ...buildClobAuthHeaders({
-            config,
-            signingAddress,
-            timestamp,
-            method,
-            path,
-            bodyText,
-        }),
-    };
-    const response = await fetch(`${host}${path}`, {
-        method,
-        headers,
-        body: body === undefined ? undefined : bodyText,
-    });
-    const text = await response.text();
-    let parsed;
-    try {
-        parsed = text ? JSON.parse(text) : null;
-    } catch (error) {
-        parsed = { raw: text };
+    const timeoutMs = normalizeNonNegativeInteger(
+        config.polymarketClobRequestTimeoutMs,
+        DEFAULT_CLOB_REQUEST_TIMEOUT_MS
+    );
+    const maxRetries = normalizeNonNegativeInteger(
+        config.polymarketClobMaxRetries,
+        DEFAULT_CLOB_MAX_RETRIES
+    );
+    const retryDelayMs = normalizeNonNegativeInteger(
+        config.polymarketClobRetryDelayMs,
+        DEFAULT_CLOB_RETRY_DELAY_MS
+    );
+
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+        const timestamp = Math.floor(Date.now() / 1000);
+        const headers = {
+            'Content-Type': 'application/json',
+            ...buildClobAuthHeaders({
+                config,
+                signingAddress,
+                timestamp,
+                method,
+                path,
+                bodyText,
+            }),
+        };
+
+        try {
+            const response = await fetch(`${host}${path}`, {
+                method,
+                headers,
+                body: body === undefined ? undefined : bodyText,
+                signal: AbortSignal.timeout(timeoutMs),
+            });
+            const text = await response.text();
+            let parsed;
+            try {
+                parsed = text ? JSON.parse(text) : null;
+            } catch (error) {
+                parsed = { raw: text };
+            }
+
+            if (!response.ok) {
+                if (attempt < maxRetries && shouldRetryResponseStatus(response.status)) {
+                    await sleep(retryDelayMs);
+                    continue;
+                }
+                throw new Error(
+                    `CLOB request failed (${method} ${path}): ${response.status} ${response.statusText} ${text}`
+                );
+            }
+
+            return parsed;
+        } catch (error) {
+            if (attempt < maxRetries && shouldRetryError(error)) {
+                await sleep(retryDelayMs);
+                continue;
+            }
+            throw error;
+        }
     }
 
-    if (!response.ok) {
-        throw new Error(
-            `CLOB request failed (${method} ${path}): ${response.status} ${response.statusText} ${text}`
-        );
-    }
-
-    return parsed;
+    throw new Error(`CLOB request failed (${method} ${path}) after retries.`);
 }
 
 async function placeClobOrder({

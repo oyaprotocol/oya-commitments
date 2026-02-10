@@ -461,7 +461,7 @@ function toolDefinitions({
                             description: 'Optional asset id used when mode=market.',
                         },
                     },
-                    required: ['mode', 'orderIds', 'market', 'assetId'],
+                    required: ['mode'],
                 },
             }
         );
