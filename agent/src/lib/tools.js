@@ -526,6 +526,10 @@ async function executeToolCalls({
             }
 
             try {
+                const runtimeSignerAddress = getAddress(account.address);
+                const clobAuthAddress = config.polymarketClobAddress
+                    ? getAddress(config.polymarketClobAddress)
+                    : runtimeSignerAddress;
                 const declaredSide = normalizeOrderSide(args.side);
                 if (!declaredSide) {
                     throw new Error('side must be BUY or SELL');
@@ -555,14 +559,17 @@ async function executeToolCalls({
                         `signedOrder token mismatch: declared ${declaredTokenId}, signed order has ${signedOrderTokenId}.`
                     );
                 }
-                const signerAddress = getAddress(account.address);
                 const identityAddresses = extractSignedOrderIdentityAddresses(args.signedOrder);
+                const allowedIdentityAddresses = new Set([
+                    clobAuthAddress,
+                    runtimeSignerAddress,
+                ]);
                 if (
                     identityAddresses.length > 0 &&
-                    !identityAddresses.some((address) => address === signerAddress)
+                    !identityAddresses.some((address) => allowedIdentityAddresses.has(address))
                 ) {
                     throw new Error(
-                        `signedOrder identity mismatch: expected ${signerAddress}, signed order contains ${identityAddresses.join(', ')}.`
+                        `signedOrder identity mismatch: expected one of ${Array.from(allowedIdentityAddresses).join(', ')}, signed order contains ${identityAddresses.join(', ')}.`
                     );
                 }
                 const configuredOwnerApiKey = config.polymarketClobApiKey;
@@ -580,7 +587,7 @@ async function executeToolCalls({
                 }
                 const result = await placeClobOrder({
                     config,
-                    signingAddress: account.address,
+                    signingAddress: clobAuthAddress,
                     signedOrder: args.signedOrder,
                     ownerApiKey: configuredOwnerApiKey,
                     orderType,
@@ -620,13 +627,17 @@ async function executeToolCalls({
             }
 
             try {
+                const runtimeSignerAddress = getAddress(account.address);
+                const clobAuthAddress = config.polymarketClobAddress
+                    ? getAddress(config.polymarketClobAddress)
+                    : runtimeSignerAddress;
                 const mode = normalizeCancelMode(args.mode);
                 if (!mode) {
                     throw new Error('mode must be one of ids, market, all');
                 }
                 const result = await cancelClobOrders({
                     config,
-                    signingAddress: account.address,
+                    signingAddress: clobAuthAddress,
                     mode,
                     orderIds: args.orderIds,
                     market: args.market,

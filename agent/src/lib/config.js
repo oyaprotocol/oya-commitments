@@ -65,6 +65,9 @@ function buildConfig() {
                 ? false
                 : process.env.POLYMARKET_CLOB_ENABLED.toLowerCase() !== 'false',
         polymarketClobHost: process.env.POLYMARKET_CLOB_HOST ?? 'https://clob.polymarket.com',
+        polymarketClobAddress: process.env.POLYMARKET_CLOB_ADDRESS
+            ? getAddress(process.env.POLYMARKET_CLOB_ADDRESS)
+            : undefined,
         polymarketClobApiKey: process.env.POLYMARKET_CLOB_API_KEY,
         polymarketClobApiSecret: process.env.POLYMARKET_CLOB_API_SECRET,
         polymarketClobApiPassphrase: process.env.POLYMARKET_CLOB_API_PASSPHRASE,
