@@ -72,6 +72,28 @@ async function run() {
     assert.equal(ok[0].parsedArguments.actions[0].amountInWei, '30000');
     assert.equal(ok[0].parsedArguments.actions[0].amountOutMinWei, '995000');
 
+    const noSnapshot = await validateToolCalls({
+        toolCalls,
+        signals: [signals[0]],
+        commitmentText: 'x-fallback',
+        commitmentSafe: '0x1234000000000000000000000000000000000000',
+        publicClient: {
+            getChainId: async () => 11155111,
+            readContract: async ({ functionName, address }) => {
+                assert.equal(functionName, 'balanceOf');
+                assert.equal(address.toLowerCase(), WETH);
+                return 30000n;
+            },
+            simulateContract: async ({ address }) => {
+                assert.equal(address.toLowerCase(), QUOTER.toLowerCase());
+                return { result: [1000000n, 0n, 0, 0n] };
+            },
+        },
+        config: {},
+    });
+    assert.equal(noSnapshot.length, 1);
+    assert.equal(noSnapshot[0].parsedArguments.actions[0].amountInWei, '30000');
+
     const rewritten = await validateToolCalls({
         toolCalls: [
             {
