@@ -71,7 +71,7 @@ async function collectAssetBalanceChangeSignals({
         const previous = nextAssetBalances.get(asset);
         nextAssetBalances.set(asset, current);
 
-        if (current > 0n && (previous === undefined || current !== previous)) {
+        if (current > 0n) {
             signals.push({
                 kind: 'erc20BalanceSnapshot',
                 asset,
