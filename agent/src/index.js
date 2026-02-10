@@ -70,6 +70,17 @@ async function loadAgentModule() {
 }
 
 const { agentModule, commitmentText } = await loadAgentModule();
+const pollingOptions = (() => {
+    if (typeof agentModule?.getPollingOptions !== 'function') {
+        return {};
+    }
+    try {
+        return agentModule.getPollingOptions({ commitmentText }) ?? {};
+    } catch (error) {
+        console.warn('[agent] getPollingOptions() failed; using defaults.');
+        return {};
+    }
+})();
 
 async function getBlockTimestampMs(blockNumber) {
     if (!blockNumber) return undefined;
@@ -310,6 +321,7 @@ async function agentLoop() {
                 lastCheckedBlock,
                 lastNativeBalance,
                 lastAssetBalances,
+                emitBalanceSnapshotsEveryPoll: Boolean(pollingOptions.emitBalanceSnapshotsEveryPoll),
             });
         lastCheckedBlock = nextCheckedBlock;
         lastNativeBalance = nextNative;
