@@ -53,6 +53,7 @@ async function collectAssetBalanceChangeSignals({
     commitmentSafe,
     blockNumber,
     lastAssetBalances,
+    emitBalanceSnapshotsEveryPoll = false,
 }) {
     const nextAssetBalances = new Map(lastAssetBalances ?? []);
     const signals = [];
@@ -71,7 +72,9 @@ async function collectAssetBalanceChangeSignals({
         const previous = nextAssetBalances.get(asset);
         nextAssetBalances.set(asset, current);
 
-        if (current > 0n) {
+        const hasChanged = previous === undefined || current !== previous;
+        const shouldEmit = emitBalanceSnapshotsEveryPoll ? current > 0n : hasChanged;
+        if (shouldEmit) {
             signals.push({
                 kind: 'erc20BalanceSnapshot',
                 asset,
@@ -96,6 +99,7 @@ async function pollCommitmentChanges({
     lastCheckedBlock,
     lastNativeBalance,
     lastAssetBalances,
+    emitBalanceSnapshotsEveryPoll = false,
 }) {
     const latestBlock = await publicClient.getBlockNumber();
     if (lastCheckedBlock === undefined) {
@@ -204,6 +208,7 @@ async function pollCommitmentChanges({
         commitmentSafe,
         blockNumber: toBlock,
         lastAssetBalances,
+        emitBalanceSnapshotsEveryPoll,
     });
     deposits.push(...balanceSignals);
 
