@@ -28,8 +28,7 @@ function toolDefinitions({ proposeEnabled, disputeEnabled, clobEnabled }) {
                                 kind: {
                                     type: 'string',
                                     description:
-                                        'Action type: erc20_transfer | native_transfer | contract_call | ctf_split | ctf_merge | ctf_redeem',
-                                        'Action type: erc20_transfer | native_transfer | contract_call | uniswap_v3_exact_input_single',
+                                        'Action type: erc20_transfer | native_transfer | contract_call | uniswap_v3_exact_input_single | ctf_split | ctf_merge | ctf_redeem',
                                 },
                                 token: {
                                     type: ['string', 'null'],
@@ -84,10 +83,6 @@ function toolDefinitions({ proposeEnabled, disputeEnabled, clobEnabled }) {
                                     description:
                                         'Safe operation (0=CALL,1=DELEGATECALL). Defaults to 0.',
                                 },
-                                chainId: {
-                                    type: ['integer', 'null'],
-                                    description: 'Chain id for CTF actions (defaults to POLYMARKET_CHAIN_ID).',
-                                },
                                 ctfContract: {
                                     type: ['string', 'null'],
                                     description:
@@ -122,6 +117,7 @@ function toolDefinitions({ proposeEnabled, disputeEnabled, clobEnabled }) {
                                     description:
                                         'Index sets for ctf_redeem. Defaults to [1,2].',
                                     items: { type: 'integer' },
+                                },
                                 router: {
                                     type: ['string', 'null'],
                                     description:

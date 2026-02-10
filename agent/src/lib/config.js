@@ -57,7 +57,6 @@ function buildConfig() {
         chainlinkPriceFeed: process.env.CHAINLINK_PRICE_FEED
             ? getAddress(process.env.CHAINLINK_PRICE_FEED)
             : undefined,
-        polymarketChainId: Number(process.env.POLYMARKET_CHAIN_ID ?? 137),
         polymarketConditionalTokens: process.env.POLYMARKET_CONDITIONAL_TOKENS
             ? getAddress(process.env.POLYMARKET_CONDITIONAL_TOKENS)
             : getAddress('0x4D97DCd97eC945f40cF65F87097ACe5EA0476045'),
