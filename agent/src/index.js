@@ -272,6 +272,13 @@ async function decideOnSignals(signals) {
 
 async function agentLoop() {
     try {
+        const triggerSeedRulesText = ogContext?.rules ?? commitmentText ?? '';
+        const triggerSeed = await getActivePriceTriggers({ rulesText: triggerSeedRulesText });
+        for (const trigger of triggerSeed) {
+            if (trigger?.baseToken) trackedAssets.add(trigger.baseToken);
+            if (trigger?.quoteToken) trackedAssets.add(trigger.quoteToken);
+        }
+
         const latestBlock = await publicClient.getBlockNumber();
         const latestBlockData = await publicClient.getBlock({ blockNumber: latestBlock });
         const nowMs = Number(latestBlockData.timestamp) * 1000;

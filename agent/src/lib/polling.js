@@ -1,4 +1,4 @@
-import { getAddress, hexToString, zeroAddress } from 'viem';
+import { erc20Abi, getAddress, hexToString, zeroAddress } from 'viem';
 import {
     optimisticGovernorAbi,
     proposalDeletedEvent,
@@ -14,6 +14,34 @@ async function primeBalances({ publicClient, commitmentSafe, watchNativeBalance,
         address: commitmentSafe,
         blockNumber,
     });
+}
+
+async function primeAssetBalanceSignals({ publicClient, trackedAssets, commitmentSafe, blockNumber }) {
+    const balances = await Promise.all(
+        Array.from(trackedAssets).map(async (asset) => {
+            const balance = await publicClient.readContract({
+                address: asset,
+                abi: erc20Abi,
+                functionName: 'balanceOf',
+                args: [commitmentSafe],
+                blockNumber,
+            });
+            return { asset, balance };
+        })
+    );
+
+    return balances
+        .filter((item) => item.balance > 0n)
+        .map((item) => ({
+            kind: 'erc20BalanceSnapshot',
+            asset: item.asset,
+            from: 'snapshot',
+            amount: item.balance,
+            blockNumber,
+            transactionHash: undefined,
+            logIndex: undefined,
+            id: `snapshot:${item.asset}:${blockNumber.toString()}`,
+        }));
 }
 
 async function pollCommitmentChanges({
@@ -32,8 +60,21 @@ async function pollCommitmentChanges({
             watchNativeBalance,
             blockNumber: latestBlock,
         });
+        const initialAssetSignals = await primeAssetBalanceSignals({
+            publicClient,
+            trackedAssets,
+            commitmentSafe,
+            blockNumber: latestBlock,
+        });
+        if (initialAssetSignals.length > 0) {
+            console.log(
+                `[agent] Startup balance snapshot signals: ${initialAssetSignals
+                    .map((s) => `${s.asset}:${s.amount.toString()}`)
+                    .join(', ')}`
+            );
+        }
         return {
-            deposits: [],
+            deposits: initialAssetSignals,
             lastCheckedBlock: latestBlock,
             lastNativeBalance: nextNativeBalance,
         };
