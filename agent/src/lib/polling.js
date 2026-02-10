@@ -33,7 +33,7 @@ async function primeAssetBalanceSignals({ publicClient, trackedAssets, commitmen
         })
     );
 
-    return balances
+    const signals = balances
         .filter((item) => item.balance > 0n)
         .map((item) => ({
             kind: 'erc20BalanceSnapshot',
@@ -45,6 +45,9 @@ async function primeAssetBalanceSignals({ publicClient, trackedAssets, commitmen
             logIndex: undefined,
             id: `snapshot:${item.asset}:${blockNumber.toString()}`,
         }));
+
+    const balanceMap = new Map(balances.map((item) => [item.asset, item.balance]));
+    return { signals, balanceMap };
 }
 
 async function collectAssetBalanceChangeSignals({
@@ -109,12 +112,13 @@ async function pollCommitmentChanges({
             watchNativeBalance,
             blockNumber: latestBlock,
         });
-        const initialAssetSignals = await primeAssetBalanceSignals({
+        const { signals: initialAssetSignals, balanceMap: initialAssetBalanceMap } =
+            await primeAssetBalanceSignals({
             publicClient,
             trackedAssets,
             commitmentSafe,
             blockNumber: latestBlock,
-        });
+            });
         if (initialAssetSignals.length > 0) {
             console.log(
                 `[agent] Startup balance snapshot signals: ${initialAssetSignals
@@ -128,10 +132,7 @@ async function pollCommitmentChanges({
             lastCheckedBlock: latestBlock,
             lastNativeBalance: nextNativeBalance,
             lastAssetBalances:
-                lastAssetBalances ??
-                new Map(
-                    initialAssetSignals.map((signal) => [signal.asset, BigInt(signal.amount)])
-                ),
+                lastAssetBalances ?? initialAssetBalanceMap,
         };
     }
 
@@ -405,7 +406,10 @@ async function executeReadyProposals({
                 account: account.address,
             });
         } catch (error) {
-            console.warn('[agent] Proposal not executable yet:', proposal.proposalHash);
+            const reason = error?.shortMessage ?? error?.message ?? String(error);
+            console.warn(
+                `[agent] Proposal execution simulation failed for ${proposal.proposalHash}: ${reason}`
+            );
             continue;
         }
 

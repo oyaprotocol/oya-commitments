@@ -2,29 +2,34 @@ import assert from 'node:assert/strict';
 import { pollCommitmentChanges } from '../src/lib/polling.js';
 
 const TOKEN = '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238';
+const TOKEN_ZERO = '0x1f9840a85d5af5bf1d1762f925bdaddc4201f984';
 const SAFE = '0x1234000000000000000000000000000000000000';
 
-function createClient({ balances }) {
+function createClient({ getTokenBalance }) {
     let block = 100n;
     return {
         getBlockNumber: async () => {
             block += 1n;
             return block;
         },
-        readContract: async () => balances.get(block) ?? 0n,
+        readContract: async ({ address }) => getTokenBalance({ block, address }),
         getLogs: async () => [],
         getBalance: async () => 0n,
     };
 }
 
 async function run() {
-    const balances = new Map([
-        [101n, 30000n],
-        [102n, 30000n],
-        [103n, 25000n],
-    ]);
-    const publicClient = createClient({ balances });
-    const trackedAssets = new Set([TOKEN]);
+    const publicClient = createClient({
+        getTokenBalance: ({ block, address }) => {
+            const token = String(address).toLowerCase();
+            if (token === TOKEN_ZERO) return 0n;
+            if (block === 101n) return 30000n;
+            if (block === 102n) return 30000n;
+            if (block === 103n) return 25000n;
+            return 0n;
+        },
+    });
+    const trackedAssets = new Set([TOKEN, TOKEN_ZERO]);
 
     const first = await pollCommitmentChanges({
         publicClient,
