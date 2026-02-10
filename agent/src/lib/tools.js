@@ -415,7 +415,8 @@ async function executeToolCalls({
             }
 
             try {
-                if (args.side !== 'BUY' && args.side !== 'SELL') {
+                const declaredSide = normalizeOrderSide(args.side);
+                if (!declaredSide) {
                     throw new Error('side must be BUY or SELL');
                 }
                 if (!args.tokenId) {
@@ -429,9 +430,9 @@ async function executeToolCalls({
                         'signedOrder must include embedded side and token id (side + tokenId/asset_id).'
                     );
                 }
-                if (signedOrderSide !== args.side) {
+                if (signedOrderSide !== declaredSide) {
                     throw new Error(
-                        `signedOrder side mismatch: declared ${args.side}, signed order has ${signedOrderSide}.`
+                        `signedOrder side mismatch: declared ${declaredSide}, signed order has ${signedOrderSide}.`
                     );
                 }
                 if (signedOrderTokenId !== declaredTokenId) {
