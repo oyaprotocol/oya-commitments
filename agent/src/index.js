@@ -195,6 +195,8 @@ async function decideOnSignals(signals) {
                         commitmentText,
                         commitmentSafe: config.commitmentSafe,
                         agentAddress,
+                        publicClient,
+                        config,
                     });
                     if (Array.isArray(validated)) {
                         approvedToolCalls = validated.map((call) => ({

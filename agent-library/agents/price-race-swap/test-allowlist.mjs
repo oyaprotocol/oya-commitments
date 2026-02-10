@@ -4,6 +4,7 @@ import { onToolOutput, resetSingleFireState, validateToolCalls } from './agent.j
 const WETH = '0x7b79995e5f793a07bc00c21412e50ecae098e7f9';
 const USDC = '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238';
 const ROUTER = '0x3bfa4769fb09eefc5a80d6e87c3b9c650f7ae48e';
+const QUOTER = '0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3';
 const POOL = '0x6418eec70f50913ff0d756b48d32ce7c02b47c47';
 
 async function run() {
@@ -50,8 +51,17 @@ async function run() {
         signals,
         commitmentText: 'x',
         commitmentSafe: '0x1234000000000000000000000000000000000000',
+        publicClient: {
+            getChainId: async () => 11155111,
+            simulateContract: async ({ address }) => {
+                assert.equal(address.toLowerCase(), QUOTER.toLowerCase());
+                return { result: [1000000n, 0n, 0, 0n] };
+            },
+        },
+        config: {},
     });
     assert.equal(ok.length, 1);
+    assert.equal(ok[0].parsedArguments.actions[0].amountOutMinWei, '995000');
 
     const rewritten = await validateToolCalls({
         toolCalls: [
@@ -70,9 +80,18 @@ async function run() {
         signals,
         commitmentText: 'y',
         commitmentSafe: '0x1234000000000000000000000000000000000000',
+        publicClient: {
+            getChainId: async () => 11155111,
+            simulateContract: async ({ address }) => {
+                assert.equal(address.toLowerCase(), QUOTER.toLowerCase());
+                return { result: [500000n, 0n, 0, 0n] };
+            },
+        },
+        config: {},
     });
     assert.equal(rewritten.length, 1);
     assert.equal(rewritten[0].parsedArguments.actions[0].router, ROUTER);
+    assert.equal(rewritten[0].parsedArguments.actions[0].amountOutMinWei, '497500');
 
     onToolOutput({
         name: 'post_bond_and_propose',
@@ -89,6 +108,11 @@ async function run() {
                 signals,
                 commitmentText: 'z',
                 commitmentSafe: '0x1234000000000000000000000000000000000000',
+                publicClient: {
+                    getChainId: async () => 11155111,
+                    simulateContract: async () => ({ result: [1000000n, 0n, 0, 0n] }),
+                },
+                config: {},
             }),
         /Single-fire lock engaged/
     );
