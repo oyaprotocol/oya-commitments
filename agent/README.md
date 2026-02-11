@@ -25,7 +25,7 @@ This is beta software provided “as is.” Use at your own risk. No guarantees 
      - `keychain`: `KEYCHAIN_SERVICE`, `KEYCHAIN_ACCOUNT` (macOS Keychain or Linux Secret Service)
      - `vault`: `VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_SECRET_PATH`, optional `VAULT_SECRET_KEY` (default `private_key`)
      - `kms`/`vault-signer`/`rpc`: `SIGNER_RPC_URL`, `SIGNER_ADDRESS` (JSON-RPC signer that accepts `eth_sendTransaction`)
-   - Optional tuning: `POLL_INTERVAL_MS`, `START_BLOCK`, `WATCH_NATIVE_BALANCE`, `DEFAULT_DEPOSIT_*`, `AGENT_MODULE`, `UNISWAP_V3_FACTORY`, `UNISWAP_V3_QUOTER`, `UNISWAP_V3_FEE_TIERS`
+   - Optional tuning: `POLL_INTERVAL_MS`, `START_BLOCK`, `WATCH_NATIVE_BALANCE`, `DEFAULT_DEPOSIT_*`, `AGENT_MODULE`, `UNISWAP_V3_FACTORY`, `UNISWAP_V3_QUOTER`, `UNISWAP_V3_FEE_TIERS`, `POLYMARKET_*`
    - Optional proposals: `PROPOSE_ENABLED` (default true), `ALLOW_PROPOSE_ON_SIMULATION_FAIL` (default false)
    - Optional disputes: `DISPUTE_ENABLED` (default true), `DISPUTE_RETRY_MS` (default 60000)
    - Optional LLM: `OPENAI_API_KEY`, `OPENAI_MODEL` (default `gpt-4.1-mini`), `OPENAI_BASE_URL`
@@ -82,6 +82,122 @@ Export `getPriceTriggers({ commitmentText, config })` from `agent-library/agents
 2. Router `exactInputSingle(...)`
 
 This lets agents propose reusable Uniswap swap calldata without embedding raw ABI in prompts.
+
+### Polymarket Support (CLOB + CTF)
+
+The shared tooling supports:
+- Onchain Conditional Tokens Framework (CTF) actions through `build_og_transactions`.
+- Offchain CLOB order placement/cancel through signed API requests.
+- Direct ERC1155 deposits to the commitment Safe.
+
+#### Polymarket Environment Variables
+
+Set these when using Polymarket functionality:
+- `POLYMARKET_CONDITIONAL_TOKENS`: Optional CTF contract address override used by CTF actions (default is Polymarket mainnet ConditionalTokens).
+- `POLYMARKET_CLOB_ENABLED`: Enable CLOB tools (`true`/`false`, default `false`).
+- `POLYMARKET_CLOB_HOST`: CLOB API host (default `https://clob.polymarket.com`).
+- `POLYMARKET_CLOB_ADDRESS`: Optional address used as `POLY_ADDRESS` for CLOB auth (for proxy/funder setups). Defaults to runtime signer address.
+- `POLYMARKET_CLOB_API_KEY`, `POLYMARKET_CLOB_API_SECRET`, `POLYMARKET_CLOB_API_PASSPHRASE`: Required for authenticated CLOB calls.
+- `POLYMARKET_CLOB_REQUEST_TIMEOUT_MS`, `POLYMARKET_CLOB_MAX_RETRIES`, `POLYMARKET_CLOB_RETRY_DELAY_MS`: Optional request tuning.
+
+#### Execution Modes
+
+- `PROPOSE_ENABLED=true` and/or `DISPUTE_ENABLED=true`: onchain tools are enabled (`build_og_transactions`, `make_deposit`, `make_erc1155_deposit`, propose/dispute tools).
+- `PROPOSE_ENABLED=false` and `DISPUTE_ENABLED=false`: onchain tools are disabled.
+- `POLYMARKET_CLOB_ENABLED=true`: CLOB tools can still run in this mode (`polymarket_clob_place_order`, `polymarket_clob_cancel_orders`).
+- All three disabled (`PROPOSE_ENABLED=false`, `DISPUTE_ENABLED=false`, `POLYMARKET_CLOB_ENABLED=false`): monitor/opinion only.
+
+#### CTF Actions (`build_og_transactions`)
+
+Supported kinds:
+- `ctf_split`
+- `ctf_merge`
+- `ctf_redeem`
+
+Example `ctf_split` action:
+
+```json
+{
+  "name": "build_og_transactions",
+  "arguments": {
+    "actions": [
+      {
+        "kind": "ctf_split",
+        "collateralToken": "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "conditionId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "partition": [1, 2],
+        "amount": "1000000"
+      }
+    ]
+  }
+}
+```
+
+`ctf_split` auto-inserts ERC20 approvals to the CTF contract (`approve(0)`, then `approve(amount)`) before `splitPosition(...)`.
+
+#### ERC1155 Deposit to Safe
+
+Use `make_erc1155_deposit` after receiving YES/NO position tokens:
+
+```json
+{
+  "name": "make_erc1155_deposit",
+  "arguments": {
+    "token": "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
+    "tokenId": "123456789",
+    "amount": "1",
+    "data": "0x"
+  }
+}
+```
+
+#### CLOB Place/Cancel Tools
+
+`polymarket_clob_place_order` submits a pre-signed order:
+
+```json
+{
+  "name": "polymarket_clob_place_order",
+  "arguments": {
+    "side": "BUY",
+    "tokenId": "123456789",
+    "orderType": "GTC",
+    "signedOrder": {
+      "maker": "0xYourSignerOrClobAddress",
+      "tokenId": "123456789",
+      "side": "BUY"
+    }
+  }
+}
+```
+
+`polymarket_clob_cancel_orders` supports `ids`, `market`, or `all`:
+
+```json
+{
+  "name": "polymarket_clob_cancel_orders",
+  "arguments": {
+    "mode": "ids",
+    "orderIds": ["order-id-1"]
+  }
+}
+```
+
+#### CLOB Identity Validation Rules
+
+For `polymarket_clob_place_order`, the runner validates the same order payload that will be sent to `/order`:
+- The submitted order must include `side` and `tokenId`/`asset_id` that match declared tool args.
+- The submitted order must include at least one identity field: `maker`/`signer`/`funder`/`user` (or corresponding `*Address` variants).
+- Every extracted identity address must be allowlisted:
+  - runtime signer address, and
+  - `POLYMARKET_CLOB_ADDRESS` when set.
+
+If any identity is outside that allowlist, the tool call is rejected before submission.
+
+#### CLOB Retry Behavior
+
+- `POST /order` is not automatically retried.
+- Cancel endpoints (and other retry-eligible requests) can use configured retry settings.
 
 ### Propose vs Dispute Modes
 
