@@ -67,7 +67,11 @@ async function run() {
                     side: ' buy ',
                     tokenId: '123',
                     orderType: ' gtc ',
-                    signedOrder: { side: 'BUY', tokenId: '123' },
+                    signedOrder: {
+                        side: 'BUY',
+                        tokenId: '123',
+                        maker: TEST_ACCOUNT.address,
+                    },
                 },
             },
         ],
@@ -80,6 +84,32 @@ async function run() {
     const normalizedOrderTypeOut = parseToolOutput(normalizedOrderType[0]);
     assert.equal(normalizedOrderTypeOut.status, 'error');
     assert.match(normalizedOrderTypeOut.message, /Missing CLOB credentials/);
+
+    const missingIdentity = await executeToolCalls({
+        toolCalls: [
+            {
+                callId: 'missing-identity',
+                name: 'polymarket_clob_place_order',
+                arguments: {
+                    side: 'BUY',
+                    tokenId: '123',
+                    orderType: 'GTC',
+                    signedOrder: {
+                        side: 'BUY',
+                        tokenId: '123',
+                    },
+                },
+            },
+        ],
+        publicClient: {},
+        walletClient: {},
+        account: TEST_ACCOUNT,
+        config,
+        ogContext: null,
+    });
+    const missingIdentityOut = parseToolOutput(missingIdentity[0]);
+    assert.equal(missingIdentityOut.status, 'error');
+    assert.match(missingIdentityOut.message, /must include an identity field/);
 
     const mismatchedIdentity = await executeToolCalls({
         toolCalls: [
@@ -107,6 +137,68 @@ async function run() {
     const mismatchedIdentityOut = parseToolOutput(mismatchedIdentity[0]);
     assert.equal(mismatchedIdentityOut.status, 'error');
     assert.match(mismatchedIdentityOut.message, /signedOrder identity mismatch/);
+
+    const mixedIdentityWrappedOrder = await executeToolCalls({
+        toolCalls: [
+            {
+                callId: 'mixed-identity-wrapped-order',
+                name: 'polymarket_clob_place_order',
+                arguments: {
+                    side: 'BUY',
+                    tokenId: '123',
+                    orderType: 'GTC',
+                    signedOrder: {
+                        // Wrapper identity should not override nested submitted order identity.
+                        maker: TEST_ACCOUNT.address,
+                        order: {
+                            side: 'BUY',
+                            tokenId: '123',
+                            maker: '0x3333333333333333333333333333333333333333',
+                        },
+                    },
+                },
+            },
+        ],
+        publicClient: {},
+        walletClient: {},
+        account: TEST_ACCOUNT,
+        config,
+        ogContext: null,
+    });
+    const mixedIdentityWrappedOrderOut = parseToolOutput(mixedIdentityWrappedOrder[0]);
+    assert.equal(mixedIdentityWrappedOrderOut.status, 'error');
+    assert.match(mixedIdentityWrappedOrderOut.message, /signedOrder identity mismatch/);
+
+    const missingNestedSideInWrappedOrder = await executeToolCalls({
+        toolCalls: [
+            {
+                callId: 'missing-nested-side',
+                name: 'polymarket_clob_place_order',
+                arguments: {
+                    side: 'BUY',
+                    tokenId: '123',
+                    orderType: 'GTC',
+                    signedOrder: {
+                        // Nested payload is what will be submitted and must carry side/token.
+                        side: 'BUY',
+                        maker: TEST_ACCOUNT.address,
+                        order: {
+                            tokenId: '123',
+                            maker: TEST_ACCOUNT.address,
+                        },
+                    },
+                },
+            },
+        ],
+        publicClient: {},
+        walletClient: {},
+        account: TEST_ACCOUNT,
+        config,
+        ogContext: null,
+    });
+    const missingNestedSideInWrappedOrderOut = parseToolOutput(missingNestedSideInWrappedOrder[0]);
+    assert.equal(missingNestedSideInWrappedOrderOut.status, 'error');
+    assert.match(missingNestedSideInWrappedOrderOut.message, /must include embedded side and token id/);
 
     const configuredIdentityMatch = await executeToolCalls({
         toolCalls: [

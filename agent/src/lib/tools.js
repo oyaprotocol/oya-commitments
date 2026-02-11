@@ -58,61 +58,47 @@ function maybeAddress(value) {
     }
 }
 
-function extractSignedOrderSideAndTokenId(signedOrder) {
+function normalizeSignedOrderPayload(signedOrder) {
     if (!signedOrder || typeof signedOrder !== 'object') {
+        return undefined;
+    }
+    return signedOrder.order && typeof signedOrder.order === 'object'
+        ? signedOrder.order
+        : signedOrder;
+}
+
+function extractSignedOrderSideAndTokenId(orderPayload) {
+    if (!orderPayload || typeof orderPayload !== 'object') {
         return { side: undefined, tokenId: undefined };
     }
 
-    const container =
-        signedOrder.order && typeof signedOrder.order === 'object'
-            ? signedOrder.order
-            : signedOrder;
-
-    const side = normalizeOrderSide(container.side ?? signedOrder.side);
+    const side = normalizeOrderSide(orderPayload.side);
     const tokenId = getFirstString([
-        container.tokenId,
-        container.tokenID,
-        container.token_id,
-        container.assetId,
-        container.assetID,
-        container.asset_id,
-        signedOrder.tokenId,
-        signedOrder.tokenID,
-        signedOrder.token_id,
-        signedOrder.assetId,
-        signedOrder.assetID,
-        signedOrder.asset_id,
+        orderPayload.tokenId,
+        orderPayload.tokenID,
+        orderPayload.token_id,
+        orderPayload.assetId,
+        orderPayload.assetID,
+        orderPayload.asset_id,
     ]);
 
     return { side, tokenId };
 }
 
-function extractSignedOrderIdentityAddresses(signedOrder) {
-    if (!signedOrder || typeof signedOrder !== 'object') {
+function extractSignedOrderIdentityAddresses(orderPayload) {
+    if (!orderPayload || typeof orderPayload !== 'object') {
         return [];
     }
 
-    const container =
-        signedOrder.order && typeof signedOrder.order === 'object'
-            ? signedOrder.order
-            : signedOrder;
     const candidates = [
-        container.signer,
-        container.signerAddress,
-        container.maker,
-        container.makerAddress,
-        container.funder,
-        container.funderAddress,
-        container.user,
-        container.userAddress,
-        signedOrder.signer,
-        signedOrder.signerAddress,
-        signedOrder.maker,
-        signedOrder.makerAddress,
-        signedOrder.funder,
-        signedOrder.funderAddress,
-        signedOrder.user,
-        signedOrder.userAddress,
+        orderPayload.signer,
+        orderPayload.signerAddress,
+        orderPayload.maker,
+        orderPayload.makerAddress,
+        orderPayload.funder,
+        orderPayload.funderAddress,
+        orderPayload.user,
+        orderPayload.userAddress,
     ];
 
     const normalized = candidates.map(maybeAddress).filter(Boolean);
@@ -530,6 +516,10 @@ async function executeToolCalls({
                 const clobAuthAddress = config.polymarketClobAddress
                     ? getAddress(config.polymarketClobAddress)
                     : runtimeSignerAddress;
+                const normalizedSignedOrder = normalizeSignedOrderPayload(args.signedOrder);
+                if (!normalizedSignedOrder) {
+                    throw new Error('signedOrder is required and must be an object.');
+                }
                 const declaredSide = normalizeOrderSide(args.side);
                 if (!declaredSide) {
                     throw new Error('side must be BUY or SELL');
@@ -543,7 +533,7 @@ async function executeToolCalls({
                     throw new Error('orderType must be one of GTC, GTD, FOK, FAK');
                 }
                 const { side: signedOrderSide, tokenId: signedOrderTokenId } =
-                    extractSignedOrderSideAndTokenId(args.signedOrder);
+                    extractSignedOrderSideAndTokenId(normalizedSignedOrder);
                 if (!signedOrderSide || !signedOrderTokenId) {
                     throw new Error(
                         'signedOrder must include embedded side and token id (side + tokenId/asset_id).'
@@ -559,17 +549,23 @@ async function executeToolCalls({
                         `signedOrder token mismatch: declared ${declaredTokenId}, signed order has ${signedOrderTokenId}.`
                     );
                 }
-                const identityAddresses = extractSignedOrderIdentityAddresses(args.signedOrder);
+                const identityAddresses =
+                    extractSignedOrderIdentityAddresses(normalizedSignedOrder);
+                if (identityAddresses.length === 0) {
+                    throw new Error(
+                        'signedOrder must include an identity field (maker/signer/funder/user).'
+                    );
+                }
                 const allowedIdentityAddresses = new Set([
                     clobAuthAddress,
                     runtimeSignerAddress,
                 ]);
-                if (
-                    identityAddresses.length > 0 &&
-                    !identityAddresses.some((address) => allowedIdentityAddresses.has(address))
-                ) {
+                const unauthorizedIdentities = identityAddresses.filter(
+                    (address) => !allowedIdentityAddresses.has(address)
+                );
+                if (unauthorizedIdentities.length > 0) {
                     throw new Error(
-                        `signedOrder identity mismatch: expected one of ${Array.from(allowedIdentityAddresses).join(', ')}, signed order contains ${identityAddresses.join(', ')}.`
+                        `signedOrder identity mismatch: expected only ${Array.from(allowedIdentityAddresses).join(', ')}, signed order contains unauthorized ${unauthorizedIdentities.join(', ')}.`
                     );
                 }
                 const configuredOwnerApiKey = config.polymarketClobApiKey;
@@ -588,7 +584,7 @@ async function executeToolCalls({
                 const result = await placeClobOrder({
                     config,
                     signingAddress: clobAuthAddress,
-                    signedOrder: args.signedOrder,
+                    signedOrder: normalizedSignedOrder,
                     ownerApiKey: configuredOwnerApiKey,
                     orderType,
                 });
