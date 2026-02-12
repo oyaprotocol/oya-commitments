@@ -94,6 +94,7 @@ The shared tooling supports:
 
 Set these when using Polymarket functionality:
 - `POLYMARKET_CONDITIONAL_TOKENS`: Optional CTF contract address override used by CTF actions (default is Polymarket mainnet ConditionalTokens).
+- `POLYMARKET_EXCHANGE`: Optional CTF exchange override for EIP-712 order signing domain.
 - `POLYMARKET_CLOB_ENABLED`: Enable CLOB tools (`true`/`false`, default `false`).
 - `POLYMARKET_CLOB_HOST`: CLOB API host (default `https://clob.polymarket.com`).
 - `POLYMARKET_CLOB_ADDRESS`: Optional address used as `POLY_ADDRESS` for CLOB auth (for proxy/funder setups). Defaults to runtime signer address.
@@ -104,7 +105,7 @@ Set these when using Polymarket functionality:
 
 - `PROPOSE_ENABLED=true` and/or `DISPUTE_ENABLED=true`: onchain tools are enabled (`build_og_transactions`, `make_deposit`, `make_erc1155_deposit`, propose/dispute tools).
 - `PROPOSE_ENABLED=false` and `DISPUTE_ENABLED=false`: onchain tools are disabled.
-- `POLYMARKET_CLOB_ENABLED=true`: CLOB tools can still run in this mode (`polymarket_clob_place_order`, `polymarket_clob_cancel_orders`).
+- `POLYMARKET_CLOB_ENABLED=true`: CLOB tools can still run in this mode (`polymarket_clob_place_order`, `polymarket_clob_build_sign_and_place_order`, `polymarket_clob_cancel_orders`).
 - All three disabled (`PROPOSE_ENABLED=false`, `DISPUTE_ENABLED=false`, `POLYMARKET_CLOB_ENABLED=false`): monitor/opinion only.
 
 #### CTF Actions (`build_og_transactions`)
@@ -171,6 +172,21 @@ Use `make_erc1155_deposit` after receiving YES/NO position tokens:
 }
 ```
 
+`polymarket_clob_build_sign_and_place_order` builds and signs the order with the runtime signer before submission:
+
+```json
+{
+  "name": "polymarket_clob_build_sign_and_place_order",
+  "arguments": {
+    "side": "BUY",
+    "tokenId": "123456789",
+    "orderType": "FOK",
+    "makerAmount": "1000000",
+    "takerAmount": "450000"
+  }
+}
+```
+
 `polymarket_clob_cancel_orders` supports `ids`, `market`, or `all`:
 
 ```json
@@ -193,6 +209,12 @@ For `polymarket_clob_place_order`, the runner validates the same order payload t
   - `POLYMARKET_CLOB_ADDRESS` when set.
 
 If any identity is outside that allowlist, the tool call is rejected before submission.
+
+For `polymarket_clob_build_sign_and_place_order`, `maker` and `signer` must also be one of:
+- runtime signer address, or
+- `POLYMARKET_CLOB_ADDRESS` when set.
+
+This tool requires a signer backend that supports `signTypedData`.
 
 #### CLOB Retry Behavior
 

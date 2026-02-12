@@ -1,0 +1,13 @@
+{
+  "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+  "name": "Oya Copy Trading Agent",
+  "description": "Copy-trading commitment agent that mirrors configured Polymarket BUY trades at 99% Safe sizing, deposits YES/NO tokens, and proposes reimbursement.",
+  "image": "https://raw.githubusercontent.com/oya-commitments/oya-commitments/main/agent-library/agents/copy-trading/agent.png",
+  "endpoints": [
+    {
+      "name": "agentWallet",
+      "endpoint": "eip155:137:0x0000000000000000000000000000000000000000"
+    }
+  ],
+  "registrations": []
+}
