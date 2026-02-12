@@ -1,6 +1,6 @@
 // Limit Order Agent - Single limit order on Sepolia (WETH/USDC)
 
-import { erc20Abi, parseAbi } from 'viem';
+import { erc20Abi, parseAbi, parseAbiItem } from 'viem';
 
 const TOKENS = Object.freeze({
     WETH: '0x7b79995e5f793a07bc00c21412e50ecae098e7f9',
@@ -69,6 +69,11 @@ let limitOrderState = {
     proposalSubmitHash: null,
     proposalSubmitMs: null,
 };
+let hydratedFromChain = false;
+
+const proposalExecutedEvent = parseAbiItem(
+    'event ProposalExecuted(bytes32 indexed proposalHash, bytes32 indexed assertionId)'
+);
 
 function normalizeAddress(value) {
     if (typeof value !== 'string' || value.length !== 42 || !value.startsWith('0x')) {
@@ -420,7 +425,29 @@ function onProposalEvents({ executedProposalCount = 0, deletedProposalCount = 0 
     }
 }
 
-async function reconcileProposalSubmission({ publicClient }) {
+async function reconcileProposalSubmission({ publicClient, ogModule, startBlock }) {
+    if (!hydratedFromChain && ogModule) {
+        hydratedFromChain = true;
+        try {
+            const toBlock = await publicClient.getBlockNumber();
+            const fromBlock = startBlock ?? 0n;
+            const logs = await publicClient.getLogs({
+                address: ogModule,
+                event: proposalExecutedEvent,
+                fromBlock,
+                toBlock,
+            });
+            if (logs.length > 0) {
+                limitOrderState.orderFilled = true;
+                limitOrderState.proposalPosted = false;
+                limitOrderState.proposalBuilt = false;
+                limitOrderState.proposalSubmitHash = null;
+                limitOrderState.proposalSubmitMs = null;
+            }
+        } catch (err) {
+            console.warn('[limit-order] Failed to hydrate from chain:', err?.message ?? err);
+        }
+    }
     if (!limitOrderState.proposalPosted || !limitOrderState.proposalSubmitHash) return;
     try {
         const receipt = await publicClient.getTransactionReceipt({

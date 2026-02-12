@@ -357,7 +357,11 @@ async function agentLoop() {
             });
         }
         if (agentModule?.reconcileProposalSubmission) {
-            await agentModule.reconcileProposalSubmission({ publicClient });
+            await agentModule.reconcileProposalSubmission({
+                publicClient,
+                ogModule: config.ogModule,
+                startBlock: config.startBlock,
+            });
         }
 
         await executeReadyProposals({
