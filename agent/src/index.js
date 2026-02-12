@@ -219,9 +219,11 @@ async function decideOnSignals(signals, { onchainPendingProposal = false } = {})
                             name: call.name,
                             callId: call.callId,
                             arguments:
-                                call.arguments !== undefined
-                                    ? call.arguments
-                                    : JSON.stringify(call.parsedArguments ?? {}),
+                                call.parsedArguments !== undefined
+                                    ? JSON.stringify(call.parsedArguments)
+                                    : call.arguments !== undefined
+                                        ? call.arguments
+                                        : JSON.stringify({}),
                         }));
                     } else {
                         approvedToolCalls = [];
@@ -361,7 +363,11 @@ async function agentLoop() {
             });
         }
         if (agentModule?.reconcileProposalSubmission) {
-            await agentModule.reconcileProposalSubmission({ publicClient });
+            await agentModule.reconcileProposalSubmission({
+                publicClient,
+                ogModule: config.ogModule,
+                startBlock: config.startBlock,
+            });
         }
 
         await executeReadyProposals({
