@@ -172,11 +172,15 @@ async function decideOnSignals(signals, { onchainPendingProposal = false } = {})
         'You are an agent monitoring an onchain commitment (Safe + Optimistic Governor).';
 
     try {
+        const executableToolsEnabled =
+            config.proposeEnabled || config.disputeEnabled || config.polymarketClobEnabled;
         const tools = toolDefinitions({
             proposeEnabled: config.proposeEnabled,
             disputeEnabled: config.disputeEnabled,
+            clobEnabled: config.polymarketClobEnabled,
+            onchainToolsEnabled: config.proposeEnabled || config.disputeEnabled,
         });
-        const allowTools = config.proposeEnabled || config.disputeEnabled;
+        const allowTools = executableToolsEnabled;
         const decision = await callAgent({
             config,
             systemPrompt,

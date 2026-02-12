@@ -45,7 +45,81 @@ function run() {
         data: txs[1].data,
     });
     assert.equal(swapCall.functionName, 'exactInputSingle');
-    console.log('[test] buildOgTransactions uniswap action OK');
+
+    const ctf = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
+    const conditionId = `0x${'11'.repeat(32)}`;
+    const ctfTxs = buildOgTransactions(
+        [
+            {
+                kind: 'ctf_split',
+                ctfContract: null,
+                collateralToken: usdc,
+                conditionId,
+                parentCollectionId: null,
+                partition: [1, 2],
+                amount: '250000',
+                operation: 0,
+            },
+        ],
+        {
+            config: {
+                polymarketConditionalTokens: ctf,
+            },
+        }
+    );
+    assert.equal(ctfTxs.length, 3);
+    assert.equal(ctfTxs[0].to.toLowerCase(), usdc.toLowerCase());
+    assert.equal(ctfTxs[1].to.toLowerCase(), usdc.toLowerCase());
+    assert.equal(ctfTxs[2].to.toLowerCase(), ctf.toLowerCase());
+    assert.equal(ctfTxs[0].operation, 0);
+    assert.equal(ctfTxs[1].operation, 0);
+    assert.equal(ctfTxs[2].operation, 0);
+
+    const resetApproveCall = decodeFunctionData({
+        abi: erc20Abi,
+        data: ctfTxs[0].data,
+    });
+    assert.equal(resetApproveCall.functionName, 'approve');
+    assert.equal(resetApproveCall.args[0].toLowerCase(), ctf.toLowerCase());
+    assert.equal(resetApproveCall.args[1], 0n);
+
+    const amountApproveCall = decodeFunctionData({
+        abi: erc20Abi,
+        data: ctfTxs[1].data,
+    });
+    assert.equal(amountApproveCall.functionName, 'approve');
+    assert.equal(amountApproveCall.args[0].toLowerCase(), ctf.toLowerCase());
+    assert.equal(amountApproveCall.args[1], 250000n);
+
+    const splitCall = decodeFunctionData({
+        abi: parseAbi([
+            'function splitPosition(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] partition, uint256 amount)',
+        ]),
+        data: ctfTxs[2].data,
+    });
+    assert.equal(splitCall.functionName, 'splitPosition');
+    assert.equal(splitCall.args[0].toLowerCase(), usdc.toLowerCase());
+    assert.equal(splitCall.args[2], conditionId);
+    assert.deepEqual(splitCall.args[3], [1n, 2n]);
+    assert.equal(splitCall.args[4], 250000n);
+
+    const ctfRedeemTxs = buildOgTransactions(
+        [
+            {
+                kind: 'ctf_redeem',
+                ctfContract: ctf,
+                collateralToken: usdc,
+                conditionId,
+                indexSets: [1, 2],
+                operation: 1,
+            },
+        ],
+        { config: {} }
+    );
+    assert.equal(ctfRedeemTxs.length, 1);
+    assert.equal(ctfRedeemTxs[0].operation, 0);
+
+    console.log('[test] buildOgTransactions uniswap + ctf_split actions OK');
 }
 
 run();

@@ -10,6 +10,18 @@ import { optimisticGovernorAbi, optimisticOracleAbi } from './og.js';
 import { normalizeAssertion } from './og.js';
 import { summarizeViemError } from './utils.js';
 
+const conditionalTokensAbi = parseAbi([
+    'function splitPosition(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] partition, uint256 amount)',
+    'function mergePositions(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] partition, uint256 amount)',
+    'function redeemPositions(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] indexSets)',
+]);
+
+const erc1155TransferAbi = parseAbi([
+    'function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data)',
+]);
+
+const ZERO_BYTES32 = '0x0000000000000000000000000000000000000000000000000000000000000000';
+
 async function postBondAndPropose({
     publicClient,
     walletClient,
@@ -302,10 +314,12 @@ function normalizeOgTransactions(transactions) {
     });
 }
 
-function buildOgTransactions(actions) {
+function buildOgTransactions(actions, options = {}) {
     if (!Array.isArray(actions) || actions.length === 0) {
         throw new Error('actions must be a non-empty array');
     }
+
+    const config = options.config ?? {};
 
     const transactions = [];
 
@@ -429,6 +443,111 @@ function buildOgTransactions(actions) {
             continue;
         }
 
+        if (action.kind === 'ctf_split' || action.kind === 'ctf_merge') {
+            if (!action.collateralToken || !action.conditionId || action.amount === undefined) {
+                throw new Error(`${action.kind} requires collateralToken, conditionId, amount`);
+            }
+            const collateralToken = getAddress(action.collateralToken);
+            const ctfContract = action.ctfContract
+                ? getAddress(action.ctfContract)
+                : config.polymarketConditionalTokens;
+            if (!ctfContract) {
+                throw new Error(`${action.kind} requires ctfContract or POLYMARKET_CONDITIONAL_TOKENS`);
+            }
+            const parentCollectionId = action.parentCollectionId ?? ZERO_BYTES32;
+            const partition = Array.isArray(action.partition) && action.partition.length > 0
+                ? action.partition.map((value) => BigInt(value))
+                : [1n, 2n];
+            const amount = BigInt(action.amount);
+            if (amount <= 0n) {
+                throw new Error(`${action.kind} amount must be > 0`);
+            }
+
+            if (action.kind === 'ctf_split') {
+                // Use zero-first approval for compatibility with ERC20 tokens that
+                // require allowance reset before setting a new non-zero allowance.
+                const resetApproveData = encodeFunctionData({
+                    abi: erc20Abi,
+                    functionName: 'approve',
+                    args: [ctfContract, 0n],
+                });
+                transactions.push({
+                    to: collateralToken,
+                    value: '0',
+                    data: resetApproveData,
+                    operation: 0,
+                });
+
+                const approveData = encodeFunctionData({
+                    abi: erc20Abi,
+                    functionName: 'approve',
+                    args: [ctfContract, amount],
+                });
+                transactions.push({
+                    to: collateralToken,
+                    value: '0',
+                    data: approveData,
+                    operation: 0,
+                });
+            }
+
+            const functionName = action.kind === 'ctf_split' ? 'splitPosition' : 'mergePositions';
+            const data = encodeFunctionData({
+                abi: conditionalTokensAbi,
+                functionName,
+                args: [
+                    collateralToken,
+                    parentCollectionId,
+                    action.conditionId,
+                    partition,
+                    amount,
+                ],
+            });
+
+            transactions.push({
+                to: ctfContract,
+                value: '0',
+                data,
+                operation: 0,
+            });
+            continue;
+        }
+
+        if (action.kind === 'ctf_redeem') {
+            if (!action.collateralToken || !action.conditionId) {
+                throw new Error('ctf_redeem requires collateralToken and conditionId');
+            }
+            const ctfContract = action.ctfContract
+                ? getAddress(action.ctfContract)
+                : config.polymarketConditionalTokens;
+            if (!ctfContract) {
+                throw new Error('ctf_redeem requires ctfContract or POLYMARKET_CONDITIONAL_TOKENS');
+            }
+            const parentCollectionId = action.parentCollectionId ?? ZERO_BYTES32;
+            const indexSets = Array.isArray(action.indexSets) && action.indexSets.length > 0
+                ? action.indexSets.map((value) => BigInt(value))
+                : [1n, 2n];
+
+            const data = encodeFunctionData({
+                abi: conditionalTokensAbi,
+                functionName: 'redeemPositions',
+                args: [
+                    getAddress(action.collateralToken),
+                    parentCollectionId,
+                    action.conditionId,
+                    indexSets,
+                ],
+            });
+
+            transactions.push({
+                to: ctfContract,
+                value: '0',
+                data,
+                operation: 0,
+            });
+            continue;
+        }
+
         throw new Error(`Unknown action kind: ${action.kind}`);
     }
 
@@ -466,8 +585,45 @@ async function makeDeposit({
     });
 }
 
+async function makeErc1155Deposit({
+    walletClient,
+    account,
+    config,
+    token,
+    tokenId,
+    amount,
+    data,
+}) {
+    if (!token || tokenId === undefined || amount === undefined) {
+        throw new Error('ERC1155 deposit requires token, tokenId, and amount.');
+    }
+
+    const normalizedToken = getAddress(token);
+    const normalizedTokenId = BigInt(tokenId);
+    const normalizedAmount = BigInt(amount);
+    if (normalizedAmount <= 0n) {
+        throw new Error('ERC1155 deposit amount must be > 0.');
+    }
+
+    const transferData = data ?? '0x';
+
+    return walletClient.writeContract({
+        address: normalizedToken,
+        abi: erc1155TransferAbi,
+        functionName: 'safeTransferFrom',
+        args: [
+            account.address,
+            config.commitmentSafe,
+            normalizedTokenId,
+            normalizedAmount,
+            transferData,
+        ],
+    });
+}
+
 export {
     buildOgTransactions,
+    makeErc1155Deposit,
     makeDeposit,
     normalizeOgTransactions,
     postBondAndDispute,

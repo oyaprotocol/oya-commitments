@@ -57,6 +57,25 @@ function buildConfig() {
         chainlinkPriceFeed: process.env.CHAINLINK_PRICE_FEED
             ? getAddress(process.env.CHAINLINK_PRICE_FEED)
             : undefined,
+        polymarketConditionalTokens: process.env.POLYMARKET_CONDITIONAL_TOKENS
+            ? getAddress(process.env.POLYMARKET_CONDITIONAL_TOKENS)
+            : getAddress('0x4D97DCd97eC945f40cF65F87097ACe5EA0476045'),
+        polymarketClobEnabled:
+            process.env.POLYMARKET_CLOB_ENABLED === undefined
+                ? false
+                : process.env.POLYMARKET_CLOB_ENABLED.toLowerCase() !== 'false',
+        polymarketClobHost: process.env.POLYMARKET_CLOB_HOST ?? 'https://clob.polymarket.com',
+        polymarketClobAddress: process.env.POLYMARKET_CLOB_ADDRESS
+            ? getAddress(process.env.POLYMARKET_CLOB_ADDRESS)
+            : undefined,
+        polymarketClobApiKey: process.env.POLYMARKET_CLOB_API_KEY,
+        polymarketClobApiSecret: process.env.POLYMARKET_CLOB_API_SECRET,
+        polymarketClobApiPassphrase: process.env.POLYMARKET_CLOB_API_PASSPHRASE,
+        polymarketClobRequestTimeoutMs: Number(
+            process.env.POLYMARKET_CLOB_REQUEST_TIMEOUT_MS ?? 15_000
+        ),
+        polymarketClobMaxRetries: Number(process.env.POLYMARKET_CLOB_MAX_RETRIES ?? 1),
+        polymarketClobRetryDelayMs: Number(process.env.POLYMARKET_CLOB_RETRY_DELAY_MS ?? 250),
         uniswapV3Factory: process.env.UNISWAP_V3_FACTORY
             ? getAddress(process.env.UNISWAP_V3_FACTORY)
             : undefined,
