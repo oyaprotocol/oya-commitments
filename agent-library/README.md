@@ -14,3 +14,4 @@ To add a new agent:
 Example agents:
 - `agent-library/agents/default/`: generic agent using the commitment text.
 - `agent-library/agents/timelock-withdraw/`: timelock withdrawal agent that only withdraws to its own address after the timelock.
+- `agent-library/agents/copy-trading/`: copy-trading agent that mirrors configured Polymarket BUY trades at 99% Safe sizing, deposits YES/NO tokens, and proposes reimbursement.

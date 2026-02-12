@@ -60,6 +60,9 @@ function buildConfig() {
         polymarketConditionalTokens: process.env.POLYMARKET_CONDITIONAL_TOKENS
             ? getAddress(process.env.POLYMARKET_CONDITIONAL_TOKENS)
             : getAddress('0x4D97DCd97eC945f40cF65F87097ACe5EA0476045'),
+        polymarketExchange: process.env.POLYMARKET_EXCHANGE
+            ? getAddress(process.env.POLYMARKET_EXCHANGE)
+            : undefined,
         polymarketClobEnabled:
             process.env.POLYMARKET_CLOB_ENABLED === undefined
                 ? false
