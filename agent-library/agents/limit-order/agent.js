@@ -395,10 +395,12 @@ function onToolOutput({ name, parsedOutput }) {
     }
 
     if (name === 'post_bond_and_propose' && parsedOutput.status === 'submitted') {
-        limitOrderState.proposalPosted = true;
-        limitOrderState.proposalBuilt = false;
-        limitOrderState.proposalSubmitHash = parsedOutput.proposalHash ?? null;
-        limitOrderState.proposalSubmitMs = Date.now();
+        if (parsedOutput.proposalHash) {
+            limitOrderState.proposalPosted = true;
+            limitOrderState.proposalBuilt = false;
+            limitOrderState.proposalSubmitHash = parsedOutput.proposalHash ?? null;
+            limitOrderState.proposalSubmitMs = Date.now();
+        }
     }
 }
 
