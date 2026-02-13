@@ -17,6 +17,7 @@ import {
     parseFiniteNumber,
 } from '../../../agent/src/lib/utils.js';
 import { getAlwaysEmitBalanceSnapshotPollingOptions } from '../../../agent/src/lib/polling.js';
+import { resolveRelayerProxyWallet } from '../../../agent/src/lib/polymarket-relayer.js';
 
 const COPY_BPS = 9900n;
 const FEE_BPS = 100n;
@@ -96,6 +97,60 @@ function getClobAuthAddress({ config, accountAddress }) {
         normalizeAddress(config?.polymarketClobAddress) ??
         normalizeAddress(accountAddress)
     );
+}
+
+async function resolveTokenHolderAddress({
+    publicClient,
+    config,
+    account,
+}) {
+    const fallbackAddress =
+        getClobAuthAddress({
+            config,
+            accountAddress: account.address,
+        }) ?? normalizeAddress(account.address);
+
+    if (!config?.polymarketRelayerEnabled) {
+        return {
+            tokenHolderAddress: fallbackAddress,
+            tokenHolderResolutionError: null,
+        };
+    }
+
+    const configuredRelayerAddress =
+        normalizeAddress(config?.polymarketRelayerFromAddress) ??
+        normalizeAddress(config?.polymarketClobAddress);
+    if (configuredRelayerAddress) {
+        return {
+            tokenHolderAddress: configuredRelayerAddress,
+            tokenHolderResolutionError: null,
+        };
+    }
+
+    try {
+        const resolved = await resolveRelayerProxyWallet({
+            publicClient,
+            account,
+            config,
+        });
+        const resolvedProxyWallet = normalizeAddress(resolved?.proxyWallet);
+        if (!resolvedProxyWallet) {
+            return {
+                tokenHolderAddress: null,
+                tokenHolderResolutionError:
+                    'Relayer proxy wallet resolution returned an invalid address.',
+            };
+        }
+        return {
+            tokenHolderAddress: resolvedProxyWallet,
+            tokenHolderResolutionError: null,
+        };
+    } catch (error) {
+        return {
+            tokenHolderAddress: null,
+            tokenHolderResolutionError: error?.message ?? String(error),
+        };
+    }
 }
 
 function extractOrderSummary(payload) {
@@ -520,31 +575,39 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
     } catch (error) {
         tradeFetchError = error?.message ?? String(error);
     }
-    const tokenHolderAddress =
-        getClobAuthAddress({
-            config,
-            accountAddress: account.address,
-        }) ?? normalizeAddress(account.address);
+    const { tokenHolderAddress, tokenHolderResolutionError } = await resolveTokenHolderAddress({
+        publicClient,
+        config,
+        account,
+    });
 
-    const [safeCollateralWei, yesBalance, noBalance] = await Promise.all([
-        publicClient.readContract({
-            address: policy.collateralToken,
-            abi: erc20Abi,
-            functionName: 'balanceOf',
-            args: [config.commitmentSafe],
-        }),
-        publicClient.readContract({
+    const safeCollateralPromise = publicClient.readContract({
+        address: policy.collateralToken,
+        abi: erc20Abi,
+        functionName: 'balanceOf',
+        args: [config.commitmentSafe],
+    });
+    const yesBalancePromise = tokenHolderAddress
+        ? publicClient.readContract({
             address: policy.ctfContract,
             abi: erc1155Abi,
             functionName: 'balanceOf',
             args: [tokenHolderAddress, BigInt(policy.yesTokenId)],
-        }),
-        publicClient.readContract({
+        })
+        : Promise.resolve(0n);
+    const noBalancePromise = tokenHolderAddress
+        ? publicClient.readContract({
             address: policy.ctfContract,
             abi: erc1155Abi,
             functionName: 'balanceOf',
             args: [tokenHolderAddress, BigInt(policy.noTokenId)],
-        }),
+        })
+        : Promise.resolve(0n);
+
+    const [safeCollateralWei, yesBalance, noBalance] = await Promise.all([
+        safeCollateralPromise,
+        yesBalancePromise,
+        noBalancePromise,
     ]);
 
     const amounts = calculateCopyAmounts(safeCollateralWei);
@@ -699,6 +762,7 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
         ),
         tradeFetchError,
         orderFillCheckError,
+        tokenHolderResolutionError,
     });
 
     return outSignals;
