@@ -30,12 +30,15 @@ const DEFAULT_COLLATERAL_TOKEN = '0x2791bca1f2de4661ed88a30c99a7a9449aa84174';
 let copyTradingState = {
     seenSourceTradeId: null,
     activeSourceTradeId: null,
+    activeTradeSide: null,
+    activeTradePrice: null,
     activeOutcome: null,
     activeTokenId: null,
     reimbursementAmountWei: null,
     orderSubmitted: false,
     tokenDeposited: false,
     reimbursementProposed: false,
+    reimbursementProposalHash: null,
 };
 
 function normalizeAddress(value) {
@@ -76,6 +79,13 @@ function normalizeTradePrice(value) {
         return null;
     }
     return parsed;
+}
+
+function normalizeHash(value) {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    if (!/^0x[0-9a-fA-F]{64}$/.test(trimmed)) return null;
+    return trimmed.toLowerCase();
 }
 
 function parseActivityEntry(entry) {
@@ -225,12 +235,15 @@ async function fetchLatestSourceTrade({ policy }) {
 
 function activateTradeCandidate({ trade, tokenId, reimbursementAmountWei }) {
     copyTradingState.activeSourceTradeId = trade.id;
+    copyTradingState.activeTradeSide = trade.side;
+    copyTradingState.activeTradePrice = trade.price;
     copyTradingState.activeOutcome = trade.outcome;
     copyTradingState.activeTokenId = tokenId;
     copyTradingState.reimbursementAmountWei = reimbursementAmountWei;
     copyTradingState.orderSubmitted = false;
     copyTradingState.tokenDeposited = false;
     copyTradingState.reimbursementProposed = false;
+    copyTradingState.reimbursementProposalHash = null;
 }
 
 function clearActiveTrade({ markSeen = false } = {}) {
@@ -239,12 +252,15 @@ function clearActiveTrade({ markSeen = false } = {}) {
     }
 
     copyTradingState.activeSourceTradeId = null;
+    copyTradingState.activeTradeSide = null;
+    copyTradingState.activeTradePrice = null;
     copyTradingState.activeOutcome = null;
     copyTradingState.activeTokenId = null;
     copyTradingState.reimbursementAmountWei = null;
     copyTradingState.orderSubmitted = false;
     copyTradingState.tokenDeposited = false;
     copyTradingState.reimbursementProposed = false;
+    copyTradingState.reimbursementProposalHash = null;
 }
 
 function getPollingOptions() {
@@ -350,7 +366,7 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
         kind: 'copyTradingState',
         policy,
         state: { ...copyTradingState },
-        activeTrade: latestTrade,
+        latestObservedTrade: latestTrade,
         balances: {
             safeCollateralWei: safeCollateralWei.toString(),
             yesBalance: yesBalance.toString(),
@@ -402,7 +418,6 @@ async function validateToolCalls({
     const validated = [];
     const policy = copySignal.policy;
     const state = copySignal.state ?? {};
-    const activeTrade = copySignal.activeTrade;
     const activeTokenBalance = BigInt(copySignal.balances?.activeTokenBalance ?? 0);
     const pendingProposal = Boolean(onchainPendingProposal || copySignal.pendingProposal);
 
@@ -423,8 +438,11 @@ async function validateToolCalls({
             if (state.orderSubmitted) {
                 throw new Error('Copy order already submitted for active trade.');
             }
-            if (activeTrade?.side !== 'BUY') {
+            if (state.activeTradeSide !== 'BUY') {
                 throw new Error('Only BUY source trades are eligible for copy trading.');
+            }
+            if (state.activeTradePrice === null || state.activeTradePrice === undefined) {
+                throw new Error('Missing triggering trade price snapshot for active trade.');
             }
             if (!state.activeTokenId) {
                 throw new Error('No active YES/NO token id configured for copy trade.');
@@ -436,7 +454,7 @@ async function validateToolCalls({
 
             const { makerAmount, takerAmount } = computeBuyOrderAmounts({
                 collateralAmountWei: reimbursementAmountWei,
-                price: activeTrade.price,
+                price: state.activeTradePrice,
             });
 
             validated.push({
@@ -535,15 +553,49 @@ function onToolOutput({ name, parsedOutput }) {
         parsedOutput.status === 'submitted'
     ) {
         copyTradingState.reimbursementProposed = true;
+        copyTradingState.reimbursementProposalHash =
+            normalizeHash(parsedOutput.proposalHash) ?? copyTradingState.reimbursementProposalHash;
     }
 }
 
-function onProposalEvents({ executedProposalCount = 0, deletedProposalCount = 0 }) {
-    if (executedProposalCount > 0) {
+function onProposalEvents({
+    executedProposals = [],
+    deletedProposals = [],
+    executedProposalCount = 0,
+    deletedProposalCount = 0,
+}) {
+    const trackedHash = normalizeHash(copyTradingState.reimbursementProposalHash);
+    const executedHashes = Array.isArray(executedProposals)
+        ? executedProposals.map((hash) => normalizeHash(hash)).filter(Boolean)
+        : [];
+    const deletedHashes = Array.isArray(deletedProposals)
+        ? deletedProposals.map((hash) => normalizeHash(hash)).filter(Boolean)
+        : [];
+
+    if (trackedHash && executedHashes.includes(trackedHash)) {
         clearActiveTrade({ markSeen: true });
     }
 
-    if (deletedProposalCount > 0) {
+    if (trackedHash && deletedHashes.includes(trackedHash)) {
+        copyTradingState.reimbursementProposed = false;
+        copyTradingState.reimbursementProposalHash = null;
+    }
+
+    // Backward-compatible fallback for environments that only pass counts and no hashes.
+    if (
+        !trackedHash &&
+        copyTradingState.reimbursementProposed &&
+        executedProposalCount > 0 &&
+        (!Array.isArray(executedProposals) || executedProposals.length === 0)
+    ) {
+        clearActiveTrade({ markSeen: true });
+    }
+    if (
+        !trackedHash &&
+        copyTradingState.reimbursementProposed &&
+        deletedProposalCount > 0 &&
+        (!Array.isArray(deletedProposals) || deletedProposals.length === 0)
+    ) {
         copyTradingState.reimbursementProposed = false;
     }
 }
@@ -556,12 +608,15 @@ function resetCopyTradingState() {
     copyTradingState = {
         seenSourceTradeId: null,
         activeSourceTradeId: null,
+        activeTradeSide: null,
+        activeTradePrice: null,
         activeOutcome: null,
         activeTokenId: null,
         reimbursementAmountWei: null,
         orderSubmitted: false,
         tokenDeposited: false,
         reimbursementProposed: false,
+        reimbursementProposalHash: null,
     };
 }
 
