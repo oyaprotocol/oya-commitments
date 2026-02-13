@@ -575,11 +575,28 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
     } catch (error) {
         tradeFetchError = error?.message ?? String(error);
     }
+    const clobAuthAddress =
+        getClobAuthAddress({
+            config,
+            accountAddress: account.address,
+        }) ?? normalizeAddress(account.address);
     const { tokenHolderAddress, tokenHolderResolutionError } = await resolveTokenHolderAddress({
         publicClient,
         config,
         account,
     });
+    let walletAlignmentError = null;
+    if (config?.polymarketRelayerEnabled) {
+        if (!clobAuthAddress) {
+            walletAlignmentError = 'Unable to resolve CLOB auth address for relayer mode.';
+        } else if (!tokenHolderAddress) {
+            walletAlignmentError =
+                tokenHolderResolutionError ?? 'Unable to resolve relayer token-holder address.';
+        } else if (clobAuthAddress !== tokenHolderAddress) {
+            walletAlignmentError =
+                `POLYMARKET_CLOB_ADDRESS (${clobAuthAddress}) must match relayer proxy wallet (${tokenHolderAddress}) when POLYMARKET_RELAYER_ENABLED=true.`;
+        }
+    }
 
     const safeCollateralPromise = publicClient.readContract({
         address: policy.collateralToken,
@@ -616,6 +633,7 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
         latestTrade.side === 'BUY' &&
         latestTrade.id !== copyTradingState.seenSourceTradeId &&
         !copyTradingState.activeSourceTradeId &&
+        !walletAlignmentError &&
         BigInt(amounts.copyAmountWei) > 0n
     ) {
         const targetTokenId = latestTrade.outcome === 'YES' ? policy.yesTokenId : policy.noTokenId;
@@ -629,16 +647,13 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
 
     let orderFillCheckError;
     if (
+        !walletAlignmentError &&
         copyTradingState.activeSourceTradeId &&
         copyTradingState.orderSubmitted &&
         !copyTradingState.tokenDeposited &&
         !copyTradingState.copyOrderFilled &&
         copyTradingState.copyOrderId
     ) {
-        const clobAuthAddress = getClobAuthAddress({
-            config,
-            accountAddress: account.address,
-        });
         if (hasClobCredentials(config) && clobAuthAddress) {
             try {
                 const signingAddress = clobAuthAddress;
@@ -763,6 +778,7 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
         tradeFetchError,
         orderFillCheckError,
         tokenHolderResolutionError,
+        walletAlignmentError,
     });
 
     return outSignals;
@@ -789,6 +805,9 @@ async function validateToolCalls({
     const state = copySignal.state ?? {};
     const activeTokenBalance = BigInt(copySignal.balances?.activeTokenBalance ?? 0);
     const pendingProposal = Boolean(onchainPendingProposal || copySignal.pendingProposal);
+    if (copySignal.walletAlignmentError) {
+        throw new Error(copySignal.walletAlignmentError);
+    }
 
     for (const call of toolCalls) {
         if (call.name === 'dispute_assertion') {
