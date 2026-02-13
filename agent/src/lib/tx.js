@@ -241,7 +241,10 @@ async function postBondAndPropose({
 
     return {
         transactionHash: proposalTxHash,
-        proposalHash,
+        // Backward-compatible alias: legacy agents read `proposalHash` as submission tx hash.
+        proposalHash: proposalTxHash,
+        // New explicit OG proposal hash extracted from TransactionsProposed logs.
+        ogProposalHash: proposalHash,
         bondAmount,
         collateral,
         optimisticOracle,

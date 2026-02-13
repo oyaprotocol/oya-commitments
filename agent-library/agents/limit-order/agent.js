@@ -400,10 +400,11 @@ function onToolOutput({ name, parsedOutput }) {
     }
 
     if (name === 'post_bond_and_propose' && parsedOutput.status === 'submitted') {
-        if (parsedOutput.proposalHash) {
+        const submitHash = parsedOutput.transactionHash ?? parsedOutput.proposalHash ?? null;
+        if (submitHash) {
             limitOrderState.proposalPosted = true;
             limitOrderState.proposalBuilt = false;
-            limitOrderState.proposalSubmitHash = parsedOutput.proposalHash ?? null;
+            limitOrderState.proposalSubmitHash = submitHash;
             limitOrderState.proposalSubmitMs = Date.now();
         }
     }
