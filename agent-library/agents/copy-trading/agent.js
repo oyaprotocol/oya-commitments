@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+
 const erc20BalanceOfAbi = [
     {
         type: 'function',
@@ -28,6 +30,18 @@ const PRICE_SCALE = 1_000_000n;
 const DEFAULT_COLLATERAL_TOKEN = '0x2791bca1f2de4661ed88a30c99a7a9449aa84174';
 const ERC20_TRANSFER_SELECTOR = '0xa9059cbb';
 const REIMBURSEMENT_SUBMISSION_TIMEOUT_MS = 60_000;
+const DEFAULT_CLOB_HOST = 'https://clob.polymarket.com';
+const DEFAULT_CLOB_REQUEST_TIMEOUT_MS = 15_000;
+const CLOB_SUCCESS_TERMINAL_STATUS = 'CONFIRMED';
+const CLOB_FAILURE_TERMINAL_STATUS = 'FAILED';
+const CLOB_ORDER_FAILURE_STATUSES = new Set([
+    'FAILED',
+    'REJECTED',
+    'CANCELED',
+    'CANCELLED',
+    'EXPIRED',
+]);
+const CLOB_ORDER_FILLED_STATUSES = new Set(['FILLED', 'MATCHED', 'CONFIRMED']);
 
 let copyTradingState = {
     seenSourceTradeId: null,
@@ -38,6 +52,10 @@ let copyTradingState = {
     activeTokenId: null,
     copyTradeAmountWei: null,
     reimbursementAmountWei: null,
+    copyOrderId: null,
+    copyOrderStatus: null,
+    copyOrderFilled: false,
+    copyOrderSubmittedMs: null,
     orderSubmitted: false,
     tokenDeposited: false,
     reimbursementProposed: false,
@@ -92,6 +110,210 @@ function normalizeHash(value) {
     const trimmed = value.trim();
     if (!/^0x[0-9a-fA-F]{64}$/.test(trimmed)) return null;
     return trimmed.toLowerCase();
+}
+
+function normalizeOrderId(value) {
+    if (typeof value !== 'string') return null;
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeClobStatus(value) {
+    if (typeof value !== 'string') return null;
+    const normalized = value.trim().toUpperCase();
+    return normalized.length > 0 ? normalized : null;
+}
+
+function parseFiniteNumber(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return null;
+    return parsed;
+}
+
+function normalizeClobHost(host) {
+    return String(host ?? DEFAULT_CLOB_HOST).replace(/\/+$/, '');
+}
+
+function hasClobCredentials(config) {
+    return Boolean(
+        config?.polymarketClobApiKey &&
+            config?.polymarketClobApiSecret &&
+            config?.polymarketClobApiPassphrase
+    );
+}
+
+function getClobAuthAddress({ config, accountAddress }) {
+    return (
+        normalizeAddress(config?.polymarketClobAddress) ??
+        normalizeAddress(accountAddress)
+    );
+}
+
+function buildClobAuthHeaders({
+    config,
+    signingAddress,
+    timestamp,
+    method,
+    path,
+    bodyText = '',
+}) {
+    const secretBytes = Buffer.from(String(config.polymarketClobApiSecret), 'base64');
+    const payload = `${timestamp}${method.toUpperCase()}${path}${bodyText}`;
+    const signature = crypto
+        .createHmac('sha256', secretBytes)
+        .update(payload)
+        .digest('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_');
+
+    return {
+        'POLY_ADDRESS': signingAddress,
+        'POLY_API_KEY': String(config.polymarketClobApiKey),
+        'POLY_SIGNATURE': signature,
+        'POLY_TIMESTAMP': String(timestamp),
+        'POLY_PASSPHRASE': String(config.polymarketClobApiPassphrase),
+    };
+}
+
+async function clobGet({ config, signingAddress, path }) {
+    const host = normalizeClobHost(config?.polymarketClobHost);
+    const timeoutMs = Number(config?.polymarketClobRequestTimeoutMs ?? DEFAULT_CLOB_REQUEST_TIMEOUT_MS);
+    const timestamp = Math.floor(Date.now() / 1000);
+    const headers = buildClobAuthHeaders({
+        config,
+        signingAddress,
+        timestamp,
+        method: 'GET',
+        path,
+        bodyText: '',
+    });
+
+    const response = await fetch(`${host}${path}`, {
+        method: 'GET',
+        headers,
+        signal: AbortSignal.timeout(timeoutMs),
+    });
+    const text = await response.text();
+    let parsed;
+    try {
+        parsed = text ? JSON.parse(text) : null;
+    } catch (error) {
+        parsed = { raw: text };
+    }
+
+    if (!response.ok) {
+        throw new Error(
+            `CLOB GET failed (${path}): ${response.status} ${response.statusText} ${text}`
+        );
+    }
+
+    return parsed;
+}
+
+function extractOrderSummary(payload) {
+    const order =
+        payload?.order && typeof payload.order === 'object'
+            ? payload.order
+            : payload && typeof payload === 'object'
+              ? payload
+              : null;
+    if (!order) return null;
+
+    return {
+        id: normalizeOrderId(order.id ?? order.orderId ?? order.order_id),
+        status: normalizeClobStatus(order.status),
+        originalSize: parseFiniteNumber(order.original_size ?? order.originalSize),
+        sizeMatched: parseFiniteNumber(order.size_matched ?? order.sizeMatched),
+    };
+}
+
+function isOrderFullyMatched(order) {
+    if (!order) return false;
+    if (order.originalSize === null || order.sizeMatched === null) return false;
+    if (order.originalSize <= 0) return false;
+    return order.sizeMatched + 1e-12 >= order.originalSize;
+}
+
+function tradeIncludesOrderId(trade, orderId) {
+    const normalizedOrderId = String(orderId).trim().toLowerCase();
+    if (!normalizedOrderId) return false;
+
+    const takerOrderId = normalizeOrderId(trade?.taker_order_id ?? trade?.takerOrderId);
+    if (takerOrderId && takerOrderId.toLowerCase() === normalizedOrderId) {
+        return true;
+    }
+
+    const makerOrders = Array.isArray(trade?.maker_orders)
+        ? trade.maker_orders
+        : Array.isArray(trade?.makerOrders)
+          ? trade.makerOrders
+          : [];
+    for (const makerOrder of makerOrders) {
+        const makerOrderId = normalizeOrderId(makerOrder?.order_id ?? makerOrder?.orderId);
+        if (makerOrderId && makerOrderId.toLowerCase() === normalizedOrderId) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function dedupeTrades(trades) {
+    const seen = new Set();
+    const unique = [];
+    for (const trade of trades) {
+        const id = normalizeOrderId(trade?.id);
+        const key = id ?? JSON.stringify(trade);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        unique.push(trade);
+    }
+    return unique;
+}
+
+function extractOrderIdFromSubmission(parsedOutput) {
+    return normalizeOrderId(
+        parsedOutput?.result?.order?.id ??
+            parsedOutput?.result?.id ??
+            parsedOutput?.result?.orderID ??
+            parsedOutput?.result?.orderId ??
+            parsedOutput?.order?.id ??
+            parsedOutput?.id ??
+            parsedOutput?.orderID ??
+            parsedOutput?.orderId
+    );
+}
+
+function extractOrderStatusFromSubmission(parsedOutput) {
+    return normalizeClobStatus(
+        parsedOutput?.result?.order?.status ??
+            parsedOutput?.result?.status ??
+            parsedOutput?.order?.status
+    );
+}
+
+async function fetchRelatedClobTrades({
+    config,
+    signingAddress,
+    orderId,
+    market,
+    clobAuthAddress,
+    submittedMs,
+}) {
+    const afterSeconds = Math.max(0, Math.floor((Number(submittedMs ?? Date.now()) - 60_000) / 1000));
+    const all = [];
+    for (const role of ['maker', 'taker']) {
+        const params = new URLSearchParams();
+        params.set(role, clobAuthAddress);
+        params.set('market', market);
+        params.set('after', String(afterSeconds));
+        const path = `/data/trades?${params.toString()}`;
+        const payload = await clobGet({ config, signingAddress, path });
+        if (Array.isArray(payload)) {
+            all.push(...payload);
+        }
+    }
+    return dedupeTrades(all).filter((trade) => tradeIncludesOrderId(trade, orderId));
 }
 
 function decodeErc20TransferCallData(data) {
@@ -329,6 +551,10 @@ function activateTradeCandidate({
     copyTradingState.activeTokenId = tokenId;
     copyTradingState.copyTradeAmountWei = copyTradeAmountWei;
     copyTradingState.reimbursementAmountWei = reimbursementAmountWei;
+    copyTradingState.copyOrderId = null;
+    copyTradingState.copyOrderStatus = null;
+    copyTradingState.copyOrderFilled = false;
+    copyTradingState.copyOrderSubmittedMs = null;
     copyTradingState.orderSubmitted = false;
     copyTradingState.tokenDeposited = false;
     copyTradingState.reimbursementProposed = false;
@@ -350,6 +576,10 @@ function clearActiveTrade({ markSeen = false } = {}) {
     copyTradingState.activeTokenId = null;
     copyTradingState.copyTradeAmountWei = null;
     copyTradingState.reimbursementAmountWei = null;
+    copyTradingState.copyOrderId = null;
+    copyTradingState.copyOrderStatus = null;
+    copyTradingState.copyOrderFilled = false;
+    copyTradingState.copyOrderSubmittedMs = null;
     copyTradingState.orderSubmitted = false;
     copyTradingState.tokenDeposited = false;
     copyTradingState.reimbursementProposed = false;
@@ -378,7 +608,7 @@ function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
         'You are a copy-trading commitment agent.',
         'Copy only BUY trades from the configured source user and configured market.',
         'Trade size must be exactly 99% of Safe collateral at detection time. Keep 1% in the Safe as fee.',
-        'Flow must stay simple: place CLOB order from your own wallet, wait for YES/NO tokens, deposit tokens to Safe, then propose reimbursement transfer to agentAddress.',
+        'Flow must stay simple: place CLOB order from your own wallet, wait for CLOB fill confirmation and YES/NO token receipt, deposit tokens to Safe, then propose reimbursement transfer to agentAddress.',
         'Never trade more than 99% of Safe collateral. Reimburse exactly the stored reimbursement amount (full Safe collateral at detection).',
         'Use polymarket_clob_build_sign_and_place_order for order placement, make_erc1155_deposit for YES/NO deposit, and build_og_transactions for reimbursement transfer.',
         'If preconditions are not met, return ignore.',
@@ -450,6 +680,68 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
             copyTradeAmountWei: amounts.copyAmountWei,
             reimbursementAmountWei: amounts.safeBalanceWei,
         });
+    }
+
+    let orderFillCheckError;
+    if (
+        copyTradingState.activeSourceTradeId &&
+        copyTradingState.orderSubmitted &&
+        !copyTradingState.tokenDeposited &&
+        !copyTradingState.copyOrderFilled &&
+        copyTradingState.copyOrderId
+    ) {
+        const clobAuthAddress = getClobAuthAddress({
+            config,
+            accountAddress: account.address,
+        });
+        if (hasClobCredentials(config) && clobAuthAddress) {
+            try {
+                const signingAddress = clobAuthAddress;
+                const orderPath = `/data/order/${encodeURIComponent(copyTradingState.copyOrderId)}`;
+                const orderPayload = await clobGet({
+                    config,
+                    signingAddress,
+                    path: orderPath,
+                });
+                const orderSummary = extractOrderSummary(orderPayload);
+                if (orderSummary?.status) {
+                    copyTradingState.copyOrderStatus = orderSummary.status;
+                }
+
+                const relatedTrades = await fetchRelatedClobTrades({
+                    config,
+                    signingAddress,
+                    orderId: copyTradingState.copyOrderId,
+                    market: policy.market,
+                    clobAuthAddress,
+                    submittedMs: copyTradingState.copyOrderSubmittedMs,
+                });
+                const relatedStatuses = relatedTrades
+                    .map((trade) => normalizeClobStatus(trade?.status))
+                    .filter(Boolean);
+                const anyFailedTrade = relatedStatuses.some(
+                    (status) => status === CLOB_FAILURE_TERMINAL_STATUS
+                );
+                const allConfirmedTrades =
+                    relatedStatuses.length > 0 &&
+                    relatedStatuses.every((status) => status === CLOB_SUCCESS_TERMINAL_STATUS);
+                const orderFilled =
+                    isOrderFullyMatched(orderSummary) ||
+                    CLOB_ORDER_FILLED_STATUSES.has(orderSummary?.status ?? '');
+                const orderFailed = CLOB_ORDER_FAILURE_STATUSES.has(orderSummary?.status ?? '');
+
+                if (orderFailed || anyFailedTrade) {
+                    copyTradingState.orderSubmitted = false;
+                    copyTradingState.copyOrderFilled = false;
+                    copyTradingState.copyOrderId = null;
+                    copyTradingState.copyOrderSubmittedMs = null;
+                } else if (allConfirmedTrades && orderFilled) {
+                    copyTradingState.copyOrderFilled = true;
+                }
+            } catch (error) {
+                orderFillCheckError = error?.message ?? String(error);
+            }
+        }
     }
 
     if (
@@ -524,6 +816,7 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
                 copyTradingState.reimbursementSubmissionPending
         ),
         tradeFetchError,
+        orderFillCheckError,
     });
 
     return outSignals;
@@ -618,6 +911,9 @@ async function validateToolCalls({
             if (!state.orderSubmitted) {
                 throw new Error('Cannot deposit YES/NO tokens before copy order submission.');
             }
+            if (state.copyOrderId && !state.copyOrderFilled) {
+                throw new Error('Copy order has not been filled yet; wait before depositing tokens.');
+            }
             if (state.tokenDeposited) {
                 throw new Error('YES/NO tokens already deposited for active trade.');
             }
@@ -684,6 +980,10 @@ function onToolOutput({ name, parsedOutput }) {
 
     if (name === 'polymarket_clob_build_sign_and_place_order' && parsedOutput.status === 'submitted') {
         copyTradingState.orderSubmitted = true;
+        copyTradingState.copyOrderId = extractOrderIdFromSubmission(parsedOutput);
+        copyTradingState.copyOrderStatus = extractOrderStatusFromSubmission(parsedOutput);
+        copyTradingState.copyOrderFilled = false;
+        copyTradingState.copyOrderSubmittedMs = Date.now();
         return;
     }
 
@@ -776,6 +1076,10 @@ function resetCopyTradingState() {
         activeTokenId: null,
         copyTradeAmountWei: null,
         reimbursementAmountWei: null,
+        copyOrderId: null,
+        copyOrderStatus: null,
+        copyOrderFilled: false,
+        copyOrderSubmittedMs: null,
         orderSubmitted: false,
         tokenDeposited: false,
         reimbursementProposed: false,
