@@ -1303,6 +1303,22 @@ async function runRelayerWalletMismatchIsBlockedTest() {
                 }),
             /must match relayer proxy wallet/
         );
+
+        const disputeValidated = await validateToolCalls({
+            toolCalls: [
+                {
+                    callId: 'dispute',
+                    name: 'dispute_assertion',
+                    arguments: {},
+                },
+            ],
+            signals: [copySignal],
+            config: {},
+            agentAddress: TEST_ACCOUNT,
+            onchainPendingProposal: false,
+        });
+        assert.equal(disputeValidated.length, 1);
+        assert.equal(disputeValidated[0].name, 'dispute_assertion');
     } finally {
         for (const key of envKeys) {
             if (oldEnv[key] === undefined) {

@@ -805,14 +805,16 @@ async function validateToolCalls({
     const state = copySignal.state ?? {};
     const activeTokenBalance = BigInt(copySignal.balances?.activeTokenBalance ?? 0);
     const pendingProposal = Boolean(onchainPendingProposal || copySignal.pendingProposal);
-    if (copySignal.walletAlignmentError) {
-        throw new Error(copySignal.walletAlignmentError);
-    }
+    const walletAlignmentError = copySignal.walletAlignmentError;
 
     for (const call of toolCalls) {
         if (call.name === 'dispute_assertion') {
             validated.push(call);
             continue;
+        }
+
+        if (walletAlignmentError) {
+            throw new Error(walletAlignmentError);
         }
 
         if (call.name === 'post_bond_and_propose') {
