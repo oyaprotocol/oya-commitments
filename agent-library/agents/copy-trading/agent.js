@@ -288,6 +288,7 @@ async function fetchLatestSourceTrade({ policy }) {
         const parsed = parseActivityEntry(item);
         if (!parsed) continue;
         if (parsed.outcome !== 'YES' && parsed.outcome !== 'NO') continue;
+        if (parsed.side !== 'BUY') continue;
         return parsed;
     }
 
@@ -646,11 +647,16 @@ function onToolOutput({ name, parsedOutput }) {
             copyTradingState.reimbursementProposalHash = proposalHash;
             copyTradingState.reimbursementSubmissionPending = false;
             copyTradingState.reimbursementSubmissionTxHash = txHash;
-        } else {
+        } else if (txHash) {
             copyTradingState.reimbursementProposed = false;
             copyTradingState.reimbursementProposalHash = null;
             copyTradingState.reimbursementSubmissionPending = true;
             copyTradingState.reimbursementSubmissionTxHash = txHash;
+        } else {
+            copyTradingState.reimbursementProposed = false;
+            copyTradingState.reimbursementProposalHash = null;
+            copyTradingState.reimbursementSubmissionPending = false;
+            copyTradingState.reimbursementSubmissionTxHash = null;
         }
     }
 }
