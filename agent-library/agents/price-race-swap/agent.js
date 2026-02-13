@@ -103,6 +103,20 @@ function normalizeHash(value) {
     return v.toLowerCase();
 }
 
+function resolveSubmittedProposalHash(parsedOutput) {
+    const txHash = normalizeHash(parsedOutput?.transactionHash);
+    const explicitOgHash = normalizeHash(parsedOutput?.ogProposalHash);
+    if (explicitOgHash) return explicitOgHash;
+
+    const legacyHash = normalizeHash(parsedOutput?.proposalHash);
+    if (legacyHash && (!txHash || legacyHash !== txHash)) {
+        return legacyHash;
+    }
+
+    // Backward-compatible fallback when only tx hash is available.
+    return txHash ?? legacyHash;
+}
+
 async function persistSingleFireState() {
     const payload = JSON.stringify(
         {
@@ -722,7 +736,7 @@ function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
 async function onToolOutput({ name, parsedOutput }) {
     if (!name || !parsedOutput || parsedOutput.status !== 'submitted') return;
     if (name !== 'post_bond_and_propose' && name !== 'auto_post_bond_and_propose') return;
-    const proposalHash = normalizeHash(parsedOutput.proposalHash);
+    const proposalHash = resolveSubmittedProposalHash(parsedOutput);
     if (!proposalHash) return;
     await lockSingleFire({ proposalHash });
 }

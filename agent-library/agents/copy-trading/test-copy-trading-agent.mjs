@@ -231,7 +231,12 @@ async function runProposalHashGatingTest() {
 
         onToolOutput({
             name: 'post_bond_and_propose',
-            parsedOutput: { status: 'submitted', proposalHash: TEST_PROPOSAL_HASH },
+            parsedOutput: {
+                status: 'submitted',
+                transactionHash: TEST_TX_HASH,
+                proposalHash: TEST_TX_HASH,
+                ogProposalHash: TEST_PROPOSAL_HASH,
+            },
         });
 
         state = getCopyTradingState();
@@ -263,6 +268,19 @@ async function runProposalHashGatingTest() {
         globalThis.fetch = oldFetch;
         resetCopyTradingState();
     }
+}
+
+function runLegacyProposalHashFallbackTest() {
+    resetCopyTradingState();
+    onToolOutput({
+        name: 'post_bond_and_propose',
+        parsedOutput: { status: 'submitted', proposalHash: TEST_PROPOSAL_HASH },
+    });
+    const state = getCopyTradingState();
+    assert.equal(state.reimbursementProposed, true);
+    assert.equal(state.reimbursementProposalHash, TEST_PROPOSAL_HASH);
+    assert.equal(state.reimbursementSubmissionPending, false);
+    resetCopyTradingState();
 }
 
 async function runProposalHashRecoveryFromSignalTest() {
@@ -324,6 +342,7 @@ async function runProposalHashRecoveryFromSignalTest() {
         assert.equal(state.reimbursementProposalHash, null);
         assert.equal(state.reimbursementSubmissionPending, true);
         assert.equal(state.reimbursementSubmissionTxHash, TEST_TX_HASH);
+        assert.equal(typeof state.reimbursementSubmissionMs, 'number');
 
         const reimbursementAmountWei = state.reimbursementAmountWei;
         const proposalSignal = {
@@ -362,6 +381,129 @@ async function runProposalHashRecoveryFromSignalTest() {
         state = getCopyTradingState();
         assert.equal(state.activeSourceTradeId, null);
         assert.equal(state.seenSourceTradeId, 'trade-1');
+    } finally {
+        for (const key of envKeys) {
+            if (oldEnv[key] === undefined) {
+                delete process.env[key];
+            } else {
+                process.env[key] = oldEnv[key];
+            }
+        }
+        globalThis.fetch = oldFetch;
+        resetCopyTradingState();
+    }
+}
+
+async function runRevertedSubmissionClearsPendingTest() {
+    resetCopyTradingState();
+    const envKeys = [
+        'COPY_TRADING_SOURCE_USER',
+        'COPY_TRADING_MARKET',
+        'COPY_TRADING_YES_TOKEN_ID',
+        'COPY_TRADING_NO_TOKEN_ID',
+    ];
+    const oldEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+    const oldFetch = globalThis.fetch;
+
+    process.env.COPY_TRADING_SOURCE_USER = TEST_SOURCE_USER;
+    process.env.COPY_TRADING_MARKET = 'test-market';
+    process.env.COPY_TRADING_YES_TOKEN_ID = YES_TOKEN_ID;
+    process.env.COPY_TRADING_NO_TOKEN_ID = NO_TOKEN_ID;
+
+    try {
+        globalThis.fetch = async () => ({
+            ok: true,
+            async json() {
+                return [
+                    {
+                        id: 'trade-1',
+                        side: 'BUY',
+                        outcome: 'YES',
+                        price: 0.5,
+                    },
+                ];
+            },
+        });
+
+        const config = {
+            commitmentSafe: TEST_SAFE,
+            polymarketConditionalTokens: '0x4d97dcd97ec945f40cf65f87097ace5ea0476045',
+        };
+        const publicClient = {
+            async readContract({ args }) {
+                if (args.length === 1) return 1_000_000n;
+                return 0n;
+            },
+            async getTransactionReceipt() {
+                return { status: 0n };
+            },
+        };
+
+        await enrichSignals([], {
+            publicClient,
+            config,
+            account: { address: TEST_ACCOUNT },
+            onchainPendingProposal: false,
+        });
+
+        onToolOutput({
+            name: 'polymarket_clob_build_sign_and_place_order',
+            parsedOutput: { status: 'submitted' },
+        });
+        onToolOutput({
+            name: 'make_erc1155_deposit',
+            parsedOutput: { status: 'confirmed' },
+        });
+        onToolOutput({
+            name: 'post_bond_and_propose',
+            parsedOutput: { status: 'submitted', transactionHash: TEST_TX_HASH },
+        });
+
+        let state = getCopyTradingState();
+        assert.equal(state.reimbursementSubmissionPending, true);
+        assert.equal(state.reimbursementSubmissionTxHash, TEST_TX_HASH);
+
+        await enrichSignals([], {
+            publicClient,
+            config,
+            account: { address: TEST_ACCOUNT },
+            onchainPendingProposal: false,
+        });
+
+        state = getCopyTradingState();
+        assert.equal(state.reimbursementSubmissionPending, false);
+        assert.equal(state.reimbursementSubmissionTxHash, null);
+        assert.equal(state.reimbursementSubmissionMs, null);
+
+        const reimbursementValidated = await validateToolCalls({
+            toolCalls: [
+                {
+                    callId: 'reimbursement',
+                    name: 'build_og_transactions',
+                    arguments: {},
+                },
+            ],
+            signals: [
+                {
+                    kind: 'copyTradingState',
+                    policy: {
+                        ready: true,
+                        ctfContract: '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045',
+                        collateralToken: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
+                    },
+                    state,
+                    balances: {
+                        activeTokenBalance: '0',
+                    },
+                    pendingProposal: false,
+                },
+            ],
+            config: {},
+            agentAddress: TEST_ACCOUNT,
+            onchainPendingProposal: false,
+        });
+
+        assert.equal(reimbursementValidated.length, 1);
     } finally {
         for (const key of envKeys) {
             if (oldEnv[key] === undefined) {
@@ -561,9 +703,11 @@ async function runFetchLatestBuyTradeTest() {
 async function run() {
     runPromptTest();
     runMathTests();
+    runLegacyProposalHashFallbackTest();
     await runValidateToolCallTests();
     await runProposalHashGatingTest();
     await runProposalHashRecoveryFromSignalTest();
+    await runRevertedSubmissionClearsPendingTest();
     await runSubmissionWithoutHashesDoesNotWedgeTest();
     await runFetchLatestBuyTradeTest();
     console.log('[test] copy-trading agent OK');
