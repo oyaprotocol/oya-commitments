@@ -34,6 +34,7 @@ let copyTradingState = {
     activeTokenId: null,
     copyTradeAmountWei: null,
     reimbursementAmountWei: null,
+    reimbursementRecipientAddress: null,
     copyOrderId: null,
     copyOrderStatus: null,
     copyOrderFilled: false,
@@ -272,13 +273,19 @@ async function fetchRelatedClobTrades({
 function findMatchingReimbursementProposalHash({
     signals,
     policy,
-    agentAddress,
+    proposerAddress,
+    recipientAddress,
     reimbursementAmountWei,
 }) {
     const normalizedCollateralToken = normalizeAddress(policy?.collateralToken);
-    const normalizedAgentAddress = normalizeAddress(agentAddress);
+    const normalizedProposerAddress = normalizeAddress(proposerAddress);
+    const normalizedRecipientAddress = normalizeAddress(recipientAddress);
     const normalizedAmount = BigInt(reimbursementAmountWei ?? 0);
-    if (!normalizedCollateralToken || !normalizedAgentAddress || normalizedAmount <= 0n) {
+    if (
+        !normalizedCollateralToken ||
+        !normalizedRecipientAddress ||
+        normalizedAmount <= 0n
+    ) {
         return null;
     }
 
@@ -288,7 +295,7 @@ function findMatchingReimbursementProposalHash({
         if (!signalHash) continue;
 
         const proposer = normalizeAddress(signal.proposer);
-        if (proposer && proposer !== normalizedAgentAddress) continue;
+        if (normalizedProposerAddress && proposer && proposer !== normalizedProposerAddress) continue;
 
         const transactions = Array.isArray(signal.transactions) ? signal.transactions : [];
         for (const tx of transactions) {
@@ -300,7 +307,7 @@ function findMatchingReimbursementProposalHash({
             if (value !== 0n) continue;
             const decoded = decodeErc20TransferCallData(tx?.data);
             if (!decoded) continue;
-            if (decoded.to !== normalizedAgentAddress) continue;
+            if (decoded.to !== normalizedRecipientAddress) continue;
             if (decoded.amount !== normalizedAmount) continue;
             return signalHash;
         }
@@ -478,6 +485,7 @@ function activateTradeCandidate({
     tokenId,
     copyTradeAmountWei,
     reimbursementAmountWei,
+    reimbursementRecipientAddress,
 }) {
     copyTradingState.activeSourceTradeId = trade.id;
     copyTradingState.activeTradeSide = trade.side;
@@ -486,6 +494,7 @@ function activateTradeCandidate({
     copyTradingState.activeTokenId = tokenId;
     copyTradingState.copyTradeAmountWei = copyTradeAmountWei;
     copyTradingState.reimbursementAmountWei = reimbursementAmountWei;
+    copyTradingState.reimbursementRecipientAddress = reimbursementRecipientAddress;
     copyTradingState.copyOrderId = null;
     copyTradingState.copyOrderStatus = null;
     copyTradingState.copyOrderFilled = false;
@@ -511,6 +520,7 @@ function clearActiveTrade({ markSeen = false } = {}) {
     copyTradingState.activeTokenId = null;
     copyTradingState.copyTradeAmountWei = null;
     copyTradingState.reimbursementAmountWei = null;
+    copyTradingState.reimbursementRecipientAddress = null;
     copyTradingState.copyOrderId = null;
     copyTradingState.copyOrderStatus = null;
     copyTradingState.copyOrderFilled = false;
@@ -539,7 +549,7 @@ function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
         'You are a copy-trading commitment agent.',
         'Copy only BUY trades from the configured source user and configured market.',
         'Trade size must be exactly 99% of Safe collateral at detection time. Keep 1% in the Safe as fee.',
-        'Flow must stay simple: place CLOB order from your configured trading wallet, wait for CLOB fill confirmation and YES/NO token receipt, deposit tokens to Safe, then propose reimbursement transfer to agentAddress.',
+        'Flow must stay simple: place CLOB order from your configured trading wallet, wait for CLOB fill confirmation and YES/NO token receipt, deposit tokens to Safe, then propose reimbursement transfer to the same wallet that funded the copy trade.',
         'Never trade more than 99% of Safe collateral. Reimburse exactly the stored reimbursement amount (full Safe collateral at detection).',
         'Use polymarket_clob_build_sign_and_place_order for order placement, make_erc1155_deposit for YES/NO deposit, and build_og_transactions for reimbursement transfer.',
         'If preconditions are not met, return ignore.',
@@ -642,6 +652,7 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
             tokenId: targetTokenId,
             copyTradeAmountWei: amounts.copyAmountWei,
             reimbursementAmountWei: amounts.safeBalanceWei,
+            reimbursementRecipientAddress: clobAuthAddress,
         });
     }
 
@@ -710,7 +721,11 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
         const recoveredHash = findMatchingReimbursementProposalHash({
             signals: outSignals,
             policy,
-            agentAddress: account.address,
+            proposerAddress: account.address,
+            recipientAddress:
+                normalizeAddress(copyTradingState.reimbursementRecipientAddress) ??
+                clobAuthAddress ??
+                normalizeAddress(account.address),
             reimbursementAmountWei: copyTradingState.reimbursementAmountWei,
         });
         if (recoveredHash) {
@@ -906,6 +921,12 @@ async function validateToolCalls({
             if (reimbursementAmountWei <= 0n) {
                 throw new Error('Reimbursement amount is zero; refusing proposal build.');
             }
+            const reimbursementRecipientAddress =
+                normalizeAddress(state.reimbursementRecipientAddress) ??
+                normalizeAddress(agentAddress);
+            if (!reimbursementRecipientAddress) {
+                throw new Error('Missing reimbursement recipient address for proposal build.');
+            }
 
             validated.push({
                 ...call,
@@ -914,7 +935,7 @@ async function validateToolCalls({
                         {
                             kind: 'erc20_transfer',
                             token: policy.collateralToken,
-                            to: agentAddress,
+                            to: reimbursementRecipientAddress,
                             amountWei: reimbursementAmountWei.toString(),
                         },
                     ],
@@ -1033,6 +1054,7 @@ function resetCopyTradingState() {
         activeTokenId: null,
         copyTradeAmountWei: null,
         reimbursementAmountWei: null,
+        reimbursementRecipientAddress: null,
         copyOrderId: null,
         copyOrderStatus: null,
         copyOrderFilled: false,

@@ -237,6 +237,123 @@ async function run() {
         globalThis.fetch = oldFetch;
     }
 
+    const deployedUnavailableRelayTxHash = `0x${'d'.repeat(64)}`;
+    const deployedUnavailableOnchainTxHash = `0x${'e'.repeat(64)}`;
+    const deployedUnavailableTransactionId = 'relayer-safe-deployed-unavailable-1';
+    let deployedUnavailableSubmitBody;
+    let sawUnavailableDeployedCheck = false;
+    const oldFetchDeployedUnavailable = globalThis.fetch;
+    try {
+        globalThis.fetch = async (url, options = {}) => {
+            const asText = String(url);
+            const asLower = asText.toLowerCase();
+            if (asLower.includes('/deployed?') && asLower.includes(relayerFromAddress.toLowerCase())) {
+                sawUnavailableDeployedCheck = true;
+                return {
+                    ok: false,
+                    status: 503,
+                    statusText: 'Service Unavailable',
+                    async text() {
+                        return JSON.stringify({ error: 'temporarily unavailable' });
+                    },
+                };
+            }
+
+            if (asText.includes('/relay-payload?')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    statusText: 'OK',
+                    async text() {
+                        return JSON.stringify({
+                            address: relayerFromAddress,
+                            nonce: '14',
+                        });
+                    },
+                };
+            }
+
+            if (asText.endsWith('/submit')) {
+                deployedUnavailableSubmitBody = JSON.parse(options.body);
+                return {
+                    ok: true,
+                    status: 200,
+                    statusText: 'OK',
+                    async text() {
+                        return JSON.stringify({
+                            transactionID: deployedUnavailableTransactionId,
+                            hash: deployedUnavailableRelayTxHash,
+                            state: 'STATE_PENDING',
+                        });
+                    },
+                };
+            }
+
+            if (
+                asText.includes('/transaction?') &&
+                (asText.includes(`id=${deployedUnavailableTransactionId}`) ||
+                    asText.includes(`transactionID=${deployedUnavailableTransactionId}`))
+            ) {
+                return {
+                    ok: true,
+                    status: 200,
+                    statusText: 'OK',
+                    async text() {
+                        return JSON.stringify([
+                            {
+                                transactionID: deployedUnavailableTransactionId,
+                                hash: deployedUnavailableRelayTxHash,
+                                state: 'STATE_CONFIRMED',
+                                transactionHash: deployedUnavailableOnchainTxHash,
+                            },
+                        ]);
+                    },
+                };
+            }
+
+            throw new Error(`Unexpected relayer fetch URL (deployed unavailable test): ${asText}`);
+        };
+
+        const deployedUnavailableDepositHash = await makeErc1155Deposit({
+            publicClient: {
+                async getChainId() {
+                    return 137;
+                },
+            },
+            walletClient: {
+                async signMessage() {
+                    return `0x${'f'.repeat(128)}1b`;
+                },
+            },
+            account,
+            config: {
+                commitmentSafe: config.commitmentSafe,
+                polymarketRelayerEnabled: true,
+                polymarketRelayerHost: 'https://relayer-v2.polymarket.com',
+                polymarketRelayerTxType: 'SAFE',
+                polymarketRelayerFromAddress: relayerFromAddress,
+                polymarketBuilderApiKey: 'builder-key',
+                polymarketBuilderSecret: Buffer.from('builder-secret').toString('base64'),
+                polymarketBuilderPassphrase: 'builder-passphrase',
+                polymarketRelayerPollIntervalMs: 0,
+                polymarketRelayerPollTimeoutMs: 1_000,
+            },
+            token,
+            tokenId: '12',
+            amount: '1',
+            data: null,
+        });
+
+        assert.equal(sawUnavailableDeployedCheck, true);
+        assert.equal(deployedUnavailableDepositHash, deployedUnavailableOnchainTxHash);
+        assert.equal(
+            deployedUnavailableSubmitBody.proxyWallet.toLowerCase(),
+            relayerFromAddress.toLowerCase()
+        );
+    } finally {
+        globalThis.fetch = oldFetchDeployedUnavailable;
+    }
+
     const clobOnlyAddress = '0x3333333333333333333333333333333333333333';
     const clobIgnoredRelayTxHash = `0x${'9'.repeat(64)}`;
     const clobIgnoredOnchainTxHash = `0x${'a'.repeat(64)}`;

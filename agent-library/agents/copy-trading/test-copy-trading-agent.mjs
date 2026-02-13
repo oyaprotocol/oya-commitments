@@ -203,6 +203,7 @@ async function runValidateToolCallTests() {
                     activeTokenId: '123',
                     copyTradeAmountWei: '990000',
                     reimbursementAmountWei: '1000000',
+                    reimbursementRecipientAddress: TEST_CLOB_PROXY,
                     orderSubmitted: true,
                     tokenDeposited: true,
                     reimbursementProposed: false,
@@ -220,6 +221,10 @@ async function runValidateToolCallTests() {
     assert.equal(reimbursementValidated.length, 1);
     assert.equal(reimbursementValidated[0].parsedArguments.actions.length, 1);
     assert.equal(reimbursementValidated[0].parsedArguments.actions[0].kind, 'erc20_transfer');
+    assert.equal(
+        reimbursementValidated[0].parsedArguments.actions[0].to.toLowerCase(),
+        TEST_CLOB_PROXY.toLowerCase()
+    );
     assert.equal(reimbursementValidated[0].parsedArguments.actions[0].amountWei, '1000000');
 }
 
@@ -277,6 +282,7 @@ async function runProposalHashGatingTest() {
         assert.equal(state.activeTradePrice, 0.5);
         assert.equal(state.copyTradeAmountWei, '990000');
         assert.equal(state.reimbursementAmountWei, '1000000');
+        assert.equal(state.reimbursementRecipientAddress, TEST_ACCOUNT.toLowerCase());
 
         onToolOutput({
             name: 'post_bond_and_propose',
@@ -1183,6 +1189,7 @@ async function runTokenBalancesUseResolvedRelayerProxyTest() {
         assert.equal(copySignal.balances.tokenHolderAddress, TEST_RELAYER_PROXY.toLowerCase());
         assert.equal(copySignal.tokenHolderResolutionError, null);
         assert.equal(copySignal.walletAlignmentError, null);
+        assert.equal(copySignal.state.reimbursementRecipientAddress, TEST_RELAYER_PROXY.toLowerCase());
     } finally {
         for (const key of envKeys) {
             if (oldEnv[key] === undefined) {

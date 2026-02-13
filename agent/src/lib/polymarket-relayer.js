@@ -1075,9 +1075,10 @@ async function ensureSafeDeployed({
     }
 
     if (deployed === null) {
-        throw new Error(
-            `Unable to verify whether SAFE proxy wallet ${safeAddress} is deployed via relayer /deployed endpoint.`
+        console.warn(
+            `[agent] Unable to verify SAFE deployment for ${safeAddress} via relayer /deployed endpoint; proceeding without deployment check.`
         );
+        return;
     }
 
     if (!config?.polymarketRelayerAutoDeployProxy) {

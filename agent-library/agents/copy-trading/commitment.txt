@@ -6,8 +6,8 @@ When the source trader executes a BUY trade in that market, the agent may copy t
 The agent must size the copied trade to exactly 99% of the Safe's collateral balance at detection time.
 The remaining 1% stays in the Safe as the agent fee.
 
-The agent executes the copied trade from the agent wallet through the Polymarket CLOB API.
+The agent executes the copied trade from the configured copy-trading funding wallet through the Polymarket CLOB API.
 After receiving YES or NO tokens, the agent deposits those ERC1155 tokens into this Safe.
 
-After token deposit confirmation, the agent proposes one reimbursement transfer from this Safe to the agent wallet equal to the full Safe collateral balance captured when the copy trade was detected.
+After token deposit confirmation, the agent proposes one reimbursement transfer from this Safe to that same copy-trading funding wallet equal to the full Safe collateral balance captured when the copy trade was detected.
 No other transfers are allowed.
