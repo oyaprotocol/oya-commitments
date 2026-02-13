@@ -1167,6 +1167,7 @@ async function runTokenBalancesUseResolvedRelayerProxyTest() {
                 polymarketRelayerEnabled: true,
                 polymarketRelayerHost: 'https://relayer-v2.polymarket.com',
                 polymarketRelayerTxType: 'SAFE',
+                polymarketClobAddress: TEST_RELAYER_PROXY,
                 polymarketBuilderApiKey: 'builder-key',
                 polymarketBuilderSecret: builderSecret,
                 polymarketBuilderPassphrase: 'builder-passphrase',
@@ -1181,6 +1182,127 @@ async function runTokenBalancesUseResolvedRelayerProxyTest() {
         const copySignal = outSignals.find((signal) => signal.kind === 'copyTradingState');
         assert.equal(copySignal.balances.tokenHolderAddress, TEST_RELAYER_PROXY.toLowerCase());
         assert.equal(copySignal.tokenHolderResolutionError, null);
+        assert.equal(copySignal.walletAlignmentError, null);
+    } finally {
+        for (const key of envKeys) {
+            if (oldEnv[key] === undefined) {
+                delete process.env[key];
+            } else {
+                process.env[key] = oldEnv[key];
+            }
+        }
+        globalThis.fetch = oldFetch;
+        resetCopyTradingState();
+    }
+}
+
+async function runRelayerWalletMismatchIsBlockedTest() {
+    resetCopyTradingState();
+    const envKeys = [
+        'COPY_TRADING_SOURCE_USER',
+        'COPY_TRADING_MARKET',
+        'COPY_TRADING_YES_TOKEN_ID',
+        'COPY_TRADING_NO_TOKEN_ID',
+    ];
+    const oldEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+    const oldFetch = globalThis.fetch;
+
+    process.env.COPY_TRADING_SOURCE_USER = TEST_SOURCE_USER;
+    process.env.COPY_TRADING_MARKET = 'test-market';
+    process.env.COPY_TRADING_YES_TOKEN_ID = YES_TOKEN_ID;
+    process.env.COPY_TRADING_NO_TOKEN_ID = NO_TOKEN_ID;
+
+    try {
+        const builderSecret = Buffer.from('test-builder-secret').toString('base64');
+        globalThis.fetch = async (url) => {
+            const asText = String(url);
+            if (asText.includes('data-api.polymarket.com/activity')) {
+                return {
+                    ok: true,
+                    async json() {
+                        return [
+                            {
+                                id: 'trade-1',
+                                side: 'BUY',
+                                outcome: 'YES',
+                                price: 0.5,
+                            },
+                        ];
+                    },
+                    async text() {
+                        return JSON.stringify([
+                            {
+                                id: 'trade-1',
+                                side: 'BUY',
+                                outcome: 'YES',
+                                price: 0.5,
+                            },
+                        ]);
+                    },
+                };
+            }
+            if (asText.includes('/relay-payload?')) {
+                return {
+                    ok: true,
+                    async text() {
+                        return JSON.stringify({
+                            address: TEST_RELAYER_PROXY,
+                        });
+                    },
+                };
+            }
+            throw new Error(`Unexpected fetch URL in relayer mismatch test: ${asText}`);
+        };
+
+        const outSignals = await enrichSignals([], {
+            publicClient: {
+                async getChainId() {
+                    return 137;
+                },
+                async readContract({ args }) {
+                    if (args.length === 1) {
+                        return 1_000_000n;
+                    }
+                    return 1n;
+                },
+            },
+            config: {
+                commitmentSafe: TEST_SAFE,
+                polymarketConditionalTokens: '0x4d97dcd97ec945f40cf65f87097ace5ea0476045',
+                polymarketRelayerEnabled: true,
+                polymarketRelayerHost: 'https://relayer-v2.polymarket.com',
+                polymarketRelayerTxType: 'SAFE',
+                polymarketRelayerFromAddress: TEST_RELAYER_PROXY,
+                polymarketClobAddress: TEST_CLOB_PROXY,
+                polymarketBuilderApiKey: 'builder-key',
+                polymarketBuilderSecret: builderSecret,
+                polymarketBuilderPassphrase: 'builder-passphrase',
+            },
+            account: { address: TEST_ACCOUNT },
+            onchainPendingProposal: false,
+        });
+
+        const copySignal = outSignals.find((signal) => signal.kind === 'copyTradingState');
+        assert.ok(copySignal.walletAlignmentError.includes('POLYMARKET_CLOB_ADDRESS'));
+        assert.equal(copySignal.state.activeSourceTradeId, null);
+
+        await assert.rejects(
+            () =>
+                validateToolCalls({
+                    toolCalls: [
+                        {
+                            callId: 'order',
+                            name: 'polymarket_clob_build_sign_and_place_order',
+                            arguments: {},
+                        },
+                    ],
+                    signals: [copySignal],
+                    config: {},
+                    agentAddress: TEST_ACCOUNT,
+                    onchainPendingProposal: false,
+                }),
+            /must match relayer proxy wallet/
+        );
     } finally {
         for (const key of envKeys) {
             if (oldEnv[key] === undefined) {
@@ -1208,6 +1330,7 @@ async function run() {
     await runFetchLatestBuyTradeTest();
     await runTokenBalancesUseClobAddressTest();
     await runTokenBalancesUseResolvedRelayerProxyTest();
+    await runRelayerWalletMismatchIsBlockedTest();
     console.log('[test] copy-trading agent OK');
 }
 
