@@ -313,6 +313,81 @@ async function run() {
     assert.equal(recordedSignInputs[0].message.signatureType, 0);
     assert.equal(recordedSignInputs[0].message.tokenId, 123n);
 
+    const proxySigWithoutClobAddress = await executeToolCalls({
+        toolCalls: [
+            {
+                callId: 'proxy-sig-without-clob-address',
+                name: 'polymarket_clob_build_sign_and_place_order',
+                arguments: {
+                    side: 'BUY',
+                    tokenId: '123',
+                    orderType: 'GTC',
+                    makerAmount: '1000000',
+                    takerAmount: '450000',
+                },
+            },
+        ],
+        publicClient: {
+            async getChainId() {
+                return 137;
+            },
+        },
+        walletClient: {
+            async signTypedData() {
+                return TEST_SIGNATURE;
+            },
+        },
+        account: TEST_ACCOUNT,
+        config: {
+            ...config,
+            polymarketClobSignatureType: 'POLY_GNOSIS_SAFE',
+        },
+        ogContext: null,
+    });
+    const proxySigWithoutClobAddressOut = parseToolOutput(proxySigWithoutClobAddress[0]);
+    assert.equal(proxySigWithoutClobAddressOut.status, 'error');
+    assert.match(proxySigWithoutClobAddressOut.message, /POLYMARKET_CLOB_ADDRESS is required/);
+
+    const recordedSafeSignInputs = [];
+    const defaultSafeSignatureType = await executeToolCalls({
+        toolCalls: [
+            {
+                callId: 'default-safe-signature-type',
+                name: 'polymarket_clob_build_sign_and_place_order',
+                arguments: {
+                    side: 'BUY',
+                    tokenId: '123',
+                    orderType: 'GTC',
+                    makerAmount: '1000000',
+                    takerAmount: '450000',
+                },
+            },
+        ],
+        publicClient: {
+            async getChainId() {
+                return 137;
+            },
+        },
+        walletClient: {
+            async signTypedData(args) {
+                recordedSafeSignInputs.push(args);
+                return TEST_SIGNATURE;
+            },
+        },
+        account: TEST_ACCOUNT,
+        config: {
+            ...config,
+            polymarketClobAddress: '0x3333333333333333333333333333333333333333',
+            polymarketClobSignatureType: 'POLY_GNOSIS_SAFE',
+        },
+        ogContext: null,
+    });
+    const defaultSafeSignatureTypeOut = parseToolOutput(defaultSafeSignatureType[0]);
+    assert.equal(defaultSafeSignatureTypeOut.status, 'error');
+    assert.match(defaultSafeSignatureTypeOut.message, /Missing CLOB credentials/);
+    assert.equal(recordedSafeSignInputs.length, 1);
+    assert.equal(recordedSafeSignInputs[0].message.signatureType, 2);
+
     const invalidBuildSignIdentity = await executeToolCalls({
         toolCalls: [
             {

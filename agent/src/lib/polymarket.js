@@ -41,8 +41,8 @@ const SIDE_INDEX = Object.freeze({
 });
 const SIGNATURE_TYPE_INDEX = Object.freeze({
     EOA: 0,
-    POLY_GNOSIS_SAFE: 1,
-    POLY_PROXY: 2,
+    POLY_PROXY: 1,
+    POLY_GNOSIS_SAFE: 2,
 });
 const DEFAULT_CTF_EXCHANGE_BY_CHAIN_ID = Object.freeze({
     137: '0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e',
