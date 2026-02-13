@@ -375,12 +375,197 @@ async function runProposalHashRecoveryFromSignalTest() {
     }
 }
 
+async function runSubmissionWithoutHashesDoesNotWedgeTest() {
+    resetCopyTradingState();
+    const envKeys = [
+        'COPY_TRADING_SOURCE_USER',
+        'COPY_TRADING_MARKET',
+        'COPY_TRADING_YES_TOKEN_ID',
+        'COPY_TRADING_NO_TOKEN_ID',
+    ];
+    const oldEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+    const oldFetch = globalThis.fetch;
+
+    process.env.COPY_TRADING_SOURCE_USER = TEST_SOURCE_USER;
+    process.env.COPY_TRADING_MARKET = 'test-market';
+    process.env.COPY_TRADING_YES_TOKEN_ID = YES_TOKEN_ID;
+    process.env.COPY_TRADING_NO_TOKEN_ID = NO_TOKEN_ID;
+
+    try {
+        globalThis.fetch = async () => ({
+            ok: true,
+            async json() {
+                return [
+                    {
+                        id: 'trade-1',
+                        side: 'BUY',
+                        outcome: 'YES',
+                        price: 0.5,
+                    },
+                ];
+            },
+        });
+
+        const config = {
+            commitmentSafe: TEST_SAFE,
+            polymarketConditionalTokens: '0x4d97dcd97ec945f40cf65f87097ace5ea0476045',
+        };
+        const publicClient = {
+            async readContract({ args }) {
+                if (args.length === 1) return 1_000_000n;
+                return 0n;
+            },
+        };
+
+        await enrichSignals([], {
+            publicClient,
+            config,
+            account: { address: TEST_ACCOUNT },
+            onchainPendingProposal: false,
+        });
+
+        onToolOutput({
+            name: 'polymarket_clob_build_sign_and_place_order',
+            parsedOutput: { status: 'submitted' },
+        });
+        onToolOutput({
+            name: 'make_erc1155_deposit',
+            parsedOutput: { status: 'confirmed' },
+        });
+        onToolOutput({
+            name: 'post_bond_and_propose',
+            parsedOutput: { status: 'submitted' },
+        });
+
+        const state = getCopyTradingState();
+        assert.equal(state.reimbursementProposed, false);
+        assert.equal(state.reimbursementProposalHash, null);
+        assert.equal(state.reimbursementSubmissionPending, false);
+        assert.equal(state.reimbursementSubmissionTxHash, null);
+
+        const reimbursementValidated = await validateToolCalls({
+            toolCalls: [
+                {
+                    callId: 'reimbursement',
+                    name: 'build_og_transactions',
+                    arguments: {},
+                },
+            ],
+            signals: [
+                {
+                    kind: 'copyTradingState',
+                    policy: {
+                        ready: true,
+                        ctfContract: '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045',
+                        collateralToken: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
+                    },
+                    state,
+                    balances: {
+                        activeTokenBalance: '0',
+                    },
+                    pendingProposal: false,
+                },
+            ],
+            config: {},
+            agentAddress: TEST_ACCOUNT,
+            onchainPendingProposal: false,
+        });
+
+        assert.equal(reimbursementValidated.length, 1);
+    } finally {
+        for (const key of envKeys) {
+            if (oldEnv[key] === undefined) {
+                delete process.env[key];
+            } else {
+                process.env[key] = oldEnv[key];
+            }
+        }
+        globalThis.fetch = oldFetch;
+        resetCopyTradingState();
+    }
+}
+
+async function runFetchLatestBuyTradeTest() {
+    resetCopyTradingState();
+    const envKeys = [
+        'COPY_TRADING_SOURCE_USER',
+        'COPY_TRADING_MARKET',
+        'COPY_TRADING_YES_TOKEN_ID',
+        'COPY_TRADING_NO_TOKEN_ID',
+    ];
+    const oldEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+    const oldFetch = globalThis.fetch;
+
+    process.env.COPY_TRADING_SOURCE_USER = TEST_SOURCE_USER;
+    process.env.COPY_TRADING_MARKET = 'test-market';
+    process.env.COPY_TRADING_YES_TOKEN_ID = YES_TOKEN_ID;
+    process.env.COPY_TRADING_NO_TOKEN_ID = NO_TOKEN_ID;
+
+    try {
+        globalThis.fetch = async () => ({
+            ok: true,
+            async json() {
+                return [
+                    {
+                        id: 'trade-sell',
+                        side: 'SELL',
+                        outcome: 'YES',
+                        price: 0.51,
+                    },
+                    {
+                        id: 'trade-buy',
+                        side: 'BUY',
+                        outcome: 'YES',
+                        price: 0.5,
+                    },
+                ];
+            },
+        });
+
+        const outSignals = await enrichSignals([], {
+            publicClient: {
+                async readContract({ args }) {
+                    if (args.length === 1) {
+                        return 1_000_000n;
+                    }
+                    return 0n;
+                },
+            },
+            config: {
+                commitmentSafe: TEST_SAFE,
+                polymarketConditionalTokens: '0x4d97dcd97ec945f40cf65f87097ace5ea0476045',
+            },
+            account: { address: TEST_ACCOUNT },
+            onchainPendingProposal: false,
+        });
+
+        const state = getCopyTradingState();
+        assert.equal(state.activeSourceTradeId, 'trade-buy');
+        assert.equal(state.activeTradeSide, 'BUY');
+
+        const copySignal = outSignals.find((signal) => signal.kind === 'copyTradingState');
+        assert.equal(copySignal.latestObservedTrade.id, 'trade-buy');
+    } finally {
+        for (const key of envKeys) {
+            if (oldEnv[key] === undefined) {
+                delete process.env[key];
+            } else {
+                process.env[key] = oldEnv[key];
+            }
+        }
+        globalThis.fetch = oldFetch;
+        resetCopyTradingState();
+    }
+}
+
 async function run() {
     runPromptTest();
     runMathTests();
     await runValidateToolCallTests();
     await runProposalHashGatingTest();
     await runProposalHashRecoveryFromSignalTest();
+    await runSubmissionWithoutHashesDoesNotWedgeTest();
+    await runFetchLatestBuyTradeTest();
     console.log('[test] copy-trading agent OK');
 }
 
