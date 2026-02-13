@@ -1,4 +1,4 @@
-import crypto from 'node:crypto';
+import { getClobOrder, getClobTrades } from '../../../agent/src/lib/polymarket.js';
 
 const erc20BalanceOfAbi = [
     {
@@ -30,8 +30,6 @@ const PRICE_SCALE = 1_000_000n;
 const DEFAULT_COLLATERAL_TOKEN = '0x2791bca1f2de4661ed88a30c99a7a9449aa84174';
 const ERC20_TRANSFER_SELECTOR = '0xa9059cbb';
 const REIMBURSEMENT_SUBMISSION_TIMEOUT_MS = 60_000;
-const DEFAULT_CLOB_HOST = 'https://clob.polymarket.com';
-const DEFAULT_CLOB_REQUEST_TIMEOUT_MS = 15_000;
 const CLOB_SUCCESS_TERMINAL_STATUS = 'CONFIRMED';
 const CLOB_FAILURE_TERMINAL_STATUS = 'FAILED';
 const CLOB_ORDER_FAILURE_STATUSES = new Set([
@@ -130,10 +128,6 @@ function parseFiniteNumber(value) {
     return parsed;
 }
 
-function normalizeClobHost(host) {
-    return String(host ?? DEFAULT_CLOB_HOST).replace(/\/+$/, '');
-}
-
 function hasClobCredentials(config) {
     return Boolean(
         config?.polymarketClobApiKey &&
@@ -147,67 +141,6 @@ function getClobAuthAddress({ config, accountAddress }) {
         normalizeAddress(config?.polymarketClobAddress) ??
         normalizeAddress(accountAddress)
     );
-}
-
-function buildClobAuthHeaders({
-    config,
-    signingAddress,
-    timestamp,
-    method,
-    path,
-    bodyText = '',
-}) {
-    const secretBytes = Buffer.from(String(config.polymarketClobApiSecret), 'base64');
-    const payload = `${timestamp}${method.toUpperCase()}${path}${bodyText}`;
-    const signature = crypto
-        .createHmac('sha256', secretBytes)
-        .update(payload)
-        .digest('base64')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_');
-
-    return {
-        'POLY_ADDRESS': signingAddress,
-        'POLY_API_KEY': String(config.polymarketClobApiKey),
-        'POLY_SIGNATURE': signature,
-        'POLY_TIMESTAMP': String(timestamp),
-        'POLY_PASSPHRASE': String(config.polymarketClobApiPassphrase),
-    };
-}
-
-async function clobGet({ config, signingAddress, path }) {
-    const host = normalizeClobHost(config?.polymarketClobHost);
-    const timeoutMs = Number(config?.polymarketClobRequestTimeoutMs ?? DEFAULT_CLOB_REQUEST_TIMEOUT_MS);
-    const timestamp = Math.floor(Date.now() / 1000);
-    const headers = buildClobAuthHeaders({
-        config,
-        signingAddress,
-        timestamp,
-        method: 'GET',
-        path,
-        bodyText: '',
-    });
-
-    const response = await fetch(`${host}${path}`, {
-        method: 'GET',
-        headers,
-        signal: AbortSignal.timeout(timeoutMs),
-    });
-    const text = await response.text();
-    let parsed;
-    try {
-        parsed = text ? JSON.parse(text) : null;
-    } catch (error) {
-        parsed = { raw: text };
-    }
-
-    if (!response.ok) {
-        throw new Error(
-            `CLOB GET failed (${path}): ${response.status} ${response.statusText} ${text}`
-        );
-    }
-
-    return parsed;
 }
 
 function extractOrderSummary(payload) {
@@ -302,17 +235,28 @@ async function fetchRelatedClobTrades({
 }) {
     const afterSeconds = Math.max(0, Math.floor((Number(submittedMs ?? Date.now()) - 60_000) / 1000));
     const all = [];
-    for (const role of ['maker', 'taker']) {
-        const params = new URLSearchParams();
-        params.set(role, clobAuthAddress);
-        params.set('market', market);
-        params.set('after', String(afterSeconds));
-        const path = `/data/trades?${params.toString()}`;
-        const payload = await clobGet({ config, signingAddress, path });
-        if (Array.isArray(payload)) {
-            all.push(...payload);
-        }
+    const makerTrades = await getClobTrades({
+        config,
+        signingAddress,
+        maker: clobAuthAddress,
+        market,
+        after: afterSeconds,
+    });
+    if (Array.isArray(makerTrades)) {
+        all.push(...makerTrades);
     }
+
+    const takerTrades = await getClobTrades({
+        config,
+        signingAddress,
+        taker: clobAuthAddress,
+        market,
+        after: afterSeconds,
+    });
+    if (Array.isArray(takerTrades)) {
+        all.push(...takerTrades);
+    }
+
     return dedupeTrades(all).filter((trade) => tradeIncludesOrderId(trade, orderId));
 }
 
@@ -697,11 +641,10 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
         if (hasClobCredentials(config) && clobAuthAddress) {
             try {
                 const signingAddress = clobAuthAddress;
-                const orderPath = `/data/order/${encodeURIComponent(copyTradingState.copyOrderId)}`;
-                const orderPayload = await clobGet({
+                const orderPayload = await getClobOrder({
                     config,
                     signingAddress,
-                    path: orderPath,
+                    orderId: copyTradingState.copyOrderId,
                 });
                 const orderSummary = extractOrderSummary(orderPayload);
                 if (orderSummary?.status) {
@@ -820,20 +763,6 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
     });
 
     return outSignals;
-}
-
-function parseCallArgs(call) {
-    if (call?.parsedArguments && typeof call.parsedArguments === 'object') {
-        return call.parsedArguments;
-    }
-    if (typeof call?.arguments === 'string') {
-        try {
-            return JSON.parse(call.arguments);
-        } catch (error) {
-            return null;
-        }
-    }
-    return null;
 }
 
 function findCopySignal(signals) {

@@ -398,6 +398,45 @@ async function placeClobOrder({
     });
 }
 
+async function getClobOrder({ config, signingAddress, orderId }) {
+    if (!orderId || typeof orderId !== 'string' || orderId.trim().length === 0) {
+        throw new Error('orderId is required.');
+    }
+
+    return clobRequest({
+        config,
+        signingAddress,
+        method: 'GET',
+        path: `/data/order/${encodeURIComponent(orderId.trim())}`,
+    });
+}
+
+async function getClobTrades({
+    config,
+    signingAddress,
+    maker,
+    taker,
+    market,
+    after,
+}) {
+    if (!maker && !taker) {
+        throw new Error('getClobTrades requires maker or taker.');
+    }
+
+    const params = new URLSearchParams();
+    if (maker) params.set('maker', String(maker));
+    if (taker) params.set('taker', String(taker));
+    if (market) params.set('market', String(market));
+    if (after !== undefined && after !== null) params.set('after', String(after));
+
+    return clobRequest({
+        config,
+        signingAddress,
+        method: 'GET',
+        path: `/data/trades?${params.toString()}`,
+    });
+}
+
 async function cancelClobOrders({
     config,
     signingAddress,
@@ -447,6 +486,8 @@ async function cancelClobOrders({
 export {
     buildClobOrderFromRaw,
     cancelClobOrders,
+    getClobOrder,
+    getClobTrades,
     placeClobOrder,
     resolveClobExchangeAddress,
     signClobOrder,
