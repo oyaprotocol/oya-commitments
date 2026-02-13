@@ -1319,6 +1319,27 @@ async function runRelayerWalletMismatchIsBlockedTest() {
         });
         assert.equal(disputeValidated.length, 1);
         assert.equal(disputeValidated[0].name, 'dispute_assertion');
+
+        const mixedValidated = await validateToolCalls({
+            toolCalls: [
+                {
+                    callId: 'order',
+                    name: 'polymarket_clob_build_sign_and_place_order',
+                    arguments: {},
+                },
+                {
+                    callId: 'dispute',
+                    name: 'dispute_assertion',
+                    arguments: {},
+                },
+            ],
+            signals: [copySignal],
+            config: {},
+            agentAddress: TEST_ACCOUNT,
+            onchainPendingProposal: false,
+        });
+        assert.equal(mixedValidated.length, 1);
+        assert.equal(mixedValidated[0].name, 'dispute_assertion');
     } finally {
         for (const key of envKeys) {
             if (oldEnv[key] === undefined) {

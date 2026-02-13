@@ -807,15 +807,18 @@ async function validateToolCalls({
     const activeTokenBalance = BigInt(copySignal.balances?.activeTokenBalance ?? 0);
     const pendingProposal = Boolean(onchainPendingProposal || copySignal.pendingProposal);
     const walletAlignmentError = copySignal.walletAlignmentError;
+    if (walletAlignmentError) {
+        const disputeCalls = toolCalls.filter((call) => call?.name === 'dispute_assertion');
+        if (disputeCalls.length > 0) {
+            return disputeCalls;
+        }
+        throw new Error(walletAlignmentError);
+    }
 
     for (const call of toolCalls) {
         if (call.name === 'dispute_assertion') {
             validated.push(call);
             continue;
-        }
-
-        if (walletAlignmentError) {
-            throw new Error(walletAlignmentError);
         }
 
         if (call.name === 'post_bond_and_propose') {
