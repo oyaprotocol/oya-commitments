@@ -1,0 +1,6 @@
+Limit Order Rules: Purchase 1 USDC of WETH if WETH price is below $2000.
+
+When the ETH/USD price is less than or equal to 2000, the agent should propose a swap of 1 USDC for WETH using this Safe's funds.
+The Safe must be pre-funded with sufficient USDC. Swap output (WETH) goes to this Safe.
+Token addresses: WETH 0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9, USDC 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238.
+Only execute one swap. Max slippage 0.50%.
