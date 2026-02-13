@@ -5,6 +5,18 @@ const DEFAULT_CLOB_HOST = 'https://clob.polymarket.com';
 const DEFAULT_CLOB_REQUEST_TIMEOUT_MS = 15_000;
 const DEFAULT_CLOB_MAX_RETRIES = 1;
 const DEFAULT_CLOB_RETRY_DELAY_MS = 250;
+const DATA_API_HOST = 'https://data-api.polymarket.com';
+const DEFAULT_COLLATERAL_TOKEN = '0x2791bca1f2de4661ed88a30c99a7a9449aa84174';
+const CLOB_SUCCESS_TERMINAL_STATUS = 'CONFIRMED';
+const CLOB_FAILURE_TERMINAL_STATUS = 'FAILED';
+const CLOB_ORDER_FAILURE_STATUSES = new Set([
+    'FAILED',
+    'REJECTED',
+    'CANCELED',
+    'CANCELLED',
+    'EXPIRED',
+]);
+const CLOB_ORDER_FILLED_STATUSES = new Set(['FILLED', 'MATCHED', 'CONFIRMED']);
 const CLOB_EIP712_DOMAIN_NAME = 'Polymarket CTF Exchange';
 const CLOB_EIP712_DOMAIN_VERSION = '1';
 const DEFAULT_EIP712_ORDER_SIDE = 0;
@@ -484,6 +496,12 @@ async function cancelClobOrders({
 }
 
 export {
+    CLOB_FAILURE_TERMINAL_STATUS,
+    CLOB_ORDER_FAILURE_STATUSES,
+    CLOB_ORDER_FILLED_STATUSES,
+    CLOB_SUCCESS_TERMINAL_STATUS,
+    DATA_API_HOST,
+    DEFAULT_COLLATERAL_TOKEN,
     buildClobOrderFromRaw,
     cancelClobOrders,
     getClobOrder,

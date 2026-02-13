@@ -1,4 +1,13 @@
-import { getClobOrder, getClobTrades } from '../../../agent/src/lib/polymarket.js';
+import {
+    CLOB_FAILURE_TERMINAL_STATUS,
+    CLOB_ORDER_FAILURE_STATUSES,
+    CLOB_ORDER_FILLED_STATUSES,
+    CLOB_SUCCESS_TERMINAL_STATUS,
+    DATA_API_HOST,
+    DEFAULT_COLLATERAL_TOKEN,
+    getClobOrder,
+    getClobTrades,
+} from '../../../agent/src/lib/polymarket.js';
 
 const erc20BalanceOfAbi = [
     {
@@ -22,24 +31,12 @@ const erc1155BalanceOfAbi = [
     },
 ];
 
-const DATA_API_HOST = 'https://data-api.polymarket.com';
 const COPY_BPS = 9900n;
 const FEE_BPS = 100n;
 const BPS_DENOMINATOR = 10_000n;
 const PRICE_SCALE = 1_000_000n;
-const DEFAULT_COLLATERAL_TOKEN = '0x2791bca1f2de4661ed88a30c99a7a9449aa84174';
 const ERC20_TRANSFER_SELECTOR = '0xa9059cbb';
 const REIMBURSEMENT_SUBMISSION_TIMEOUT_MS = 60_000;
-const CLOB_SUCCESS_TERMINAL_STATUS = 'CONFIRMED';
-const CLOB_FAILURE_TERMINAL_STATUS = 'FAILED';
-const CLOB_ORDER_FAILURE_STATUSES = new Set([
-    'FAILED',
-    'REJECTED',
-    'CANCELED',
-    'CANCELLED',
-    'EXPIRED',
-]);
-const CLOB_ORDER_FILLED_STATUSES = new Set(['FILLED', 'MATCHED', 'CONFIRMED']);
 
 let copyTradingState = {
     seenSourceTradeId: null,
