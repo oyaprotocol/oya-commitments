@@ -1,4 +1,5 @@
 import {
+    decodeEventLog,
     encodeFunctionData,
     erc20Abi,
     getAddress,
@@ -6,7 +7,11 @@ import {
     stringToHex,
     zeroAddress,
 } from 'viem';
-import { optimisticGovernorAbi, optimisticOracleAbi } from './og.js';
+import {
+    optimisticGovernorAbi,
+    optimisticOracleAbi,
+    transactionsProposedEvent,
+} from './og.js';
 import { normalizeAssertion } from './og.js';
 import { summarizeViemError } from './utils.js';
 
@@ -21,6 +26,47 @@ const erc1155TransferAbi = parseAbi([
 ]);
 
 const ZERO_BYTES32 = '0x0000000000000000000000000000000000000000000000000000000000000000';
+
+function normalizeHash(value) {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    if (!/^0x[0-9a-fA-F]{64}$/.test(trimmed)) return null;
+    return trimmed.toLowerCase();
+}
+
+function extractProposalHashFromReceipt({ receipt, ogModule }) {
+    if (!receipt?.logs || !Array.isArray(receipt.logs)) return null;
+    let normalizedOgModule;
+    try {
+        normalizedOgModule = getAddress(ogModule);
+    } catch (error) {
+        return null;
+    }
+
+    for (const log of receipt.logs) {
+        let logAddress;
+        try {
+            logAddress = getAddress(log.address);
+        } catch (error) {
+            continue;
+        }
+        if (logAddress !== normalizedOgModule) continue;
+
+        try {
+            const decoded = decodeEventLog({
+                abi: [transactionsProposedEvent],
+                data: log.data,
+                topics: log.topics,
+            });
+            const hash = normalizeHash(decoded?.args?.proposalHash);
+            if (hash) return hash;
+        } catch (error) {
+            // Ignore non-matching logs.
+        }
+    }
+
+    return null;
+}
 
 async function postBondAndPropose({
     publicClient,
@@ -115,6 +161,7 @@ async function postBondAndPropose({
         );
     }
 
+    let proposalTxHash;
     let proposalHash;
     const explanation = 'Agent serving Oya commitment.';
     const explanationBytes = stringToHex(explanation);
@@ -146,7 +193,7 @@ async function postBondAndPropose({
 
     try {
         if (simulationError) {
-            proposalHash = await walletClient.sendTransaction({
+            proposalTxHash = await walletClient.sendTransaction({
                 account,
                 to: ogModule,
                 data: proposalData,
@@ -154,7 +201,7 @@ async function postBondAndPropose({
                 gas: config.proposeGasLimit,
             });
         } else {
-            proposalHash = await walletClient.writeContract({
+            proposalTxHash = await walletClient.writeContract({
                 address: ogModule,
                 abi: optimisticGovernorAbi,
                 functionName: 'proposeTransactions',
@@ -172,11 +219,28 @@ async function postBondAndPropose({
         console.warn('[agent] Propose submission failed:', message);
     }
 
+    if (proposalTxHash) {
+        console.log('[agent] Proposal submitted tx:', proposalTxHash);
+        try {
+            const receipt = await publicClient.waitForTransactionReceipt({
+                hash: proposalTxHash,
+            });
+            proposalHash = extractProposalHashFromReceipt({
+                receipt,
+                ogModule,
+            });
+        } catch (error) {
+            const reason = error?.shortMessage ?? error?.message ?? String(error);
+            console.warn('[agent] Failed to resolve OG proposalHash from receipt:', reason);
+        }
+    }
+
     if (proposalHash) {
-        console.log('[agent] Proposal submitted:', proposalHash);
+        console.log('[agent] OG proposal hash:', proposalHash);
     }
 
     return {
+        transactionHash: proposalTxHash,
         proposalHash,
         bondAmount,
         collateral,
