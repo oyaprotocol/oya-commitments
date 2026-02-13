@@ -8,11 +8,15 @@ import {
     getClobOrder,
     getClobTrades,
 } from '../../../agent/src/lib/polymarket.js';
-import { decodeFunctionData, erc20Abi, erc1155Abi } from 'viem';
+import { erc20Abi, erc1155Abi } from 'viem';
 import {
+    decodeErc20TransferCallData,
     normalizeAddressOrNull,
     normalizeHashOrNull,
+    normalizeTokenId,
+    parseFiniteNumber,
 } from '../../../agent/src/lib/utils.js';
+import { getAlwaysEmitBalanceSnapshotPollingOptions } from '../../../agent/src/lib/polling.js';
 
 const COPY_BPS = 9900n;
 const FEE_BPS = 100n;
@@ -42,17 +46,6 @@ let copyTradingState = {
     reimbursementSubmissionMs: null,
 };
 const normalizeAddress = normalizeAddressOrNull;
-
-function normalizeTokenId(value) {
-    if (value === null || value === undefined || value === '') return null;
-    try {
-        const normalized = BigInt(value);
-        if (normalized < 0n) return null;
-        return normalized.toString();
-    } catch (error) {
-        return null;
-    }
-}
 
 function normalizeOutcome(value) {
     if (typeof value !== 'string') return null;
@@ -88,12 +81,6 @@ function normalizeClobStatus(value) {
     if (typeof value !== 'string') return null;
     const normalized = value.trim().toUpperCase();
     return normalized.length > 0 ? normalized : null;
-}
-
-function parseFiniteNumber(value) {
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed)) return null;
-    return parsed;
 }
 
 function hasClobCredentials(config) {
@@ -226,25 +213,6 @@ async function fetchRelatedClobTrades({
     }
 
     return dedupeTrades(all).filter((trade) => tradeIncludesOrderId(trade, orderId));
-}
-
-function decodeErc20TransferCallData(data) {
-    if (typeof data !== 'string') return null;
-
-    try {
-        const decoded = decodeFunctionData({
-            abi: erc20Abi,
-            data,
-        });
-        if (decoded.functionName !== 'transfer') return null;
-        const to = normalizeAddress(decoded.args?.[0]);
-        if (!to) return null;
-        const amount = BigInt(decoded.args?.[1] ?? 0n);
-        if (amount < 0n) return null;
-        return { to, amount };
-    } catch (error) {
-        return null;
-    }
 }
 
 function findMatchingReimbursementProposalHash({
@@ -502,11 +470,7 @@ function clearActiveTrade({ markSeen = false } = {}) {
     copyTradingState.reimbursementSubmissionMs = null;
 }
 
-function getPollingOptions() {
-    return {
-        emitBalanceSnapshotsEveryPoll: true,
-    };
-}
+const getPollingOptions = getAlwaysEmitBalanceSnapshotPollingOptions;
 
 function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
     const mode = proposeEnabled && disputeEnabled

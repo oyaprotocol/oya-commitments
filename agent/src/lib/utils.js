@@ -1,4 +1,4 @@
-import { getAddress } from 'viem';
+import { decodeFunctionData, erc20Abi, getAddress } from 'viem';
 
 function mustGetEnv(key) {
     const value = process.env[key];
@@ -59,6 +59,43 @@ function normalizeHashOrNull(value) {
     return trimmed.toLowerCase();
 }
 
+function normalizeTokenId(value) {
+    if (value === null || value === undefined || value === '') return null;
+    try {
+        const normalized = BigInt(value);
+        if (normalized < 0n) return null;
+        return normalized.toString();
+    } catch (error) {
+        return null;
+    }
+}
+
+function parseFiniteNumber(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return null;
+    return parsed;
+}
+
+function decodeErc20TransferCallData(data) {
+    if (typeof data !== 'string') return null;
+
+    try {
+        const decoded = decodeFunctionData({
+            abi: erc20Abi,
+            data,
+        });
+        if (decoded.functionName !== 'transfer') return null;
+
+        const to = normalizeAddressOrNull(decoded.args?.[0], { trim: false });
+        if (!to) return null;
+        const amount = BigInt(decoded.args?.[1] ?? 0n);
+        if (amount < 0n) return null;
+        return { to, amount };
+    } catch (error) {
+        return null;
+    }
+}
+
 function parseToolArguments(raw) {
     if (!raw) return null;
     if (typeof raw === 'object') return raw;
@@ -73,11 +110,14 @@ function parseToolArguments(raw) {
 }
 
 export {
+    decodeErc20TransferCallData,
     mustGetEnv,
     normalizeAddressOrNull,
     normalizeAddressOrThrow,
     normalizeHashOrNull,
+    normalizeTokenId,
     normalizePrivateKey,
+    parseFiniteNumber,
     parseAddressList,
     parseToolArguments,
     summarizeViemError,
