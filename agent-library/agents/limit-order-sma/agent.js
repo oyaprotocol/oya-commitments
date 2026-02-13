@@ -1,6 +1,7 @@
 // SMA Limit Order Agent - Single limit order with 200-day SMA as dynamic limit on Sepolia (WETH/USDC)
 
 import { erc20Abi, parseAbiItem } from 'viem';
+import { normalizeAddressOrThrow } from '../../../agent/src/lib/utils.js';
 
 const TOKENS = Object.freeze({
     WETH: '0x7b79995e5f793a07bc00c21412e50ecae098e7f9',
@@ -71,17 +72,11 @@ let limitOrderState = {
 };
 let hydratedFromChain = false;
 let priceDataCache = { ethPriceUSD: null, smaEth200USD: null, fetchedAt: 0 };
+const normalizeAddress = (value) => normalizeAddressOrThrow(value, { requireHex: false });
 
 const proposalExecutedEvent = parseAbiItem(
     'event ProposalExecuted(bytes32 indexed proposalHash, bytes32 indexed assertionId)'
 );
-
-function normalizeAddress(value) {
-    if (typeof value !== 'string' || value.length !== 42 || !value.startsWith('0x')) {
-        throw new Error(`Invalid address: ${value}`);
-    }
-    return value.toLowerCase();
-}
 
 async function fetchEthPriceDataFromCoinGecko() {
     const now = Date.now();

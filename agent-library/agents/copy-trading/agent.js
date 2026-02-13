@@ -9,6 +9,10 @@ import {
     getClobTrades,
 } from '../../../agent/src/lib/polymarket.js';
 import { decodeFunctionData, erc20Abi, erc1155Abi } from 'viem';
+import {
+    normalizeAddressOrNull,
+    normalizeHashOrNull,
+} from '../../../agent/src/lib/utils.js';
 
 const COPY_BPS = 9900n;
 const FEE_BPS = 100n;
@@ -37,13 +41,7 @@ let copyTradingState = {
     reimbursementSubmissionTxHash: null,
     reimbursementSubmissionMs: null,
 };
-
-function normalizeAddress(value) {
-    if (typeof value !== 'string') return null;
-    const trimmed = value.trim();
-    if (!/^0x[0-9a-fA-F]{40}$/.test(trimmed)) return null;
-    return trimmed.toLowerCase();
-}
+const normalizeAddress = normalizeAddressOrNull;
 
 function normalizeTokenId(value) {
     if (value === null || value === undefined || value === '') return null;
@@ -78,12 +76,7 @@ function normalizeTradePrice(value) {
     return parsed;
 }
 
-function normalizeHash(value) {
-    if (typeof value !== 'string') return null;
-    const trimmed = value.trim();
-    if (!/^0x[0-9a-fA-F]{64}$/.test(trimmed)) return null;
-    return trimmed.toLowerCase();
-}
+const normalizeHash = normalizeHashOrNull;
 
 function normalizeOrderId(value) {
     if (typeof value !== 'string') return null;

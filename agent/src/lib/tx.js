@@ -13,7 +13,7 @@ import {
     transactionsProposedEvent,
 } from './og.js';
 import { normalizeAssertion } from './og.js';
-import { summarizeViemError } from './utils.js';
+import { normalizeHashOrNull, summarizeViemError } from './utils.js';
 
 const conditionalTokensAbi = parseAbi([
     'function splitPosition(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] partition, uint256 amount)',
@@ -26,13 +26,6 @@ const erc1155TransferAbi = parseAbi([
 ]);
 
 const ZERO_BYTES32 = '0x0000000000000000000000000000000000000000000000000000000000000000';
-
-function normalizeHash(value) {
-    if (typeof value !== 'string') return null;
-    const trimmed = value.trim();
-    if (!/^0x[0-9a-fA-F]{64}$/.test(trimmed)) return null;
-    return trimmed.toLowerCase();
-}
 
 function extractProposalHashFromReceipt({ receipt, ogModule }) {
     if (!receipt?.logs || !Array.isArray(receipt.logs)) return null;
@@ -58,7 +51,7 @@ function extractProposalHashFromReceipt({ receipt, ogModule }) {
                 data: log.data,
                 topics: log.topics,
             });
-            const hash = normalizeHash(decoded?.args?.proposalHash);
+            const hash = normalizeHashOrNull(decoded?.args?.proposalHash);
             if (hash) return hash;
         } catch (error) {
             // Ignore non-matching logs.

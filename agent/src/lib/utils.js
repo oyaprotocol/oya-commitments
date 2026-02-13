@@ -36,6 +36,29 @@ function summarizeViemError(error) {
     };
 }
 
+function normalizeAddressOrNull(value, { trim = true, requireHex = true } = {}) {
+    if (typeof value !== 'string') return null;
+    const candidate = trim ? value.trim() : value;
+    if (candidate.length !== 42 || !candidate.startsWith('0x')) return null;
+    if (requireHex && !/^0x[0-9a-fA-F]{40}$/.test(candidate)) return null;
+    return candidate.toLowerCase();
+}
+
+function normalizeAddressOrThrow(value, options = {}) {
+    const normalized = normalizeAddressOrNull(value, { trim: false, ...options });
+    if (!normalized) {
+        throw new Error(`Invalid address: ${value}`);
+    }
+    return normalized;
+}
+
+function normalizeHashOrNull(value) {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    if (!/^0x[0-9a-fA-F]{64}$/.test(trimmed)) return null;
+    return trimmed.toLowerCase();
+}
+
 function parseToolArguments(raw) {
     if (!raw) return null;
     if (typeof raw === 'object') return raw;
@@ -51,6 +74,9 @@ function parseToolArguments(raw) {
 
 export {
     mustGetEnv,
+    normalizeAddressOrNull,
+    normalizeAddressOrThrow,
+    normalizeHashOrNull,
     normalizePrivateKey,
     parseAddressList,
     parseToolArguments,
