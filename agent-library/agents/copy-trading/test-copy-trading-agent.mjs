@@ -17,6 +17,7 @@ const TEST_ACCOUNT = '0x1111111111111111111111111111111111111111';
 const TEST_SAFE = '0x2222222222222222222222222222222222222222';
 const TEST_SOURCE_USER = '0x3333333333333333333333333333333333333333';
 const TEST_CLOB_PROXY = '0x4444444444444444444444444444444444444444';
+const TEST_RELAYER_PROXY = '0x5555555555555555555555555555555555555555';
 const TEST_PROPOSAL_HASH = `0x${'a'.repeat(64)}`;
 const OTHER_PROPOSAL_HASH = `0x${'b'.repeat(64)}`;
 const TEST_TX_HASH = `0x${'c'.repeat(64)}`;
@@ -1088,6 +1089,111 @@ async function runTokenBalancesUseClobAddressTest() {
     }
 }
 
+async function runTokenBalancesUseResolvedRelayerProxyTest() {
+    resetCopyTradingState();
+    const envKeys = [
+        'COPY_TRADING_SOURCE_USER',
+        'COPY_TRADING_MARKET',
+        'COPY_TRADING_YES_TOKEN_ID',
+        'COPY_TRADING_NO_TOKEN_ID',
+    ];
+    const oldEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+    const oldFetch = globalThis.fetch;
+
+    process.env.COPY_TRADING_SOURCE_USER = TEST_SOURCE_USER;
+    process.env.COPY_TRADING_MARKET = 'test-market';
+    process.env.COPY_TRADING_YES_TOKEN_ID = YES_TOKEN_ID;
+    process.env.COPY_TRADING_NO_TOKEN_ID = NO_TOKEN_ID;
+
+    try {
+        const builderSecret = Buffer.from('test-builder-secret').toString('base64');
+        globalThis.fetch = async (url) => {
+            const asText = String(url);
+            if (asText.includes('data-api.polymarket.com/activity')) {
+                return {
+                    ok: true,
+                    async json() {
+                        return [
+                            {
+                                id: 'trade-1',
+                                side: 'BUY',
+                                outcome: 'YES',
+                                price: 0.5,
+                            },
+                        ];
+                    },
+                    async text() {
+                        return JSON.stringify([
+                            {
+                                id: 'trade-1',
+                                side: 'BUY',
+                                outcome: 'YES',
+                                price: 0.5,
+                            },
+                        ]);
+                    },
+                };
+            }
+            if (asText.includes('/relay-payload?')) {
+                return {
+                    ok: true,
+                    async text() {
+                        return JSON.stringify({
+                            address: TEST_RELAYER_PROXY,
+                        });
+                    },
+                };
+            }
+            throw new Error(`Unexpected fetch URL in relayer test: ${asText}`);
+        };
+
+        const erc1155BalanceCallAddresses = [];
+        const outSignals = await enrichSignals([], {
+            publicClient: {
+                async getChainId() {
+                    return 137;
+                },
+                async readContract({ args }) {
+                    if (args.length === 1) {
+                        return 1_000_000n;
+                    }
+                    erc1155BalanceCallAddresses.push(String(args[0]).toLowerCase());
+                    return 1n;
+                },
+            },
+            config: {
+                commitmentSafe: TEST_SAFE,
+                polymarketConditionalTokens: '0x4d97dcd97ec945f40cf65f87097ace5ea0476045',
+                polymarketRelayerEnabled: true,
+                polymarketRelayerHost: 'https://relayer-v2.polymarket.com',
+                polymarketRelayerTxType: 'SAFE',
+                polymarketBuilderApiKey: 'builder-key',
+                polymarketBuilderSecret: builderSecret,
+                polymarketBuilderPassphrase: 'builder-passphrase',
+            },
+            account: { address: TEST_ACCOUNT },
+            onchainPendingProposal: false,
+        });
+
+        assert.equal(erc1155BalanceCallAddresses.length, 2);
+        assert.equal(erc1155BalanceCallAddresses[0], TEST_RELAYER_PROXY.toLowerCase());
+        assert.equal(erc1155BalanceCallAddresses[1], TEST_RELAYER_PROXY.toLowerCase());
+        const copySignal = outSignals.find((signal) => signal.kind === 'copyTradingState');
+        assert.equal(copySignal.balances.tokenHolderAddress, TEST_RELAYER_PROXY.toLowerCase());
+        assert.equal(copySignal.tokenHolderResolutionError, null);
+    } finally {
+        for (const key of envKeys) {
+            if (oldEnv[key] === undefined) {
+                delete process.env[key];
+            } else {
+                process.env[key] = oldEnv[key];
+            }
+        }
+        globalThis.fetch = oldFetch;
+        resetCopyTradingState();
+    }
+}
+
 async function run() {
     runPromptTest();
     runMathTests();
@@ -1101,6 +1207,7 @@ async function run() {
     await runSubmissionWithoutHashesDoesNotWedgeTest();
     await runFetchLatestBuyTradeTest();
     await runTokenBalancesUseClobAddressTest();
+    await runTokenBalancesUseResolvedRelayerProxyTest();
     console.log('[test] copy-trading agent OK');
 }
 
