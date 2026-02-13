@@ -1,12 +1,28 @@
 import crypto from 'node:crypto';
-import { encodePacked, getAddress, hashTypedData, isHex, keccak256, parseAbi } from 'viem';
+import {
+    encodeAbiParameters,
+    encodePacked,
+    getAddress,
+    getCreate2Address,
+    hashTypedData,
+    isHex,
+    keccak256,
+    zeroAddress,
+} from 'viem';
 import { normalizeAddressOrNull, normalizeHashOrNull } from './utils.js';
 
 const DEFAULT_RELAYER_HOST = 'https://relayer-v2.polymarket.com';
 const DEFAULT_RELAYER_REQUEST_TIMEOUT_MS = 15_000;
 const DEFAULT_RELAYER_POLL_INTERVAL_MS = 2_000;
 const DEFAULT_RELAYER_POLL_TIMEOUT_MS = 120_000;
-const SAFE_TX_NONCE_ABI = parseAbi(['function nonce() view returns (uint256)']);
+const SAFE_FACTORY_ADDRESS = '0xaacfeea03eb1561c4e67d661e40682bd20e3541b';
+const PROXY_FACTORY_ADDRESS = SAFE_FACTORY_ADDRESS;
+const SAFE_INIT_CODE_HASH =
+    '0xb61d27f6f0f1579b6af9d23fafd567586f35f7d2f43d6bd5f85c0b690952d469';
+const PROXY_INIT_CODE_HASH =
+    '0x72ea4f5319066fd7435f2f2e1e8f117d0848fa51987edc76b4e2207ee3f1fe6f';
+const CREATE_PROXY_DOMAIN_NAME = 'Polymarket Contract Proxy Factory';
+
 const SAFE_EIP712_TYPES = Object.freeze({
     EIP712Domain: [
         { name: 'chainId', type: 'uint256' },
@@ -17,15 +33,59 @@ const SAFE_EIP712_TYPES = Object.freeze({
         { name: 'value', type: 'uint256' },
         { name: 'data', type: 'bytes' },
         { name: 'operation', type: 'uint8' },
+        { name: 'safeTxGas', type: 'uint256' },
+        { name: 'baseGas', type: 'uint256' },
+        { name: 'gasPrice', type: 'uint256' },
+        { name: 'gasToken', type: 'address' },
+        { name: 'refundReceiver', type: 'address' },
         { name: 'nonce', type: 'uint256' },
     ],
 });
+
+const CREATE_PROXY_EIP712_TYPES = Object.freeze({
+    CreateProxy: [
+        { name: 'paymentToken', type: 'address' },
+        { name: 'payment', type: 'uint256' },
+        { name: 'paymentReceiver', type: 'address' },
+    ],
+});
+
 const RELAYER_TX_TYPE = Object.freeze({
     SAFE: 'SAFE',
     PROXY: 'PROXY',
 });
-const RELAYER_SUCCESS_STATUSES = new Set(['MINED', 'CONFIRMED']);
-const RELAYER_FAILURE_STATUSES = new Set(['FAILED', 'REVERTED']);
+
+const RELAYER_ENDPOINTS = Object.freeze({
+    ADDRESS: '/address',
+    NONCE: '/nonce',
+    RELAY_PAYLOAD: '/relay-payload',
+    SUBMIT: '/submit',
+    TRANSACTION: '/transaction',
+    DEPLOYED: '/deployed',
+});
+
+const LEGACY_ENDPOINTS = Object.freeze({
+    PROXY_ADDRESS: (address) => `/relayer/proxy-address/${encodeURIComponent(address)}`,
+    PROXY_NONCE: (address) => `/relayer/proxy-nonce/${encodeURIComponent(address)}`,
+    CREATE_PROXY: '/relayer/create-proxy-wallet',
+    TRANSACTION: '/relayer/transaction',
+    TRANSACTION_STATUS: (hash) => `/relayer/transaction-status/${encodeURIComponent(hash)}`,
+});
+
+const RELAYER_SUCCESS_STATES = new Set([
+    'STATE_MINED',
+    'STATE_CONFIRMED',
+    'MINED',
+    'CONFIRMED',
+]);
+
+const RELAYER_FAILURE_STATES = new Set([
+    'STATE_FAILED',
+    'STATE_INVALID',
+    'FAILED',
+    'REVERTED',
+    'INVALID',
+]);
 
 function normalizeNonNegativeInteger(value, fallback) {
     const parsed = Number(value);
@@ -52,6 +112,20 @@ function normalizeHexData(data) {
         throw new Error('Relayer transaction data must be a hex string.');
     }
     return data;
+}
+
+function normalizeMetadata(metadata) {
+    if (typeof metadata === 'string') {
+        return metadata;
+    }
+    if (metadata === null || metadata === undefined) {
+        return '';
+    }
+    try {
+        return JSON.stringify(metadata);
+    } catch (error) {
+        return String(metadata);
+    }
 }
 
 function getBuilderCredentials(config) {
@@ -101,6 +175,38 @@ function buildRelayerAuthHeaders({
     };
 }
 
+function buildPathWithQuery(basePath, params) {
+    const urlParams = new URLSearchParams();
+    for (const [key, value] of Object.entries(params ?? {})) {
+        if (value === undefined || value === null || value === '') continue;
+        urlParams.set(key, String(value));
+    }
+    const query = urlParams.toString();
+    return query.length > 0 ? `${basePath}?${query}` : basePath;
+}
+
+function uniqueList(values) {
+    return [...new Set(values.filter(Boolean))];
+}
+
+function buildSignerQueryCandidates(basePath, signerAddress, txType) {
+    const address = getAddress(signerAddress);
+    const normalizedType = normalizeRelayerTxType(txType);
+    const typeCandidates = uniqueList([
+        normalizedType,
+        normalizedType.toLowerCase(),
+    ]);
+
+    const paths = [];
+    for (const signerType of typeCandidates) {
+        paths.push(buildPathWithQuery(basePath, { address, type: signerType }));
+        paths.push(buildPathWithQuery(basePath, { address, signerType }));
+        paths.push(buildPathWithQuery(basePath, { signerAddress: address, signerType }));
+        paths.push(buildPathWithQuery(basePath, { signerAddress: address, type: signerType }));
+    }
+    return uniqueList(paths);
+}
+
 async function sleep(ms) {
     if (ms <= 0) return;
     await new Promise((resolve) => setTimeout(resolve, ms));
@@ -143,12 +249,40 @@ async function relayerRequest({
     }
 
     if (!response.ok) {
-        throw new Error(
+        const requestError = new Error(
             `Relayer request failed (${method} ${path}): ${response.status} ${response.statusText} ${text}`
         );
+        requestError.statusCode = response.status;
+        requestError.responseBody = parsed;
+        throw requestError;
     }
 
     return parsed;
+}
+
+async function relayerRequestFirst({
+    config,
+    method,
+    candidatePaths,
+    body,
+}) {
+    let lastError;
+
+    for (const path of candidatePaths) {
+        try {
+            const payload = await relayerRequest({
+                config,
+                method,
+                path,
+                body,
+            });
+            return { payload, path };
+        } catch (error) {
+            lastError = error;
+        }
+    }
+
+    throw lastError ?? new Error(`Relayer request failed for ${method} ${candidatePaths.join(', ')}`);
 }
 
 function collectPayloadObjects(payload) {
@@ -192,6 +326,26 @@ function extractStringField(payload, fieldNames) {
     return null;
 }
 
+function extractBooleanField(payload, fieldNames) {
+    const candidates = collectPayloadObjects(payload);
+    for (const candidate of candidates) {
+        for (const fieldName of fieldNames) {
+            const value = candidate?.[fieldName];
+            if (typeof value === 'boolean') return value;
+            if (typeof value === 'string') {
+                const normalized = value.trim().toLowerCase();
+                if (normalized === 'true') return true;
+                if (normalized === 'false') return false;
+            }
+            if (typeof value === 'number') {
+                if (value === 1) return true;
+                if (value === 0) return false;
+            }
+        }
+    }
+    return null;
+}
+
 function extractRelayerTxHash(payload) {
     const hashCandidate = extractStringField(payload, [
         'txHash',
@@ -199,8 +353,7 @@ function extractRelayerTxHash(payload) {
         'relay_hash',
         'hash',
     ]);
-    const normalized = normalizeHashOrNull(hashCandidate);
-    return normalized;
+    return normalizeHashOrNull(hashCandidate);
 }
 
 function extractTransactionHash(payload) {
@@ -208,138 +361,336 @@ function extractTransactionHash(payload) {
         'transactionHash',
         'transaction_hash',
         'chainTxHash',
+        'minedTransactionHash',
     ]);
     return normalizeHashOrNull(hashCandidate);
 }
 
+function extractTransactionId(payload) {
+    const idCandidate = extractStringField(payload, [
+        'transactionID',
+        'transactionId',
+        'id',
+    ]);
+    return idCandidate && idCandidate.length > 0 ? idCandidate : null;
+}
+
+function normalizeRelayerState(value) {
+    if (typeof value !== 'string') return null;
+    const normalized = value.trim().toUpperCase();
+    if (!normalized) return null;
+    if (!normalized.startsWith('STATE_')) {
+        if (normalized === 'PENDING') return 'STATE_PENDING';
+        if (normalized === 'MINED') return 'STATE_MINED';
+        if (normalized === 'CONFIRMED') return 'STATE_CONFIRMED';
+        if (normalized === 'FAILED') return 'STATE_FAILED';
+        if (normalized === 'INVALID') return 'STATE_INVALID';
+    }
+    return normalized;
+}
+
 function extractRelayerStatus(payload) {
-    const statusCandidate = extractStringField(payload, ['status', 'txStatus', 'state']);
+    const statusCandidate = extractStringField(payload, ['state', 'status', 'txStatus']);
     if (!statusCandidate) return null;
-    return statusCandidate.toUpperCase();
+    return normalizeRelayerState(statusCandidate);
+}
+
+function extractTransactionRecord(payload) {
+    if (Array.isArray(payload)) {
+        return payload.length > 0 ? payload[0] : null;
+    }
+    if (payload && typeof payload === 'object') {
+        if (Array.isArray(payload.transactions) && payload.transactions.length > 0) {
+            return payload.transactions[0];
+        }
+        if (payload.transaction && typeof payload.transaction === 'object') {
+            return payload.transaction;
+        }
+    }
+    return payload;
+}
+
+function getSafeFactoryAddress(config) {
+    const configured = normalizeAddressOrNull(config?.polymarketRelayerSafeFactory);
+    return configured ? getAddress(configured) : SAFE_FACTORY_ADDRESS;
+}
+
+function getProxyFactoryAddress(config) {
+    const configured = normalizeAddressOrNull(config?.polymarketRelayerProxyFactory);
+    return configured ? getAddress(configured) : PROXY_FACTORY_ADDRESS;
+}
+
+function deriveSafeAddress({ signerAddress, safeFactory }) {
+    return getCreate2Address({
+        from: getAddress(safeFactory),
+        salt: keccak256(
+            encodeAbiParameters(
+                [
+                    {
+                        type: 'address',
+                    },
+                ],
+                [getAddress(signerAddress)]
+            )
+        ),
+        bytecodeHash: SAFE_INIT_CODE_HASH,
+    });
+}
+
+function deriveProxyAddress({ signerAddress, proxyFactory }) {
+    return getCreate2Address({
+        from: getAddress(proxyFactory),
+        salt: keccak256(encodePacked(['address'], [getAddress(signerAddress)])),
+        bytecodeHash: PROXY_INIT_CODE_HASH,
+    });
+}
+
+function splitAndPackSignature(signature) {
+    if (typeof signature !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(signature)) {
+        throw new Error('Invalid 65-byte signature.');
+    }
+
+    const body = signature.slice(2);
+    const r = body.slice(0, 64);
+    const s = body.slice(64, 128);
+    const vRaw = Number.parseInt(body.slice(128, 130), 16);
+
+    let safeV = vRaw;
+    if (safeV === 0 || safeV === 1) {
+        safeV += 31;
+    } else if (safeV === 27 || safeV === 28) {
+        safeV += 4;
+    }
+
+    if (safeV < 31 || safeV > 32) {
+        throw new Error(`Unexpected signature v=${vRaw} while packing SAFE signature.`);
+    }
+
+    return `0x${r}${s}${safeV.toString(16).padStart(2, '0')}`;
 }
 
 function isPolymarketRelayerEnabled(config) {
     return Boolean(config?.polymarketRelayerEnabled);
 }
 
+async function getRelayerPayload({
+    config,
+    signerAddress,
+    txType,
+}) {
+    const payloadCandidates = buildSignerQueryCandidates(
+        RELAYER_ENDPOINTS.RELAY_PAYLOAD,
+        signerAddress,
+        txType
+    );
+
+    try {
+        const { payload } = await relayerRequestFirst({
+            config,
+            method: 'GET',
+            candidatePaths: payloadCandidates,
+        });
+        return payload;
+    } catch (error) {
+        return null;
+    }
+}
+
 async function getRelayerProxyAddress({
     config,
     signerAddress,
+    txType = RELAYER_TX_TYPE.SAFE,
 }) {
-    const response = await relayerRequest({
+    const payload = await getRelayerPayload({
         config,
-        method: 'GET',
-        path: `/relayer/proxy-address/${encodeURIComponent(getAddress(signerAddress))}`,
+        signerAddress,
+        txType,
     });
-    const candidate = extractStringField(response, [
+
+    let candidate = extractStringField(payload, [
+        'address',
         'proxyWallet',
         'proxyAddress',
         'walletAddress',
-        'address',
     ]);
+
+    if (!candidate) {
+        try {
+            const { payload: addressPayload } = await relayerRequestFirst({
+                config,
+                method: 'GET',
+                candidatePaths: buildSignerQueryCandidates(
+                    RELAYER_ENDPOINTS.ADDRESS,
+                    signerAddress,
+                    txType
+                ),
+            });
+            candidate = extractStringField(addressPayload, [
+                'address',
+                'proxyWallet',
+                'proxyAddress',
+                'walletAddress',
+            ]);
+        } catch (error) {
+            // Continue to legacy fallback.
+        }
+    }
+
+    if (!candidate) {
+        try {
+            const { payload: legacyPayload } = await relayerRequestFirst({
+                config,
+                method: 'GET',
+                candidatePaths: [LEGACY_ENDPOINTS.PROXY_ADDRESS(getAddress(signerAddress))],
+            });
+            candidate = extractStringField(legacyPayload, [
+                'proxyWallet',
+                'proxyAddress',
+                'walletAddress',
+                'address',
+            ]);
+        } catch (error) {
+            // No legacy proxy-address support.
+        }
+    }
+
     const normalized = normalizeAddressOrNull(candidate);
     return normalized ? getAddress(normalized) : null;
 }
 
-async function getSafeNonce({
-    publicClient,
-    safeAddress,
-}) {
-    return publicClient.readContract({
-        address: getAddress(safeAddress),
-        abi: SAFE_TX_NONCE_ABI,
-        functionName: 'nonce',
-    });
-}
-
-async function getProxyNonce({
+async function getRelayerNonce({
     config,
+    signerAddress,
+    txType,
     proxyAddress,
 }) {
-    const response = await relayerRequest({
+    const payload = await getRelayerPayload({
         config,
-        method: 'GET',
-        path: `/relayer/proxy-nonce/${encodeURIComponent(getAddress(proxyAddress))}`,
+        signerAddress,
+        txType,
     });
-    const nonceCandidate = extractStringField(response, ['nonce']);
-    if (nonceCandidate === null) {
-        throw new Error('Relayer proxy nonce response did not include nonce.');
+
+    let nonceCandidate = extractStringField(payload, ['nonce']);
+
+    if (!nonceCandidate) {
+        try {
+            const { payload: noncePayload } = await relayerRequestFirst({
+                config,
+                method: 'GET',
+                candidatePaths: buildSignerQueryCandidates(
+                    RELAYER_ENDPOINTS.NONCE,
+                    signerAddress,
+                    txType
+                ),
+            });
+            nonceCandidate = extractStringField(noncePayload, ['nonce']);
+        } catch (error) {
+            // Continue to legacy fallback.
+        }
     }
+
+    if (!nonceCandidate && proxyAddress) {
+        try {
+            const { payload: legacyNoncePayload } = await relayerRequestFirst({
+                config,
+                method: 'GET',
+                candidatePaths: [LEGACY_ENDPOINTS.PROXY_NONCE(getAddress(proxyAddress))],
+            });
+            nonceCandidate = extractStringField(legacyNoncePayload, ['nonce']);
+        } catch (error) {
+            // Continue.
+        }
+    }
+
+    if (!nonceCandidate) {
+        throw new Error('Relayer nonce response did not include nonce.');
+    }
+
     return BigInt(nonceCandidate);
 }
 
-async function createProxyWallet({
+async function getSafeDeployed({
     config,
-    signerAddress,
-    chainId,
-    txType,
+    safeAddress,
 }) {
-    return relayerRequest({
-        config,
-        method: 'POST',
-        path: '/relayer/create-proxy-wallet',
-        body: {
-            from: getAddress(signerAddress),
-            chainId: Number(chainId),
-            relayerTxType: txType,
-        },
-    });
-}
-
-async function waitForRelayerTransaction({
-    config,
-    txHash,
-}) {
-    const normalizedTxHash = normalizeHashOrNull(txHash);
-    if (!normalizedTxHash) {
-        throw new Error(`Invalid relayer txHash: ${txHash}`);
-    }
-    const pollIntervalMs = normalizeNonNegativeInteger(
-        config?.polymarketRelayerPollIntervalMs,
-        DEFAULT_RELAYER_POLL_INTERVAL_MS
-    );
-    const timeoutMs = normalizeNonNegativeInteger(
-        config?.polymarketRelayerPollTimeoutMs,
-        DEFAULT_RELAYER_POLL_TIMEOUT_MS
-    );
-    const deadline = Date.now() + timeoutMs;
-    let lastPayload = null;
-
-    while (Date.now() <= deadline) {
-        lastPayload = await relayerRequest({
+    try {
+        const { payload } = await relayerRequestFirst({
             config,
             method: 'GET',
-            path: `/relayer/transaction-status/${encodeURIComponent(normalizedTxHash)}`,
+            candidatePaths: uniqueList([
+                buildPathWithQuery(RELAYER_ENDPOINTS.DEPLOYED, {
+                    address: getAddress(safeAddress),
+                }),
+                buildPathWithQuery(RELAYER_ENDPOINTS.DEPLOYED, {
+                    proxyWallet: getAddress(safeAddress),
+                }),
+            ]),
         });
-        const status = extractRelayerStatus(lastPayload);
-        if (status && RELAYER_SUCCESS_STATUSES.has(status)) {
-            return lastPayload;
-        }
-        if (status && RELAYER_FAILURE_STATUSES.has(status)) {
-            throw new Error(
-                `Relayer transaction failed with status=${status} for txHash=${normalizedTxHash}.`
-            );
-        }
-        await sleep(pollIntervalMs);
+        return extractBooleanField(payload, ['deployed', 'isDeployed', 'safeDeployed']);
+    } catch (error) {
+        return null;
+    }
+}
+
+async function buildSafeCreateRequest({
+    walletClient,
+    account,
+    chainId,
+    signerAddress,
+    safeFactory,
+    safeAddress,
+    metadata,
+}) {
+    if (!walletClient || typeof walletClient.signTypedData !== 'function') {
+        throw new Error(
+            'Runtime signer does not support signTypedData; cannot create SAFE proxy wallet through relayer.'
+        );
     }
 
-    throw new Error(
-        `Timed out waiting for relayer transaction ${normalizedTxHash}. Last payload: ${JSON.stringify(
-            lastPayload
-        )}`
-    );
+    const signature = await walletClient.signTypedData({
+        account,
+        domain: {
+            name: CREATE_PROXY_DOMAIN_NAME,
+            chainId: Number(chainId),
+            verifyingContract: getAddress(safeFactory),
+        },
+        types: CREATE_PROXY_EIP712_TYPES,
+        primaryType: 'CreateProxy',
+        message: {
+            paymentToken: zeroAddress,
+            payment: 0n,
+            paymentReceiver: zeroAddress,
+        },
+    });
+
+    return {
+        from: getAddress(signerAddress),
+        to: getAddress(safeFactory),
+        proxyWallet: getAddress(safeAddress),
+        data: '0x',
+        signature,
+        signatureParams: {
+            paymentToken: zeroAddress,
+            payment: '0',
+            paymentReceiver: zeroAddress,
+        },
+        type: 'SAFE-CREATE',
+        metadata: normalizeMetadata(metadata),
+    };
 }
 
 async function signSafeTransaction({
     walletClient,
     account,
     chainId,
-    fromAddress,
+    signerAddress,
+    proxyWallet,
     toAddress,
     value,
     data,
     operation,
     nonce,
+    metadata,
 }) {
     if (!walletClient || typeof walletClient.signMessage !== 'function') {
         throw new Error(
@@ -350,10 +701,10 @@ async function signSafeTransaction({
         throw new Error('SAFE relayer transaction operation must be 0 or 1.');
     }
 
-    const txHash = hashTypedData({
+    const safeTxHash = hashTypedData({
         domain: {
             chainId: Number(chainId),
-            verifyingContract: getAddress(fromAddress),
+            verifyingContract: getAddress(proxyWallet),
         },
         primaryType: 'SafeTx',
         types: SAFE_EIP712_TYPES,
@@ -362,24 +713,40 @@ async function signSafeTransaction({
             value: BigInt(value),
             data: normalizeHexData(data),
             operation,
+            safeTxGas: 0n,
+            baseGas: 0n,
+            gasPrice: 0n,
+            gasToken: zeroAddress,
+            refundReceiver: zeroAddress,
             nonce: BigInt(nonce),
         },
     });
+
     const signature = await walletClient.signMessage({
         account,
-        message: { raw: txHash },
+        message: { raw: safeTxHash },
     });
 
     return {
-        txHash,
-        signature,
-        signatureParams: {
+        request: {
+            from: getAddress(signerAddress),
             to: getAddress(toAddress),
-            value: BigInt(value).toString(),
+            proxyWallet: getAddress(proxyWallet),
             data: normalizeHexData(data),
-            operation,
             nonce: BigInt(nonce).toString(),
+            signature: splitAndPackSignature(signature),
+            signatureParams: {
+                gasPrice: '0',
+                operation: String(operation),
+                safeTxnGas: '0',
+                baseGas: '0',
+                gasToken: zeroAddress,
+                refundReceiver: zeroAddress,
+            },
+            type: RELAYER_TX_TYPE.SAFE,
+            metadata: normalizeMetadata(metadata),
         },
+        txHash: safeTxHash,
     };
 }
 
@@ -387,10 +754,12 @@ async function signProxyTransaction({
     walletClient,
     account,
     chainId,
-    fromAddress,
+    signerAddress,
+    proxyWallet,
     toAddress,
     data,
     nonce,
+    metadata,
 }) {
     if (!walletClient || typeof walletClient.signMessage !== 'function') {
         throw new Error(
@@ -402,40 +771,191 @@ async function signProxyTransaction({
         ['uint256', 'address', 'address', 'bytes', 'uint256'],
         [
             BigInt(chainId),
-            getAddress(fromAddress),
+            getAddress(proxyWallet),
             getAddress(toAddress),
             normalizeHexData(data),
             BigInt(nonce),
         ]
     );
-    const txHash = keccak256(encoded);
+
+    const proxyTxHash = keccak256(encoded);
     const signature = await walletClient.signMessage({
         account,
-        message: { raw: txHash },
+        message: { raw: proxyTxHash },
     });
 
     return {
-        txHash,
-        signature,
-        signatureParams: {
-            from: getAddress(fromAddress),
+        request: {
+            from: getAddress(signerAddress),
             to: getAddress(toAddress),
+            proxyWallet: getAddress(proxyWallet),
             data: normalizeHexData(data),
             nonce: BigInt(nonce).toString(),
-            chainId: Number(chainId),
+            signature,
+            signatureParams: {
+                chainId: String(chainId),
+            },
+            type: RELAYER_TX_TYPE.PROXY,
+            metadata: normalizeMetadata(metadata),
         },
+        txHash: proxyTxHash,
     };
 }
 
-async function resolveFromAddress({
+async function submitRelayerTransaction({
     config,
-    explicitFrom,
-    accountAddress,
+    transactionRequest,
+}) {
+    const { payload, path } = await relayerRequestFirst({
+        config,
+        method: 'POST',
+        candidatePaths: [RELAYER_ENDPOINTS.SUBMIT, LEGACY_ENDPOINTS.TRANSACTION],
+        body: transactionRequest,
+    });
+
+    return {
+        payload,
+        path,
+        transactionId: extractTransactionId(payload),
+        relayTxHash: extractRelayerTxHash(payload),
+        transactionHash: extractTransactionHash(payload),
+        state: extractRelayerStatus(payload),
+    };
+}
+
+async function fetchTransactionStatus({
+    config,
+    transactionId,
+    relayTxHash,
+}) {
+    const candidatePaths = [];
+
+    if (transactionId) {
+        candidatePaths.push(
+            buildPathWithQuery(RELAYER_ENDPOINTS.TRANSACTION, { id: transactionId }),
+            buildPathWithQuery(RELAYER_ENDPOINTS.TRANSACTION, {
+                transactionID: transactionId,
+            }),
+            buildPathWithQuery(RELAYER_ENDPOINTS.TRANSACTION, {
+                transactionId,
+            })
+        );
+    }
+
+    if (relayTxHash) {
+        candidatePaths.push(
+            buildPathWithQuery(RELAYER_ENDPOINTS.TRANSACTION, { hash: relayTxHash }),
+            buildPathWithQuery(RELAYER_ENDPOINTS.TRANSACTION, { txHash: relayTxHash }),
+            LEGACY_ENDPOINTS.TRANSACTION_STATUS(relayTxHash)
+        );
+    }
+
+    const { payload, path } = await relayerRequestFirst({
+        config,
+        method: 'GET',
+        candidatePaths: uniqueList(candidatePaths),
+    });
+
+    const record = extractTransactionRecord(payload);
+    const state = extractRelayerStatus(record ?? payload);
+    const nextTransactionId = extractTransactionId(record ?? payload) ?? transactionId;
+    const nextRelayTxHash = extractRelayerTxHash(record ?? payload) ?? relayTxHash;
+    const transactionHash = extractTransactionHash(record ?? payload);
+
+    return {
+        payload,
+        path,
+        state,
+        transactionId: nextTransactionId,
+        relayTxHash: nextRelayTxHash,
+        transactionHash,
+    };
+}
+
+async function waitForRelayerTransaction({
+    config,
+    transactionId,
+    relayTxHash,
+}) {
+    if (!transactionId && !relayTxHash) {
+        throw new Error('waitForRelayerTransaction requires transactionId or relayTxHash.');
+    }
+
+    const pollIntervalMs = normalizeNonNegativeInteger(
+        config?.polymarketRelayerPollIntervalMs,
+        DEFAULT_RELAYER_POLL_INTERVAL_MS
+    );
+    const timeoutMs = normalizeNonNegativeInteger(
+        config?.polymarketRelayerPollTimeoutMs,
+        DEFAULT_RELAYER_POLL_TIMEOUT_MS
+    );
+    const deadline = Date.now() + timeoutMs;
+    let lastStatus;
+    let currentTransactionId = transactionId;
+    let currentRelayTxHash = relayTxHash;
+
+    while (Date.now() <= deadline) {
+        const statusResult = await fetchTransactionStatus({
+            config,
+            transactionId: currentTransactionId,
+            relayTxHash: currentRelayTxHash,
+        });
+
+        currentTransactionId = statusResult.transactionId ?? currentTransactionId;
+        currentRelayTxHash = statusResult.relayTxHash ?? currentRelayTxHash;
+        lastStatus = statusResult;
+
+        if (statusResult.state && RELAYER_SUCCESS_STATES.has(statusResult.state)) {
+            return {
+                ...statusResult,
+                transactionId: currentTransactionId,
+                relayTxHash: currentRelayTxHash,
+            };
+        }
+
+        if (statusResult.state && RELAYER_FAILURE_STATES.has(statusResult.state)) {
+            throw new Error(
+                `Relayer transaction failed with state=${statusResult.state} for transactionId=${currentTransactionId ?? 'unknown'} relayTxHash=${currentRelayTxHash ?? 'unknown'}.`
+            );
+        }
+
+        await sleep(pollIntervalMs);
+    }
+
+    throw new Error(
+        `Timed out waiting for relayer transaction. transactionId=${currentTransactionId ?? 'unknown'} relayTxHash=${currentRelayTxHash ?? 'unknown'} lastStatus=${JSON.stringify(
+            lastStatus?.payload ?? null
+        )}`
+    );
+}
+
+async function createProxyWallet({
+    config,
+    signerAddress,
     chainId,
     txType,
 }) {
-    if (explicitFrom) {
-        return getAddress(explicitFrom);
+    return relayerRequest({
+        config,
+        method: 'POST',
+        path: LEGACY_ENDPOINTS.CREATE_PROXY,
+        body: {
+            from: getAddress(signerAddress),
+            chainId: Number(chainId),
+            relayerTxType: txType,
+        },
+    });
+}
+
+async function resolveProxyWalletAddress({
+    config,
+    signerAddress,
+    chainId,
+    txType,
+    explicitProxyWallet,
+}) {
+    if (explicitProxyWallet) {
+        return getAddress(explicitProxyWallet);
     }
     if (config?.polymarketRelayerFromAddress) {
         return getAddress(config.polymarketRelayerFromAddress);
@@ -449,41 +969,90 @@ async function resolveFromAddress({
         try {
             const existingProxy = await getRelayerProxyAddress({
                 config,
-                signerAddress: accountAddress,
+                signerAddress,
+                txType,
             });
             if (existingProxy) {
                 return existingProxy;
             }
         } catch (error) {
-            // Continue to optional deployment/fallback.
+            // Continue to deterministic derivation and optional deployment.
         }
     }
 
-    if (config?.polymarketRelayerAutoDeployProxy) {
+    const derivedAddress =
+        txType === RELAYER_TX_TYPE.SAFE
+            ? deriveSafeAddress({
+                signerAddress,
+                safeFactory: getSafeFactoryAddress(config),
+            })
+            : deriveProxyAddress({
+                signerAddress,
+                proxyFactory: getProxyFactoryAddress(config),
+            });
+
+    if (txType === RELAYER_TX_TYPE.PROXY && config?.polymarketRelayerAutoDeployProxy) {
         const deployResponse = await createProxyWallet({
             config,
-            signerAddress: accountAddress,
+            signerAddress,
             chainId,
             txType,
         });
+        const deployTxId = extractTransactionId(deployResponse);
         const deployTxHash = extractRelayerTxHash(deployResponse);
-        if (!deployTxHash) {
-            throw new Error('Relayer proxy deployment did not return txHash.');
-        }
         await waitForRelayerTransaction({
             config,
-            txHash: deployTxHash,
+            transactionId: deployTxId,
+            relayTxHash: deployTxHash,
         });
-        const deployedProxy = await getRelayerProxyAddress({
-            config,
-            signerAddress: accountAddress,
-        });
-        if (deployedProxy) {
-            return deployedProxy;
-        }
     }
 
-    return null;
+    return derivedAddress;
+}
+
+async function ensureSafeDeployed({
+    config,
+    walletClient,
+    account,
+    chainId,
+    signerAddress,
+    safeAddress,
+}) {
+    const deployed = await getSafeDeployed({
+        config,
+        safeAddress,
+    });
+
+    if (deployed === true || deployed === null) {
+        return;
+    }
+
+    if (!config?.polymarketRelayerAutoDeployProxy) {
+        throw new Error(
+            `SAFE proxy wallet ${safeAddress} appears undeployed. Enable POLYMARKET_RELAYER_AUTO_DEPLOY_PROXY=true to deploy automatically or deploy it out of band.`
+        );
+    }
+
+    const createRequest = await buildSafeCreateRequest({
+        walletClient,
+        account,
+        chainId,
+        signerAddress,
+        safeFactory: getSafeFactoryAddress(config),
+        safeAddress,
+        metadata: 'Relayer SAFE deployment',
+    });
+
+    const createSubmission = await submitRelayerTransaction({
+        config,
+        transactionRequest: createRequest,
+    });
+
+    await waitForRelayerTransaction({
+        config,
+        transactionId: createSubmission.transactionId,
+        relayTxHash: createSubmission.relayTxHash,
+    });
 }
 
 async function relayPolymarketTransaction({
@@ -491,7 +1060,7 @@ async function relayPolymarketTransaction({
     walletClient,
     account,
     config,
-    from,
+    proxyWallet,
     to,
     data,
     value = 0n,
@@ -508,13 +1077,15 @@ async function relayPolymarketTransaction({
     if (!walletClient) {
         throw new Error('walletClient is required for relayer transaction submission.');
     }
-    const runtimeAddress = getAddress(account?.address);
+
+    const signerAddress = getAddress(account?.address);
     const chainId = Number(
         config?.polymarketRelayerChainId ??
             (typeof publicClient.getChainId === 'function'
                 ? await publicClient.getChainId()
                 : undefined)
     );
+
     if (!Number.isInteger(chainId) || chainId <= 0) {
         throw new Error(
             'Unable to resolve chainId for relayer transaction. Set POLYMARKET_RELAYER_CHAIN_ID.'
@@ -522,46 +1093,54 @@ async function relayPolymarketTransaction({
     }
 
     const txType = normalizeRelayerTxType(config?.polymarketRelayerTxType);
-    const fromAddress = await resolveFromAddress({
+    const resolvedProxyWallet = await resolveProxyWalletAddress({
         config,
-        explicitFrom: from,
-        accountAddress: runtimeAddress,
+        signerAddress,
         chainId,
         txType,
+        explicitProxyWallet: proxyWallet,
     });
-    if (!fromAddress) {
+
+    if (!resolvedProxyWallet) {
         throw new Error(
-            'Unable to resolve relayer wallet address. Set POLYMARKET_RELAYER_FROM_ADDRESS or POLYMARKET_CLOB_ADDRESS, or enable POLYMARKET_RELAYER_AUTO_DEPLOY_PROXY.'
+            'Unable to resolve relayer proxy wallet address. Set POLYMARKET_RELAYER_FROM_ADDRESS or POLYMARKET_CLOB_ADDRESS, or enable POLYMARKET_RELAYER_AUTO_DEPLOY_PROXY.'
         );
+    }
+
+    if (txType === RELAYER_TX_TYPE.SAFE) {
+        const expectedSafeAddress = deriveSafeAddress({
+            signerAddress,
+            safeFactory: getSafeFactoryAddress(config),
+        });
+        if (resolvedProxyWallet.toLowerCase() !== expectedSafeAddress.toLowerCase()) {
+            throw new Error(
+                `Configured SAFE proxy wallet ${resolvedProxyWallet} does not match expected relayer SAFE address ${expectedSafeAddress} for signer ${signerAddress}.`
+            );
+        }
+        await ensureSafeDeployed({
+            config,
+            walletClient,
+            account,
+            chainId,
+            signerAddress,
+            safeAddress: resolvedProxyWallet,
+        });
     }
 
     const normalizedTo = getAddress(to);
     const normalizedData = normalizeHexData(data);
     const normalizedValue = BigInt(value ?? 0n);
     const normalizedOperation = Number(operation ?? 0);
-    let normalizedNonce;
-    if (nonce === undefined || nonce === null) {
-        if (txType === RELAYER_TX_TYPE.SAFE) {
-            try {
-                normalizedNonce = await getSafeNonce({
-                    publicClient,
-                    safeAddress: fromAddress,
-                });
-            } catch (error) {
-                const reason = error?.shortMessage ?? error?.message ?? String(error);
-                throw new Error(
-                    `Failed to read SAFE nonce from ${fromAddress}. Ensure POLYMARKET_RELAYER_FROM_ADDRESS points to a deployed Safe proxy on chainId=${chainId}. ${reason}`
-                );
-            }
-        } else {
-            normalizedNonce = await getProxyNonce({
+
+    const normalizedNonce =
+        nonce === undefined || nonce === null
+            ? await getRelayerNonce({
                 config,
-                proxyAddress: fromAddress,
-            });
-        }
-    } else {
-        normalizedNonce = BigInt(nonce);
-    }
+                signerAddress,
+                txType,
+                proxyAddress: resolvedProxyWallet,
+            })
+            : BigInt(nonce);
 
     const signed =
         txType === RELAYER_TX_TYPE.SAFE
@@ -569,83 +1148,65 @@ async function relayPolymarketTransaction({
                 walletClient,
                 account,
                 chainId,
-                fromAddress,
+                signerAddress,
+                proxyWallet: resolvedProxyWallet,
                 toAddress: normalizedTo,
                 value: normalizedValue,
                 data: normalizedData,
                 operation: normalizedOperation,
                 nonce: normalizedNonce,
+                metadata,
             })
             : await signProxyTransaction({
                 walletClient,
                 account,
                 chainId,
-                fromAddress,
+                signerAddress,
+                proxyWallet: resolvedProxyWallet,
                 toAddress: normalizedTo,
                 data: normalizedData,
                 nonce: normalizedNonce,
+                metadata,
             });
 
-    const txRequest = {
-        type: txType,
-        from: fromAddress,
-        to: normalizedTo,
-        data: normalizedData,
-        value: normalizedValue.toString(),
-        nonce: normalizedNonce.toString(),
-    };
-    if (txType === RELAYER_TX_TYPE.SAFE) {
-        txRequest.operation = normalizedOperation;
-    }
-
-    const submitResponse = await relayerRequest({
+    const submission = await submitRelayerTransaction({
         config,
-        method: 'POST',
-        path: '/relayer/transaction',
-        body: {
-            ...txRequest,
-            txHash: signed.txHash,
-            signature: signed.signature,
-            signatureParams: signed.signatureParams,
-            metadata,
-        },
+        transactionRequest: signed.request,
     });
 
-    const relayTxHash = extractRelayerTxHash(submitResponse) ?? normalizeHashOrNull(signed.txHash);
-    if (!relayTxHash) {
-        throw new Error('Relayer submission did not return txHash.');
-    }
-
-    const statusResponse = await waitForRelayerTransaction({
+    const waited = await waitForRelayerTransaction({
         config,
-        txHash: relayTxHash,
+        transactionId: submission.transactionId,
+        relayTxHash: submission.relayTxHash ?? signed.txHash,
     });
-    const status = extractRelayerStatus(statusResponse);
-    let transactionHash = extractTransactionHash(statusResponse);
-    if (!transactionHash) {
+
+    let transactionHash = waited.transactionHash ?? submission.transactionHash;
+    if (!transactionHash && waited.relayTxHash) {
         try {
-            await publicClient.getTransactionReceipt({ hash: relayTxHash });
-            transactionHash = relayTxHash;
+            await publicClient.getTransactionReceipt({ hash: waited.relayTxHash });
+            transactionHash = waited.relayTxHash;
         } catch (error) {
-            // Relay tx hash is not necessarily the chain tx hash.
+            // Relay tx hash is not always the chain transaction hash.
         }
     }
 
     if (!transactionHash) {
         throw new Error(
-            `Relayer transaction ${relayTxHash} reached status=${status ?? 'unknown'} without transactionHash.`
+            `Relayer transaction reached state=${waited.state ?? 'unknown'} without transactionHash. transactionId=${waited.transactionId ?? 'unknown'} relayTxHash=${waited.relayTxHash ?? 'unknown'}`
         );
     }
 
     return {
-        relayTxHash,
         transactionHash,
-        status,
-        from: fromAddress,
+        relayTxHash: waited.relayTxHash ?? submission.relayTxHash ?? null,
+        transactionId: waited.transactionId ?? submission.transactionId ?? null,
+        state: waited.state ?? submission.state ?? null,
+        from: signerAddress,
+        proxyWallet: resolvedProxyWallet,
         txType,
         nonce: normalizedNonce.toString(),
-        submitResponse,
-        statusResponse,
+        submitResponse: submission.payload,
+        statusResponse: waited.payload,
     };
 }
 
