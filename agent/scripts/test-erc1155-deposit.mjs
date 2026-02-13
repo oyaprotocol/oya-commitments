@@ -237,6 +237,129 @@ async function run() {
         globalThis.fetch = oldFetch;
     }
 
+    const clobOnlyAddress = '0x3333333333333333333333333333333333333333';
+    const clobIgnoredRelayTxHash = `0x${'9'.repeat(64)}`;
+    const clobIgnoredOnchainTxHash = `0x${'a'.repeat(64)}`;
+    const clobIgnoredTransactionId = 'relayer-safe-from-resolved-1';
+    let clobIgnoredSubmitBody;
+    const oldFetchClobIgnored = globalThis.fetch;
+    try {
+        globalThis.fetch = async (url, options = {}) => {
+            const asText = String(url);
+            const asLower = asText.toLowerCase();
+            if (asLower.includes('/deployed?') && asLower.includes(relayerFromAddress.toLowerCase())) {
+                return {
+                    ok: true,
+                    status: 200,
+                    statusText: 'OK',
+                    async text() {
+                        return JSON.stringify({ deployed: true });
+                    },
+                };
+            }
+
+            if (asText.includes('/relay-payload?')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    statusText: 'OK',
+                    async text() {
+                        return JSON.stringify({
+                            address: relayerFromAddress,
+                            nonce: '13',
+                        });
+                    },
+                };
+            }
+
+            if (asText.endsWith('/submit')) {
+                clobIgnoredSubmitBody = JSON.parse(options.body);
+                return {
+                    ok: true,
+                    status: 200,
+                    statusText: 'OK',
+                    async text() {
+                        return JSON.stringify({
+                            transactionID: clobIgnoredTransactionId,
+                            hash: clobIgnoredRelayTxHash,
+                            state: 'STATE_PENDING',
+                        });
+                    },
+                };
+            }
+
+            if (
+                asText.includes('/transaction?') &&
+                (asText.includes(`id=${clobIgnoredTransactionId}`) ||
+                    asText.includes(`transactionID=${clobIgnoredTransactionId}`))
+            ) {
+                return {
+                    ok: true,
+                    status: 200,
+                    statusText: 'OK',
+                    async text() {
+                        return JSON.stringify([
+                            {
+                                transactionID: clobIgnoredTransactionId,
+                                hash: clobIgnoredRelayTxHash,
+                                state: 'STATE_CONFIRMED',
+                                transactionHash: clobIgnoredOnchainTxHash,
+                            },
+                        ]);
+                    },
+                };
+            }
+
+            throw new Error(`Unexpected relayer fetch URL (CLOB ignored test): ${asText}`);
+        };
+
+        const clobIgnoredDepositHash = await makeErc1155Deposit({
+            publicClient: {
+                async getChainId() {
+                    return 137;
+                },
+            },
+            walletClient: {
+                async signMessage() {
+                    return `0x${'b'.repeat(128)}1b`;
+                },
+            },
+            account,
+            config: {
+                commitmentSafe: config.commitmentSafe,
+                polymarketRelayerEnabled: true,
+                polymarketRelayerHost: 'https://relayer-v2.polymarket.com',
+                polymarketRelayerTxType: 'SAFE',
+                polymarketClobAddress: clobOnlyAddress,
+                polymarketBuilderApiKey: 'builder-key',
+                polymarketBuilderSecret: Buffer.from('builder-secret').toString('base64'),
+                polymarketBuilderPassphrase: 'builder-passphrase',
+                polymarketRelayerPollIntervalMs: 0,
+                polymarketRelayerPollTimeoutMs: 1_000,
+            },
+            token,
+            tokenId: '11',
+            amount: '2',
+            data: null,
+        });
+
+        assert.equal(clobIgnoredDepositHash, clobIgnoredOnchainTxHash);
+        assert.equal(clobIgnoredSubmitBody.proxyWallet.toLowerCase(), relayerFromAddress.toLowerCase());
+        assert.notEqual(clobIgnoredSubmitBody.proxyWallet.toLowerCase(), clobOnlyAddress.toLowerCase());
+
+        const decodedClobIgnored = decodeFunctionData({
+            abi: parseAbi([
+                'function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data)',
+            ]),
+            data: clobIgnoredSubmitBody.data,
+        });
+        assert.equal(decodedClobIgnored.functionName, 'safeTransferFrom');
+        assert.equal(decodedClobIgnored.args[0].toLowerCase(), relayerFromAddress.toLowerCase());
+        assert.notEqual(decodedClobIgnored.args[0].toLowerCase(), clobOnlyAddress.toLowerCase());
+    } finally {
+        globalThis.fetch = oldFetchClobIgnored;
+    }
+
     const proxyWalletAddress = '0x5555555555555555555555555555555555555555';
     const proxyRelayTxHash = `0x${'3'.repeat(64)}`;
     const proxyOnchainTxHash = `0x${'4'.repeat(64)}`;
