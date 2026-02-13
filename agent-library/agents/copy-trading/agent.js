@@ -26,6 +26,7 @@ const FEE_BPS = 100n;
 const BPS_DENOMINATOR = 10_000n;
 const PRICE_SCALE = 1_000_000n;
 const DEFAULT_COLLATERAL_TOKEN = '0x2791bca1f2de4661ed88a30c99a7a9449aa84174';
+const ERC20_TRANSFER_SELECTOR = '0xa9059cbb';
 
 let copyTradingState = {
     seenSourceTradeId: null,
@@ -39,6 +40,8 @@ let copyTradingState = {
     tokenDeposited: false,
     reimbursementProposed: false,
     reimbursementProposalHash: null,
+    reimbursementSubmissionPending: false,
+    reimbursementSubmissionTxHash: null,
 };
 
 function normalizeAddress(value) {
@@ -86,6 +89,64 @@ function normalizeHash(value) {
     const trimmed = value.trim();
     if (!/^0x[0-9a-fA-F]{64}$/.test(trimmed)) return null;
     return trimmed.toLowerCase();
+}
+
+function decodeErc20TransferCallData(data) {
+    if (typeof data !== 'string') return null;
+    const normalized = data.toLowerCase();
+    if (!normalized.startsWith(ERC20_TRANSFER_SELECTOR)) return null;
+    if (normalized.length !== 138) return null;
+    const toWord = normalized.slice(10, 74);
+    const amountWord = normalized.slice(74, 138);
+    const to = normalizeAddress(`0x${toWord.slice(24)}`);
+    if (!to) return null;
+    let amount;
+    try {
+        amount = BigInt(`0x${amountWord}`);
+    } catch (error) {
+        return null;
+    }
+    return { to, amount };
+}
+
+function findMatchingReimbursementProposalHash({
+    signals,
+    policy,
+    agentAddress,
+    reimbursementAmountWei,
+}) {
+    const normalizedCollateralToken = normalizeAddress(policy?.collateralToken);
+    const normalizedAgentAddress = normalizeAddress(agentAddress);
+    const normalizedAmount = BigInt(reimbursementAmountWei ?? 0);
+    if (!normalizedCollateralToken || !normalizedAgentAddress || normalizedAmount <= 0n) {
+        return null;
+    }
+
+    for (const signal of signals) {
+        if (signal?.kind !== 'proposal') continue;
+        const signalHash = normalizeHash(signal.proposalHash);
+        if (!signalHash) continue;
+
+        const proposer = normalizeAddress(signal.proposer);
+        if (proposer && proposer !== normalizedAgentAddress) continue;
+
+        const transactions = Array.isArray(signal.transactions) ? signal.transactions : [];
+        for (const tx of transactions) {
+            const txTo = normalizeAddress(tx?.to);
+            if (!txTo || txTo !== normalizedCollateralToken) continue;
+            const operation = Number(tx?.operation ?? 0);
+            if (operation !== 0) continue;
+            const value = BigInt(tx?.value ?? 0);
+            if (value !== 0n) continue;
+            const decoded = decodeErc20TransferCallData(tx?.data);
+            if (!decoded) continue;
+            if (decoded.to !== normalizedAgentAddress) continue;
+            if (decoded.amount !== normalizedAmount) continue;
+            return signalHash;
+        }
+    }
+
+    return null;
 }
 
 function parseActivityEntry(entry) {
@@ -244,6 +305,8 @@ function activateTradeCandidate({ trade, tokenId, reimbursementAmountWei }) {
     copyTradingState.tokenDeposited = false;
     copyTradingState.reimbursementProposed = false;
     copyTradingState.reimbursementProposalHash = null;
+    copyTradingState.reimbursementSubmissionPending = false;
+    copyTradingState.reimbursementSubmissionTxHash = null;
 }
 
 function clearActiveTrade({ markSeen = false } = {}) {
@@ -261,6 +324,8 @@ function clearActiveTrade({ markSeen = false } = {}) {
     copyTradingState.tokenDeposited = false;
     copyTradingState.reimbursementProposed = false;
     copyTradingState.reimbursementProposalHash = null;
+    copyTradingState.reimbursementSubmissionPending = false;
+    copyTradingState.reimbursementSubmissionTxHash = null;
 }
 
 function getPollingOptions() {
@@ -355,6 +420,24 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
         });
     }
 
+    if (
+        copyTradingState.reimbursementSubmissionPending &&
+        !copyTradingState.reimbursementProposalHash
+    ) {
+        const recoveredHash = findMatchingReimbursementProposalHash({
+            signals: outSignals,
+            policy,
+            agentAddress: account.address,
+            reimbursementAmountWei: copyTradingState.reimbursementAmountWei,
+        });
+        if (recoveredHash) {
+            copyTradingState.reimbursementProposalHash = recoveredHash;
+            copyTradingState.reimbursementProposed = true;
+            copyTradingState.reimbursementSubmissionPending = false;
+            copyTradingState.reimbursementSubmissionTxHash = null;
+        }
+    }
+
     const activeTokenBalance =
         copyTradingState.activeTokenId === policy.yesTokenId
             ? yesBalance
@@ -378,7 +461,11 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
             copyBps: COPY_BPS.toString(),
             feeBps: FEE_BPS.toString(),
         },
-        pendingProposal: Boolean(onchainPendingProposal || copyTradingState.reimbursementProposed),
+        pendingProposal: Boolean(
+            onchainPendingProposal ||
+                copyTradingState.reimbursementProposed ||
+                copyTradingState.reimbursementSubmissionPending
+        ),
         tradeFetchError,
     });
 
@@ -500,7 +587,7 @@ async function validateToolCalls({
             if (!state.tokenDeposited) {
                 throw new Error('Cannot build reimbursement proposal before token deposit confirmation.');
             }
-            if (state.reimbursementProposed) {
+            if (state.reimbursementProposed || state.reimbursementSubmissionPending) {
                 throw new Error('Reimbursement proposal already submitted for active trade.');
             }
             if (pendingProposal) {
@@ -552,9 +639,19 @@ function onToolOutput({ name, parsedOutput }) {
         (name === 'post_bond_and_propose' || name === 'auto_post_bond_and_propose') &&
         parsedOutput.status === 'submitted'
     ) {
-        copyTradingState.reimbursementProposed = true;
-        copyTradingState.reimbursementProposalHash =
-            normalizeHash(parsedOutput.proposalHash) ?? copyTradingState.reimbursementProposalHash;
+        const proposalHash = normalizeHash(parsedOutput.proposalHash);
+        const txHash = normalizeHash(parsedOutput.transactionHash);
+        if (proposalHash) {
+            copyTradingState.reimbursementProposed = true;
+            copyTradingState.reimbursementProposalHash = proposalHash;
+            copyTradingState.reimbursementSubmissionPending = false;
+            copyTradingState.reimbursementSubmissionTxHash = txHash;
+        } else {
+            copyTradingState.reimbursementProposed = false;
+            copyTradingState.reimbursementProposalHash = null;
+            copyTradingState.reimbursementSubmissionPending = true;
+            copyTradingState.reimbursementSubmissionTxHash = txHash;
+        }
     }
 }
 
@@ -579,6 +676,8 @@ function onProposalEvents({
     if (trackedHash && deletedHashes.includes(trackedHash)) {
         copyTradingState.reimbursementProposed = false;
         copyTradingState.reimbursementProposalHash = null;
+        copyTradingState.reimbursementSubmissionPending = false;
+        copyTradingState.reimbursementSubmissionTxHash = null;
     }
 
     // Backward-compatible fallback for environments that only pass counts and no hashes.
@@ -597,6 +696,8 @@ function onProposalEvents({
         (!Array.isArray(deletedProposals) || deletedProposals.length === 0)
     ) {
         copyTradingState.reimbursementProposed = false;
+        copyTradingState.reimbursementSubmissionPending = false;
+        copyTradingState.reimbursementSubmissionTxHash = null;
     }
 }
 
@@ -617,6 +718,8 @@ function resetCopyTradingState() {
         tokenDeposited: false,
         reimbursementProposed: false,
         reimbursementProposalHash: null,
+        reimbursementSubmissionPending: false,
+        reimbursementSubmissionTxHash: null,
     };
 }
 

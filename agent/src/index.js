@@ -219,9 +219,11 @@ async function decideOnSignals(signals, { onchainPendingProposal = false } = {})
                             name: call.name,
                             callId: call.callId,
                             arguments:
-                                call.arguments !== undefined
-                                    ? call.arguments
-                                    : JSON.stringify(call.parsedArguments ?? {}),
+                                call.parsedArguments !== undefined
+                                    ? call.parsedArguments
+                                    : call.arguments !== undefined
+                                      ? call.arguments
+                                      : {},
                         }));
                     } else {
                         approvedToolCalls = [];
