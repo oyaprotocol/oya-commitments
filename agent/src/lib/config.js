@@ -90,6 +90,12 @@ function buildConfig() {
         polymarketRelayerFromAddress: process.env.POLYMARKET_RELAYER_FROM_ADDRESS
             ? getAddress(process.env.POLYMARKET_RELAYER_FROM_ADDRESS)
             : undefined,
+        polymarketRelayerSafeFactory: process.env.POLYMARKET_RELAYER_SAFE_FACTORY
+            ? getAddress(process.env.POLYMARKET_RELAYER_SAFE_FACTORY)
+            : undefined,
+        polymarketRelayerProxyFactory: process.env.POLYMARKET_RELAYER_PROXY_FACTORY
+            ? getAddress(process.env.POLYMARKET_RELAYER_PROXY_FACTORY)
+            : undefined,
         polymarketRelayerResolveProxyAddress:
             process.env.POLYMARKET_RELAYER_RESOLVE_PROXY_ADDRESS === undefined
                 ? true

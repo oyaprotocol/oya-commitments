@@ -16,6 +16,7 @@ import { normalizeAssertion } from './og.js';
 import {
     isPolymarketRelayerEnabled,
     relayPolymarketTransaction,
+    resolveRelayerProxyWallet,
 } from './polymarket-relayer.js';
 import { normalizeHashOrNull, summarizeViemError } from './utils.js';
 
@@ -672,11 +673,14 @@ async function makeErc1155Deposit({
 
     const transferData = data ?? '0x';
     if (isPolymarketRelayerEnabled(config)) {
-        const relayerFromAddress = config?.polymarketRelayerFromAddress ?? config?.polymarketClobAddress;
+        let relayerFromAddress = config?.polymarketRelayerFromAddress ?? config?.polymarketClobAddress;
         if (!relayerFromAddress) {
-            throw new Error(
-                'Polymarket relayer ERC1155 deposit requires POLYMARKET_RELAYER_FROM_ADDRESS or POLYMARKET_CLOB_ADDRESS.'
-            );
+            const resolved = await resolveRelayerProxyWallet({
+                publicClient,
+                account,
+                config,
+            });
+            relayerFromAddress = resolved.proxyWallet;
         }
         const transferCallData = encodeFunctionData({
             abi: erc1155TransferAbi,
