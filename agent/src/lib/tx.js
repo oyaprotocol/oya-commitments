@@ -694,7 +694,7 @@ async function makeErc1155Deposit({
             walletClient,
             account,
             config,
-            from: relayerFromAddress,
+            proxyWallet: relayerFromAddress,
             to: normalizedToken,
             data: transferCallData,
             value: 0n,

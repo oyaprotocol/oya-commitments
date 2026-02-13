@@ -1,5 +1,11 @@
 import assert from 'node:assert/strict';
-import { decodeFunctionData, parseAbi } from 'viem';
+import {
+    decodeFunctionData,
+    encodeAbiParameters,
+    getCreate2Address,
+    keccak256,
+    parseAbi,
+} from 'viem';
 import { makeErc1155Deposit } from '../src/lib/tx.js';
 
 async function run() {
@@ -48,17 +54,60 @@ async function run() {
         /amount must be > 0/
     );
 
-    const relayerFromAddress = '0x3333333333333333333333333333333333333333';
+    const relayerFromAddress = getCreate2Address({
+        from: '0xaacfeea03eb1561c4e67d661e40682bd20e3541b',
+        salt: keccak256(
+            encodeAbiParameters(
+                [
+                    {
+                        type: 'address',
+                    },
+                ],
+                [account.address]
+            )
+        ),
+        bytecodeHash:
+            '0xb61d27f6f0f1579b6af9d23fafd567586f35f7d2f43d6bd5f85c0b690952d469',
+    });
     const relayedTxHash = `0x${'1'.repeat(64)}`;
     const onchainTxHash = `0x${'2'.repeat(64)}`;
+    const relayerTransactionId = 'relayer-tx-1';
     let relayerSubmitBody;
     let relayerSubmitHeaders;
     let statusPollCount = 0;
+    let sawSubmitEndpoint = false;
     const oldFetch = globalThis.fetch;
     try {
         globalThis.fetch = async (url, options = {}) => {
             const asText = String(url);
-            if (asText.endsWith('/relayer/transaction')) {
+            const asLower = asText.toLowerCase();
+            if (asLower.includes('/deployed?') && asLower.includes(relayerFromAddress.toLowerCase())) {
+                return {
+                    ok: true,
+                    status: 200,
+                    statusText: 'OK',
+                    async text() {
+                        return JSON.stringify({ deployed: true });
+                    },
+                };
+            }
+
+            if (asText.includes('/relay-payload?')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    statusText: 'OK',
+                    async text() {
+                        return JSON.stringify({
+                            address: relayerFromAddress,
+                            nonce: '12',
+                        });
+                    },
+                };
+            }
+
+            if (asText.endsWith('/submit')) {
+                sawSubmitEndpoint = true;
                 relayerSubmitBody = JSON.parse(options.body);
                 relayerSubmitHeaders = options.headers;
                 return {
@@ -66,12 +115,20 @@ async function run() {
                     status: 200,
                     statusText: 'OK',
                     async text() {
-                        return JSON.stringify({ txHash: relayedTxHash });
+                        return JSON.stringify({
+                            transactionID: relayerTransactionId,
+                            hash: relayedTxHash,
+                            state: 'STATE_PENDING',
+                        });
                     },
                 };
             }
 
-            if (asText.endsWith(`/relayer/transaction-status/${relayedTxHash}`)) {
+            if (
+                asText.includes('/transaction?') &&
+                (asText.includes(`id=${relayerTransactionId}`) ||
+                    asText.includes(`transactionID=${relayerTransactionId}`))
+            ) {
                 statusPollCount += 1;
                 return {
                     ok: true,
@@ -79,13 +136,22 @@ async function run() {
                     statusText: 'OK',
                     async text() {
                         if (statusPollCount === 1) {
-                            return JSON.stringify({ status: 'PENDING', txHash: relayedTxHash });
+                            return JSON.stringify([
+                                {
+                                    transactionID: relayerTransactionId,
+                                    hash: relayedTxHash,
+                                    state: 'STATE_PENDING',
+                                },
+                            ]);
                         }
-                        return JSON.stringify({
-                            status: 'MINED',
-                            txHash: relayedTxHash,
-                            transactionHash: onchainTxHash,
-                        });
+                        return JSON.stringify([
+                            {
+                                transactionID: relayerTransactionId,
+                                hash: relayedTxHash,
+                                state: 'STATE_CONFIRMED',
+                                transactionHash: onchainTxHash,
+                            },
+                        ]);
                     },
                 };
             }
@@ -97,7 +163,7 @@ async function run() {
         const relayerWalletClient = {
             async signMessage({ message }) {
                 relayerSignedMessage = message;
-                return `0x${'a'.repeat(130)}`;
+                return `0x${'a'.repeat(128)}1b`;
             },
         };
 
@@ -135,14 +201,20 @@ async function run() {
         });
 
         assert.equal(relayerDepositHash, onchainTxHash);
+        assert.equal(sawSubmitEndpoint, true);
         assert.equal(relayerSubmitBody.type, 'SAFE');
-        assert.equal(relayerSubmitBody.from.toLowerCase(), relayerFromAddress.toLowerCase());
+        assert.equal(relayerSubmitBody.from.toLowerCase(), account.address.toLowerCase());
+        assert.equal(relayerSubmitBody.proxyWallet.toLowerCase(), relayerFromAddress.toLowerCase());
         assert.equal(relayerSubmitBody.to.toLowerCase(), token.toLowerCase());
-        assert.equal(relayerSubmitBody.value, '0');
-        assert.equal(relayerSubmitBody.operation, 0);
         assert.equal(relayerSubmitBody.nonce, '12');
+        assert.equal(typeof relayerSubmitBody.signatureParams, 'object');
+        assert.equal(relayerSubmitBody.signatureParams.gasPrice, '0');
+        assert.equal(relayerSubmitBody.signatureParams.safeTxnGas, '0');
+        assert.equal(relayerSubmitBody.signatureParams.baseGas, '0');
+        assert.equal(relayerSubmitBody.signatureParams.operation, '0');
         assert.equal(typeof relayerSubmitBody.signature, 'string');
-        assert.equal(relayerSubmitBody.metadata.tool, 'make_erc1155_deposit');
+        assert.equal(typeof relayerSubmitBody.metadata, 'string');
+        assert.equal(relayerSubmitBody.metadata.includes('make_erc1155_deposit'), true);
         assert.equal(relayerSubmitHeaders.POLY_BUILDER_API_KEY, 'builder-key');
         assert.equal(relayerSubmitHeaders.POLY_BUILDER_PASSPHRASE, 'builder-passphrase');
         assert.equal(typeof relayerSubmitHeaders.POLY_BUILDER_SIGNATURE, 'string');
