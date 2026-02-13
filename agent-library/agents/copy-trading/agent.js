@@ -773,7 +773,7 @@ async function validateToolCalls({
             if (!state.orderSubmitted) {
                 throw new Error('Cannot deposit YES/NO tokens before copy order submission.');
             }
-            if (state.copyOrderId && !state.copyOrderFilled) {
+            if (!state.copyOrderFilled) {
                 throw new Error('Copy order has not been filled yet; wait before depositing tokens.');
             }
             if (state.tokenDeposited) {
@@ -841,11 +841,12 @@ function onToolOutput({ name, parsedOutput }) {
     }
 
     if (name === 'polymarket_clob_build_sign_and_place_order' && parsedOutput.status === 'submitted') {
-        copyTradingState.orderSubmitted = true;
-        copyTradingState.copyOrderId = extractOrderIdFromSubmission(parsedOutput);
+        const submittedOrderId = extractOrderIdFromSubmission(parsedOutput);
+        copyTradingState.orderSubmitted = Boolean(submittedOrderId);
+        copyTradingState.copyOrderId = submittedOrderId;
         copyTradingState.copyOrderStatus = extractOrderStatusFromSubmission(parsedOutput);
         copyTradingState.copyOrderFilled = false;
-        copyTradingState.copyOrderSubmittedMs = Date.now();
+        copyTradingState.copyOrderSubmittedMs = submittedOrderId ? Date.now() : null;
         return;
     }
 

@@ -704,6 +704,139 @@ async function runOrderFillConfirmationGatesDepositTest() {
     }
 }
 
+async function runMissingOrderIdDoesNotAdvanceOrderStateTest() {
+    resetCopyTradingState();
+    const envKeys = [
+        'COPY_TRADING_SOURCE_USER',
+        'COPY_TRADING_MARKET',
+        'COPY_TRADING_YES_TOKEN_ID',
+        'COPY_TRADING_NO_TOKEN_ID',
+    ];
+    const oldEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+    const oldFetch = globalThis.fetch;
+
+    process.env.COPY_TRADING_SOURCE_USER = TEST_SOURCE_USER;
+    process.env.COPY_TRADING_MARKET = 'test-market';
+    process.env.COPY_TRADING_YES_TOKEN_ID = YES_TOKEN_ID;
+    process.env.COPY_TRADING_NO_TOKEN_ID = NO_TOKEN_ID;
+
+    try {
+        globalThis.fetch = async () => ({
+            ok: true,
+            async json() {
+                return [
+                    {
+                        id: 'trade-1',
+                        side: 'BUY',
+                        outcome: 'YES',
+                        price: 0.5,
+                    },
+                ];
+            },
+        });
+
+        const config = {
+            commitmentSafe: TEST_SAFE,
+            polymarketConditionalTokens: '0x4d97dcd97ec945f40cf65f87097ace5ea0476045',
+        };
+        const publicClient = {
+            async readContract({ args }) {
+                if (args.length === 1) return 1_000_000n;
+                return 5n;
+            },
+        };
+
+        await enrichSignals([], {
+            publicClient,
+            config,
+            account: { address: TEST_ACCOUNT },
+            onchainPendingProposal: false,
+        });
+
+        onToolOutput({
+            name: 'polymarket_clob_build_sign_and_place_order',
+            parsedOutput: { status: 'submitted' },
+        });
+
+        const state = getCopyTradingState();
+        assert.equal(state.orderSubmitted, false);
+        assert.equal(state.copyOrderId, null);
+        assert.equal(state.copyOrderSubmittedMs, null);
+        assert.equal(state.copyOrderFilled, false);
+
+        await assert.rejects(
+            () =>
+                validateToolCalls({
+                    toolCalls: [
+                        {
+                            callId: 'deposit-no-order-id',
+                            name: 'make_erc1155_deposit',
+                            arguments: {},
+                        },
+                    ],
+                    signals: [
+                        {
+                            kind: 'copyTradingState',
+                            policy: {
+                                ready: true,
+                                ctfContract: config.polymarketConditionalTokens,
+                                collateralToken: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
+                            },
+                            state,
+                            balances: {
+                                activeTokenBalance: '5',
+                            },
+                            pendingProposal: false,
+                        },
+                    ],
+                    config: {},
+                    agentAddress: TEST_ACCOUNT,
+                    onchainPendingProposal: false,
+                }),
+            /before copy order submission/
+        );
+
+        const orderValidated = await validateToolCalls({
+            toolCalls: [
+                {
+                    callId: 'order-retry',
+                    name: 'polymarket_clob_build_sign_and_place_order',
+                    arguments: {},
+                },
+            ],
+            signals: [
+                {
+                    kind: 'copyTradingState',
+                    policy: {
+                        ready: true,
+                        ctfContract: config.polymarketConditionalTokens,
+                        collateralToken: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
+                    },
+                    state,
+                    balances: {
+                        activeTokenBalance: '5',
+                    },
+                    pendingProposal: false,
+                },
+            ],
+            config: {},
+            agentAddress: TEST_ACCOUNT,
+            onchainPendingProposal: false,
+        });
+        assert.equal(orderValidated.length, 1);
+    } finally {
+        for (const key of envKeys) {
+            if (oldEnv[key] === undefined) {
+                delete process.env[key];
+            } else {
+                process.env[key] = oldEnv[key];
+            }
+        }
+        globalThis.fetch = oldFetch;
+        resetCopyTradingState();
+    }
+}
+
 async function runSubmissionWithoutHashesDoesNotWedgeTest() {
     resetCopyTradingState();
     const envKeys = [
@@ -896,6 +1029,7 @@ async function run() {
     await runProposalHashRecoveryFromSignalTest();
     await runRevertedSubmissionClearsPendingTest();
     await runOrderFillConfirmationGatesDepositTest();
+    await runMissingOrderIdDoesNotAdvanceOrderStateTest();
     await runSubmissionWithoutHashesDoesNotWedgeTest();
     await runFetchLatestBuyTradeTest();
     console.log('[test] copy-trading agent OK');
