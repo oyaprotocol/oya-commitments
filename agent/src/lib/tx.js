@@ -673,7 +673,7 @@ async function makeErc1155Deposit({
 
     const transferData = data ?? '0x';
     if (isPolymarketRelayerEnabled(config)) {
-        let relayerFromAddress = config?.polymarketRelayerFromAddress ?? config?.polymarketClobAddress;
+        let relayerFromAddress = config?.polymarketRelayerFromAddress;
         if (!relayerFromAddress) {
             const resolved = await resolveRelayerProxyWallet({
                 publicClient,

@@ -118,8 +118,7 @@ async function resolveTokenHolderAddress({
     }
 
     const configuredRelayerAddress =
-        normalizeAddress(config?.polymarketRelayerFromAddress) ??
-        normalizeAddress(config?.polymarketClobAddress);
+        normalizeAddress(config?.polymarketRelayerFromAddress);
     if (configuredRelayerAddress) {
         return {
             tokenHolderAddress: configuredRelayerAddress,

@@ -960,9 +960,6 @@ async function resolveProxyWalletAddress({
     if (config?.polymarketRelayerFromAddress) {
         return getAddress(config.polymarketRelayerFromAddress);
     }
-    if (config?.polymarketClobAddress) {
-        return getAddress(config.polymarketClobAddress);
-    }
 
     const resolveProxyAddress = config?.polymarketRelayerResolveProxyAddress !== false;
     if (resolveProxyAddress) {
@@ -1048,7 +1045,7 @@ async function resolveRelayerProxyWallet({
 
     if (!resolvedProxyWallet) {
         throw new Error(
-            'Unable to resolve relayer proxy wallet address. Set POLYMARKET_RELAYER_FROM_ADDRESS or POLYMARKET_CLOB_ADDRESS, or enable POLYMARKET_RELAYER_AUTO_DEPLOY_PROXY.'
+            'Unable to resolve relayer proxy wallet address. Set POLYMARKET_RELAYER_FROM_ADDRESS, or enable relayer proxy resolution/auto-deploy.'
         );
     }
 
