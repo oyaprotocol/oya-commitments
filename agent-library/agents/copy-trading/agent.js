@@ -575,11 +575,12 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
     } catch (error) {
         tradeFetchError = error?.message ?? String(error);
     }
-    const clobAuthAddress =
-        getClobAuthAddress({
-            config,
-            accountAddress: account.address,
-        }) ?? normalizeAddress(account.address);
+    const configuredClobAddress = normalizeAddress(config?.polymarketClobAddress);
+    const runtimeSignerAddress = normalizeAddress(account.address);
+    const clobAuthAddress = configuredClobAddress ?? runtimeSignerAddress;
+    const clobAuthAddressLabel = configuredClobAddress
+        ? 'POLYMARKET_CLOB_ADDRESS'
+        : 'runtime signer address (fallback for POLYMARKET_CLOB_ADDRESS)';
     const { tokenHolderAddress, tokenHolderResolutionError } = await resolveTokenHolderAddress({
         publicClient,
         config,
@@ -594,7 +595,7 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
                 tokenHolderResolutionError ?? 'Unable to resolve relayer token-holder address.';
         } else if (clobAuthAddress !== tokenHolderAddress) {
             walletAlignmentError =
-                `POLYMARKET_CLOB_ADDRESS (${clobAuthAddress}) must match relayer proxy wallet (${tokenHolderAddress}) when POLYMARKET_RELAYER_ENABLED=true.`;
+                `${clobAuthAddressLabel} (${clobAuthAddress}) must match relayer proxy wallet (${tokenHolderAddress}) when POLYMARKET_RELAYER_ENABLED=true.`;
         }
     }
 
