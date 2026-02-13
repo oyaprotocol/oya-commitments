@@ -858,6 +858,18 @@ async function executeToolCalls({
                     args.feeRateBps,
                     'feeRateBps'
                 );
+                const configuredSignatureType =
+                    config.polymarketClobSignatureType !== undefined &&
+                    config.polymarketClobSignatureType !== null &&
+                    String(config.polymarketClobSignatureType).trim() !== ''
+                        ? config.polymarketClobSignatureType
+                        : undefined;
+                const requestedSignatureType =
+                    args.signatureType !== undefined &&
+                    args.signatureType !== null &&
+                    String(args.signatureType).trim() !== ''
+                        ? args.signatureType
+                        : configuredSignatureType;
                 const unsignedOrder = buildClobOrderFromRaw({
                     maker,
                     signer,
@@ -866,12 +878,25 @@ async function executeToolCalls({
                     makerAmount: args.makerAmount,
                     takerAmount: args.takerAmount,
                     side: declaredSideEnum,
-                    signatureType: args.signatureType,
+                    signatureType: requestedSignatureType,
                     salt: normalizedSalt,
                     expiration: normalizedExpiration,
                     nonce: normalizedNonce,
                     feeRateBps: normalizedFeeRateBps,
                 });
+                const signatureTypeIndex = Number(unsignedOrder.signatureType);
+                if (signatureTypeIndex !== 0) {
+                    if (!config.polymarketClobAddress) {
+                        throw new Error(
+                            'POLYMARKET_CLOB_ADDRESS is required for POLY_PROXY/POLY_GNOSIS_SAFE signature types.'
+                        );
+                    }
+                    if (maker !== clobAuthAddress) {
+                        throw new Error(
+                            'maker must match POLYMARKET_CLOB_ADDRESS for POLY_PROXY/POLY_GNOSIS_SAFE signature types.'
+                        );
+                    }
+                }
                 const signedOrder = await signClobOrder({
                     walletClient,
                     account,

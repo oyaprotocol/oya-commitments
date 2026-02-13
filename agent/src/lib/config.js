@@ -71,6 +71,7 @@ function buildConfig() {
         polymarketClobAddress: process.env.POLYMARKET_CLOB_ADDRESS
             ? getAddress(process.env.POLYMARKET_CLOB_ADDRESS)
             : undefined,
+        polymarketClobSignatureType: process.env.POLYMARKET_CLOB_SIGNATURE_TYPE,
         polymarketClobApiKey: process.env.POLYMARKET_CLOB_API_KEY,
         polymarketClobApiSecret: process.env.POLYMARKET_CLOB_API_SECRET,
         polymarketClobApiPassphrase: process.env.POLYMARKET_CLOB_API_PASSPHRASE,
