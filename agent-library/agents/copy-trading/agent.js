@@ -485,7 +485,7 @@ function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
         'You are a copy-trading commitment agent.',
         'Copy only BUY trades from the configured source user and configured market.',
         'Trade size must be exactly 99% of Safe collateral at detection time. Keep 1% in the Safe as fee.',
-        'Flow must stay simple: place CLOB order from your own wallet, wait for CLOB fill confirmation and YES/NO token receipt, deposit tokens to Safe, then propose reimbursement transfer to agentAddress.',
+        'Flow must stay simple: place CLOB order from your configured trading wallet, wait for CLOB fill confirmation and YES/NO token receipt, deposit tokens to Safe, then propose reimbursement transfer to agentAddress.',
         'Never trade more than 99% of Safe collateral. Reimburse exactly the stored reimbursement amount (full Safe collateral at detection).',
         'Use polymarket_clob_build_sign_and_place_order for order placement, make_erc1155_deposit for YES/NO deposit, and build_og_transactions for reimbursement transfer.',
         'If preconditions are not met, return ignore.',
@@ -520,6 +520,11 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
     } catch (error) {
         tradeFetchError = error?.message ?? String(error);
     }
+    const tokenHolderAddress =
+        getClobAuthAddress({
+            config,
+            accountAddress: account.address,
+        }) ?? normalizeAddress(account.address);
 
     const [safeCollateralWei, yesBalance, noBalance] = await Promise.all([
         publicClient.readContract({
@@ -532,13 +537,13 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
             address: policy.ctfContract,
             abi: erc1155Abi,
             functionName: 'balanceOf',
-            args: [account.address, BigInt(policy.yesTokenId)],
+            args: [tokenHolderAddress, BigInt(policy.yesTokenId)],
         }),
         publicClient.readContract({
             address: policy.ctfContract,
             abi: erc1155Abi,
             functionName: 'balanceOf',
-            args: [account.address, BigInt(policy.noTokenId)],
+            args: [tokenHolderAddress, BigInt(policy.noTokenId)],
         }),
     ]);
 
@@ -680,6 +685,7 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
             yesBalance: yesBalance.toString(),
             noBalance: noBalance.toString(),
             activeTokenBalance: activeTokenBalance.toString(),
+            tokenHolderAddress,
         },
         metrics: {
             ...amounts,

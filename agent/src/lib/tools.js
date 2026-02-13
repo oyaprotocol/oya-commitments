@@ -991,6 +991,7 @@ async function executeToolCalls({
                 continue;
             }
             const txHash = await makeErc1155Deposit({
+                publicClient,
                 walletClient,
                 account,
                 config,

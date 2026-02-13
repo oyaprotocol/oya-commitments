@@ -16,6 +16,7 @@ const NO_TOKEN_ID = '456';
 const TEST_ACCOUNT = '0x1111111111111111111111111111111111111111';
 const TEST_SAFE = '0x2222222222222222222222222222222222222222';
 const TEST_SOURCE_USER = '0x3333333333333333333333333333333333333333';
+const TEST_CLOB_PROXY = '0x4444444444444444444444444444444444444444';
 const TEST_PROPOSAL_HASH = `0x${'a'.repeat(64)}`;
 const OTHER_PROPOSAL_HASH = `0x${'b'.repeat(64)}`;
 const TEST_TX_HASH = `0x${'c'.repeat(64)}`;
@@ -1020,6 +1021,73 @@ async function runFetchLatestBuyTradeTest() {
     }
 }
 
+async function runTokenBalancesUseClobAddressTest() {
+    resetCopyTradingState();
+    const envKeys = [
+        'COPY_TRADING_SOURCE_USER',
+        'COPY_TRADING_MARKET',
+        'COPY_TRADING_YES_TOKEN_ID',
+        'COPY_TRADING_NO_TOKEN_ID',
+    ];
+    const oldEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+    const oldFetch = globalThis.fetch;
+
+    process.env.COPY_TRADING_SOURCE_USER = TEST_SOURCE_USER;
+    process.env.COPY_TRADING_MARKET = 'test-market';
+    process.env.COPY_TRADING_YES_TOKEN_ID = YES_TOKEN_ID;
+    process.env.COPY_TRADING_NO_TOKEN_ID = NO_TOKEN_ID;
+
+    try {
+        globalThis.fetch = async () => ({
+            ok: true,
+            async json() {
+                return [
+                    {
+                        id: 'trade-1',
+                        side: 'BUY',
+                        outcome: 'YES',
+                        price: 0.5,
+                    },
+                ];
+            },
+        });
+
+        const erc1155BalanceCallAddresses = [];
+        await enrichSignals([], {
+            publicClient: {
+                async readContract({ args }) {
+                    if (args.length === 1) {
+                        return 1_000_000n;
+                    }
+                    erc1155BalanceCallAddresses.push(String(args[0]).toLowerCase());
+                    return 1n;
+                },
+            },
+            config: {
+                commitmentSafe: TEST_SAFE,
+                polymarketConditionalTokens: '0x4d97dcd97ec945f40cf65f87097ace5ea0476045',
+                polymarketClobAddress: TEST_CLOB_PROXY,
+            },
+            account: { address: TEST_ACCOUNT },
+            onchainPendingProposal: false,
+        });
+
+        assert.equal(erc1155BalanceCallAddresses.length, 2);
+        assert.equal(erc1155BalanceCallAddresses[0], TEST_CLOB_PROXY.toLowerCase());
+        assert.equal(erc1155BalanceCallAddresses[1], TEST_CLOB_PROXY.toLowerCase());
+    } finally {
+        for (const key of envKeys) {
+            if (oldEnv[key] === undefined) {
+                delete process.env[key];
+            } else {
+                process.env[key] = oldEnv[key];
+            }
+        }
+        globalThis.fetch = oldFetch;
+        resetCopyTradingState();
+    }
+}
+
 async function run() {
     runPromptTest();
     runMathTests();
@@ -1032,6 +1100,7 @@ async function run() {
     await runMissingOrderIdDoesNotAdvanceOrderStateTest();
     await runSubmissionWithoutHashesDoesNotWedgeTest();
     await runFetchLatestBuyTradeTest();
+    await runTokenBalancesUseClobAddressTest();
     console.log('[test] copy-trading agent OK');
 }
 

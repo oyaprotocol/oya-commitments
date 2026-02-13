@@ -13,6 +13,10 @@ import {
     transactionsProposedEvent,
 } from './og.js';
 import { normalizeAssertion } from './og.js';
+import {
+    isPolymarketRelayerEnabled,
+    relayPolymarketTransaction,
+} from './polymarket-relayer.js';
 import { normalizeHashOrNull, summarizeViemError } from './utils.js';
 
 const conditionalTokensAbi = parseAbi([
@@ -646,6 +650,7 @@ async function makeDeposit({
 }
 
 async function makeErc1155Deposit({
+    publicClient,
     walletClient,
     account,
     config,
@@ -666,6 +671,43 @@ async function makeErc1155Deposit({
     }
 
     const transferData = data ?? '0x';
+    if (isPolymarketRelayerEnabled(config)) {
+        const relayerFromAddress = config?.polymarketRelayerFromAddress ?? config?.polymarketClobAddress;
+        if (!relayerFromAddress) {
+            throw new Error(
+                'Polymarket relayer ERC1155 deposit requires POLYMARKET_RELAYER_FROM_ADDRESS or POLYMARKET_CLOB_ADDRESS.'
+            );
+        }
+        const transferCallData = encodeFunctionData({
+            abi: erc1155TransferAbi,
+            functionName: 'safeTransferFrom',
+            args: [
+                getAddress(relayerFromAddress),
+                config.commitmentSafe,
+                normalizedTokenId,
+                normalizedAmount,
+                transferData,
+            ],
+        });
+        const relayed = await relayPolymarketTransaction({
+            publicClient,
+            walletClient,
+            account,
+            config,
+            from: relayerFromAddress,
+            to: normalizedToken,
+            data: transferCallData,
+            value: 0n,
+            operation: 0,
+            metadata: {
+                tool: 'make_erc1155_deposit',
+                token: normalizedToken,
+                tokenId: normalizedTokenId.toString(),
+                amount: normalizedAmount.toString(),
+            },
+        });
+        return relayed.transactionHash;
+    }
 
     return walletClient.writeContract({
         address: normalizedToken,
