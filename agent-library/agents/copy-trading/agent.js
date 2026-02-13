@@ -8,34 +8,12 @@ import {
     getClobOrder,
     getClobTrades,
 } from '../../../agent/src/lib/polymarket.js';
-
-const erc20BalanceOfAbi = [
-    {
-        type: 'function',
-        name: 'balanceOf',
-        stateMutability: 'view',
-        inputs: [{ name: 'account', type: 'address' }],
-        outputs: [{ name: '', type: 'uint256' }],
-    },
-];
-const erc1155BalanceOfAbi = [
-    {
-        type: 'function',
-        name: 'balanceOf',
-        stateMutability: 'view',
-        inputs: [
-            { name: 'account', type: 'address' },
-            { name: 'id', type: 'uint256' },
-        ],
-        outputs: [{ name: '', type: 'uint256' }],
-    },
-];
+import { decodeFunctionData, erc20Abi, erc1155Abi } from 'viem';
 
 const COPY_BPS = 9900n;
 const FEE_BPS = 100n;
 const BPS_DENOMINATOR = 10_000n;
 const PRICE_SCALE = 1_000_000n;
-const ERC20_TRANSFER_SELECTOR = '0xa9059cbb';
 const REIMBURSEMENT_SUBMISSION_TIMEOUT_MS = 60_000;
 
 let copyTradingState = {
@@ -259,20 +237,21 @@ async function fetchRelatedClobTrades({
 
 function decodeErc20TransferCallData(data) {
     if (typeof data !== 'string') return null;
-    const normalized = data.toLowerCase();
-    if (!normalized.startsWith(ERC20_TRANSFER_SELECTOR)) return null;
-    if (normalized.length !== 138) return null;
-    const toWord = normalized.slice(10, 74);
-    const amountWord = normalized.slice(74, 138);
-    const to = normalizeAddress(`0x${toWord.slice(24)}`);
-    if (!to) return null;
-    let amount;
+
     try {
-        amount = BigInt(`0x${amountWord}`);
+        const decoded = decodeFunctionData({
+            abi: erc20Abi,
+            data,
+        });
+        if (decoded.functionName !== 'transfer') return null;
+        const to = normalizeAddress(decoded.args?.[0]);
+        if (!to) return null;
+        const amount = BigInt(decoded.args?.[1] ?? 0n);
+        if (amount < 0n) return null;
+        return { to, amount };
     } catch (error) {
         return null;
     }
-    return { to, amount };
 }
 
 function findMatchingReimbursementProposalHash({
@@ -588,19 +567,19 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
     const [safeCollateralWei, yesBalance, noBalance] = await Promise.all([
         publicClient.readContract({
             address: policy.collateralToken,
-            abi: erc20BalanceOfAbi,
+            abi: erc20Abi,
             functionName: 'balanceOf',
             args: [config.commitmentSafe],
         }),
         publicClient.readContract({
             address: policy.ctfContract,
-            abi: erc1155BalanceOfAbi,
+            abi: erc1155Abi,
             functionName: 'balanceOf',
             args: [account.address, BigInt(policy.yesTokenId)],
         }),
         publicClient.readContract({
             address: policy.ctfContract,
-            abi: erc1155BalanceOfAbi,
+            abi: erc1155Abi,
             functionName: 'balanceOf',
             args: [account.address, BigInt(policy.noTokenId)],
         }),
