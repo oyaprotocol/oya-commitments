@@ -106,7 +106,8 @@ Set these when using Polymarket functionality:
 - `POLYMARKET_RELAYER_ENABLED`: Enable Polymarket relayer submission for ERC1155 deposits (`true`/`false`, default `false`).
 - `POLYMARKET_RELAYER_HOST`: Relayer API host (default `https://relayer-v2.polymarket.com`).
 - `POLYMARKET_RELAYER_TX_TYPE`: Relayer wallet type (`SAFE` default, or `PROXY`).
-- `POLYMARKET_RELAYER_FROM_ADDRESS`: Optional explicit relayer wallet address to send from.
+- `POLYMARKET_RELAYER_FROM_ADDRESS`: Optional explicit relayer proxy wallet address (if omitted, runtime auto-resolves from signer + relayer APIs / deterministic address).
+- `POLYMARKET_RELAYER_SAFE_FACTORY`, `POLYMARKET_RELAYER_PROXY_FACTORY`: Optional factory overrides for deterministic SAFE/PROXY address derivation.
 - `POLYMARKET_RELAYER_RESOLVE_PROXY_ADDRESS`: Resolve proxy address via relayer API when from-address is not set (default `true`).
 - `POLYMARKET_RELAYER_AUTO_DEPLOY_PROXY`: Optionally create proxy wallet when absent (default `false`).
 - `POLYMARKET_RELAYER_CHAIN_ID`, `POLYMARKET_RELAYER_REQUEST_TIMEOUT_MS`, `POLYMARKET_RELAYER_POLL_INTERVAL_MS`, `POLYMARKET_RELAYER_POLL_TIMEOUT_MS`: Optional relayer runtime tuning.
@@ -165,7 +166,7 @@ Use `make_erc1155_deposit` after receiving YES/NO position tokens:
 }
 ```
 
-When `POLYMARKET_RELAYER_ENABLED=true`, this tool submits via Polymarket relayer (SAFE/PROXY) instead of direct onchain `writeContract`. For SAFE proxy-wallet mode, set `POLYMARKET_RELAYER_FROM_ADDRESS` (or `POLYMARKET_CLOB_ADDRESS`) to the proxy Safe that holds the YES/NO tokens.
+When `POLYMARKET_RELAYER_ENABLED=true`, this tool submits via Polymarket relayer (SAFE/PROXY) instead of direct onchain `writeContract`. If `POLYMARKET_RELAYER_FROM_ADDRESS` is not set, the runtime resolves the proxy wallet from the signer and relayer metadata. For SAFE mode, any explicitly configured proxy wallet must match the relayer-derived SAFE address for that signer.
 
 #### CLOB Place/Cancel Tools
 

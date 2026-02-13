@@ -1010,6 +1010,56 @@ async function resolveProxyWalletAddress({
     return derivedAddress;
 }
 
+async function resolveRelayerProxyWallet({
+    publicClient,
+    account,
+    config,
+    proxyWallet,
+}) {
+    if (!isPolymarketRelayerEnabled(config)) {
+        throw new Error('Polymarket relayer is disabled (POLYMARKET_RELAYER_ENABLED=false).');
+    }
+    if (!publicClient) {
+        throw new Error('publicClient is required to resolve relayer proxy wallet.');
+    }
+
+    const signerAddress = getAddress(account?.address);
+    const chainId = Number(
+        config?.polymarketRelayerChainId ??
+            (typeof publicClient.getChainId === 'function'
+                ? await publicClient.getChainId()
+                : undefined)
+    );
+
+    if (!Number.isInteger(chainId) || chainId <= 0) {
+        throw new Error(
+            'Unable to resolve chainId for relayer transaction. Set POLYMARKET_RELAYER_CHAIN_ID.'
+        );
+    }
+
+    const txType = normalizeRelayerTxType(config?.polymarketRelayerTxType);
+    const resolvedProxyWallet = await resolveProxyWalletAddress({
+        config,
+        signerAddress,
+        chainId,
+        txType,
+        explicitProxyWallet: proxyWallet,
+    });
+
+    if (!resolvedProxyWallet) {
+        throw new Error(
+            'Unable to resolve relayer proxy wallet address. Set POLYMARKET_RELAYER_FROM_ADDRESS or POLYMARKET_CLOB_ADDRESS, or enable POLYMARKET_RELAYER_AUTO_DEPLOY_PROXY.'
+        );
+    }
+
+    return {
+        signerAddress,
+        chainId,
+        txType,
+        proxyWallet: resolvedProxyWallet,
+    };
+}
+
 async function ensureSafeDeployed({
     config,
     walletClient,
@@ -1023,8 +1073,14 @@ async function ensureSafeDeployed({
         safeAddress,
     });
 
-    if (deployed === true || deployed === null) {
+    if (deployed === true) {
         return;
+    }
+
+    if (deployed === null) {
+        throw new Error(
+            `Unable to verify whether SAFE proxy wallet ${safeAddress} is deployed via relayer /deployed endpoint.`
+        );
     }
 
     if (!config?.polymarketRelayerAutoDeployProxy) {
@@ -1078,34 +1134,16 @@ async function relayPolymarketTransaction({
         throw new Error('walletClient is required for relayer transaction submission.');
     }
 
-    const signerAddress = getAddress(account?.address);
-    const chainId = Number(
-        config?.polymarketRelayerChainId ??
-            (typeof publicClient.getChainId === 'function'
-                ? await publicClient.getChainId()
-                : undefined)
-    );
-
-    if (!Number.isInteger(chainId) || chainId <= 0) {
-        throw new Error(
-            'Unable to resolve chainId for relayer transaction. Set POLYMARKET_RELAYER_CHAIN_ID.'
-        );
-    }
-
-    const txType = normalizeRelayerTxType(config?.polymarketRelayerTxType);
-    const resolvedProxyWallet = await resolveProxyWalletAddress({
+    const resolved = await resolveRelayerProxyWallet({
+        publicClient,
+        account,
         config,
-        signerAddress,
-        chainId,
-        txType,
-        explicitProxyWallet: proxyWallet,
+        proxyWallet,
     });
-
-    if (!resolvedProxyWallet) {
-        throw new Error(
-            'Unable to resolve relayer proxy wallet address. Set POLYMARKET_RELAYER_FROM_ADDRESS or POLYMARKET_CLOB_ADDRESS, or enable POLYMARKET_RELAYER_AUTO_DEPLOY_PROXY.'
-        );
-    }
+    const signerAddress = resolved.signerAddress;
+    const chainId = resolved.chainId;
+    const txType = resolved.txType;
+    const resolvedProxyWallet = resolved.proxyWallet;
 
     if (txType === RELAYER_TX_TYPE.SAFE) {
         const expectedSafeAddress = deriveSafeAddress({
@@ -1173,11 +1211,16 @@ async function relayPolymarketTransaction({
         config,
         transactionRequest: signed.request,
     });
+    if (!submission.transactionId && !submission.relayTxHash) {
+        throw new Error(
+            'Relayer submission did not return transactionID or txHash; cannot track transaction lifecycle.'
+        );
+    }
 
     const waited = await waitForRelayerTransaction({
         config,
         transactionId: submission.transactionId,
-        relayTxHash: submission.relayTxHash ?? signed.txHash,
+        relayTxHash: submission.relayTxHash,
     });
 
     let transactionHash = waited.transactionHash ?? submission.transactionHash;
@@ -1215,4 +1258,5 @@ export {
     getRelayerProxyAddress,
     isPolymarketRelayerEnabled,
     relayPolymarketTransaction,
+    resolveRelayerProxyWallet,
 };

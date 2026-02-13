@@ -237,6 +237,366 @@ async function run() {
         globalThis.fetch = oldFetch;
     }
 
+    const proxyWalletAddress = '0x5555555555555555555555555555555555555555';
+    const proxyRelayTxHash = `0x${'3'.repeat(64)}`;
+    const proxyOnchainTxHash = `0x${'4'.repeat(64)}`;
+    const proxyTransactionId = 'relayer-proxy-tx-1';
+    let proxySubmitBody;
+    const oldFetchProxy = globalThis.fetch;
+    try {
+        globalThis.fetch = async (url, options = {}) => {
+            const asText = String(url);
+            if (asText.includes('/relay-payload?')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    statusText: 'OK',
+                    async text() {
+                        return JSON.stringify({
+                            address: proxyWalletAddress,
+                            nonce: '3',
+                        });
+                    },
+                };
+            }
+
+            if (asText.endsWith('/submit')) {
+                proxySubmitBody = JSON.parse(options.body);
+                return {
+                    ok: true,
+                    status: 200,
+                    statusText: 'OK',
+                    async text() {
+                        return JSON.stringify({
+                            transactionID: proxyTransactionId,
+                            hash: proxyRelayTxHash,
+                            state: 'STATE_PENDING',
+                        });
+                    },
+                };
+            }
+
+            if (asText.includes('/transaction?') && asText.includes(proxyTransactionId)) {
+                return {
+                    ok: true,
+                    status: 200,
+                    statusText: 'OK',
+                    async text() {
+                        return JSON.stringify([
+                            {
+                                transactionID: proxyTransactionId,
+                                hash: proxyRelayTxHash,
+                                state: 'STATE_CONFIRMED',
+                                transactionHash: proxyOnchainTxHash,
+                            },
+                        ]);
+                    },
+                };
+            }
+
+            throw new Error(`Unexpected PROXY relayer fetch URL: ${asText}`);
+        };
+
+        let proxySignedMessage;
+        const proxyWalletClient = {
+            async signMessage({ message }) {
+                proxySignedMessage = message;
+                return `0x${'c'.repeat(128)}1b`;
+            },
+        };
+        const proxyPublicClient = {
+            async getChainId() {
+                return 137;
+            },
+        };
+
+        const proxyConfig = {
+            commitmentSafe: config.commitmentSafe,
+            polymarketRelayerEnabled: true,
+            polymarketRelayerHost: 'https://relayer-v2.polymarket.com',
+            polymarketRelayerTxType: 'PROXY',
+            polymarketBuilderApiKey: 'builder-key',
+            polymarketBuilderSecret: Buffer.from('builder-secret').toString('base64'),
+            polymarketBuilderPassphrase: 'builder-passphrase',
+            polymarketRelayerPollIntervalMs: 0,
+            polymarketRelayerPollTimeoutMs: 1_000,
+        };
+
+        const proxyDepositHash = await makeErc1155Deposit({
+            publicClient: proxyPublicClient,
+            walletClient: proxyWalletClient,
+            account,
+            config: proxyConfig,
+            token,
+            tokenId: '8',
+            amount: '4',
+            data: null,
+        });
+
+        assert.equal(proxyDepositHash, proxyOnchainTxHash);
+        assert.equal(proxySubmitBody.type, 'PROXY');
+        assert.equal(proxySubmitBody.from.toLowerCase(), account.address.toLowerCase());
+        assert.equal(proxySubmitBody.proxyWallet.toLowerCase(), proxyWalletAddress.toLowerCase());
+        assert.equal(proxySubmitBody.signatureParams.chainId, '137');
+        assert.equal(proxySubmitBody.nonce, '3');
+        assert.ok(proxySignedMessage?.raw);
+
+        const decodedProxy = decodeFunctionData({
+            abi: parseAbi([
+                'function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data)',
+            ]),
+            data: proxySubmitBody.data,
+        });
+        assert.equal(decodedProxy.args[0].toLowerCase(), proxyWalletAddress.toLowerCase());
+        assert.equal(decodedProxy.args[1].toLowerCase(), config.commitmentSafe.toLowerCase());
+        assert.equal(decodedProxy.args[2], 8n);
+        assert.equal(decodedProxy.args[3], 4n);
+    } finally {
+        globalThis.fetch = oldFetchProxy;
+    }
+
+    const safeCreateRelayHash = `0x${'5'.repeat(64)}`;
+    const safeCreateOnchainHash = `0x${'6'.repeat(64)}`;
+    const safeActionRelayHash = `0x${'7'.repeat(64)}`;
+    const safeActionOnchainHash = `0x${'8'.repeat(64)}`;
+    const safeCreateTransactionId = 'safe-create-1';
+    const safeActionTransactionId = 'safe-action-1';
+    let safeCreateSubmitBody;
+    let safeActionSubmitBody;
+    let submitCount = 0;
+    let signTypedDataCalled = false;
+    const oldFetchSafeCreate = globalThis.fetch;
+    try {
+        globalThis.fetch = async (url, options = {}) => {
+            const asText = String(url);
+            const asLower = asText.toLowerCase();
+
+            if (asText.includes('/relay-payload?')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    statusText: 'OK',
+                    async text() {
+                        return JSON.stringify({
+                            address: relayerFromAddress,
+                            nonce: '9',
+                        });
+                    },
+                };
+            }
+
+            if (asLower.includes('/deployed?') && asLower.includes(relayerFromAddress.toLowerCase())) {
+                return {
+                    ok: true,
+                    status: 200,
+                    statusText: 'OK',
+                    async text() {
+                        return JSON.stringify({ deployed: false });
+                    },
+                };
+            }
+
+            if (asText.endsWith('/submit')) {
+                submitCount += 1;
+                const body = JSON.parse(options.body);
+                if (submitCount === 1) {
+                    safeCreateSubmitBody = body;
+                    return {
+                        ok: true,
+                        status: 200,
+                        statusText: 'OK',
+                        async text() {
+                            return JSON.stringify({
+                                transactionID: safeCreateTransactionId,
+                                hash: safeCreateRelayHash,
+                                state: 'STATE_PENDING',
+                            });
+                        },
+                    };
+                }
+                safeActionSubmitBody = body;
+                return {
+                    ok: true,
+                    status: 200,
+                    statusText: 'OK',
+                    async text() {
+                        return JSON.stringify({
+                            transactionID: safeActionTransactionId,
+                            hash: safeActionRelayHash,
+                            state: 'STATE_PENDING',
+                        });
+                    },
+                };
+            }
+
+            if (asText.includes('/transaction?') && asText.includes(safeCreateTransactionId)) {
+                return {
+                    ok: true,
+                    status: 200,
+                    statusText: 'OK',
+                    async text() {
+                        return JSON.stringify([
+                            {
+                                transactionID: safeCreateTransactionId,
+                                hash: safeCreateRelayHash,
+                                state: 'STATE_CONFIRMED',
+                                transactionHash: safeCreateOnchainHash,
+                            },
+                        ]);
+                    },
+                };
+            }
+
+            if (asText.includes('/transaction?') && asText.includes(safeActionTransactionId)) {
+                return {
+                    ok: true,
+                    status: 200,
+                    statusText: 'OK',
+                    async text() {
+                        return JSON.stringify([
+                            {
+                                transactionID: safeActionTransactionId,
+                                hash: safeActionRelayHash,
+                                state: 'STATE_CONFIRMED',
+                                transactionHash: safeActionOnchainHash,
+                            },
+                        ]);
+                    },
+                };
+            }
+
+            throw new Error(`Unexpected SAFE-CREATE relayer fetch URL: ${asText}`);
+        };
+
+        const safeCreateWalletClient = {
+            async signTypedData(args) {
+                signTypedDataCalled = true;
+                assert.equal(args.primaryType, 'CreateProxy');
+                return `0x${'d'.repeat(130)}`;
+            },
+            async signMessage() {
+                return `0x${'e'.repeat(128)}1b`;
+            },
+        };
+        const safeCreatePublicClient = {
+            async getChainId() {
+                return 137;
+            },
+        };
+
+        const safeCreateConfig = {
+            commitmentSafe: config.commitmentSafe,
+            polymarketRelayerEnabled: true,
+            polymarketRelayerHost: 'https://relayer-v2.polymarket.com',
+            polymarketRelayerTxType: 'SAFE',
+            polymarketRelayerAutoDeployProxy: true,
+            polymarketBuilderApiKey: 'builder-key',
+            polymarketBuilderSecret: Buffer.from('builder-secret').toString('base64'),
+            polymarketBuilderPassphrase: 'builder-passphrase',
+            polymarketRelayerPollIntervalMs: 0,
+            polymarketRelayerPollTimeoutMs: 1_000,
+        };
+
+        const safeCreateDepositHash = await makeErc1155Deposit({
+            publicClient: safeCreatePublicClient,
+            walletClient: safeCreateWalletClient,
+            account,
+            config: safeCreateConfig,
+            token,
+            tokenId: '9',
+            amount: '5',
+            data: null,
+        });
+
+        assert.equal(safeCreateDepositHash, safeActionOnchainHash);
+        assert.equal(signTypedDataCalled, true);
+        assert.equal(safeCreateSubmitBody.type, 'SAFE-CREATE');
+        assert.equal(safeCreateSubmitBody.from.toLowerCase(), account.address.toLowerCase());
+        assert.equal(safeCreateSubmitBody.proxyWallet.toLowerCase(), relayerFromAddress.toLowerCase());
+        assert.equal(safeActionSubmitBody.type, 'SAFE');
+        assert.equal(safeActionSubmitBody.proxyWallet.toLowerCase(), relayerFromAddress.toLowerCase());
+    } finally {
+        globalThis.fetch = oldFetchSafeCreate;
+    }
+
+    const oldFetchMissingTracking = globalThis.fetch;
+    try {
+        globalThis.fetch = async (url) => {
+            const asText = String(url);
+            const asLower = asText.toLowerCase();
+            if (asText.includes('/relay-payload?')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    statusText: 'OK',
+                    async text() {
+                        return JSON.stringify({
+                            address: relayerFromAddress,
+                            nonce: '12',
+                        });
+                    },
+                };
+            }
+            if (asLower.includes('/deployed?') && asLower.includes(relayerFromAddress.toLowerCase())) {
+                return {
+                    ok: true,
+                    status: 200,
+                    statusText: 'OK',
+                    async text() {
+                        return JSON.stringify({ deployed: true });
+                    },
+                };
+            }
+            if (asText.endsWith('/submit')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    statusText: 'OK',
+                    async text() {
+                        return JSON.stringify({});
+                    },
+                };
+            }
+            throw new Error(`Unexpected missing-tracking fetch URL: ${asText}`);
+        };
+
+        await assert.rejects(
+            () =>
+                makeErc1155Deposit({
+                    publicClient: {
+                        async getChainId() {
+                            return 137;
+                        },
+                    },
+                    walletClient: {
+                        async signMessage() {
+                            return `0x${'f'.repeat(128)}1b`;
+                        },
+                    },
+                    account,
+                    config: {
+                        commitmentSafe: config.commitmentSafe,
+                        polymarketRelayerEnabled: true,
+                        polymarketRelayerHost: 'https://relayer-v2.polymarket.com',
+                        polymarketRelayerTxType: 'SAFE',
+                        polymarketRelayerFromAddress: relayerFromAddress,
+                        polymarketBuilderApiKey: 'builder-key',
+                        polymarketBuilderSecret: Buffer.from('builder-secret').toString('base64'),
+                        polymarketBuilderPassphrase: 'builder-passphrase',
+                        polymarketRelayerPollIntervalMs: 0,
+                        polymarketRelayerPollTimeoutMs: 1_000,
+                    },
+                    token,
+                    tokenId: '10',
+                    amount: '1',
+                    data: null,
+                }),
+            /did not return transactionID or txHash/
+        );
+    } finally {
+        globalThis.fetch = oldFetchMissingTracking;
+    }
+
     console.log('[test] makeErc1155Deposit OK');
 }
 
