@@ -75,7 +75,8 @@ async function runValidateToolCallTests() {
                     activeTradeSide: 'BUY',
                     activeTradePrice: 0.55,
                     activeTokenId: '123',
-                    reimbursementAmountWei: '990000',
+                    copyTradeAmountWei: '990000',
+                    reimbursementAmountWei: '1000000',
                     orderSubmitted: false,
                     tokenDeposited: false,
                     reimbursementProposed: false,
@@ -118,7 +119,8 @@ async function runValidateToolCallTests() {
                     activeTradeSide: 'BUY',
                     activeTradePrice: 0.55,
                     activeTokenId: '123',
-                    reimbursementAmountWei: '990000',
+                    copyTradeAmountWei: '990000',
+                    reimbursementAmountWei: '1000000',
                     orderSubmitted: true,
                     tokenDeposited: false,
                     reimbursementProposed: false,
@@ -155,7 +157,8 @@ async function runValidateToolCallTests() {
                     activeTradeSide: 'BUY',
                     activeTradePrice: 0.55,
                     activeTokenId: '123',
-                    reimbursementAmountWei: '990000',
+                    copyTradeAmountWei: '990000',
+                    reimbursementAmountWei: '1000000',
                     orderSubmitted: true,
                     tokenDeposited: true,
                     reimbursementProposed: false,
@@ -173,7 +176,7 @@ async function runValidateToolCallTests() {
     assert.equal(reimbursementValidated.length, 1);
     assert.equal(reimbursementValidated[0].parsedArguments.actions.length, 1);
     assert.equal(reimbursementValidated[0].parsedArguments.actions[0].kind, 'erc20_transfer');
-    assert.equal(reimbursementValidated[0].parsedArguments.actions[0].amountWei, '990000');
+    assert.equal(reimbursementValidated[0].parsedArguments.actions[0].amountWei, '1000000');
 }
 
 async function runProposalHashGatingTest() {
@@ -228,6 +231,8 @@ async function runProposalHashGatingTest() {
         assert.equal(state.activeSourceTradeId, 'trade-1');
         assert.equal(state.activeTradeSide, 'BUY');
         assert.equal(state.activeTradePrice, 0.5);
+        assert.equal(state.copyTradeAmountWei, '990000');
+        assert.equal(state.reimbursementAmountWei, '1000000');
 
         onToolOutput({
             name: 'post_bond_and_propose',
@@ -343,6 +348,8 @@ async function runProposalHashRecoveryFromSignalTest() {
         assert.equal(state.reimbursementSubmissionPending, true);
         assert.equal(state.reimbursementSubmissionTxHash, TEST_TX_HASH);
         assert.equal(typeof state.reimbursementSubmissionMs, 'number');
+        assert.equal(state.copyTradeAmountWei, '990000');
+        assert.equal(state.reimbursementAmountWei, '1000000');
 
         const reimbursementAmountWei = state.reimbursementAmountWei;
         const proposalSignal = {

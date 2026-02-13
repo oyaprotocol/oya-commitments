@@ -36,6 +36,7 @@ let copyTradingState = {
     activeTradePrice: null,
     activeOutcome: null,
     activeTokenId: null,
+    copyTradeAmountWei: null,
     reimbursementAmountWei: null,
     orderSubmitted: false,
     tokenDeposited: false,
@@ -315,12 +316,18 @@ async function fetchLatestSourceTrade({ policy }) {
     return null;
 }
 
-function activateTradeCandidate({ trade, tokenId, reimbursementAmountWei }) {
+function activateTradeCandidate({
+    trade,
+    tokenId,
+    copyTradeAmountWei,
+    reimbursementAmountWei,
+}) {
     copyTradingState.activeSourceTradeId = trade.id;
     copyTradingState.activeTradeSide = trade.side;
     copyTradingState.activeTradePrice = trade.price;
     copyTradingState.activeOutcome = trade.outcome;
     copyTradingState.activeTokenId = tokenId;
+    copyTradingState.copyTradeAmountWei = copyTradeAmountWei;
     copyTradingState.reimbursementAmountWei = reimbursementAmountWei;
     copyTradingState.orderSubmitted = false;
     copyTradingState.tokenDeposited = false;
@@ -341,6 +348,7 @@ function clearActiveTrade({ markSeen = false } = {}) {
     copyTradingState.activeTradePrice = null;
     copyTradingState.activeOutcome = null;
     copyTradingState.activeTokenId = null;
+    copyTradingState.copyTradeAmountWei = null;
     copyTradingState.reimbursementAmountWei = null;
     copyTradingState.orderSubmitted = false;
     copyTradingState.tokenDeposited = false;
@@ -371,7 +379,7 @@ function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
         'Copy only BUY trades from the configured source user and configured market.',
         'Trade size must be exactly 99% of Safe collateral at detection time. Keep 1% in the Safe as fee.',
         'Flow must stay simple: place CLOB order from your own wallet, wait for YES/NO tokens, deposit tokens to Safe, then propose reimbursement transfer to agentAddress.',
-        'Never trade more than 99% of Safe collateral and never reimburse more than the stored copy amount.',
+        'Never trade more than 99% of Safe collateral. Reimburse exactly the stored reimbursement amount (full Safe collateral at detection).',
         'Use polymarket_clob_build_sign_and_place_order for order placement, make_erc1155_deposit for YES/NO deposit, and build_og_transactions for reimbursement transfer.',
         'If preconditions are not met, return ignore.',
         'Default to disputing proposals that violate these rules; prefer no-op when unsure.',
@@ -439,7 +447,8 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
         activateTradeCandidate({
             trade: latestTrade,
             tokenId: targetTokenId,
-            reimbursementAmountWei: amounts.copyAmountWei,
+            copyTradeAmountWei: amounts.copyAmountWei,
+            reimbursementAmountWei: amounts.safeBalanceWei,
         });
     }
 
@@ -582,13 +591,13 @@ async function validateToolCalls({
             if (!state.activeTokenId) {
                 throw new Error('No active YES/NO token id configured for copy trade.');
             }
-            const reimbursementAmountWei = BigInt(state.reimbursementAmountWei ?? 0);
-            if (reimbursementAmountWei <= 0n) {
-                throw new Error('Reimbursement amount is zero; refusing copy-trade order.');
+            const copyTradeAmountWei = BigInt(state.copyTradeAmountWei ?? 0);
+            if (copyTradeAmountWei <= 0n) {
+                throw new Error('Copy-trade amount is zero; refusing copy-trade order.');
             }
 
             const { makerAmount, takerAmount } = computeBuyOrderAmounts({
-                collateralAmountWei: reimbursementAmountWei,
+                collateralAmountWei: copyTradeAmountWei,
                 price: state.activeTradePrice,
             });
 
@@ -765,6 +774,7 @@ function resetCopyTradingState() {
         activeTradePrice: null,
         activeOutcome: null,
         activeTokenId: null,
+        copyTradeAmountWei: null,
         reimbursementAmountWei: null,
         orderSubmitted: false,
         tokenDeposited: false,
