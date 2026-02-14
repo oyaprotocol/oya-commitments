@@ -1,4 +1,5 @@
 import {
+    decodeEventLog,
     encodeFunctionData,
     erc20Abi,
     getAddress,
@@ -6,9 +7,18 @@ import {
     stringToHex,
     zeroAddress,
 } from 'viem';
-import { optimisticGovernorAbi, optimisticOracleAbi } from './og.js';
+import {
+    optimisticGovernorAbi,
+    optimisticOracleAbi,
+    transactionsProposedEvent,
+} from './og.js';
 import { normalizeAssertion } from './og.js';
-import { summarizeViemError } from './utils.js';
+import {
+    isPolymarketRelayerEnabled,
+    relayPolymarketTransaction,
+    resolveRelayerProxyWallet,
+} from './polymarket-relayer.js';
+import { normalizeHashOrNull, summarizeViemError } from './utils.js';
 
 const conditionalTokensAbi = parseAbi([
     'function splitPosition(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] partition, uint256 amount)',
@@ -21,6 +31,40 @@ const erc1155TransferAbi = parseAbi([
 ]);
 
 const ZERO_BYTES32 = '0x0000000000000000000000000000000000000000000000000000000000000000';
+
+function extractProposalHashFromReceipt({ receipt, ogModule }) {
+    if (!receipt?.logs || !Array.isArray(receipt.logs)) return null;
+    let normalizedOgModule;
+    try {
+        normalizedOgModule = getAddress(ogModule);
+    } catch (error) {
+        return null;
+    }
+
+    for (const log of receipt.logs) {
+        let logAddress;
+        try {
+            logAddress = getAddress(log.address);
+        } catch (error) {
+            continue;
+        }
+        if (logAddress !== normalizedOgModule) continue;
+
+        try {
+            const decoded = decodeEventLog({
+                abi: [transactionsProposedEvent],
+                data: log.data,
+                topics: log.topics,
+            });
+            const hash = normalizeHashOrNull(decoded?.args?.proposalHash);
+            if (hash) return hash;
+        } catch (error) {
+            // Ignore non-matching logs.
+        }
+    }
+
+    return null;
+}
 
 async function postBondAndPropose({
     publicClient,
@@ -115,6 +159,7 @@ async function postBondAndPropose({
         );
     }
 
+    let proposalTxHash;
     let proposalHash;
     const explanation = 'Agent serving Oya commitment.';
     const explanationBytes = stringToHex(explanation);
@@ -146,7 +191,7 @@ async function postBondAndPropose({
 
     try {
         if (simulationError) {
-            proposalHash = await walletClient.sendTransaction({
+            proposalTxHash = await walletClient.sendTransaction({
                 account,
                 to: ogModule,
                 data: proposalData,
@@ -154,7 +199,7 @@ async function postBondAndPropose({
                 gas: config.proposeGasLimit,
             });
         } else {
-            proposalHash = await walletClient.writeContract({
+            proposalTxHash = await walletClient.writeContract({
                 address: ogModule,
                 abi: optimisticGovernorAbi,
                 functionName: 'proposeTransactions',
@@ -172,12 +217,32 @@ async function postBondAndPropose({
         console.warn('[agent] Propose submission failed:', message);
     }
 
+    if (proposalTxHash) {
+        console.log('[agent] Proposal submitted tx:', proposalTxHash);
+        try {
+            const receipt = await publicClient.waitForTransactionReceipt({
+                hash: proposalTxHash,
+            });
+            proposalHash = extractProposalHashFromReceipt({
+                receipt,
+                ogModule,
+            });
+        } catch (error) {
+            const reason = error?.shortMessage ?? error?.message ?? String(error);
+            console.warn('[agent] Failed to resolve OG proposalHash from receipt:', reason);
+        }
+    }
+
     if (proposalHash) {
-        console.log('[agent] Proposal submitted:', proposalHash);
+        console.log('[agent] OG proposal hash:', proposalHash);
     }
 
     return {
-        proposalHash,
+        transactionHash: proposalTxHash,
+        // Backward-compatible alias: legacy agents read `proposalHash` as submission tx hash.
+        proposalHash: proposalTxHash,
+        // New explicit OG proposal hash extracted from TransactionsProposed logs.
+        ogProposalHash: proposalHash,
         bondAmount,
         collateral,
         optimisticOracle,
@@ -586,6 +651,7 @@ async function makeDeposit({
 }
 
 async function makeErc1155Deposit({
+    publicClient,
     walletClient,
     account,
     config,
@@ -606,6 +672,46 @@ async function makeErc1155Deposit({
     }
 
     const transferData = data ?? '0x';
+    if (isPolymarketRelayerEnabled(config)) {
+        let relayerFromAddress = config?.polymarketRelayerFromAddress;
+        if (!relayerFromAddress) {
+            const resolved = await resolveRelayerProxyWallet({
+                publicClient,
+                account,
+                config,
+            });
+            relayerFromAddress = resolved.proxyWallet;
+        }
+        const transferCallData = encodeFunctionData({
+            abi: erc1155TransferAbi,
+            functionName: 'safeTransferFrom',
+            args: [
+                getAddress(relayerFromAddress),
+                config.commitmentSafe,
+                normalizedTokenId,
+                normalizedAmount,
+                transferData,
+            ],
+        });
+        const relayed = await relayPolymarketTransaction({
+            publicClient,
+            walletClient,
+            account,
+            config,
+            proxyWallet: relayerFromAddress,
+            to: normalizedToken,
+            data: transferCallData,
+            value: 0n,
+            operation: 0,
+            metadata: {
+                tool: 'make_erc1155_deposit',
+                token: normalizedToken,
+                tokenId: normalizedTokenId.toString(),
+                amount: normalizedAmount.toString(),
+            },
+        });
+        return relayed.transactionHash;
+    }
 
     return walletClient.writeContract({
         address: normalizedToken,

@@ -6,7 +6,13 @@ import {
     postBondAndDispute,
     postBondAndPropose,
 } from './tx.js';
-import { cancelClobOrders, placeClobOrder } from './polymarket.js';
+import {
+    buildClobOrderFromRaw,
+    cancelClobOrders,
+    placeClobOrder,
+    resolveClobExchangeAddress,
+    signClobOrder,
+} from './polymarket.js';
 import { parseToolArguments } from './utils.js';
 
 function safeStringify(value) {
@@ -17,6 +23,12 @@ function normalizeOrderSide(value) {
     if (typeof value !== 'string') return undefined;
     const normalized = value.trim().toUpperCase();
     return normalized === 'BUY' || normalized === 'SELL' ? normalized : undefined;
+}
+
+function normalizeOrderSideEnumIndex(value) {
+    const normalized = normalizeOrderSide(value);
+    if (!normalized) return undefined;
+    return normalized === 'BUY' ? 0 : 1;
 }
 
 function normalizeOrderType(value) {
@@ -55,6 +67,21 @@ function maybeAddress(value) {
         return getAddress(trimmed);
     } catch (error) {
         return undefined;
+    }
+}
+
+function normalizeOptionalUintString(value, fieldName) {
+    if (value === undefined || value === null || value === '') {
+        return undefined;
+    }
+    try {
+        const normalized = BigInt(value);
+        if (normalized < 0n) {
+            throw new Error(`${fieldName} must be >= 0.`);
+        }
+        return normalized.toString();
+    } catch (error) {
+        throw new Error(`${fieldName} must be an integer value.`);
     }
 }
 
@@ -420,6 +447,91 @@ function toolDefinitions({
             },
             {
                 type: 'function',
+                name: 'polymarket_clob_build_sign_and_place_order',
+                description:
+                    'Build an unsigned CLOB order, sign it with the runtime signer (EIP-712), and submit it.',
+                strict: true,
+                parameters: {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                        owner: {
+                            type: ['string', 'null'],
+                            description:
+                                'Optional CLOB API key owner override; defaults to POLYMARKET_CLOB_API_KEY.',
+                        },
+                        side: {
+                            type: 'string',
+                            description: 'BUY or SELL.',
+                        },
+                        tokenId: {
+                            type: 'string',
+                            description: 'Polymarket token id for the order.',
+                        },
+                        orderType: {
+                            type: 'string',
+                            enum: ['GTC', 'GTD', 'FOK', 'FAK'],
+                            description: 'Order type, e.g. GTC, GTD, FOK, or FAK.',
+                        },
+                        makerAmount: {
+                            type: 'string',
+                            description: 'Order makerAmount in base units as an integer string.',
+                        },
+                        takerAmount: {
+                            type: 'string',
+                            description: 'Order takerAmount in base units as an integer string.',
+                        },
+                        maker: {
+                            type: ['string', 'null'],
+                            description:
+                                'Optional maker override. Must match runtime signer or POLYMARKET_CLOB_ADDRESS.',
+                        },
+                        signer: {
+                            type: ['string', 'null'],
+                            description:
+                                'Optional signer override. Must match runtime signer or POLYMARKET_CLOB_ADDRESS.',
+                        },
+                        taker: {
+                            type: ['string', 'null'],
+                            description: 'Optional taker address override (defaults to zero address).',
+                        },
+                        expiration: {
+                            type: ['string', 'null'],
+                            description: 'Optional expiration timestamp as integer string. Default 0.',
+                        },
+                        nonce: {
+                            type: ['string', 'null'],
+                            description: 'Optional nonce as integer string. Default 0.',
+                        },
+                        feeRateBps: {
+                            type: ['string', 'null'],
+                            description: 'Optional fee rate in bps as integer string. Default 0.',
+                        },
+                        signatureType: {
+                            type: ['string', 'integer', 'null'],
+                            description:
+                                'Optional signature type (EOA|POLY_GNOSIS_SAFE|POLY_PROXY or enum 0/1/2). Default EOA.',
+                        },
+                        salt: {
+                            type: ['string', 'null'],
+                            description: 'Optional uint256 salt as integer string. Random if omitted.',
+                        },
+                        exchange: {
+                            type: ['string', 'null'],
+                            description:
+                                'Optional CTF exchange address override for EIP-712 domain verifyingContract.',
+                        },
+                        chainId: {
+                            type: ['integer', 'null'],
+                            description:
+                                'Optional chainId override for EIP-712 domain. Defaults to current RPC chain.',
+                        },
+                    },
+                    required: ['side', 'tokenId', 'orderType', 'makerAmount', 'takerAmount'],
+                },
+            },
+            {
+                type: 'function',
                 name: 'polymarket_clob_cancel_orders',
                 description:
                     'Cancel Polymarket CLOB orders by ids, by market, or cancel all open orders.',
@@ -660,6 +772,181 @@ async function executeToolCalls({
             continue;
         }
 
+        if (call.name === 'polymarket_clob_build_sign_and_place_order') {
+            if (!config.polymarketClobEnabled) {
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'skipped',
+                        reason: 'polymarket CLOB disabled',
+                    }),
+                });
+                continue;
+            }
+
+            try {
+                const runtimeSignerAddress = getAddress(account.address);
+                const clobAuthAddress = config.polymarketClobAddress
+                    ? getAddress(config.polymarketClobAddress)
+                    : runtimeSignerAddress;
+                const declaredSide = normalizeOrderSide(args.side);
+                if (!declaredSide) {
+                    throw new Error('side must be BUY or SELL');
+                }
+                const declaredSideEnum = normalizeOrderSideEnumIndex(declaredSide);
+                if (declaredSideEnum === undefined) {
+                    throw new Error('side must be BUY or SELL');
+                }
+                if (!args.tokenId) {
+                    throw new Error('tokenId is required');
+                }
+                const declaredTokenId = String(args.tokenId).trim();
+                const orderType = normalizeOrderType(args.orderType);
+                if (!orderType) {
+                    throw new Error('orderType must be one of GTC, GTD, FOK, FAK');
+                }
+                if (!args.makerAmount) {
+                    throw new Error('makerAmount is required');
+                }
+                if (!args.takerAmount) {
+                    throw new Error('takerAmount is required');
+                }
+
+                const allowedIdentityAddresses = new Set([
+                    runtimeSignerAddress,
+                    clobAuthAddress,
+                ]);
+                const maker = args.maker ? getAddress(String(args.maker)) : clobAuthAddress;
+                const signer = args.signer ? getAddress(String(args.signer)) : runtimeSignerAddress;
+                if (!allowedIdentityAddresses.has(maker)) {
+                    throw new Error(
+                        `maker identity mismatch: maker must be one of ${Array.from(
+                            allowedIdentityAddresses
+                        ).join(', ')}.`
+                    );
+                }
+                if (!allowedIdentityAddresses.has(signer)) {
+                    throw new Error(
+                        `signer identity mismatch: signer must be one of ${Array.from(
+                            allowedIdentityAddresses
+                        ).join(', ')}.`
+                    );
+                }
+
+                const runtimeChainId =
+                    typeof publicClient?.getChainId === 'function'
+                        ? await publicClient.getChainId()
+                        : undefined;
+                const chainId = Number(args.chainId ?? runtimeChainId);
+                if (!Number.isInteger(chainId) || chainId <= 0) {
+                    throw new Error(
+                        'chainId is required to sign CLOB orders (provide chainId or use a client with getChainId).'
+                    );
+                }
+                const exchange = resolveClobExchangeAddress({
+                    chainId,
+                    exchangeOverride: args.exchange ?? config.polymarketExchange,
+                });
+                const normalizedSalt = normalizeOptionalUintString(args.salt, 'salt');
+                const normalizedExpiration = normalizeOptionalUintString(
+                    args.expiration,
+                    'expiration'
+                );
+                const normalizedNonce = normalizeOptionalUintString(args.nonce, 'nonce');
+                const normalizedFeeRateBps = normalizeOptionalUintString(
+                    args.feeRateBps,
+                    'feeRateBps'
+                );
+                const configuredSignatureType =
+                    config.polymarketClobSignatureType !== undefined &&
+                    config.polymarketClobSignatureType !== null &&
+                    String(config.polymarketClobSignatureType).trim() !== ''
+                        ? config.polymarketClobSignatureType
+                        : undefined;
+                const requestedSignatureType =
+                    args.signatureType !== undefined &&
+                    args.signatureType !== null &&
+                    String(args.signatureType).trim() !== ''
+                        ? args.signatureType
+                        : configuredSignatureType;
+                const unsignedOrder = buildClobOrderFromRaw({
+                    maker,
+                    signer,
+                    taker: args.taker,
+                    tokenId: declaredTokenId,
+                    makerAmount: args.makerAmount,
+                    takerAmount: args.takerAmount,
+                    side: declaredSideEnum,
+                    signatureType: requestedSignatureType,
+                    salt: normalizedSalt,
+                    expiration: normalizedExpiration,
+                    nonce: normalizedNonce,
+                    feeRateBps: normalizedFeeRateBps,
+                });
+                const signatureTypeIndex = Number(unsignedOrder.signatureType);
+                if (signatureTypeIndex !== 0) {
+                    if (!config.polymarketClobAddress) {
+                        throw new Error(
+                            'POLYMARKET_CLOB_ADDRESS is required for POLY_PROXY/POLY_GNOSIS_SAFE signature types.'
+                        );
+                    }
+                    if (maker !== clobAuthAddress) {
+                        throw new Error(
+                            'maker must match POLYMARKET_CLOB_ADDRESS for POLY_PROXY/POLY_GNOSIS_SAFE signature types.'
+                        );
+                    }
+                }
+                const signedOrder = await signClobOrder({
+                    walletClient,
+                    account,
+                    chainId,
+                    exchange,
+                    order: unsignedOrder,
+                });
+
+                const configuredOwnerApiKey = config.polymarketClobApiKey;
+                if (!configuredOwnerApiKey) {
+                    throw new Error('Missing POLYMARKET_CLOB_API_KEY in runtime config.');
+                }
+                const requestedOwner =
+                    typeof args.owner === 'string' && args.owner.trim()
+                        ? args.owner.trim()
+                        : undefined;
+                if (requestedOwner && requestedOwner !== configuredOwnerApiKey) {
+                    throw new Error(
+                        'owner mismatch: provided owner does not match configured POLYMARKET_CLOB_API_KEY.'
+                    );
+                }
+                const result = await placeClobOrder({
+                    config,
+                    signingAddress: clobAuthAddress,
+                    signedOrder,
+                    ownerApiKey: configuredOwnerApiKey,
+                    orderType,
+                });
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'submitted',
+                        signedOrder,
+                        result,
+                    }),
+                });
+            } catch (error) {
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'error',
+                        message: error?.message ?? String(error),
+                    }),
+                });
+            }
+            continue;
+        }
+
         if (call.name === 'make_deposit') {
             if (!onchainToolsEnabled) {
                 outputs.push({
@@ -704,6 +991,7 @@ async function executeToolCalls({
                 continue;
             }
             const txHash = await makeErc1155Deposit({
+                publicClient,
                 walletClient,
                 account,
                 config,

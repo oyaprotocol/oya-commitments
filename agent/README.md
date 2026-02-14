@@ -94,17 +94,32 @@ The shared tooling supports:
 
 Set these when using Polymarket functionality:
 - `POLYMARKET_CONDITIONAL_TOKENS`: Optional CTF contract address override used by CTF actions (default is Polymarket mainnet ConditionalTokens).
+- `POLYMARKET_EXCHANGE`: Optional CTF exchange override for EIP-712 order signing domain.
 - `POLYMARKET_CLOB_ENABLED`: Enable CLOB tools (`true`/`false`, default `false`).
 - `POLYMARKET_CLOB_HOST`: CLOB API host (default `https://clob.polymarket.com`).
 - `POLYMARKET_CLOB_ADDRESS`: Optional address used as `POLY_ADDRESS` for CLOB auth (for proxy/funder setups). Defaults to runtime signer address.
+- `POLYMARKET_CLOB_SIGNATURE_TYPE`: Optional default order signature type for build/sign flow (`EOA`/`POLY_PROXY`/`POLY_GNOSIS_SAFE` or `0`/`1`/`2`).
+  - Per Polymarket docs: `0=EOA`, `1=POLY_PROXY`, `2=POLY_GNOSIS_SAFE`.
+  - When using `POLY_PROXY` or `POLY_GNOSIS_SAFE`, set `POLYMARKET_CLOB_ADDRESS` to the proxy/funder wallet address.
 - `POLYMARKET_CLOB_API_KEY`, `POLYMARKET_CLOB_API_SECRET`, `POLYMARKET_CLOB_API_PASSPHRASE`: Required for authenticated CLOB calls.
 - `POLYMARKET_CLOB_REQUEST_TIMEOUT_MS`, `POLYMARKET_CLOB_MAX_RETRIES`, `POLYMARKET_CLOB_RETRY_DELAY_MS`: Optional request tuning.
+- `POLYMARKET_RELAYER_ENABLED`: Enable Polymarket relayer submission for ERC1155 deposits (`true`/`false`, default `false`).
+- `POLYMARKET_RELAYER_HOST`: Relayer API host (default `https://relayer-v2.polymarket.com`).
+- `POLYMARKET_RELAYER_TX_TYPE`: Relayer wallet type (`SAFE` default, or `PROXY`).
+- `POLYMARKET_RELAYER_FROM_ADDRESS`: Optional explicit relayer proxy wallet address (if omitted, runtime auto-resolves from signer + relayer APIs / deterministic address).
+- `POLYMARKET_RELAYER_SAFE_FACTORY`, `POLYMARKET_RELAYER_PROXY_FACTORY`: Optional factory overrides for deterministic SAFE/PROXY address derivation.
+- `POLYMARKET_RELAYER_RESOLVE_PROXY_ADDRESS`: Resolve proxy address via relayer API when from-address is not set (default `true`).
+- `POLYMARKET_RELAYER_AUTO_DEPLOY_PROXY`: Optionally create proxy wallet when absent (default `false`).
+- `POLYMARKET_RELAYER_CHAIN_ID`, `POLYMARKET_RELAYER_REQUEST_TIMEOUT_MS`, `POLYMARKET_RELAYER_POLL_INTERVAL_MS`, `POLYMARKET_RELAYER_POLL_TIMEOUT_MS`: Optional relayer runtime tuning.
+- Builder credentials for relayer auth headers:
+  - Preferred: `POLYMARKET_BUILDER_API_KEY`, `POLYMARKET_BUILDER_SECRET`, `POLYMARKET_BUILDER_PASSPHRASE`.
+  - Fallbacks supported: `POLYMARKET_API_*` then `POLYMARKET_CLOB_API_*`.
 
 #### Execution Modes
 
 - `PROPOSE_ENABLED=true` and/or `DISPUTE_ENABLED=true`: onchain tools are enabled (`build_og_transactions`, `make_deposit`, `make_erc1155_deposit`, propose/dispute tools).
 - `PROPOSE_ENABLED=false` and `DISPUTE_ENABLED=false`: onchain tools are disabled.
-- `POLYMARKET_CLOB_ENABLED=true`: CLOB tools can still run in this mode (`polymarket_clob_place_order`, `polymarket_clob_cancel_orders`).
+- `POLYMARKET_CLOB_ENABLED=true`: CLOB tools can still run in this mode (`polymarket_clob_place_order`, `polymarket_clob_build_sign_and_place_order`, `polymarket_clob_cancel_orders`).
 - All three disabled (`PROPOSE_ENABLED=false`, `DISPUTE_ENABLED=false`, `POLYMARKET_CLOB_ENABLED=false`): monitor/opinion only.
 
 #### CTF Actions (`build_og_transactions`)
@@ -151,6 +166,8 @@ Use `make_erc1155_deposit` after receiving YES/NO position tokens:
 }
 ```
 
+When `POLYMARKET_RELAYER_ENABLED=true`, this tool submits via Polymarket relayer (SAFE/PROXY) instead of direct onchain `writeContract`. If `POLYMARKET_RELAYER_FROM_ADDRESS` is not set, the runtime resolves the proxy wallet from the signer and relayer metadata. For SAFE mode, any explicitly configured proxy wallet must match the relayer-derived SAFE address for that signer.
+
 #### CLOB Place/Cancel Tools
 
 `polymarket_clob_place_order` submits a pre-signed order:
@@ -167,6 +184,21 @@ Use `make_erc1155_deposit` after receiving YES/NO position tokens:
       "tokenId": "123456789",
       "side": "BUY"
     }
+  }
+}
+```
+
+`polymarket_clob_build_sign_and_place_order` builds and signs the order with the runtime signer before submission:
+
+```json
+{
+  "name": "polymarket_clob_build_sign_and_place_order",
+  "arguments": {
+    "side": "BUY",
+    "tokenId": "123456789",
+    "orderType": "FOK",
+    "makerAmount": "1000000",
+    "takerAmount": "450000"
   }
 }
 ```
@@ -193,6 +225,12 @@ For `polymarket_clob_place_order`, the runner validates the same order payload t
   - `POLYMARKET_CLOB_ADDRESS` when set.
 
 If any identity is outside that allowlist, the tool call is rejected before submission.
+
+For `polymarket_clob_build_sign_and_place_order`, `maker` and `signer` must also be one of:
+- runtime signer address, or
+- `POLYMARKET_CLOB_ADDRESS` when set.
+
+This tool requires a signer backend that supports `signTypedData`.
 
 #### CLOB Retry Behavior
 

@@ -199,7 +199,8 @@ function onToolOutput({ name, parsedOutput }) {
         dcaState.proposalPosted = true;
         dcaState.depositConfirmed = false;
         dcaState.proposalBuilt = false;
-        dcaState.proposalSubmitHash = parsedOutput.proposalHash ?? null;
+        dcaState.proposalSubmitHash =
+            parsedOutput.transactionHash ?? parsedOutput.proposalHash ?? null;
         dcaState.proposalSubmitMs = Date.now();
     }
 }

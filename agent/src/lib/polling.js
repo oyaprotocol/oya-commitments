@@ -7,6 +7,12 @@ import {
     transferEvent,
 } from './og.js';
 
+function getAlwaysEmitBalanceSnapshotPollingOptions() {
+    return {
+        emitBalanceSnapshotsEveryPoll: true,
+    };
+}
+
 async function primeBalances({ publicClient, commitmentSafe, watchNativeBalance, blockNumber }) {
     if (!watchNativeBalance) return undefined;
 
@@ -432,6 +438,7 @@ async function executeReadyProposals({
 
 export {
     primeBalances,
+    getAlwaysEmitBalanceSnapshotPollingOptions,
     pollCommitmentChanges,
     pollProposalChanges,
     executeReadyProposals,

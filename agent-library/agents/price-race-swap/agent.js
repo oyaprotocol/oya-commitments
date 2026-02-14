@@ -1,6 +1,10 @@
 import { readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+    normalizeAddressOrThrow,
+    normalizeHashOrNull,
+} from '../../../agent/src/lib/utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -87,6 +91,8 @@ const singleFireState = {
 };
 let singleFireStateHydrated = false;
 let singleFireReconciledOnchain = false;
+const normalizeAddress = normalizeAddressOrThrow;
+const normalizeHash = normalizeHashOrNull;
 
 function getSingleFireStatePath() {
     const fromEnv = process.env.PRICE_RACE_SWAP_STATE_FILE;
@@ -96,11 +102,18 @@ function getSingleFireStatePath() {
     return path.join(__dirname, '.single-fire-state.json');
 }
 
-function normalizeHash(value) {
-    if (typeof value !== 'string') return null;
-    const v = value.trim();
-    if (!/^0x[0-9a-fA-F]{64}$/.test(v)) return null;
-    return v.toLowerCase();
+function resolveSubmittedProposalHash(parsedOutput) {
+    const txHash = normalizeHash(parsedOutput?.transactionHash);
+    const explicitOgHash = normalizeHash(parsedOutput?.ogProposalHash);
+    if (explicitOgHash) return explicitOgHash;
+
+    const legacyHash = normalizeHash(parsedOutput?.proposalHash);
+    if (legacyHash && (!txHash || legacyHash !== txHash)) {
+        return legacyHash;
+    }
+
+    // Backward-compatible fallback when only tx hash is available.
+    return txHash ?? legacyHash;
 }
 
 async function persistSingleFireState() {
@@ -171,30 +184,6 @@ async function reconcileSingleFireFromChain({ publicClient }) {
         if (currentFrom === configuredStart) break;
         currentTo = currentFrom - 1n;
     }
-}
-
-function isHexChar(char) {
-    const code = char.charCodeAt(0);
-    return (
-        (code >= 48 && code <= 57) ||
-        (code >= 65 && code <= 70) ||
-        (code >= 97 && code <= 102)
-    );
-}
-
-function normalizeAddress(value) {
-    if (typeof value !== 'string') {
-        throw new Error(`Invalid address: ${value}`);
-    }
-    if (value.length !== 42 || !value.startsWith('0x')) {
-        throw new Error(`Invalid address: ${value}`);
-    }
-    for (let i = 2; i < value.length; i += 1) {
-        if (!isHexChar(value[i])) {
-            throw new Error(`Invalid address: ${value}`);
-        }
-    }
-    return value.toLowerCase();
 }
 
 function normalizeComparator(value) {
@@ -722,7 +711,7 @@ function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
 async function onToolOutput({ name, parsedOutput }) {
     if (!name || !parsedOutput || parsedOutput.status !== 'submitted') return;
     if (name !== 'post_bond_and_propose' && name !== 'auto_post_bond_and_propose') return;
-    const proposalHash = normalizeHash(parsedOutput.proposalHash);
+    const proposalHash = resolveSubmittedProposalHash(parsedOutput);
     if (!proposalHash) return;
     await lockSingleFire({ proposalHash });
 }
