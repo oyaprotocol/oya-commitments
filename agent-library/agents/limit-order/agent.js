@@ -1,6 +1,7 @@
 // Limit Order Agent - Single limit order on Sepolia (WETH/USDC)
 
 import { erc20Abi, parseAbi, parseAbiItem } from 'viem';
+import { normalizeAddressOrThrow } from '../../../agent/src/lib/utils.js';
 
 const TOKENS = Object.freeze({
     WETH: '0x7b79995e5f793a07bc00c21412e50ecae098e7f9',
@@ -70,17 +71,11 @@ let limitOrderState = {
     proposalSubmitMs: null,
 };
 let hydratedFromChain = false;
+const normalizeAddress = (value) => normalizeAddressOrThrow(value, { requireHex: false });
 
 const proposalExecutedEvent = parseAbiItem(
     'event ProposalExecuted(bytes32 indexed proposalHash, bytes32 indexed assertionId)'
 );
-
-function normalizeAddress(value) {
-    if (typeof value !== 'string' || value.length !== 42 || !value.startsWith('0x')) {
-        throw new Error(`Invalid address: ${value}`);
-    }
-    return value.toLowerCase();
-}
 
 async function getEthPriceUSD(publicClient, chainlinkFeedAddress) {
     const result = await publicClient.readContract({
@@ -400,10 +395,11 @@ function onToolOutput({ name, parsedOutput }) {
     }
 
     if (name === 'post_bond_and_propose' && parsedOutput.status === 'submitted') {
-        if (parsedOutput.proposalHash) {
+        const submitHash = parsedOutput.transactionHash ?? parsedOutput.proposalHash ?? null;
+        if (submitHash) {
             limitOrderState.proposalPosted = true;
             limitOrderState.proposalBuilt = false;
-            limitOrderState.proposalSubmitHash = parsedOutput.proposalHash ?? null;
+            limitOrderState.proposalSubmitHash = submitHash;
             limitOrderState.proposalSubmitMs = Date.now();
         }
     }

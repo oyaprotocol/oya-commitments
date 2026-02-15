@@ -360,6 +360,8 @@ async function agentLoop() {
             agentModule.onProposalEvents({
                 executedProposalCount,
                 deletedProposalCount,
+                executedProposals,
+                deletedProposals,
             });
         }
         if (agentModule?.reconcileProposalSubmission) {

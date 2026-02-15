@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { executeToolCalls, toolDefinitions } from '../src/lib/tools.js';
 
 const TEST_ACCOUNT = { address: '0x1111111111111111111111111111111111111111' };
+const TEST_SIGNATURE = `0x${'1'.repeat(130)}`;
 
 function parseToolOutput(output) {
     return JSON.parse(output.output);
@@ -14,15 +15,25 @@ async function run() {
         clobEnabled: true,
     });
     const placeOrderDef = defs.find((tool) => tool.name === 'polymarket_clob_place_order');
+    const buildSignAndPlaceOrderDef = defs.find(
+        (tool) => tool.name === 'polymarket_clob_build_sign_and_place_order'
+    );
     const cancelOrdersDef = defs.find((tool) => tool.name === 'polymarket_clob_cancel_orders');
     const makeDepositDef = defs.find((tool) => tool.name === 'make_deposit');
     const makeErc1155DepositDef = defs.find((tool) => tool.name === 'make_erc1155_deposit');
 
     assert.ok(placeOrderDef);
+    assert.ok(buildSignAndPlaceOrderDef);
     assert.ok(cancelOrdersDef);
     assert.equal(makeDepositDef, undefined);
     assert.equal(makeErc1155DepositDef, undefined);
     assert.deepEqual(placeOrderDef.parameters.properties.orderType.enum, ['GTC', 'GTD', 'FOK', 'FAK']);
+    assert.deepEqual(buildSignAndPlaceOrderDef.parameters.properties.orderType.enum, [
+        'GTC',
+        'GTD',
+        'FOK',
+        'FAK',
+    ]);
     assert.deepEqual(cancelOrdersDef.parameters.properties.mode.enum, ['ids', 'market', 'all']);
     assert.deepEqual(cancelOrdersDef.parameters.required, ['mode']);
 
@@ -229,6 +240,214 @@ async function run() {
     const configuredIdentityMatchOut = parseToolOutput(configuredIdentityMatch[0]);
     assert.equal(configuredIdentityMatchOut.status, 'error');
     assert.match(configuredIdentityMatchOut.message, /Missing CLOB credentials/);
+
+    const missingTypedDataSupport = await executeToolCalls({
+        toolCalls: [
+            {
+                callId: 'missing-typed-data-support',
+                name: 'polymarket_clob_build_sign_and_place_order',
+                arguments: {
+                    side: 'BUY',
+                    tokenId: '123',
+                    orderType: 'GTC',
+                    makerAmount: '1000000',
+                    takerAmount: '400000',
+                },
+            },
+        ],
+        publicClient: {
+            async getChainId() {
+                return 137;
+            },
+        },
+        walletClient: {},
+        account: TEST_ACCOUNT,
+        config,
+        ogContext: null,
+    });
+    const missingTypedDataSupportOut = parseToolOutput(missingTypedDataSupport[0]);
+    assert.equal(missingTypedDataSupportOut.status, 'error');
+    assert.match(missingTypedDataSupportOut.message, /signTypedData/);
+
+    const recordedSignInputs = [];
+    const buildSignAndPlace = await executeToolCalls({
+        toolCalls: [
+            {
+                callId: 'build-sign-place',
+                name: 'polymarket_clob_build_sign_and_place_order',
+                arguments: {
+                    side: ' buy ',
+                    tokenId: '123',
+                    orderType: ' gtc ',
+                    makerAmount: '1000000',
+                    takerAmount: '450000',
+                    signatureType: 'EOA',
+                },
+            },
+        ],
+        publicClient: {
+            async getChainId() {
+                return 137;
+            },
+        },
+        walletClient: {
+            async signTypedData(args) {
+                recordedSignInputs.push(args);
+                return TEST_SIGNATURE;
+            },
+        },
+        account: TEST_ACCOUNT,
+        config,
+        ogContext: null,
+    });
+    const buildSignAndPlaceOut = parseToolOutput(buildSignAndPlace[0]);
+    assert.equal(buildSignAndPlaceOut.status, 'error');
+    assert.match(buildSignAndPlaceOut.message, /Missing CLOB credentials/);
+    assert.equal(recordedSignInputs.length, 1);
+    assert.equal(recordedSignInputs[0].domain.chainId, 137);
+    assert.equal(
+        recordedSignInputs[0].domain.verifyingContract.toLowerCase(),
+        '0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e'
+    );
+    assert.equal(recordedSignInputs[0].message.side, 0);
+    assert.equal(recordedSignInputs[0].message.signatureType, 0);
+    assert.equal(recordedSignInputs[0].message.tokenId, 123n);
+
+    const proxySigWithoutClobAddress = await executeToolCalls({
+        toolCalls: [
+            {
+                callId: 'proxy-sig-without-clob-address',
+                name: 'polymarket_clob_build_sign_and_place_order',
+                arguments: {
+                    side: 'BUY',
+                    tokenId: '123',
+                    orderType: 'GTC',
+                    makerAmount: '1000000',
+                    takerAmount: '450000',
+                },
+            },
+        ],
+        publicClient: {
+            async getChainId() {
+                return 137;
+            },
+        },
+        walletClient: {
+            async signTypedData() {
+                return TEST_SIGNATURE;
+            },
+        },
+        account: TEST_ACCOUNT,
+        config: {
+            ...config,
+            polymarketClobSignatureType: 'POLY_GNOSIS_SAFE',
+        },
+        ogContext: null,
+    });
+    const proxySigWithoutClobAddressOut = parseToolOutput(proxySigWithoutClobAddress[0]);
+    assert.equal(proxySigWithoutClobAddressOut.status, 'error');
+    assert.match(proxySigWithoutClobAddressOut.message, /POLYMARKET_CLOB_ADDRESS is required/);
+
+    const recordedSafeSignInputs = [];
+    const defaultSafeSignatureType = await executeToolCalls({
+        toolCalls: [
+            {
+                callId: 'default-safe-signature-type',
+                name: 'polymarket_clob_build_sign_and_place_order',
+                arguments: {
+                    side: 'BUY',
+                    tokenId: '123',
+                    orderType: 'GTC',
+                    makerAmount: '1000000',
+                    takerAmount: '450000',
+                },
+            },
+        ],
+        publicClient: {
+            async getChainId() {
+                return 137;
+            },
+        },
+        walletClient: {
+            async signTypedData(args) {
+                recordedSafeSignInputs.push(args);
+                return TEST_SIGNATURE;
+            },
+        },
+        account: TEST_ACCOUNT,
+        config: {
+            ...config,
+            polymarketClobAddress: '0x3333333333333333333333333333333333333333',
+            polymarketClobSignatureType: 'POLY_GNOSIS_SAFE',
+        },
+        ogContext: null,
+    });
+    const defaultSafeSignatureTypeOut = parseToolOutput(defaultSafeSignatureType[0]);
+    assert.equal(defaultSafeSignatureTypeOut.status, 'error');
+    assert.match(defaultSafeSignatureTypeOut.message, /Missing CLOB credentials/);
+    assert.equal(recordedSafeSignInputs.length, 1);
+    assert.equal(recordedSafeSignInputs[0].message.signatureType, 2);
+
+    const invalidBuildSignIdentity = await executeToolCalls({
+        toolCalls: [
+            {
+                callId: 'invalid-build-sign-identity',
+                name: 'polymarket_clob_build_sign_and_place_order',
+                arguments: {
+                    side: 'BUY',
+                    tokenId: '123',
+                    orderType: 'GTC',
+                    makerAmount: '1000000',
+                    takerAmount: '450000',
+                    maker: '0x3333333333333333333333333333333333333333',
+                },
+            },
+        ],
+        publicClient: {
+            async getChainId() {
+                return 137;
+            },
+        },
+        walletClient: {
+            async signTypedData() {
+                return TEST_SIGNATURE;
+            },
+        },
+        account: TEST_ACCOUNT,
+        config,
+        ogContext: null,
+    });
+    const invalidBuildSignIdentityOut = parseToolOutput(invalidBuildSignIdentity[0]);
+    assert.equal(invalidBuildSignIdentityOut.status, 'error');
+    assert.match(invalidBuildSignIdentityOut.message, /maker identity mismatch/);
+
+    const missingChainIdForBuildSign = await executeToolCalls({
+        toolCalls: [
+            {
+                callId: 'missing-chain-id-build-sign',
+                name: 'polymarket_clob_build_sign_and_place_order',
+                arguments: {
+                    side: 'BUY',
+                    tokenId: '123',
+                    orderType: 'GTC',
+                    makerAmount: '1000000',
+                    takerAmount: '450000',
+                },
+            },
+        ],
+        publicClient: {},
+        walletClient: {
+            async signTypedData() {
+                return TEST_SIGNATURE;
+            },
+        },
+        account: TEST_ACCOUNT,
+        config,
+        ogContext: null,
+    });
+    const missingChainIdForBuildSignOut = parseToolOutput(missingChainIdForBuildSign[0]);
+    assert.equal(missingChainIdForBuildSignOut.status, 'error');
+    assert.match(missingChainIdForBuildSignOut.message, /chainId is required/);
 
     const invalidCancelMode = await executeToolCalls({
         toolCalls: [
