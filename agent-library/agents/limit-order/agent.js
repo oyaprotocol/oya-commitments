@@ -16,6 +16,7 @@ const QUOTER_CANDIDATES_BY_CHAIN = new Map([
     [11155111, ['0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3', '0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6']],
 ]);
 const SLIPPAGE_BPS = 50;
+const LIMIT_PRICE_USD = 2000;
 
 const chainlinkAbi = parseAbi([
     'function latestRoundData() external view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)',
@@ -380,6 +381,19 @@ async function validateToolCalls({
         action.amountOutMinWei = minAmountOut.toString();
         args.actions[0] = action;
 
+        let ethPriceUSD;
+        try {
+            const feed = config?.chainlinkPriceFeed ?? CHAINLINK_ETH_USD_FEED_SEPOLIA;
+            ethPriceUSD = await getEthPriceUSD(publicClient, feed);
+        } catch {
+            ethPriceUSD = await getEthPriceUSDFallback();
+        }
+        if (ethPriceUSD > LIMIT_PRICE_USD) {
+            throw new Error(
+                `Price condition not met: ethPriceUSD ${ethPriceUSD} exceeds limit ${LIMIT_PRICE_USD}`
+            );
+        }
+
         validated.push({ ...call, parsedArguments: args });
     }
 
@@ -423,7 +437,6 @@ function onProposalEvents({ executedProposalCount = 0, deletedProposalCount = 0 
 
 async function reconcileProposalSubmission({ publicClient, ogModule, startBlock }) {
     if (!hydratedFromChain && ogModule) {
-        hydratedFromChain = true;
         try {
             const toBlock = await publicClient.getBlockNumber();
             const fromBlock = startBlock ?? 0n;
@@ -440,6 +453,7 @@ async function reconcileProposalSubmission({ publicClient, ogModule, startBlock 
                 limitOrderState.proposalSubmitHash = null;
                 limitOrderState.proposalSubmitMs = null;
             }
+            hydratedFromChain = true;
         } catch (err) {
             console.warn('[limit-order] Failed to hydrate from chain:', err?.message ?? err);
         }

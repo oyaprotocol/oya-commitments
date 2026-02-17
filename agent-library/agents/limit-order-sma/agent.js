@@ -411,6 +411,20 @@ async function validateToolCalls({
         action.amountOutMinWei = minAmountOut.toString();
         args.actions[0] = action;
 
+        const { ethPriceUSD, smaEth200USD } = await fetchEthPriceDataFromCoinGecko();
+        if (
+            smaEth200USD == null ||
+            !Number.isFinite(smaEth200USD) ||
+            !Number.isFinite(ethPriceUSD)
+        ) {
+            throw new Error('SMA or price data unavailable; cannot validate condition.');
+        }
+        if (ethPriceUSD > smaEth200USD) {
+            throw new Error(
+                `SMA condition not met: ethPriceUSD ${ethPriceUSD} > smaEth200USD ${smaEth200USD}`
+            );
+        }
+
         validated.push({ ...call, parsedArguments: args });
     }
 
@@ -454,7 +468,6 @@ function onProposalEvents({ executedProposalCount = 0, deletedProposalCount = 0 
 
 async function reconcileProposalSubmission({ publicClient, ogModule, startBlock }) {
     if (!hydratedFromChain && ogModule) {
-        hydratedFromChain = true;
         try {
             const toBlock = await publicClient.getBlockNumber();
             const fromBlock = startBlock ?? 0n;
@@ -471,6 +484,7 @@ async function reconcileProposalSubmission({ publicClient, ogModule, startBlock 
                 limitOrderState.proposalSubmitHash = null;
                 limitOrderState.proposalSubmitMs = null;
             }
+            hydratedFromChain = true;
         } catch (err) {
             console.warn('[limit-order-sma] Failed to hydrate from chain:', err?.message ?? err);
         }
