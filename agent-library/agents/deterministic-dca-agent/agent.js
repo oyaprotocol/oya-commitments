@@ -23,6 +23,8 @@ const POLICY = Object.freeze({
     bpsDenominator: 10_000n,
     logChunkSize: 5_000n,
 });
+let cachedAutoStartBlock = null;
+let autoDiscoveryFailed = false;
 
 const chainlinkAbi = parseAbi([
     'function latestRoundData() external view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)',
@@ -93,6 +95,76 @@ async function getLogsChunked({ publicClient, address, event, args, fromBlock, t
     }
 
     return logs;
+}
+
+function hasContractCode(code) {
+    return typeof code === 'string' && code !== '0x';
+}
+
+async function findContractDeploymentBlock({ publicClient, address, latestBlock }) {
+    const latestCode = await publicClient.getCode({
+        address,
+        blockNumber: latestBlock,
+    });
+    if (!hasContractCode(latestCode)) {
+        return null;
+    }
+
+    let left = 0n;
+    let right = latestBlock;
+    while (left < right) {
+        const middle = (left + right) / 2n;
+        const codeAtMiddle = await publicClient.getCode({
+            address,
+            blockNumber: middle,
+        });
+        if (hasContractCode(codeAtMiddle)) {
+            right = middle;
+        } else {
+            left = middle + 1n;
+        }
+    }
+
+    return left;
+}
+
+async function resolveScanStartBlock({ publicClient, config, latestBlock }) {
+    if (config?.startBlock !== undefined) {
+        return BigInt(config.startBlock);
+    }
+    if (cachedAutoStartBlock !== null) {
+        return cachedAutoStartBlock;
+    }
+    if (autoDiscoveryFailed) {
+        return null;
+    }
+
+    try {
+        const discovered = await findContractDeploymentBlock({
+            publicClient,
+            address: config.ogModule,
+            latestBlock,
+        });
+        if (discovered === null) {
+            autoDiscoveryFailed = true;
+            console.warn(
+                '[deterministic-dca-agent] Auto-discovery failed: ogModule has no code at latest block.'
+            );
+            return null;
+        }
+        cachedAutoStartBlock = discovered;
+        console.log(
+            `[deterministic-dca-agent] Auto-discovered scan start block from OG deployment: ${discovered.toString()}`
+        );
+        return discovered;
+    } catch (error) {
+        autoDiscoveryFailed = true;
+        console.warn(
+            '[deterministic-dca-agent] Failed to auto-discover scan start block; set START_BLOCK explicitly.',
+            error?.message ?? error
+        );
+        return null;
+    }
 }
 
 async function getBlockTimestampMs(publicClient, blockNumber, cache) {
@@ -338,14 +410,15 @@ function parseReimbursementProposal(log, { agentAddress }) {
 async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicClient, config }) {
     const safeAddress = normalizeAddressOrThrow(commitmentSafe, { requireHex: false });
     const normalizedAgentAddress = normalizeAddressOrThrow(agentAddress, { requireHex: false });
-
-    if (config?.startBlock === undefined) {
-        console.warn('[deterministic-dca-agent] START_BLOCK is required for deterministic reconstruction.');
+    const latestBlock = await publicClient.getBlockNumber();
+    const fromBlock = await resolveScanStartBlock({
+        publicClient,
+        config,
+        latestBlock,
+    });
+    if (fromBlock === null) {
         return [];
     }
-
-    const fromBlock = BigInt(config.startBlock);
-    const latestBlock = await publicClient.getBlockNumber();
     if (fromBlock > latestBlock) {
         return [];
     }
@@ -681,6 +754,7 @@ export {
     splitReimbursementTranches,
     computeFillNotionalUsdcWei,
     computeWethAmountWei,
+    findContractDeploymentBlock,
     buildCampaigns,
     chooseCampaignAction,
 };
