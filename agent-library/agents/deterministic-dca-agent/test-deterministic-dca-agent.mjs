@@ -4,6 +4,7 @@ import {
     splitReimbursementTranches,
     computeFillNotionalUsdcWei,
     computeWethAmountWei,
+    findContractDeploymentBlock,
     buildCampaigns,
     chooseCampaignAction,
     validateToolCalls,
@@ -19,6 +20,18 @@ async function run() {
 
     const tranches = splitReimbursementTranches(100_000_000n);
     assert.deepEqual(tranches, [25_000_000n, 25_000_000n, 25_000_000n, 25_000_000n]);
+
+    const discoveredDeploymentBlock = await findContractDeploymentBlock({
+        publicClient: {
+            getCode: async ({ blockNumber }) => {
+                if (blockNumber < 123n) return '0x';
+                return '0x1234';
+            },
+        },
+        address: '0x00000000000000000000000000000000000000cc',
+        latestBlock: 500n,
+    });
+    assert.equal(discoveredDeploymentBlock, 123n);
 
     const fillNotional = computeFillNotionalUsdcWei(25_000_000n);
     assert.equal(fillNotional, 24_875_000n);
