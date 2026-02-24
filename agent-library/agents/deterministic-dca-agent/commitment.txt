@@ -13,5 +13,3 @@ For each campaign:
 Safety and execution rules:
 - Reimbursements must be proposed as a single USDC erc20_transfer to the agent address.
 - If any proposal is pending onchain, do not propose another.
-- Reconstruct campaign progress from chain history on every run; do not rely on in-memory state.
-- Poll/check every 15 minutes, but only act when a tranche is due.
