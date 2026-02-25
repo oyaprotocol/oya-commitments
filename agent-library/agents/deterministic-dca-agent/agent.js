@@ -60,15 +60,42 @@ function sortByChainOrder(entries) {
     });
 }
 
-async function getLogsChunked({ publicClient, address, event, args, fromBlock, toBlock }) {
+function resolveLogChunkSize(config) {
+    const genericChunkSize = config?.logChunkSize;
+    if (typeof genericChunkSize === 'bigint' && genericChunkSize > 0n) {
+        return genericChunkSize;
+    }
+
+    const legacyRaw = process.env.DETERMINISTIC_DCA_LOG_CHUNK_SIZE;
+    if (legacyRaw === undefined || legacyRaw === null || String(legacyRaw).trim() === '') {
+        return POLICY.logChunkSize;
+    }
+
+    try {
+        const parsed = BigInt(String(legacyRaw).trim());
+        if (parsed <= 0n) {
+            throw new Error('chunk size must be greater than 0');
+        }
+        return parsed;
+    } catch {
+        console.warn(
+            `[deterministic-dca-agent] Invalid DETERMINISTIC_DCA_LOG_CHUNK_SIZE='${legacyRaw}', using default ${POLICY.logChunkSize.toString()}.`
+        );
+        return POLICY.logChunkSize;
+    }
+}
+
+async function getLogsChunked({ publicClient, address, event, args, fromBlock, toBlock, config }) {
     if (fromBlock > toBlock) return [];
+
+    const configuredChunkSize = resolveLogChunkSize(config);
 
     const logs = [];
     let currentFrom = fromBlock;
     while (currentFrom <= toBlock) {
-        const currentTo = currentFrom + POLICY.logChunkSize - 1n > toBlock
+        const currentTo = currentFrom + configuredChunkSize - 1n > toBlock
             ? toBlock
-            : currentFrom + POLICY.logChunkSize - 1n;
+            : currentFrom + configuredChunkSize - 1n;
 
         const chunk = await publicClient.getLogs({
             address,
@@ -559,6 +586,7 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
             args: { to: safeAddress },
             fromBlock,
             toBlock: latestBlock,
+            config,
         }),
         getLogsChunked({
             publicClient,
@@ -567,6 +595,7 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
             args: { from: normalizedAgentAddress, to: safeAddress },
             fromBlock,
             toBlock: latestBlock,
+            config,
         }),
         getLogsChunked({
             publicClient,
@@ -574,6 +603,7 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
             event: transactionsProposedEvent,
             fromBlock,
             toBlock: latestBlock,
+            config,
         }),
         getLogsChunked({
             publicClient,
@@ -581,6 +611,7 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
             event: proposalExecutedEvent,
             fromBlock,
             toBlock: latestBlock,
+            config,
         }),
         getLogsChunked({
             publicClient,
@@ -588,6 +619,7 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
             event: proposalDeletedEvent,
             fromBlock,
             toBlock: latestBlock,
+            config,
         }),
     ]);
 
