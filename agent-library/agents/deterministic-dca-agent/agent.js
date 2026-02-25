@@ -1,4 +1,4 @@
-import { erc20Abi, parseAbi } from 'viem';
+import { erc20Abi, parseAbi, zeroAddress } from 'viem';
 import {
     normalizeAddressOrNull,
     normalizeAddressOrThrow,
@@ -6,6 +6,9 @@ import {
     decodeErc20TransferCallData,
 } from '../../../agent/src/lib/utils.js';
 import {
+    optimisticGovernorAbi,
+    optimisticOracleAbi,
+    normalizeAssertion,
     transferEvent,
     proposalDeletedEvent,
     proposalExecutedEvent,
@@ -25,6 +28,7 @@ const POLICY = Object.freeze({
 });
 let cachedAutoStartBlock = null;
 let autoDiscoveryFailed = false;
+const MAX_DISPUTE_EXPLANATION_LENGTH = 240;
 
 const chainlinkAbi = parseAbi([
     'function latestRoundData() external view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)',
@@ -208,6 +212,184 @@ function computeWethAmountWei({ fillNotionalUsdcWei, chainlinkAnswer }) {
     return (fillNotionalUsdcWei * scale) / chainlinkAnswer;
 }
 
+function chainPositionCompare(left, right) {
+    const leftBlock = BigInt(left?.blockNumber ?? 0n);
+    const rightBlock = BigInt(right?.blockNumber ?? 0n);
+    if (leftBlock !== rightBlock) {
+        return leftBlock < rightBlock ? -1 : 1;
+    }
+    const leftLogIndex = BigInt(left?.logIndex ?? 0);
+    const rightLogIndex = BigInt(right?.logIndex ?? 0);
+    if (leftLogIndex === rightLogIndex) return 0;
+    return leftLogIndex < rightLogIndex ? -1 : 1;
+}
+
+function getExpectedTranche({ campaignDeposits, validProposalCount }) {
+    if (!Array.isArray(campaignDeposits) || campaignDeposits.length === 0) {
+        return null;
+    }
+
+    const campaignIndex = Math.floor(validProposalCount / POLICY.tranchesPerCampaign);
+    const trancheIndex = validProposalCount % POLICY.tranchesPerCampaign;
+    const campaignDeposit = campaignDeposits[campaignIndex];
+    if (!campaignDeposit) {
+        return null;
+    }
+
+    const reimbursementTranches = splitReimbursementTranches(campaignDeposit.amountWei);
+    const reimbursementAmountWei = reimbursementTranches[trancheIndex];
+    const fillNotionalUsdcWei = computeFillNotionalUsdcWei(reimbursementAmountWei);
+    const dueAtMs = campaignDeposit.timestampMs + POLICY.trancheIntervalMs * trancheIndex;
+
+    return {
+        campaignIndex,
+        trancheIndex,
+        reimbursementAmountWei,
+        fillNotionalUsdcWei,
+        dueAtMs,
+        deposit: campaignDeposit,
+    };
+}
+
+function parseProposalRecord(log) {
+    const proposalHash = normalizeHashOrNull(log?.args?.proposalHash);
+    if (!proposalHash) return null;
+    const assertionId = normalizeHashOrNull(log?.args?.assertionId);
+    const proposal = log?.args?.proposal;
+    const transactions = Array.isArray(proposal?.transactions) ? proposal.transactions : [];
+    return {
+        proposalHash,
+        assertionId,
+        blockNumber: log.blockNumber,
+        logIndex: log.logIndex ?? 0,
+        transactions,
+    };
+}
+
+function normalizeDisputeExplanation(explanation) {
+    const text = String(explanation ?? '').trim();
+    if (!text) return null;
+    if (text.length <= MAX_DISPUTE_EXPLANATION_LENGTH) return text;
+    return text.slice(0, MAX_DISPUTE_EXPLANATION_LENGTH - 3).trimEnd() + '...';
+}
+
+function parseReimbursementTransfer({ proposalRecord, normalizedAgentAddress }) {
+    if (!proposalRecord?.transactions || proposalRecord.transactions.length !== 1) {
+        return { ok: false, reason: 'proposal must include exactly one transaction' };
+    }
+
+    const tx = proposalRecord.transactions[0];
+    const to = normalizeAddressOrNull(tx?.to, { requireHex: false });
+    if (to !== POLICY.usdcAddress) {
+        return { ok: false, reason: 'transaction target must be Sepolia USDC token' };
+    }
+    const operation = Number(tx?.operation ?? 0);
+    if (!Number.isInteger(operation) || operation !== 0) {
+        return { ok: false, reason: 'transaction operation must be CALL (0)' };
+    }
+    const value = BigInt(tx?.value ?? 0n);
+    if (value !== 0n) {
+        return { ok: false, reason: 'transaction value must be 0 for ERC20 transfer' };
+    }
+
+    const decoded = decodeErc20TransferCallData(tx?.data);
+    if (!decoded) {
+        return { ok: false, reason: 'transaction calldata must decode as ERC20 transfer' };
+    }
+    if (decoded.to !== normalizedAgentAddress) {
+        return { ok: false, reason: 'transfer recipient must be agentAddress' };
+    }
+    if (decoded.amount <= 0n) {
+        return { ok: false, reason: 'transfer amount must be positive' };
+    }
+
+    return {
+        ok: true,
+        transferAmountWei: decoded.amount,
+    };
+}
+
+async function getChainlinkAnswerAtBlock({
+    publicClient,
+    feedAddress,
+    blockNumber,
+    cache,
+}) {
+    const key = BigInt(blockNumber).toString();
+    if (cache.has(key)) {
+        return cache.get(key);
+    }
+    const round = await publicClient.readContract({
+        address: feedAddress,
+        abi: chainlinkAbi,
+        functionName: 'latestRoundData',
+        blockNumber: BigInt(blockNumber),
+    });
+    const answer = BigInt(round?.[1] ?? 0n);
+    if (answer <= 0n) {
+        throw new Error(`Chainlink answer at block ${key} is non-positive.`);
+    }
+    cache.set(key, answer);
+    return answer;
+}
+
+async function getOptimisticOracleAddress({
+    publicClient,
+    ogModule,
+    cache,
+}) {
+    if (cache.value) return cache.value;
+    const optimisticOracle = normalizeAddressOrThrow(
+        await publicClient.readContract({
+            address: ogModule,
+            abi: optimisticGovernorAbi,
+            functionName: 'optimisticOracleV3',
+        }),
+        { requireHex: false }
+    );
+    cache.value = optimisticOracle;
+    return optimisticOracle;
+}
+
+async function isAssertionDisputable({
+    publicClient,
+    ogModule,
+    assertionId,
+    nowSeconds,
+    optimisticOracleCache,
+    assertionCache,
+}) {
+    if (!assertionId) return false;
+    if (assertionCache.has(assertionId)) {
+        return assertionCache.get(assertionId);
+    }
+
+    try {
+        const optimisticOracle = await getOptimisticOracleAddress({
+            publicClient,
+            ogModule,
+            cache: optimisticOracleCache,
+        });
+        const assertionRaw = await publicClient.readContract({
+            address: optimisticOracle,
+            abi: optimisticOracleAbi,
+            functionName: 'getAssertion',
+            args: [assertionId],
+        });
+        const assertion = normalizeAssertion(assertionRaw);
+        const settled = Boolean(assertion?.settled);
+        const disputer =
+            normalizeAddressOrNull(assertion?.disputer, { requireHex: false }) ?? zeroAddress;
+        const expirationTime = BigInt(assertion?.expirationTime ?? 0n);
+        const disputable = !settled && disputer === zeroAddress && expirationTime > nowSeconds;
+        assertionCache.set(assertionId, disputable);
+        return disputable;
+    } catch {
+        assertionCache.set(assertionId, false);
+        return false;
+    }
+}
+
 function buildCampaigns({ deposits, reimbursementRecords, agentFillDeposits }) {
     const campaigns = deposits.map((deposit, index) => {
         const reimbursementTranches = splitReimbursementTranches(deposit.amountWei);
@@ -359,54 +541,6 @@ function chooseCampaignAction({ campaign, nowMs }) {
     };
 }
 
-function parseReimbursementProposal(log, { agentAddress }) {
-    const proposalHash = normalizeHashOrNull(log?.args?.proposalHash);
-    if (!proposalHash) {
-        return null;
-    }
-
-    const proposer = normalizeAddressOrNull(log?.args?.proposer, { requireHex: false });
-    if (proposer !== agentAddress) {
-        return null;
-    }
-
-    const proposal = log?.args?.proposal;
-    const transactions = Array.isArray(proposal?.transactions) ? proposal.transactions : null;
-    if (!transactions || transactions.length !== 1) {
-        return null;
-    }
-
-    const tx = transactions[0];
-    const txTo = normalizeAddressOrNull(tx?.to, { requireHex: false });
-    if (txTo !== POLICY.usdcAddress) {
-        return null;
-    }
-
-    if (BigInt(tx?.value ?? 0n) !== 0n) {
-        return null;
-    }
-
-    const decodedTransfer = decodeErc20TransferCallData(tx?.data);
-    if (!decodedTransfer) {
-        return null;
-    }
-
-    if (decodedTransfer.to !== agentAddress || decodedTransfer.amount <= 0n) {
-        return null;
-    }
-
-    const proposalTime = log?.args?.proposalTime;
-    const proposalTimeMs = typeof proposalTime === 'bigint' ? Number(proposalTime) * 1000 : null;
-
-    return {
-        proposalHash,
-        amountWei: decodedTransfer.amount,
-        blockNumber: log.blockNumber,
-        logIndex: log.logIndex ?? 0,
-        proposalTimeMs,
-    };
-}
-
 async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicClient, config }) {
     const safeAddress = normalizeAddressOrThrow(commitmentSafe, { requireHex: false });
     const normalizedAgentAddress = normalizeAddressOrThrow(agentAddress, { requireHex: false });
@@ -425,6 +559,8 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
 
     const latestBlockData = await publicClient.getBlock({ blockNumber: latestBlock });
     const nowMs = Number(latestBlockData.timestamp) * 1000;
+    const nowSeconds = BigInt(latestBlockData.timestamp);
+    const chainlinkFeedAddress = config?.chainlinkPriceFeed ?? POLICY.chainlinkEthUsdFeed;
 
     const [
         usdcDepositsRaw,
@@ -490,7 +626,7 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
         return [];
     }
 
-    const agentWethDeposits = sortByChainOrder(
+    const sortedAgentWethDeposits = sortByChainOrder(
         agentWethDepositsRaw
             .map((log) => ({
                 amountWei: BigInt(log?.args?.value ?? 0n),
@@ -510,51 +646,179 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
             .map((log) => normalizeHashOrNull(log?.args?.proposalHash))
             .filter(Boolean)
     );
+    const sortedCampaignDeposits = sortByChainOrder(usdcDeposits);
 
-    const proposedLogs = sortByChainOrder(proposedLogsRaw);
-    const reimbursementRecords = [];
-    let pendingProposalCount = 0;
+    const proposalRecords = sortByChainOrder(
+        proposedLogsRaw
+            .map((log) => parseProposalRecord(log))
+            .filter(Boolean)
+            .filter((record) => !deletedHashes.has(record.proposalHash))
+            .map((record) => ({
+                ...record,
+                status: executedHashes.has(record.proposalHash) ? 'executed' : 'pending',
+            }))
+    );
 
-    for (const log of proposedLogs) {
-        const proposalHash = normalizeHashOrNull(log?.args?.proposalHash);
-        if (!proposalHash) continue;
-        if (deletedHashes.has(proposalHash)) continue;
+    let validProposalCount = 0;
+    let consumedFillCount = 0;
+    let pendingValidProposalCount = 0;
+    let invalidExecutedProposalCount = 0;
+    const invalidPendingProposals = [];
+    const chainlinkAnswerByBlock = new Map();
 
-        const status = executedHashes.has(proposalHash) ? 'executed' : 'pending';
-        if (status === 'pending') pendingProposalCount += 1;
-
-        const reimbursement = parseReimbursementProposal(log, {
-            agentAddress: normalizedAgentAddress,
+    for (const proposalRecord of proposalRecords) {
+        const expected = getExpectedTranche({
+            campaignDeposits: sortedCampaignDeposits,
+            validProposalCount,
         });
-        if (!reimbursement) continue;
 
-        reimbursementRecords.push({
-            ...reimbursement,
-            status,
+        let invalidReason = null;
+        if (!proposalRecord.assertionId) {
+            invalidReason = 'missing assertionId';
+        }
+        if (!invalidReason && !expected) {
+            invalidReason = 'no scheduled campaign tranche available for this proposal';
+        }
+
+        const transferCheck = parseReimbursementTransfer({
+            proposalRecord,
+            normalizedAgentAddress,
         });
+        if (!invalidReason && !transferCheck.ok) {
+            invalidReason = transferCheck.reason;
+        }
+        if (
+            !invalidReason &&
+            transferCheck.transferAmountWei !== expected.reimbursementAmountWei
+        ) {
+            invalidReason =
+                `reimbursement amount mismatch (expected ${expected.reimbursementAmountWei.toString()}, got ${transferCheck.transferAmountWei.toString()})`;
+        }
+
+        if (!invalidReason) {
+            const proposalTimestampMs = await getBlockTimestampMs(
+                publicClient,
+                proposalRecord.blockNumber,
+                blockTimestampCache
+            );
+            if (proposalTimestampMs < expected.dueAtMs) {
+                invalidReason = 'proposal submitted before tranche due time';
+            }
+        }
+
+        let expectedFillAmountWei = null;
+        if (!invalidReason) {
+            const fillRecord = sortedAgentWethDeposits[consumedFillCount];
+            if (!fillRecord) {
+                invalidReason = 'missing agent WETH fill deposit for this tranche';
+            } else if (chainPositionCompare(fillRecord, proposalRecord) > 0) {
+                invalidReason = 'agent WETH fill deposit occurs after proposal';
+            } else {
+                const chainlinkAnswer = await getChainlinkAnswerAtBlock({
+                    publicClient,
+                    feedAddress: chainlinkFeedAddress,
+                    blockNumber: fillRecord.blockNumber,
+                    cache: chainlinkAnswerByBlock,
+                });
+                expectedFillAmountWei = computeWethAmountWei({
+                    fillNotionalUsdcWei: expected.fillNotionalUsdcWei,
+                    chainlinkAnswer,
+                });
+                if (fillRecord.amountWei !== expectedFillAmountWei) {
+                    invalidReason =
+                        `fill amount mismatch (expected ${expectedFillAmountWei.toString()}, got ${fillRecord.amountWei.toString()})`;
+                }
+            }
+        }
+
+        if (invalidReason) {
+            if (proposalRecord.status === 'pending') {
+                invalidPendingProposals.push({
+                    proposalHash: proposalRecord.proposalHash,
+                    assertionId: proposalRecord.assertionId,
+                    reason: invalidReason,
+                });
+            } else if (proposalRecord.status === 'executed') {
+                invalidExecutedProposalCount += 1;
+            }
+            continue;
+        }
+
+        validProposalCount += 1;
+        consumedFillCount += 1;
+        if (proposalRecord.status === 'pending') {
+            pendingValidProposalCount += 1;
+        }
+        void expectedFillAmountWei;
     }
 
-    if (pendingProposalCount > 0) {
+    if (invalidPendingProposals.length > 0) {
+        if (!config?.disputeEnabled) {
+            return [];
+        }
+
+        const disputeCalls = [];
+        const optimisticOracleCache = { value: null };
+        const assertionDisputableCache = new Map();
+        for (const invalidProposal of invalidPendingProposals) {
+            if (!invalidProposal.assertionId) continue;
+            const disputable = await isAssertionDisputable({
+                publicClient,
+                ogModule: config.ogModule,
+                assertionId: invalidProposal.assertionId,
+                nowSeconds,
+                optimisticOracleCache,
+                assertionCache: assertionDisputableCache,
+            });
+            if (!disputable) continue;
+
+            const explanation = normalizeDisputeExplanation(
+                `Proposal ${invalidProposal.proposalHash.slice(0, 10)} invalid: ${invalidProposal.reason}.`
+            );
+            if (!explanation) continue;
+
+            disputeCalls.push({
+                callId: `deterministic-dispute-${invalidProposal.proposalHash.slice(2, 10)}`,
+                name: 'dispute_assertion',
+                arguments: JSON.stringify({
+                    assertionId: invalidProposal.assertionId,
+                    explanation,
+                }),
+            });
+        }
+        if (disputeCalls.length > 0) {
+            return disputeCalls;
+        }
         return [];
     }
 
-    const sortedDeposits = sortByChainOrder(usdcDeposits);
-    const sortedReimbursements = sortByChainOrder(reimbursementRecords);
+    if (pendingValidProposalCount > 0) {
+        return [];
+    }
 
-    const { campaigns, anomalies } = buildCampaigns({
-        deposits: sortedDeposits,
-        reimbursementRecords: sortedReimbursements,
-        agentFillDeposits: agentWethDeposits,
+    if (invalidExecutedProposalCount > 0) {
+        console.warn(
+            `[deterministic-dca-agent] Found ${invalidExecutedProposalCount} invalid executed proposal(s); refusing automatic proposals.`
+        );
+        return [];
+    }
+
+    const selection = getExpectedTranche({
+        campaignDeposits: sortedCampaignDeposits,
+        validProposalCount,
     });
-
-    if (anomalies.length > 0) {
-        console.warn('[deterministic-dca-agent] History anomalies detected:', anomalies.join(' | '));
+    if (!selection) {
+        return [];
+    }
+    if (nowMs < selection.dueAtMs) {
         return [];
     }
 
-    const activeCampaign = getActiveCampaign(campaigns);
-    const selection = chooseCampaignAction({ campaign: activeCampaign, nowMs });
-    if (selection.action === 'ignore') {
+    const unpairedFillCount = sortedAgentWethDeposits.length - consumedFillCount;
+    if (unpairedFillCount > 1) {
+        console.warn(
+            `[deterministic-dca-agent] Found ${unpairedFillCount} unpaired WETH fills; refusing automatic proposals.`
+        );
         return [];
     }
 
@@ -569,7 +833,7 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
     }
 
     const buildCall = {
-        callId: `deterministic-build-c${activeCampaign.campaignIndex + 1}-t${selection.nextTrancheIndex + 1}`,
+        callId: `deterministic-build-c${selection.campaignIndex + 1}-t${selection.trancheIndex + 1}`,
         name: 'build_og_transactions',
         arguments: JSON.stringify({
             actions: [
@@ -583,12 +847,29 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
         }),
     };
 
-    if (selection.action === 'propose_only') {
+    if (unpairedFillCount === 1) {
+        const unpairedFill = sortedAgentWethDeposits[consumedFillCount];
+        if (!unpairedFill) {
+            return [];
+        }
+        const chainlinkAnswer = await getChainlinkAnswerAtBlock({
+            publicClient,
+            feedAddress: chainlinkFeedAddress,
+            blockNumber: unpairedFill.blockNumber,
+            cache: chainlinkAnswerByBlock,
+        });
+        const expectedFillAmountWei = computeWethAmountWei({
+            fillNotionalUsdcWei: selection.fillNotionalUsdcWei,
+            chainlinkAnswer,
+        });
+        if (unpairedFill.amountWei !== expectedFillAmountWei) {
+            return [];
+        }
         return [buildCall];
     }
 
     const priceRound = await publicClient.readContract({
-        address: config?.chainlinkPriceFeed ?? POLICY.chainlinkEthUsdFeed,
+        address: chainlinkFeedAddress,
         abi: chainlinkAbi,
         functionName: 'latestRoundData',
     });
@@ -617,7 +898,7 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
 
     return [
         {
-            callId: `deterministic-deposit-c${activeCampaign.campaignIndex + 1}-t${selection.nextTrancheIndex + 1}`,
+            callId: `deterministic-deposit-c${selection.campaignIndex + 1}-t${selection.trancheIndex + 1}`,
             name: 'make_deposit',
             arguments: JSON.stringify({
                 asset: POLICY.wethAddress,
@@ -650,8 +931,43 @@ async function validateToolCalls({ toolCalls, commitmentSafe, agentAddress }) {
         return [];
     }
 
+    const disputeCalls = toolCalls.filter((call) => call?.name === 'dispute_assertion');
+    if (disputeCalls.length > 0) {
+        const nonDisputeCalls = toolCalls.filter((call) => call?.name !== 'dispute_assertion');
+        if (nonDisputeCalls.length > 0) {
+            throw new Error(
+                'Deterministic DCA agent does not mix dispute_assertion with proposal/deposit calls in one run.'
+            );
+        }
+        return disputeCalls.map((call, index) => {
+            if (!call?.callId) {
+                throw new Error('dispute_assertion call must include callId.');
+            }
+            const args = parseCallArgs(call);
+            if (!args) {
+                throw new Error('Invalid JSON arguments for dispute_assertion.');
+            }
+            const assertionId = normalizeHashOrNull(args.assertionId);
+            if (!assertionId) {
+                throw new Error('dispute_assertion requires a valid assertionId.');
+            }
+            const explanation = normalizeDisputeExplanation(args.explanation);
+            if (!explanation) {
+                throw new Error('dispute_assertion requires a non-empty explanation.');
+            }
+            return {
+                ...call,
+                callId: call.callId || `deterministic-dispute-${index}`,
+                parsedArguments: {
+                    assertionId,
+                    explanation,
+                },
+            };
+        });
+    }
+
     if (toolCalls.length > 2) {
-        throw new Error('Deterministic DCA agent allows at most two tool calls per run.');
+        throw new Error('Deterministic DCA agent allows at most two non-dispute tool calls per run.');
     }
 
     const normalizedCalls = [];

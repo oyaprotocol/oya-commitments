@@ -116,6 +116,58 @@ async function run() {
     });
     assert.equal(validatedTwoStep.length, 2);
 
+    const validatedDispute = await validateToolCalls({
+        toolCalls: [
+            {
+                callId: 'dispute-1',
+                name: 'dispute_assertion',
+                arguments: JSON.stringify({
+                    assertionId:
+                        '0x1111111111111111111111111111111111111111111111111111111111111111',
+                    explanation: 'Invalid proposal: reimbursement amount mismatch.',
+                }),
+            },
+        ],
+        commitmentSafe: '0x00000000000000000000000000000000000000bb',
+        agentAddress: '0x00000000000000000000000000000000000000aa',
+    });
+    assert.equal(validatedDispute.length, 1);
+    assert.equal(validatedDispute[0].name, 'dispute_assertion');
+
+    await assert.rejects(
+        () =>
+            validateToolCalls({
+                toolCalls: [
+                    {
+                        callId: 'mix-dispute',
+                        name: 'dispute_assertion',
+                        arguments: JSON.stringify({
+                            assertionId:
+                                '0x1111111111111111111111111111111111111111111111111111111111111111',
+                            explanation: 'invalid',
+                        }),
+                    },
+                    {
+                        callId: 'mix-build',
+                        name: 'build_og_transactions',
+                        arguments: JSON.stringify({
+                            actions: [
+                                {
+                                    kind: 'erc20_transfer',
+                                    token: '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238',
+                                    to: '0x00000000000000000000000000000000000000aa',
+                                    amountWei: '1',
+                                },
+                            ],
+                        }),
+                    },
+                ],
+                commitmentSafe: '0x00000000000000000000000000000000000000bb',
+                agentAddress: '0x00000000000000000000000000000000000000aa',
+            }),
+        /does not mix dispute_assertion/
+    );
+
     console.log('[test] deterministic-dca-agent OK');
 }
 
