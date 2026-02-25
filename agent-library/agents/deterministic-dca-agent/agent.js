@@ -16,6 +16,7 @@ import {
 } from '../../../agent/src/lib/og.js';
 
 const CHAINLINK_ETH_USD_FEED_SEPOLIA = '0x694AA1769357215DE4FAC081bf1f309aDC325306';
+const CHAINLINK_ETH_USD_FEED_MAINNET = '0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419';
 const POLICY = Object.freeze({
     usdcAddress: '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238',
     wethAddress: '0x7b79995e5f793a07bc00c21412e50ecae098e7f9',
