@@ -22,10 +22,21 @@ import { isAssertionDisputable, parseProposalRecord } from '../../../agent/src/l
 
 const CHAINLINK_ETH_USD_FEED_SEPOLIA = '0x694AA1769357215DE4FAC081bf1f309aDC325306';
 const CHAINLINK_ETH_USD_FEED_MAINNET = '0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419';
+const POLICY_PRESETS = Object.freeze({
+    testnet: Object.freeze({
+        usdcAddress: '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238',
+        wethAddress: '0x7b79995e5f793a07bc00c21412e50ecae098e7f9',
+        chainlinkEthUsdFeed: CHAINLINK_ETH_USD_FEED_SEPOLIA,
+    }),
+    mainnet: Object.freeze({
+        usdcAddress: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+        wethAddress: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2',
+        chainlinkEthUsdFeed: CHAINLINK_ETH_USD_FEED_MAINNET,
+    }),
+});
+const DEFAULT_POLICY_PRESET = 'testnet';
 const POLICY = Object.freeze({
-    usdcAddress: '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238',
-    wethAddress: '0x7b79995e5f793a07bc00c21412e50ecae098e7f9',
-    chainlinkEthUsdFeed: CHAINLINK_ETH_USD_FEED_SEPOLIA,
+    ...POLICY_PRESETS[DEFAULT_POLICY_PRESET],
     tranchesPerCampaign: 4,
     trancheIntervalMs: 6 * 60 * 60 * 1000,
     feeBps: 50n,
@@ -35,6 +46,30 @@ const POLICY = Object.freeze({
 let cachedAutoStartBlock = null;
 let autoDiscoveryFailed = false;
 const MAX_DISPUTE_EXPLANATION_LENGTH = 240;
+
+function resolvePolicyPresetName(config) {
+    const raw = String(
+        config?.deterministicDcaPolicyPreset ??
+            process.env.DETERMINISTIC_DCA_POLICY_PRESET ??
+            ''
+    )
+        .trim()
+        .toLowerCase();
+    if (!raw) return DEFAULT_POLICY_PRESET;
+    if (raw === 'mainnet' || raw === 'testnet') return raw;
+    console.warn(
+        `[deterministic-dca-agent] Unsupported DETERMINISTIC_DCA_POLICY_PRESET='${raw}', defaulting to ${DEFAULT_POLICY_PRESET}.`
+    );
+    return DEFAULT_POLICY_PRESET;
+}
+
+function resolvePolicy(config) {
+    const preset = resolvePolicyPresetName(config);
+    return {
+        ...POLICY,
+        ...POLICY_PRESETS[preset],
+    };
+}
 
 /**
  * Adds a deterministic heartbeat signal so the module can run on a timer
@@ -227,15 +262,15 @@ function normalizeDisputeExplanation(explanation) {
  * Validates that a proposal is exactly one USDC transfer reimbursing the agent,
  * and returns the decoded transfer amount when valid.
  */
-function parseReimbursementTransfer({ proposalRecord, normalizedAgentAddress }) {
+function parseReimbursementTransfer({ proposalRecord, normalizedAgentAddress, policy }) {
     if (!proposalRecord?.transactions || proposalRecord.transactions.length !== 1) {
         return { ok: false, reason: 'proposal must include exactly one transaction' };
     }
 
     const tx = proposalRecord.transactions[0];
     const to = normalizeAddressOrNull(tx?.to, { requireHex: false });
-    if (to !== POLICY.usdcAddress) {
-        return { ok: false, reason: 'transaction target must be Sepolia USDC token' };
+    if (to !== policy.usdcAddress) {
+        return { ok: false, reason: 'transaction target must be policy USDC token' };
     }
     const operation = Number(tx?.operation ?? 0);
     if (!Number.isInteger(operation) || operation !== 0) {
@@ -432,6 +467,7 @@ function chooseCampaignAction({ campaign, nowMs }) {
 async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicClient, config }) {
     const safeAddress = normalizeAddressOrThrow(commitmentSafe, { requireHex: false });
     const normalizedAgentAddress = normalizeAddressOrThrow(agentAddress, { requireHex: false });
+    const policy = resolvePolicy(config);
     const latestBlock = await publicClient.getBlockNumber();
     const fromBlock = await resolveScanStartBlock({
         publicClient,
@@ -448,7 +484,7 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
     const latestBlockData = await publicClient.getBlock({ blockNumber: latestBlock });
     const nowMs = Number(latestBlockData.timestamp) * 1000;
     const nowSeconds = BigInt(latestBlockData.timestamp);
-    const chainlinkFeedAddress = config?.chainlinkPriceFeed ?? POLICY.chainlinkEthUsdFeed;
+    const chainlinkFeedAddress = config?.chainlinkPriceFeed ?? policy.chainlinkEthUsdFeed;
     const logChunkSize = resolveLogChunkSize(config);
 
     const [
@@ -460,7 +496,7 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
     ] = await Promise.all([
         getLogsChunked({
             publicClient,
-            address: POLICY.usdcAddress,
+            address: policy.usdcAddress,
             event: transferEvent,
             args: { to: safeAddress },
             fromBlock,
@@ -469,7 +505,7 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
         }),
         getLogsChunked({
             publicClient,
-            address: POLICY.wethAddress,
+            address: policy.wethAddress,
             event: transferEvent,
             args: { from: normalizedAgentAddress, to: safeAddress },
             fromBlock,
@@ -577,6 +613,7 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
         const transferCheck = parseReimbursementTransfer({
             proposalRecord,
             normalizedAgentAddress,
+            policy,
         });
         if (!invalidReason && !transferCheck.ok) {
             invalidReason = transferCheck.reason;
@@ -717,7 +754,7 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
     }
 
     const safeUsdcBalance = await publicClient.readContract({
-        address: POLICY.usdcAddress,
+        address: policy.usdcAddress,
         abi: erc20Abi,
         functionName: 'balanceOf',
         args: [safeAddress],
@@ -733,7 +770,7 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
             actions: [
                 {
                     kind: 'erc20_transfer',
-                    token: POLICY.usdcAddress,
+                    token: policy.usdcAddress,
                     to: normalizedAgentAddress,
                     amountWei: selection.reimbursementAmountWei.toString(),
                 },
@@ -781,7 +818,7 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
     }
 
     const agentWethBalance = await publicClient.readContract({
-        address: POLICY.wethAddress,
+        address: policy.wethAddress,
         abi: erc20Abi,
         functionName: 'balanceOf',
         args: [normalizedAgentAddress],
@@ -795,7 +832,7 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
             callId: `deterministic-deposit-c${selection.campaignIndex + 1}-t${selection.trancheIndex + 1}`,
             name: 'make_deposit',
             arguments: JSON.stringify({
-                asset: POLICY.wethAddress,
+                asset: policy.wethAddress,
                 amountWei: wethDepositAmountWei.toString(),
             }),
         },
@@ -824,9 +861,10 @@ function parseCallArgs(call) {
  * Strictly validates and normalizes tool calls the module is allowed to execute.
  * Enforces dispute/proposal separation and deterministic DCA transfer constraints.
  */
-async function validateToolCalls({ toolCalls, commitmentSafe, agentAddress }) {
+async function validateToolCalls({ toolCalls, commitmentSafe, agentAddress, config }) {
     const safeAddress = normalizeAddressOrThrow(commitmentSafe, { requireHex: false });
     const normalizedAgentAddress = normalizeAddressOrThrow(agentAddress, { requireHex: false });
+    const policy = resolvePolicy(config);
 
     if (!Array.isArray(toolCalls) || toolCalls.length === 0) {
         return [];
@@ -888,8 +926,8 @@ async function validateToolCalls({ toolCalls, commitmentSafe, agentAddress }) {
         if (call.name === 'make_deposit') {
             const asset = normalizeAddressOrThrow(String(args.asset), { requireHex: false });
             const amountWei = BigInt(String(args.amountWei));
-            if (asset !== POLICY.wethAddress) {
-                throw new Error('make_deposit asset must be Sepolia WETH.');
+            if (asset !== policy.wethAddress) {
+                throw new Error('make_deposit asset must be policy WETH.');
             }
             if (amountWei <= 0n) {
                 throw new Error('make_deposit amountWei must be positive.');
@@ -917,8 +955,8 @@ async function validateToolCalls({ toolCalls, commitmentSafe, agentAddress }) {
         const token = normalizeAddressOrThrow(String(action.token), { requireHex: false });
         const to = normalizeAddressOrThrow(String(action.to), { requireHex: false });
         const amountWei = BigInt(String(action.amountWei));
-        if (token !== POLICY.usdcAddress) {
-            throw new Error('Reimbursement transfer token must be Sepolia USDC.');
+        if (token !== policy.usdcAddress) {
+            throw new Error('Reimbursement transfer token must be policy USDC.');
         }
         if (to !== normalizedAgentAddress) {
             throw new Error('Reimbursement transfer recipient must be agentAddress.');

@@ -108,6 +108,37 @@ async function run() {
     });
     assert.equal(validatedTwoStep.length, 2);
 
+    const validatedTwoStepMainnet = await validateToolCalls({
+        toolCalls: [
+            {
+                callId: 'deposit-mainnet',
+                name: 'make_deposit',
+                arguments: JSON.stringify({
+                    asset: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2',
+                    amountWei: '100',
+                }),
+            },
+            {
+                callId: 'build-mainnet',
+                name: 'build_og_transactions',
+                arguments: JSON.stringify({
+                    actions: [
+                        {
+                            kind: 'erc20_transfer',
+                            token: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+                            to: '0x00000000000000000000000000000000000000aa',
+                            amountWei: '25000000',
+                        },
+                    ],
+                }),
+            },
+        ],
+        commitmentSafe: '0x00000000000000000000000000000000000000bb',
+        agentAddress: '0x00000000000000000000000000000000000000aa',
+        config: { deterministicDcaPolicyPreset: 'mainnet' },
+    });
+    assert.equal(validatedTwoStepMainnet.length, 2);
+
     const validatedDispute = await validateToolCalls({
         toolCalls: [
             {
