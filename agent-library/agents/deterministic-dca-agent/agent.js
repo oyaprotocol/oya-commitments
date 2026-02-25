@@ -34,24 +34,6 @@ const chainlinkAbi = parseAbi([
     'function latestRoundData() external view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)',
 ]);
 
-function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
-    const mode = proposeEnabled && disputeEnabled
-        ? 'You may propose and dispute.'
-        : proposeEnabled
-          ? 'You may propose but you may not dispute.'
-          : disputeEnabled
-            ? 'You may dispute but you may not propose.'
-            : 'You may not propose or dispute; provide opinions only.';
-
-    return [
-        'You are a deterministic DCA reimbursement agent. This module computes actions directly from onchain history and does not rely on LLM reasoning.',
-        mode,
-        commitmentText ? `\nCommitment:\n${commitmentText}` : '',
-    ]
-        .filter(Boolean)
-        .join(' ');
-}
-
 function augmentSignals(signals, { nowMs } = {}) {
     return [
         ...signals,
@@ -1063,7 +1045,6 @@ async function validateToolCalls({ toolCalls, commitmentSafe, agentAddress }) {
 
 export {
     POLICY,
-    getSystemPrompt,
     augmentSignals,
     getDeterministicToolCalls,
     validateToolCalls,

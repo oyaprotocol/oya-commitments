@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import {
-    getSystemPrompt,
     splitReimbursementTranches,
     computeFillNotionalUsdcWei,
     computeWethAmountWei,
@@ -11,13 +10,6 @@ import {
 } from './agent.js';
 
 async function run() {
-    const prompt = getSystemPrompt({
-        proposeEnabled: true,
-        disputeEnabled: false,
-        commitmentText: 'Deterministic DCA commitment.',
-    });
-    assert.ok(prompt.includes('deterministic'));
-
     const tranches = splitReimbursementTranches(100_000_000n);
     assert.deepEqual(tranches, [25_000_000n, 25_000_000n, 25_000_000n, 25_000_000n]);
 
