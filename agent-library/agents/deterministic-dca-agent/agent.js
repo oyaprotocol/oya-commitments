@@ -1,4 +1,4 @@
-import { erc20Abi, parseAbi, zeroAddress } from 'viem';
+import { erc20Abi } from 'viem';
 import {
     normalizeAddressOrNull,
     normalizeAddressOrThrow,
@@ -6,14 +6,19 @@ import {
     decodeErc20TransferCallData,
 } from '../../../agent/src/lib/utils.js';
 import {
-    optimisticGovernorAbi,
-    optimisticOracleAbi,
-    normalizeAssertion,
     transferEvent,
     proposalDeletedEvent,
     proposalExecutedEvent,
     transactionsProposedEvent,
 } from '../../../agent/src/lib/og.js';
+import {
+    chainPositionCompare,
+    findContractDeploymentBlock,
+    getBlockTimestampMs,
+    getLogsChunked,
+} from '../../../agent/src/lib/chain-history.js';
+import { getChainlinkAnswerAtBlock } from '../../../agent/src/lib/chainlink.js';
+import { isAssertionDisputable, parseProposalRecord } from '../../../agent/src/lib/og-state.js';
 
 const CHAINLINK_ETH_USD_FEED_SEPOLIA = '0x694AA1769357215DE4FAC081bf1f309aDC325306';
 const CHAINLINK_ETH_USD_FEED_MAINNET = '0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419';
@@ -30,10 +35,6 @@ const POLICY = Object.freeze({
 let cachedAutoStartBlock = null;
 let autoDiscoveryFailed = false;
 const MAX_DISPUTE_EXPLANATION_LENGTH = 240;
-
-const chainlinkAbi = parseAbi([
-    'function latestRoundData() external view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)',
-]);
 
 /**
  * Adds a deterministic heartbeat signal so the module can run on a timer
@@ -101,73 +102,6 @@ function resolveLogChunkSize(config) {
 }
 
 /**
- * Fetches logs in bounded block chunks to stay within provider range limits.
- */
-async function getLogsChunked({ publicClient, address, event, args, fromBlock, toBlock, config }) {
-    if (fromBlock > toBlock) return [];
-
-    const configuredChunkSize = resolveLogChunkSize(config);
-
-    const logs = [];
-    let currentFrom = fromBlock;
-    while (currentFrom <= toBlock) {
-        const currentTo = currentFrom + configuredChunkSize - 1n > toBlock
-            ? toBlock
-            : currentFrom + configuredChunkSize - 1n;
-
-        const chunk = await publicClient.getLogs({
-            address,
-            event,
-            args,
-            fromBlock: currentFrom,
-            toBlock: currentTo,
-        });
-        logs.push(...chunk);
-        currentFrom = currentTo + 1n;
-    }
-
-    return logs;
-}
-
-/**
- * Checks whether an eth_getCode result indicates deployed bytecode.
- */
-function hasContractCode(code) {
-    return typeof code === 'string' && code !== '0x';
-}
-
-/**
- * Finds the first block where a contract has code using binary search.
- * Returns null when no code exists at latestBlock.
- */
-async function findContractDeploymentBlock({ publicClient, address, latestBlock }) {
-    const latestCode = await publicClient.getCode({
-        address,
-        blockNumber: latestBlock,
-    });
-    if (!hasContractCode(latestCode)) {
-        return null;
-    }
-
-    let left = 0n;
-    let right = latestBlock;
-    while (left < right) {
-        const middle = (left + right) / 2n;
-        const codeAtMiddle = await publicClient.getCode({
-            address,
-            blockNumber: middle,
-        });
-        if (hasContractCode(codeAtMiddle)) {
-            right = middle;
-        } else {
-            left = middle + 1n;
-        }
-    }
-
-    return left;
-}
-
-/**
  * Resolves the historical scan lower bound for deterministic reconstruction.
  * Uses START_BLOCK when provided, otherwise auto-discovers OG deployment block once and caches it.
  */
@@ -211,21 +145,6 @@ async function resolveScanStartBlock({ publicClient, config, latestBlock }) {
 }
 
 /**
- * Returns block timestamp in milliseconds with a local cache to avoid repeated RPC calls.
- */
-async function getBlockTimestampMs(publicClient, blockNumber, cache) {
-    const key = blockNumber.toString();
-    if (cache.has(key)) {
-        return cache.get(key);
-    }
-
-    const block = await publicClient.getBlock({ blockNumber });
-    const timestampMs = Number(block.timestamp) * 1000;
-    cache.set(key, timestampMs);
-    return timestampMs;
-}
-
-/**
  * Splits a campaign reimbursement total into 4 tranches, assigning remainder to the final tranche.
  */
 function splitReimbursementTranches(totalUsdcWei) {
@@ -264,22 +183,6 @@ function computeWethAmountWei({ fillNotionalUsdcWei, chainlinkAnswer }) {
 }
 
 /**
- * Compares two chain records by block and log index.
- * Returns -1 if left is earlier, 1 if later, 0 if same position.
- */
-function chainPositionCompare(left, right) {
-    const leftBlock = BigInt(left?.blockNumber ?? 0n);
-    const rightBlock = BigInt(right?.blockNumber ?? 0n);
-    if (leftBlock !== rightBlock) {
-        return leftBlock < rightBlock ? -1 : 1;
-    }
-    const leftLogIndex = BigInt(left?.logIndex ?? 0);
-    const rightLogIndex = BigInt(right?.logIndex ?? 0);
-    if (leftLogIndex === rightLogIndex) return 0;
-    return leftLogIndex < rightLogIndex ? -1 : 1;
-}
-
-/**
  * Maps the Nth valid reimbursement proposal to its expected campaign tranche
  * and returns the tranche amount plus due timestamp.
  */
@@ -307,24 +210,6 @@ function getExpectedTranche({ campaignDeposits, validProposalCount }) {
         fillNotionalUsdcWei,
         dueAtMs,
         deposit: campaignDeposit,
-    };
-}
-
-/**
- * Normalizes a TransactionsProposed log into the minimal fields needed by validation logic.
- */
-function parseProposalRecord(log) {
-    const proposalHash = normalizeHashOrNull(log?.args?.proposalHash);
-    if (!proposalHash) return null;
-    const assertionId = normalizeHashOrNull(log?.args?.assertionId);
-    const proposal = log?.args?.proposal;
-    const transactions = Array.isArray(proposal?.transactions) ? proposal.transactions : [];
-    return {
-        proposalHash,
-        assertionId,
-        blockNumber: log.blockNumber,
-        logIndex: log.logIndex ?? 0,
-        transactions,
     };
 }
 
@@ -376,97 +261,6 @@ function parseReimbursementTransfer({ proposalRecord, normalizedAgentAddress }) 
         ok: true,
         transferAmountWei: decoded.amount,
     };
-}
-
-/**
- * Reads and caches Chainlink price answer at a specific historical block.
- */
-async function getChainlinkAnswerAtBlock({
-    publicClient,
-    feedAddress,
-    blockNumber,
-    cache,
-}) {
-    const key = BigInt(blockNumber).toString();
-    if (cache.has(key)) {
-        return cache.get(key);
-    }
-    const round = await publicClient.readContract({
-        address: feedAddress,
-        abi: chainlinkAbi,
-        functionName: 'latestRoundData',
-        blockNumber: BigInt(blockNumber),
-    });
-    const answer = BigInt(round?.[1] ?? 0n);
-    if (answer <= 0n) {
-        throw new Error(`Chainlink answer at block ${key} is non-positive.`);
-    }
-    cache.set(key, answer);
-    return answer;
-}
-
-/**
- * Resolves and caches the Optimistic Oracle V3 address used by an OG module.
- */
-async function getOptimisticOracleAddress({
-    publicClient,
-    ogModule,
-    cache,
-}) {
-    if (cache.value) return cache.value;
-    const optimisticOracle = normalizeAddressOrThrow(
-        await publicClient.readContract({
-            address: ogModule,
-            abi: optimisticGovernorAbi,
-            functionName: 'optimisticOracleV3',
-        }),
-        { requireHex: false }
-    );
-    cache.value = optimisticOracle;
-    return optimisticOracle;
-}
-
-/**
- * Determines whether an assertion can still be disputed:
- * not settled, no disputer yet, and still within the dispute window.
- */
-async function isAssertionDisputable({
-    publicClient,
-    ogModule,
-    assertionId,
-    nowSeconds,
-    optimisticOracleCache,
-    assertionCache,
-}) {
-    if (!assertionId) return false;
-    if (assertionCache.has(assertionId)) {
-        return assertionCache.get(assertionId);
-    }
-
-    try {
-        const optimisticOracle = await getOptimisticOracleAddress({
-            publicClient,
-            ogModule,
-            cache: optimisticOracleCache,
-        });
-        const assertionRaw = await publicClient.readContract({
-            address: optimisticOracle,
-            abi: optimisticOracleAbi,
-            functionName: 'getAssertion',
-            args: [assertionId],
-        });
-        const assertion = normalizeAssertion(assertionRaw);
-        const settled = Boolean(assertion?.settled);
-        const disputer =
-            normalizeAddressOrNull(assertion?.disputer, { requireHex: false }) ?? zeroAddress;
-        const expirationTime = BigInt(assertion?.expirationTime ?? 0n);
-        const disputable = !settled && disputer === zeroAddress && expirationTime > nowSeconds;
-        assertionCache.set(assertionId, disputable);
-        return disputable;
-    } catch {
-        assertionCache.set(assertionId, false);
-        return false;
-    }
 }
 
 /**
@@ -655,6 +449,7 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
     const nowMs = Number(latestBlockData.timestamp) * 1000;
     const nowSeconds = BigInt(latestBlockData.timestamp);
     const chainlinkFeedAddress = config?.chainlinkPriceFeed ?? POLICY.chainlinkEthUsdFeed;
+    const logChunkSize = resolveLogChunkSize(config);
 
     const [
         usdcDepositsRaw,
@@ -670,7 +465,7 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
             args: { to: safeAddress },
             fromBlock,
             toBlock: latestBlock,
-            config,
+            chunkSize: logChunkSize,
         }),
         getLogsChunked({
             publicClient,
@@ -679,7 +474,7 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
             args: { from: normalizedAgentAddress, to: safeAddress },
             fromBlock,
             toBlock: latestBlock,
-            config,
+            chunkSize: logChunkSize,
         }),
         getLogsChunked({
             publicClient,
@@ -687,7 +482,7 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
             event: transactionsProposedEvent,
             fromBlock,
             toBlock: latestBlock,
-            config,
+            chunkSize: logChunkSize,
         }),
         getLogsChunked({
             publicClient,
@@ -695,7 +490,7 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
             event: proposalExecutedEvent,
             fromBlock,
             toBlock: latestBlock,
-            config,
+            chunkSize: logChunkSize,
         }),
         getLogsChunked({
             publicClient,
@@ -703,7 +498,7 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
             event: proposalDeletedEvent,
             fromBlock,
             toBlock: latestBlock,
-            config,
+            chunkSize: logChunkSize,
         }),
     ]);
 
