@@ -35,6 +35,10 @@ const chainlinkAbi = parseAbi([
     'function latestRoundData() external view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)',
 ]);
 
+/**
+ * Adds a deterministic heartbeat signal so the module can run on a timer
+ * even when no new deposit/proposal events were observed.
+ */
 function augmentSignals(signals, { nowMs } = {}) {
     return [
         ...signals,
@@ -45,12 +49,19 @@ function augmentSignals(signals, { nowMs } = {}) {
     ];
 }
 
+/**
+ * Builds a sortable key from (blockNumber, logIndex) so events can be
+ * ordered exactly as they occurred on chain.
+ */
 function toChronologicalSortKey(entry) {
     const block = BigInt(entry.blockNumber ?? 0n);
     const logIndex = BigInt(entry.logIndex ?? 0n);
     return block * 1_000_000n + logIndex;
 }
 
+/**
+ * Returns a copy of entries sorted in chain order (block first, then log index).
+ */
 function sortByChainOrder(entries) {
     return [...entries].sort((a, b) => {
         const left = toChronologicalSortKey(a);
@@ -60,6 +71,10 @@ function sortByChainOrder(entries) {
     });
 }
 
+/**
+ * Resolves the block range size used for eth_getLogs calls.
+ * Priority: shared config LOG_CHUNK_SIZE -> legacy agent-specific env var -> default policy.
+ */
 function resolveLogChunkSize(config) {
     const genericChunkSize = config?.logChunkSize;
     if (typeof genericChunkSize === 'bigint' && genericChunkSize > 0n) {
@@ -85,6 +100,9 @@ function resolveLogChunkSize(config) {
     }
 }
 
+/**
+ * Fetches logs in bounded block chunks to stay within provider range limits.
+ */
 async function getLogsChunked({ publicClient, address, event, args, fromBlock, toBlock, config }) {
     if (fromBlock > toBlock) return [];
 
@@ -111,10 +129,17 @@ async function getLogsChunked({ publicClient, address, event, args, fromBlock, t
     return logs;
 }
 
+/**
+ * Checks whether an eth_getCode result indicates deployed bytecode.
+ */
 function hasContractCode(code) {
     return typeof code === 'string' && code !== '0x';
 }
 
+/**
+ * Finds the first block where a contract has code using binary search.
+ * Returns null when no code exists at latestBlock.
+ */
 async function findContractDeploymentBlock({ publicClient, address, latestBlock }) {
     const latestCode = await publicClient.getCode({
         address,
@@ -142,6 +167,10 @@ async function findContractDeploymentBlock({ publicClient, address, latestBlock 
     return left;
 }
 
+/**
+ * Resolves the historical scan lower bound for deterministic reconstruction.
+ * Uses START_BLOCK when provided, otherwise auto-discovers OG deployment block once and caches it.
+ */
 async function resolveScanStartBlock({ publicClient, config, latestBlock }) {
     if (config?.startBlock !== undefined) {
         return BigInt(config.startBlock);
@@ -181,6 +210,9 @@ async function resolveScanStartBlock({ publicClient, config, latestBlock }) {
     }
 }
 
+/**
+ * Returns block timestamp in milliseconds with a local cache to avoid repeated RPC calls.
+ */
 async function getBlockTimestampMs(publicClient, blockNumber, cache) {
     const key = blockNumber.toString();
     if (cache.has(key)) {
@@ -193,6 +225,9 @@ async function getBlockTimestampMs(publicClient, blockNumber, cache) {
     return timestampMs;
 }
 
+/**
+ * Splits a campaign reimbursement total into 4 tranches, assigning remainder to the final tranche.
+ */
 function splitReimbursementTranches(totalUsdcWei) {
     const trancheCount = BigInt(POLICY.tranchesPerCampaign);
     const base = totalUsdcWei / trancheCount;
@@ -210,10 +245,16 @@ function splitReimbursementTranches(totalUsdcWei) {
     return tranches;
 }
 
+/**
+ * Applies the implied service fee by converting reimbursement amount (100%) to fill notional (99.5%).
+ */
 function computeFillNotionalUsdcWei(reimbursementUsdcWei) {
     return (reimbursementUsdcWei * (POLICY.bpsDenominator - POLICY.feeBps)) / POLICY.bpsDenominator;
 }
 
+/**
+ * Converts a USD notional (USDC 6 decimals) to WETH wei using Chainlink ETH/USD answer (8 decimals).
+ */
 function computeWethAmountWei({ fillNotionalUsdcWei, chainlinkAnswer }) {
     // fillNotionalUsdcWei has 6 decimals; Chainlink answer has 8 decimals.
     // wethWei = floor(fillUsd * 1e18 / ethPriceUsd)
@@ -222,6 +263,10 @@ function computeWethAmountWei({ fillNotionalUsdcWei, chainlinkAnswer }) {
     return (fillNotionalUsdcWei * scale) / chainlinkAnswer;
 }
 
+/**
+ * Compares two chain records by block and log index.
+ * Returns -1 if left is earlier, 1 if later, 0 if same position.
+ */
 function chainPositionCompare(left, right) {
     const leftBlock = BigInt(left?.blockNumber ?? 0n);
     const rightBlock = BigInt(right?.blockNumber ?? 0n);
@@ -234,6 +279,10 @@ function chainPositionCompare(left, right) {
     return leftLogIndex < rightLogIndex ? -1 : 1;
 }
 
+/**
+ * Maps the Nth valid reimbursement proposal to its expected campaign tranche
+ * and returns the tranche amount plus due timestamp.
+ */
 function getExpectedTranche({ campaignDeposits, validProposalCount }) {
     if (!Array.isArray(campaignDeposits) || campaignDeposits.length === 0) {
         return null;
@@ -261,6 +310,9 @@ function getExpectedTranche({ campaignDeposits, validProposalCount }) {
     };
 }
 
+/**
+ * Normalizes a TransactionsProposed log into the minimal fields needed by validation logic.
+ */
 function parseProposalRecord(log) {
     const proposalHash = normalizeHashOrNull(log?.args?.proposalHash);
     if (!proposalHash) return null;
@@ -276,6 +328,9 @@ function parseProposalRecord(log) {
     };
 }
 
+/**
+ * Trims and length-bounds dispute explanations to fit downstream constraints.
+ */
 function normalizeDisputeExplanation(explanation) {
     const text = String(explanation ?? '').trim();
     if (!text) return null;
@@ -283,6 +338,10 @@ function normalizeDisputeExplanation(explanation) {
     return text.slice(0, MAX_DISPUTE_EXPLANATION_LENGTH - 3).trimEnd() + '...';
 }
 
+/**
+ * Validates that a proposal is exactly one USDC transfer reimbursing the agent,
+ * and returns the decoded transfer amount when valid.
+ */
 function parseReimbursementTransfer({ proposalRecord, normalizedAgentAddress }) {
     if (!proposalRecord?.transactions || proposalRecord.transactions.length !== 1) {
         return { ok: false, reason: 'proposal must include exactly one transaction' };
@@ -319,6 +378,9 @@ function parseReimbursementTransfer({ proposalRecord, normalizedAgentAddress }) 
     };
 }
 
+/**
+ * Reads and caches Chainlink price answer at a specific historical block.
+ */
 async function getChainlinkAnswerAtBlock({
     publicClient,
     feedAddress,
@@ -343,6 +405,9 @@ async function getChainlinkAnswerAtBlock({
     return answer;
 }
 
+/**
+ * Resolves and caches the Optimistic Oracle V3 address used by an OG module.
+ */
 async function getOptimisticOracleAddress({
     publicClient,
     ogModule,
@@ -361,6 +426,10 @@ async function getOptimisticOracleAddress({
     return optimisticOracle;
 }
 
+/**
+ * Determines whether an assertion can still be disputed:
+ * not settled, no disputer yet, and still within the dispute window.
+ */
 async function isAssertionDisputable({
     publicClient,
     ogModule,
@@ -400,6 +469,9 @@ async function isAssertionDisputable({
     }
 }
 
+/**
+ * Reconstructs campaign state from deposit/fill/reimbursement history and flags anomalies.
+ */
 function buildCampaigns({ deposits, reimbursementRecords, agentFillDeposits }) {
     const campaigns = deposits.map((deposit, index) => {
         const reimbursementTranches = splitReimbursementTranches(deposit.amountWei);
@@ -494,10 +566,17 @@ function buildCampaigns({ deposits, reimbursementRecords, agentFillDeposits }) {
     };
 }
 
+/**
+ * Returns the first campaign that is not fully executed, or null when all campaigns are done.
+ */
 function getActiveCampaign(campaigns) {
     return campaigns.find((campaign) => campaign.executedCount < POLICY.tranchesPerCampaign) ?? null;
 }
 
+/**
+ * Chooses the next campaign action based on timing and consistency checks:
+ * ignore, propose_only, or deposit_and_propose.
+ */
 function chooseCampaignAction({ campaign, nowMs }) {
     if (!campaign) {
         return { action: 'ignore', reason: 'No campaigns detected.' };
@@ -551,6 +630,11 @@ function chooseCampaignAction({ campaign, nowMs }) {
     };
 }
 
+/**
+ * Main deterministic planner.
+ * Reconstructs chain state, validates prior proposals/fills, disputes invalid pending proposals,
+ * and emits the next safe tool calls when a tranche is due.
+ */
 async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicClient, config }) {
     const safeAddress = normalizeAddressOrThrow(commitmentSafe, { requireHex: false });
     const normalizedAgentAddress = normalizeAddressOrThrow(agentAddress, { requireHex: false });
@@ -924,6 +1008,9 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
     ];
 }
 
+/**
+ * Parses pre-parsed or JSON-encoded tool call arguments.
+ */
 function parseCallArgs(call) {
     if (call?.parsedArguments && typeof call.parsedArguments === 'object') {
         return call.parsedArguments;
@@ -938,6 +1025,10 @@ function parseCallArgs(call) {
     return null;
 }
 
+/**
+ * Strictly validates and normalizes tool calls the module is allowed to execute.
+ * Enforces dispute/proposal separation and deterministic DCA transfer constraints.
+ */
 async function validateToolCalls({ toolCalls, commitmentSafe, agentAddress }) {
     const safeAddress = normalizeAddressOrThrow(commitmentSafe, { requireHex: false });
     const normalizedAgentAddress = normalizeAddressOrThrow(agentAddress, { requireHex: false });
