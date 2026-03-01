@@ -343,6 +343,19 @@ async function pollProposalChanges({
         currentFrom = currentTo + 1n;
     }
 
+    // Treat any proposal hash that was finalized within this scanned window as stale.
+    // This prevents startup backfill from surfacing already executed/deleted proposals
+    // as fresh "proposal" signals to agent modules.
+    const finalizedProposalHashes = new Set();
+    for (const log of executedLogs) {
+        const proposalHash = log.args?.proposalHash;
+        if (proposalHash) finalizedProposalHashes.add(proposalHash);
+    }
+    for (const log of deletedLogs) {
+        const proposalHash = log.args?.proposalHash;
+        if (proposalHash) finalizedProposalHashes.add(proposalHash);
+    }
+
     const newProposals = [];
     for (const log of proposedLogs) {
         const proposalHash = log.args?.proposalHash;
@@ -350,6 +363,7 @@ async function pollProposalChanges({
         const proposal = log.args?.proposal;
         const challengeWindowEnds = log.args?.challengeWindowEnds;
         if (!proposalHash || !proposal?.transactions) continue;
+        if (finalizedProposalHashes.has(proposalHash)) continue;
         const proposer = log.args?.proposer;
         const explanationHex = log.args?.explanation;
         const rules = log.args?.rules;
