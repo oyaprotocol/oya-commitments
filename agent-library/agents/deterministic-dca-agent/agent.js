@@ -44,8 +44,9 @@ const POLICY = Object.freeze({
     logChunkSize: 5_000n,
 });
 let cachedAutoStartBlock = null;
-let autoDiscoveryFailed = false;
+let autoDiscoveryRetryAfterMs = 0;
 const MAX_DISPUTE_EXPLANATION_LENGTH = 240;
+const AUTO_DISCOVERY_RETRY_DELAY_MS = 60_000;
 
 function resolvePolicyPresetName(config) {
     const raw = String(
@@ -147,7 +148,7 @@ async function resolveScanStartBlock({ publicClient, config, latestBlock }) {
     if (cachedAutoStartBlock !== null) {
         return cachedAutoStartBlock;
     }
-    if (autoDiscoveryFailed) {
+    if (Date.now() < autoDiscoveryRetryAfterMs) {
         return null;
     }
 
@@ -158,21 +159,22 @@ async function resolveScanStartBlock({ publicClient, config, latestBlock }) {
             latestBlock,
         });
         if (discovered === null) {
-            autoDiscoveryFailed = true;
+            autoDiscoveryRetryAfterMs = Date.now() + AUTO_DISCOVERY_RETRY_DELAY_MS;
             console.warn(
-                '[deterministic-dca-agent] Auto-discovery failed: ogModule has no code at latest block.'
+                `[deterministic-dca-agent] Auto-discovery failed: ogModule has no code at latest block. Retrying in ${AUTO_DISCOVERY_RETRY_DELAY_MS}ms.`
             );
             return null;
         }
         cachedAutoStartBlock = discovered;
+        autoDiscoveryRetryAfterMs = 0;
         console.log(
             `[deterministic-dca-agent] Auto-discovered scan start block from OG deployment: ${discovered.toString()}`
         );
         return discovered;
     } catch (error) {
-        autoDiscoveryFailed = true;
+        autoDiscoveryRetryAfterMs = Date.now() + AUTO_DISCOVERY_RETRY_DELAY_MS;
         console.warn(
-            '[deterministic-dca-agent] Failed to auto-discover scan start block; set START_BLOCK explicitly.',
+            `[deterministic-dca-agent] Failed to auto-discover scan start block; will retry in ${AUTO_DISCOVERY_RETRY_DELAY_MS}ms (or set START_BLOCK explicitly).`,
             error?.message ?? error
         );
         return null;
