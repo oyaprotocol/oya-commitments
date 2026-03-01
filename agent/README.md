@@ -256,12 +256,12 @@ You can validate a module quickly:
 node agent/scripts/validate-agent.mjs --module=default
 ```
 
-Execute a specific OG proposal by hash (uses the configured signer from `agent/.env`):
+Execute a specific OG proposal by proposal submission transaction hash (uses the configured signer from `agent/.env`):
 
 ```bash
 node agent/scripts/execute-og-proposal.mjs \
   --og=0xYourOptimisticGovernor \
-  --proposal-hash=0xYourProposalHash
+  --proposal-tx-hash=0xProposalSubmissionTxHash
 ```
 
 Default agent smoke test:

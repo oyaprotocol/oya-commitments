@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createPublicClient, getAddress, http } from 'viem';
+import { createPublicClient, decodeEventLog, getAddress, http } from 'viem';
 import {
     optimisticGovernorAbi,
     proposalDeletedEvent,
@@ -9,7 +9,7 @@ import {
     transactionsProposedEvent,
 } from '../src/lib/og.js';
 import { createSignerClient } from '../src/lib/signer.js';
-import { findContractDeploymentBlock, getLogsChunked } from '../src/lib/chain-history.js';
+import { getLogsChunked } from '../src/lib/chain-history.js';
 import { normalizeHashOrNull } from '../src/lib/utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -60,63 +60,19 @@ function parsePositiveNumber(value, label) {
     return parsed;
 }
 
-function sortByChainPosition(entries) {
-    return [...entries].sort((left, right) => {
-        const leftBlock = BigInt(left?.blockNumber ?? 0n);
-        const rightBlock = BigInt(right?.blockNumber ?? 0n);
-        if (leftBlock !== rightBlock) {
-            return leftBlock < rightBlock ? -1 : 1;
-        }
-        const leftLogIndex = BigInt(left?.logIndex ?? 0);
-        const rightLogIndex = BigInt(right?.logIndex ?? 0);
-        if (leftLogIndex === rightLogIndex) {
-            return 0;
-        }
-        return leftLogIndex < rightLogIndex ? -1 : 1;
-    });
-}
-
 function printUsage() {
     console.log(`Usage:
-node agent/scripts/execute-og-proposal.mjs --og=<og-module-address> --proposal-hash=<0x...>
+node agent/scripts/execute-og-proposal.mjs --og=<og-module-address> --proposal-tx-hash=<0x...>
 
 Options:
   --og=<address>                 Optimistic Governor module address (fallback: OG_MODULE env)
-  --proposal-hash=<0x...>        Proposal hash to execute (required)
+  --proposal-tx-hash=<0x...>     Proposal submission transaction hash (required)
+  --tx-hash=<0x...>              Alias for --proposal-tx-hash
   --rpc-url=<url>                RPC URL (fallback: RPC_URL env)
-  --from-block=<number>          Lower bound for scanning TransactionsProposed logs
   --log-chunk-size=<number>      Chunk size for getLogs scans (fallback: LOG_CHUNK_SIZE env, default 5000)
   --wait-timeout-ms=<number>     Wait timeout for execution receipt (default 180000)
   --help                         Show this help
 `);
-}
-
-async function resolveScanStartBlock({
-    publicClient,
-    ogModule,
-    latestBlock,
-    fromBlockArg,
-}) {
-    if (fromBlockArg !== null) {
-        return parseNonNegativeBigInt(fromBlockArg, '--from-block');
-    }
-    if (process.env.START_BLOCK) {
-        return parseNonNegativeBigInt(process.env.START_BLOCK, 'START_BLOCK');
-    }
-
-    const deploymentBlock = await findContractDeploymentBlock({
-        publicClient,
-        address: ogModule,
-        latestBlock,
-    });
-    if (deploymentBlock === null) {
-        throw new Error(`No contract code found for OG module ${ogModule} at latest block.`);
-    }
-
-    console.log(
-        `[script] Auto-discovered scan start block from OG deployment: ${deploymentBlock.toString()}`
-    );
-    return deploymentBlock;
 }
 
 async function main() {
@@ -131,10 +87,10 @@ async function main() {
     }
     const ogModule = getAddress(ogRaw);
 
-    const proposalHashRaw = getArgValue('--proposal-hash=');
-    const proposalHash = normalizeHashOrNull(proposalHashRaw);
-    if (!proposalHash) {
-        throw new Error('Missing or invalid --proposal-hash=<0x...>.');
+    const proposalTxHashRaw = getArgValue('--proposal-tx-hash=') ?? getArgValue('--tx-hash=');
+    const proposalTxHash = normalizeHashOrNull(proposalTxHashRaw);
+    if (!proposalTxHash) {
+        throw new Error('Missing or invalid --proposal-tx-hash=<0x...>.');
     }
 
     const rpcUrl = getArgValue('--rpc-url=') ?? process.env.RPC_URL;
@@ -155,20 +111,57 @@ async function main() {
     const publicClient = createPublicClient({ transport: http(rpcUrl) });
     const { account, walletClient } = await createSignerClient({ rpcUrl });
 
-    const latestBlock = await publicClient.getBlockNumber();
-    const fromBlock = await resolveScanStartBlock({
-        publicClient,
-        ogModule,
-        latestBlock,
-        fromBlockArg: getArgValue('--from-block='),
+    const proposalReceipt = await publicClient.getTransactionReceipt({
+        hash: proposalTxHash,
     });
-    if (fromBlock > latestBlock) {
+    if (proposalReceipt.status !== 'success') {
         throw new Error(
-            `fromBlock ${fromBlock.toString()} is greater than latest block ${latestBlock.toString()}.`
+            `Proposal submission transaction ${proposalTxHash} did not succeed (status=${proposalReceipt.status}).`
         );
     }
 
-    const [executedLogs, deletedLogs, proposedLogs] = await Promise.all([
+    let proposalHash = null;
+    let transactions = null;
+    for (const log of proposalReceipt.logs ?? []) {
+        let logAddress;
+        try {
+            logAddress = getAddress(log.address);
+        } catch (error) {
+            continue;
+        }
+        if (logAddress !== ogModule) continue;
+
+        try {
+            const decoded = decodeEventLog({
+                abi: [transactionsProposedEvent],
+                data: log.data,
+                topics: log.topics,
+            });
+            const decodedProposalHash = normalizeHashOrNull(decoded?.args?.proposalHash);
+            const decodedTransactions = decoded?.args?.proposal?.transactions;
+            if (decodedProposalHash && Array.isArray(decodedTransactions) && decodedTransactions.length > 0) {
+                proposalHash = decodedProposalHash;
+                transactions = decodedTransactions;
+                break;
+            }
+        } catch (error) {
+            // Ignore unrelated logs in the tx receipt.
+        }
+    }
+
+    if (!proposalHash || !transactions) {
+        throw new Error(
+            `Could not decode TransactionsProposed from tx ${proposalTxHash} for OG ${ogModule}.`
+        );
+    }
+
+    console.log(
+        `[script] Decoded proposal from tx ${proposalTxHash}. proposalHash=${proposalHash}`
+    );
+
+    const latestBlock = await publicClient.getBlockNumber();
+    const fromBlock = proposalReceipt.blockNumber;
+    const [executedLogs, deletedLogs] = await Promise.all([
         getLogsChunked({
             publicClient,
             address: ogModule,
@@ -187,14 +180,6 @@ async function main() {
             toBlock: latestBlock,
             chunkSize,
         }),
-        getLogsChunked({
-            publicClient,
-            address: ogModule,
-            event: transactionsProposedEvent,
-            fromBlock,
-            toBlock: latestBlock,
-            chunkSize,
-        }),
     ]);
 
     if (deletedLogs.length > 0) {
@@ -205,24 +190,6 @@ async function main() {
     if (executedLogs.length > 0) {
         console.log(`[script] Proposal ${proposalHash} is already executed. Nothing to do.`);
         return;
-    }
-
-    const proposalMatches = proposedLogs.filter((log) => {
-        const logHash = normalizeHashOrNull(log?.args?.proposalHash);
-        return logHash === proposalHash;
-    });
-    if (proposalMatches.length === 0) {
-        throw new Error(
-            `Could not find TransactionsProposed log for proposalHash ${proposalHash} in [${fromBlock.toString()}, ${latestBlock.toString()}].`
-        );
-    }
-
-    const sortedMatches = sortByChainPosition(proposalMatches);
-    const proposalLog = sortedMatches[sortedMatches.length - 1];
-    const proposal = proposalLog?.args?.proposal;
-    const transactions = Array.isArray(proposal?.transactions) ? proposal.transactions : [];
-    if (transactions.length === 0) {
-        throw new Error(`Proposal ${proposalHash} has no executable transactions in log payload.`);
     }
 
     try {
@@ -239,7 +206,7 @@ async function main() {
     }
 
     console.log(
-        `[script] Executing proposal ${proposalHash} on OG ${ogModule} as signer ${account.address}...`
+        `[script] Executing proposal from tx ${proposalTxHash} on OG ${ogModule} as signer ${account.address}...`
     );
     const txHash = await walletClient.writeContract({
         address: ogModule,
