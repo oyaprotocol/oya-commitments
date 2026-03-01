@@ -68,6 +68,12 @@ function buildConfig() {
                 ? true
                 : process.env.DISPUTE_ENABLED.toLowerCase() !== 'false',
         disputeRetryMs: Number(process.env.DISPUTE_RETRY_MS ?? 60_000),
+        proposalHashResolveTimeoutMs: Number(
+            process.env.PROPOSAL_HASH_RESOLVE_TIMEOUT_MS ?? 15_000
+        ),
+        proposalHashResolvePollIntervalMs: Number(
+            process.env.PROPOSAL_HASH_RESOLVE_POLL_INTERVAL_MS ?? 1_500
+        ),
         agentModule: process.env.AGENT_MODULE,
         chainlinkPriceFeed: process.env.CHAINLINK_PRICE_FEED
             ? getAddress(process.env.CHAINLINK_PRICE_FEED)

@@ -31,6 +31,8 @@ const erc1155TransferAbi = parseAbi([
 ]);
 
 const ZERO_BYTES32 = '0x0000000000000000000000000000000000000000000000000000000000000000';
+const DEFAULT_PROPOSAL_HASH_RESOLVE_TIMEOUT_MS = 15_000;
+const DEFAULT_PROPOSAL_HASH_RESOLVE_POLL_INTERVAL_MS = 1_500;
 
 function extractProposalHashFromReceipt({ receipt, ogModule }) {
     if (!receipt?.logs || !Array.isArray(receipt.logs)) return null;
@@ -61,6 +63,65 @@ function extractProposalHashFromReceipt({ receipt, ogModule }) {
         } catch (error) {
             // Ignore non-matching logs.
         }
+    }
+
+    return null;
+}
+
+function sleep(ms) {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
+}
+
+function isReceiptUnavailableError(error) {
+    const name = String(error?.name ?? '');
+    if (name.includes('TransactionReceiptNotFoundError') || name.includes('TransactionNotFoundError')) {
+        return true;
+    }
+
+    const message = String(error?.shortMessage ?? error?.message ?? '').toLowerCase();
+    return message.includes('transaction receipt') && message.includes('not found');
+}
+
+async function resolveProposalHashFromReceipt({
+    publicClient,
+    proposalTxHash,
+    ogModule,
+    timeoutMs,
+    pollIntervalMs,
+}) {
+    const effectiveTimeoutMs =
+        Number.isFinite(timeoutMs) && timeoutMs >= 0
+            ? timeoutMs
+            : DEFAULT_PROPOSAL_HASH_RESOLVE_TIMEOUT_MS;
+    const effectivePollIntervalMs =
+        Number.isFinite(pollIntervalMs) && pollIntervalMs > 0
+            ? pollIntervalMs
+            : DEFAULT_PROPOSAL_HASH_RESOLVE_POLL_INTERVAL_MS;
+    const deadlineMs = Date.now() + effectiveTimeoutMs;
+
+    while (Date.now() <= deadlineMs) {
+        try {
+            const receipt = await publicClient.getTransactionReceipt({
+                hash: proposalTxHash,
+            });
+            return extractProposalHashFromReceipt({
+                receipt,
+                ogModule,
+            });
+        } catch (error) {
+            if (!isReceiptUnavailableError(error)) {
+                throw error;
+            }
+        }
+
+        if (Date.now() >= deadlineMs) {
+            break;
+        }
+
+        const waitMs = Math.min(effectivePollIntervalMs, Math.max(1, deadlineMs - Date.now()));
+        await sleep(waitMs);
     }
 
     return null;
@@ -220,13 +281,18 @@ async function postBondAndPropose({
     if (proposalTxHash) {
         console.log('[agent] Proposal submitted tx:', proposalTxHash);
         try {
-            const receipt = await publicClient.waitForTransactionReceipt({
-                hash: proposalTxHash,
-            });
-            proposalHash = extractProposalHashFromReceipt({
-                receipt,
+            proposalHash = await resolveProposalHashFromReceipt({
+                publicClient,
+                proposalTxHash,
                 ogModule,
+                timeoutMs: config.proposalHashResolveTimeoutMs,
+                pollIntervalMs: config.proposalHashResolvePollIntervalMs,
             });
+            if (!proposalHash) {
+                console.log(
+                    '[agent] Proposal hash not yet available from receipt; continuing and relying on OG log polling.'
+                );
+            }
         } catch (error) {
             const reason = error?.shortMessage ?? error?.message ?? String(error);
             console.warn('[agent] Failed to resolve OG proposalHash from receipt:', reason);

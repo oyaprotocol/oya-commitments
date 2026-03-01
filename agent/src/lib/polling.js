@@ -6,6 +6,7 @@ import {
     transactionsProposedEvent,
     transferEvent,
 } from './og.js';
+import { findContractDeploymentBlock } from './chain-history.js';
 
 function getAlwaysEmitBalanceSnapshotPollingOptions() {
     return {
@@ -237,27 +238,72 @@ async function pollCommitmentChanges({
     };
 }
 
-async function pollProposalChanges({ publicClient, ogModule, lastProposalCheckedBlock, proposalsByHash }) {
-    const latestBlock = await publicClient.getBlockNumber();
-    if (lastProposalCheckedBlock === undefined) {
-        return {
-            newProposals: [],
-            executedProposals: [],
-            deletedProposals: [],
-            lastProposalCheckedBlock: latestBlock,
-        };
+async function resolveInitialProposalScanStartBlock({
+    publicClient,
+    ogModule,
+    startBlock,
+    latestBlock,
+}) {
+    if (startBlock !== undefined) {
+        return BigInt(startBlock);
     }
 
-    if (latestBlock <= lastProposalCheckedBlock) {
+    try {
+        const discovered = await findContractDeploymentBlock({
+            publicClient,
+            address: ogModule,
+            latestBlock,
+        });
+        if (discovered !== null) {
+            console.log(
+                `[agent] Backfilling proposal history from OG deployment block ${discovered.toString()}.`
+            );
+            return discovered;
+        }
+    } catch (error) {
+        console.warn(
+            '[agent] Failed to auto-discover proposal scan start block; skipping startup backfill.',
+            error?.message ?? error
+        );
+    }
+
+    return latestBlock + 1n;
+}
+
+async function pollProposalChanges({
+    publicClient,
+    ogModule,
+    lastProposalCheckedBlock,
+    proposalsByHash,
+    startBlock,
+}) {
+    const latestBlock = await publicClient.getBlockNumber();
+    let fromBlock;
+    if (lastProposalCheckedBlock === undefined) {
+        fromBlock = await resolveInitialProposalScanStartBlock({
+            publicClient,
+            ogModule,
+            startBlock,
+            latestBlock,
+        });
+        if (fromBlock > latestBlock) {
+            return {
+                newProposals: [],
+                executedProposals: [],
+                deletedProposals: [],
+                lastProposalCheckedBlock: latestBlock,
+            };
+        }
+    } else if (latestBlock <= lastProposalCheckedBlock) {
         return {
             newProposals: [],
             executedProposals: [],
             deletedProposals: [],
             lastProposalCheckedBlock,
         };
+    } else {
+        fromBlock = lastProposalCheckedBlock + 1n;
     }
-
-    const fromBlock = lastProposalCheckedBlock + 1n;
     const toBlock = latestBlock;
 
     const maxRange = 10n;

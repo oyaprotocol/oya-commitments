@@ -395,6 +395,7 @@ async function agentLoop() {
                 ogModule: config.ogModule,
                 lastProposalCheckedBlock,
                 proposalsByHash,
+                startBlock: config.startBlock,
             });
         lastProposalCheckedBlock = nextProposalBlock;
         const executedProposalCount = executedProposals?.length ?? 0;
@@ -516,10 +517,6 @@ async function startAgent() {
     if (lastCheckedBlock === undefined) {
         lastCheckedBlock = await publicClient.getBlockNumber();
     }
-    if (lastProposalCheckedBlock === undefined) {
-        lastProposalCheckedBlock = lastCheckedBlock;
-    }
-
     lastNativeBalance = await primeBalances({
         publicClient,
         commitmentSafe: config.commitmentSafe,
