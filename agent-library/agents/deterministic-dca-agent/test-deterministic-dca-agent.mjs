@@ -66,6 +66,29 @@ async function run() {
     assert.equal(action.nextTrancheIndex, 2);
     assert.equal(action.reimbursementAmountWei, 25_000_000n);
 
+    const fourHoursAgo = Date.now() - 4 * 60 * 60 * 1000;
+    const { campaigns: cadenceCampaigns, anomalies: cadenceAnomalies } = buildCampaigns({
+        deposits: [
+            {
+                amountWei: 100_000_000n,
+                blockNumber: 11n,
+                logIndex: 0,
+                timestampMs: fourHoursAgo,
+            },
+        ],
+        reimbursementRecords: [
+            { amountWei: 25_000_000n, status: 'executed', blockNumber: 12n, logIndex: 0 },
+        ],
+        agentFillDeposits: [{ amountWei: 1n, blockNumber: 12n, logIndex: 1 }],
+    });
+    assert.equal(cadenceAnomalies.length, 0);
+    const cadenceAction = chooseCampaignAction({
+        campaign: cadenceCampaigns[0],
+        nowMs: Date.now(),
+    });
+    assert.equal(cadenceAction.action, 'deposit_and_propose');
+    assert.equal(cadenceAction.nextTrancheIndex, 1);
+
     const proposeOnly = chooseCampaignAction({
         campaign: {
             ...campaigns[0],

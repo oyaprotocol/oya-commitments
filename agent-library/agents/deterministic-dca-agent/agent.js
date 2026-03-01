@@ -38,7 +38,7 @@ const DEFAULT_POLICY_PRESET = 'testnet';
 const POLICY = Object.freeze({
     ...POLICY_PRESETS[DEFAULT_POLICY_PRESET],
     tranchesPerCampaign: 4,
-    trancheIntervalMs: 6 * 60 * 60 * 1000,
+    trancheIntervalMs: 3 * 60 * 60 * 1000,
     feeBps: 50n,
     bpsDenominator: 10_000n,
     logChunkSize: 5_000n,
@@ -489,6 +489,7 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
 
     const [
         usdcDepositsRaw,
+        usdcWithdrawalsRaw,
         agentWethDepositsRaw,
         proposedLogsRaw,
         executedLogsRaw,
@@ -499,6 +500,15 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
             address: policy.usdcAddress,
             event: transferEvent,
             args: { to: safeAddress },
+            fromBlock,
+            toBlock: latestBlock,
+            chunkSize: logChunkSize,
+        }),
+        getLogsChunked({
+            publicClient,
+            address: policy.usdcAddress,
+            event: transferEvent,
+            args: { from: safeAddress },
             fromBlock,
             toBlock: latestBlock,
             chunkSize: logChunkSize,
@@ -555,6 +565,31 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
     if (usdcDeposits.length === 0) {
         return [];
     }
+    const sortedCampaignDeposits = sortByChainOrder(usdcDeposits);
+
+    const sortedUserUsdcWithdrawals = sortByChainOrder(
+        usdcWithdrawalsRaw
+            .map((log) => {
+                const amount = BigInt(log?.args?.value ?? 0n);
+                const to = normalizeAddressOrNull(log?.args?.to, { requireHex: false });
+                return {
+                    amountWei: amount,
+                    to,
+                    blockNumber: log.blockNumber,
+                    logIndex: log.logIndex ?? 0,
+                };
+            })
+            .filter(
+                (entry) =>
+                    entry.amountWei > 0n &&
+                    typeof entry.to === 'string' &&
+                    entry.to !== normalizedAgentAddress
+            )
+    );
+    const firstUserUsdcWithdrawal =
+        sortedUserUsdcWithdrawals.find(
+            (entry) => chainPositionCompare(entry, sortedCampaignDeposits[0]) >= 0
+        ) ?? null;
 
     const sortedAgentWethDeposits = sortByChainOrder(
         agentWethDepositsRaw
@@ -576,8 +611,6 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
             .map((log) => normalizeHashOrNull(log?.args?.proposalHash))
             .filter(Boolean)
     );
-    const sortedCampaignDeposits = sortByChainOrder(usdcDeposits);
-
     const proposalRecords = sortByChainOrder(
         proposedLogsRaw
             .map((log) => parseProposalRecord(log))
@@ -597,14 +630,23 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
     const chainlinkAnswerByBlock = new Map();
 
     for (const proposalRecord of proposalRecords) {
-        const expected = getExpectedTranche({
-            campaignDeposits: sortedCampaignDeposits,
-            validProposalCount,
-        });
-
         let invalidReason = null;
+        let expected = null;
         if (!proposalRecord.assertionId) {
             invalidReason = 'missing assertionId';
+        }
+        if (
+            !invalidReason &&
+            firstUserUsdcWithdrawal &&
+            chainPositionCompare(firstUserUsdcWithdrawal, proposalRecord) <= 0
+        ) {
+            invalidReason = 'campaign canceled by user USDC withdrawal';
+        }
+        if (!invalidReason) {
+            expected = getExpectedTranche({
+                campaignDeposits: sortedCampaignDeposits,
+                validProposalCount,
+            });
         }
         if (!invalidReason && !expected) {
             invalidReason = 'no scheduled campaign tranche available for this proposal';
@@ -731,6 +773,10 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
         console.warn(
             `[deterministic-dca-agent] Found ${invalidExecutedProposalCount} invalid executed proposal(s); refusing automatic proposals.`
         );
+        return [];
+    }
+
+    if (firstUserUsdcWithdrawal) {
         return [];
     }
 
