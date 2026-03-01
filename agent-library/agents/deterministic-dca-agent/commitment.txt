@@ -10,8 +10,4 @@ For each campaign:
 - For each due tranche, the agent deposits WETH worth 99.5% of that tranche's USDC reimbursement amount, then proposes Safe reimbursement of 100% of that tranche's USDC amount to the agent.
 - The implied fee is 0.5% of the reimbursed USDC amount per tranche.
 - The user may withdraw funds at any time, but must not withdraw USDC reserved for the agent's future reimbursement.
-- Any user-initiated USDC withdrawal from the Safe (other than the agent reimbursement transfer) cancels the DCA process; after cancellation, no new fills or reimbursement proposals are allowed.
-
-Safety and execution rules:
-- Reimbursements must be proposed as a single USDC erc20_transfer to the agent address.
-- If any proposal is pending onchain, do not propose another.
+- Any user-initiated USDC withdrawal from the Safe cancels the DCA process; after cancellation, no new fills or reimbursement proposals are allowed.
