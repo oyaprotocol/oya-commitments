@@ -1,7 +1,7 @@
 {
   "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
   "name": "Oya Deterministic DCA Agent",
-  "description": "Deterministic single-active-campaign DCA reimbursement agent: reconstructs campaign state from chain history, executes 4 tranches over 24h (immediate + every 6h), and applies an implied 0.5% service fee.",
+  "description": "Deterministic single-active-campaign DCA reimbursement agent: reconstructs campaign state from chain history, executes 4 tranches over 9h (immediate + every 3h), applies an implied 0.5% service fee, and halts on user withdrawal cancellation.",
   "image": "https://raw.githubusercontent.com/oya-commitments/oya-commitments/main/agent-library/agents/default/agent.png",
   "endpoints": [
     {

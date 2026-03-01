@@ -6,9 +6,11 @@ Only one campaign may be active at a time. If additional USDC deposits arrive wh
 For each campaign:
 - Split the campaign deposit into 4 reimbursement tranches (integer micro-USDC split; first 3 equal, last tranche gets remainder).
 - Tranche 1 is immediate once the campaign is detected.
-- Tranches 2, 3, and 4 are due every 6 hours after campaign start.
+- Tranches 2, 3, and 4 are due every 3 hours after campaign start.
 - For each due tranche, the agent deposits WETH worth 99.5% of that tranche's USDC reimbursement amount, then proposes Safe reimbursement of 100% of that tranche's USDC amount to the agent.
 - The implied fee is 0.5% of the reimbursed USDC amount per tranche.
+- The user may withdraw funds at any time, but must not withdraw USDC reserved for the agent's future reimbursement.
+- Any user-initiated USDC withdrawal from the Safe (other than the agent reimbursement transfer) cancels the DCA process; after cancellation, no new fills or reimbursement proposals are allowed.
 
 Safety and execution rules:
 - Reimbursements must be proposed as a single USDC erc20_transfer to the agent address.
