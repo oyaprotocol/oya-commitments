@@ -799,15 +799,12 @@ async function getDeterministicToolCalls({ commitmentSafe, agentAddress, publicC
         return [buildCall];
     }
 
-    const priceRound = await publicClient.readContract({
-        address: chainlinkFeedAddress,
-        abi: chainlinkAbi,
-        functionName: 'latestRoundData',
+    const chainlinkAnswer = await getChainlinkAnswerAtBlock({
+        publicClient,
+        feedAddress: chainlinkFeedAddress,
+        blockNumber: latestBlock,
+        cache: chainlinkAnswerByBlock,
     });
-    const chainlinkAnswer = BigInt(priceRound?.[1] ?? 0n);
-    if (chainlinkAnswer <= 0n) {
-        return [];
-    }
 
     const wethDepositAmountWei = computeWethAmountWei({
         fillNotionalUsdcWei: selection.fillNotionalUsdcWei,
