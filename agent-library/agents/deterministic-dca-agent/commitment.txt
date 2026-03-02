@@ -1,0 +1,14 @@
+Deterministic DCA Commitment (single active campaign)
+
+When USDC is deposited into this Safe, that deposit starts a DCA campaign.
+Only one campaign may be active at a time. If additional USDC deposits arrive while a campaign is active, they are queued for the next campaign in deposit order.
+
+For each campaign:
+- Split the campaign deposit into 4 reimbursement tranches (integer micro-USDC split; first 3 equal, last tranche gets remainder).
+- Tranche 1 is immediate once the campaign is detected.
+- Tranches 2, 3, and 4 are due every 3 hours after campaign start.
+- The agent must wait at least 3 hours after the previous tranche to propose a new tranche, but is allowed to propose after a longer than 3-hour wait period (for example, 4 hours after the previous tranche).
+- For each due tranche, the agent deposits WETH worth 99.5% of that tranche's USDC reimbursement amount, then proposes Safe reimbursement of 100% of that tranche's USDC amount to the agent.
+- The implied fee is 0.5% of the reimbursed USDC amount per tranche.
+- The user may withdraw funds at any time, but must not withdraw USDC reserved for the agent's future reimbursement.
+- Any user-initiated USDC withdrawal from the Safe cancels the DCA process; after cancellation, no new fills or reimbursement proposals are allowed.

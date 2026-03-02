@@ -1,0 +1,220 @@
+import assert from 'node:assert/strict';
+import {
+    splitReimbursementTranches,
+    computeFillNotionalUsdcWei,
+    computeWethAmountWei,
+    findContractDeploymentBlock,
+    buildCampaigns,
+    chooseCampaignAction,
+    validateToolCalls,
+} from './agent.js';
+
+async function run() {
+    const tranches = splitReimbursementTranches(100_000_000n);
+    assert.deepEqual(tranches, [25_000_000n, 25_000_000n, 25_000_000n, 25_000_000n]);
+
+    const discoveredDeploymentBlock = await findContractDeploymentBlock({
+        publicClient: {
+            getCode: async ({ blockNumber }) => {
+                if (blockNumber < 123n) return '0x';
+                return '0x1234';
+            },
+        },
+        address: '0x00000000000000000000000000000000000000cc',
+        latestBlock: 500n,
+    });
+    assert.equal(discoveredDeploymentBlock, 123n);
+
+    const fillNotional = computeFillNotionalUsdcWei(25_000_000n);
+    assert.equal(fillNotional, 24_875_000n);
+    const wethWei = computeWethAmountWei({
+        fillNotionalUsdcWei: 24_875_000n,
+        chainlinkAnswer: 2_000n * 10n ** 8n,
+    });
+    assert.equal(wethWei, 12_437_500_000_000_000n);
+
+    const depositTs = Date.now() - 13 * 60 * 60 * 1000;
+    const { campaigns, anomalies } = buildCampaigns({
+        deposits: [
+            {
+                amountWei: 100_000_000n,
+                blockNumber: 1n,
+                logIndex: 0,
+                timestampMs: depositTs,
+            },
+        ],
+        reimbursementRecords: [
+            { amountWei: 25_000_000n, status: 'executed', blockNumber: 2n, logIndex: 0 },
+            { amountWei: 25_000_000n, status: 'executed', blockNumber: 3n, logIndex: 0 },
+        ],
+        agentFillDeposits: [
+            { amountWei: 1n, blockNumber: 2n, logIndex: 1 },
+            { amountWei: 1n, blockNumber: 3n, logIndex: 1 },
+        ],
+    });
+    assert.equal(anomalies.length, 0);
+    assert.equal(campaigns.length, 1);
+    assert.equal(campaigns[0].proposalCount, 2);
+    assert.equal(campaigns[0].executedCount, 2);
+    assert.equal(campaigns[0].unpairedFillCount, 0);
+
+    const action = chooseCampaignAction({
+        campaign: campaigns[0],
+        nowMs: Date.now(),
+    });
+    assert.equal(action.action, 'deposit_and_propose');
+    assert.equal(action.nextTrancheIndex, 2);
+    assert.equal(action.reimbursementAmountWei, 25_000_000n);
+
+    const fourHoursAgo = Date.now() - 4 * 60 * 60 * 1000;
+    const { campaigns: cadenceCampaigns, anomalies: cadenceAnomalies } = buildCampaigns({
+        deposits: [
+            {
+                amountWei: 100_000_000n,
+                blockNumber: 11n,
+                logIndex: 0,
+                timestampMs: fourHoursAgo,
+            },
+        ],
+        reimbursementRecords: [
+            { amountWei: 25_000_000n, status: 'executed', blockNumber: 12n, logIndex: 0 },
+        ],
+        agentFillDeposits: [{ amountWei: 1n, blockNumber: 12n, logIndex: 1 }],
+    });
+    assert.equal(cadenceAnomalies.length, 0);
+    const cadenceAction = chooseCampaignAction({
+        campaign: cadenceCampaigns[0],
+        nowMs: Date.now(),
+    });
+    assert.equal(cadenceAction.action, 'deposit_and_propose');
+    assert.equal(cadenceAction.nextTrancheIndex, 1);
+
+    const proposeOnly = chooseCampaignAction({
+        campaign: {
+            ...campaigns[0],
+            agentFillCount: 3,
+            unpairedFillCount: 1,
+            proposalCount: 2,
+            pendingCount: 0,
+        },
+        nowMs: Date.now(),
+    });
+    assert.equal(proposeOnly.action, 'propose_only');
+
+    const validatedTwoStep = await validateToolCalls({
+        toolCalls: [
+            {
+                callId: 'deposit',
+                name: 'make_deposit',
+                arguments: JSON.stringify({
+                    asset: '0x7b79995e5f793a07bc00c21412e50ecae098e7f9',
+                    amountWei: '100',
+                }),
+            },
+            {
+                callId: 'build',
+                name: 'build_og_transactions',
+                arguments: JSON.stringify({
+                    actions: [
+                        {
+                            kind: 'erc20_transfer',
+                            token: '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238',
+                            to: '0x00000000000000000000000000000000000000aa',
+                            amountWei: '25000000',
+                        },
+                    ],
+                }),
+            },
+        ],
+        commitmentSafe: '0x00000000000000000000000000000000000000bb',
+        agentAddress: '0x00000000000000000000000000000000000000aa',
+    });
+    assert.equal(validatedTwoStep.length, 2);
+
+    const validatedTwoStepMainnet = await validateToolCalls({
+        toolCalls: [
+            {
+                callId: 'deposit-mainnet',
+                name: 'make_deposit',
+                arguments: JSON.stringify({
+                    asset: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2',
+                    amountWei: '100',
+                }),
+            },
+            {
+                callId: 'build-mainnet',
+                name: 'build_og_transactions',
+                arguments: JSON.stringify({
+                    actions: [
+                        {
+                            kind: 'erc20_transfer',
+                            token: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+                            to: '0x00000000000000000000000000000000000000aa',
+                            amountWei: '25000000',
+                        },
+                    ],
+                }),
+            },
+        ],
+        commitmentSafe: '0x00000000000000000000000000000000000000bb',
+        agentAddress: '0x00000000000000000000000000000000000000aa',
+        config: { deterministicDcaPolicyPreset: 'mainnet' },
+    });
+    assert.equal(validatedTwoStepMainnet.length, 2);
+
+    const validatedDispute = await validateToolCalls({
+        toolCalls: [
+            {
+                callId: 'dispute-1',
+                name: 'dispute_assertion',
+                arguments: JSON.stringify({
+                    assertionId:
+                        '0x1111111111111111111111111111111111111111111111111111111111111111',
+                    explanation: 'Invalid proposal: reimbursement amount mismatch.',
+                }),
+            },
+        ],
+        commitmentSafe: '0x00000000000000000000000000000000000000bb',
+        agentAddress: '0x00000000000000000000000000000000000000aa',
+    });
+    assert.equal(validatedDispute.length, 1);
+    assert.equal(validatedDispute[0].name, 'dispute_assertion');
+
+    await assert.rejects(
+        () =>
+            validateToolCalls({
+                toolCalls: [
+                    {
+                        callId: 'mix-dispute',
+                        name: 'dispute_assertion',
+                        arguments: JSON.stringify({
+                            assertionId:
+                                '0x1111111111111111111111111111111111111111111111111111111111111111',
+                            explanation: 'invalid',
+                        }),
+                    },
+                    {
+                        callId: 'mix-build',
+                        name: 'build_og_transactions',
+                        arguments: JSON.stringify({
+                            actions: [
+                                {
+                                    kind: 'erc20_transfer',
+                                    token: '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238',
+                                    to: '0x00000000000000000000000000000000000000aa',
+                                    amountWei: '1',
+                                },
+                            ],
+                        }),
+                    },
+                ],
+                commitmentSafe: '0x00000000000000000000000000000000000000bb',
+                agentAddress: '0x00000000000000000000000000000000000000aa',
+            }),
+        /does not mix dispute_assertion/
+    );
+
+    console.log('[test] deterministic-dca-agent OK');
+}
+
+run();

@@ -21,8 +21,13 @@ async function main() {
         : path.resolve(repoRoot, modulePath);
 
     const agentModule = await import(pathToFileURL(resolvedPath).href);
-    if (typeof agentModule.getSystemPrompt !== 'function') {
-        throw new Error('Agent module must export getSystemPrompt().');
+    const hasSystemPrompt = typeof agentModule.getSystemPrompt === 'function';
+    const hasDeterministicToolCalls =
+        typeof agentModule.getDeterministicToolCalls === 'function';
+    if (!hasSystemPrompt && !hasDeterministicToolCalls) {
+        throw new Error(
+            'Agent module must export at least one decision entrypoint: getSystemPrompt() or getDeterministicToolCalls().'
+        );
     }
 
     const commitmentPath = path.join(path.dirname(resolvedPath), 'commitment.txt');
@@ -31,13 +36,15 @@ async function main() {
         throw new Error('commitment.txt is missing or empty.');
     }
 
-    const prompt = agentModule.getSystemPrompt({
-        proposeEnabled: true,
-        disputeEnabled: true,
-        commitmentText,
-    });
-    if (!prompt || typeof prompt !== 'string') {
-        throw new Error('getSystemPrompt() must return a non-empty string.');
+    if (hasSystemPrompt) {
+        const prompt = agentModule.getSystemPrompt({
+            proposeEnabled: true,
+            disputeEnabled: true,
+            commitmentText,
+        });
+        if (!prompt || typeof prompt !== 'string') {
+            throw new Error('getSystemPrompt() must return a non-empty string.');
+        }
     }
 
     console.log('[agent] Agent module OK:', resolvedPath);

@@ -19,6 +19,15 @@ function safeStringify(value) {
     return JSON.stringify(value, (_, item) => (typeof item === 'bigint' ? item.toString() : item));
 }
 
+function isReceiptWaitTimeoutError(error) {
+    const name = String(error?.name ?? '');
+    if (name.includes('WaitForTransactionReceiptTimeoutError')) {
+        return true;
+    }
+    const message = String(error?.shortMessage ?? error?.message ?? '').toLowerCase();
+    return message.includes('timed out while waiting for transaction');
+}
+
 function normalizeOrderSide(value) {
     if (typeof value !== 'string') return undefined;
     const normalized = value.trim().toUpperCase();
@@ -966,15 +975,32 @@ async function executeToolCalls({
                 asset: args.asset,
                 amountWei: BigInt(args.amountWei),
             });
-            await publicClient.waitForTransactionReceipt({ hash: txHash });
-            outputs.push({
-                callId: call.callId,
-                name: call.name,
-                output: safeStringify({
-                    status: 'confirmed',
-                    transactionHash: String(txHash),
-                }),
-            });
+            try {
+                await publicClient.waitForTransactionReceipt({ hash: txHash });
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'confirmed',
+                        transactionHash: String(txHash),
+                    }),
+                });
+            } catch (error) {
+                if (!isReceiptWaitTimeoutError(error)) {
+                    throw error;
+                }
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'submitted',
+                        transactionHash: String(txHash),
+                        pendingConfirmation: true,
+                        warning:
+                            'Timed out waiting for deposit receipt; transaction may still be pending or mined.',
+                    }),
+                });
+            }
             continue;
         }
 
@@ -1000,15 +1026,32 @@ async function executeToolCalls({
                 amount: args.amount,
                 data: args.data,
             });
-            await publicClient.waitForTransactionReceipt({ hash: txHash });
-            outputs.push({
-                callId: call.callId,
-                name: call.name,
-                output: safeStringify({
-                    status: 'confirmed',
-                    transactionHash: String(txHash),
-                }),
-            });
+            try {
+                await publicClient.waitForTransactionReceipt({ hash: txHash });
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'confirmed',
+                        transactionHash: String(txHash),
+                    }),
+                });
+            } catch (error) {
+                if (!isReceiptWaitTimeoutError(error)) {
+                    throw error;
+                }
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'submitted',
+                        transactionHash: String(txHash),
+                        pendingConfirmation: true,
+                        warning:
+                            'Timed out waiting for ERC1155 deposit receipt; transaction may still be pending or mined.',
+                    }),
+                });
+            }
             continue;
         }
 
@@ -1031,22 +1074,35 @@ async function executeToolCalls({
                 data: tx.data,
                 operation: Number(tx.operation),
             }));
-            const result = await postBondAndPropose({
-                publicClient,
-                walletClient,
-                account,
-                config,
-                ogModule: config.ogModule,
-                transactions,
-            });
-            outputs.push({
-                callId: call.callId,
-                name: call.name,
-                output: safeStringify({
-                    status: 'submitted',
-                    ...result,
-                }),
-            });
+            try {
+                const result = await postBondAndPropose({
+                    publicClient,
+                    walletClient,
+                    account,
+                    config,
+                    ogModule: config.ogModule,
+                    transactions,
+                });
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: result?.skipped ? 'skipped' : 'submitted',
+                        ...result,
+                    }),
+                });
+            } catch (error) {
+                const timeout = isReceiptWaitTimeoutError(error);
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: timeout ? 'pending' : 'error',
+                        message: error?.message ?? String(error),
+                        retryable: timeout,
+                    }),
+                });
+            }
             continue;
         }
 
@@ -1106,22 +1162,35 @@ async function executeToolCalls({
         if (!config.proposeEnabled) {
             console.log('[agent] Built transactions but proposals are disabled; skipping propose.');
         } else {
-            const result = await postBondAndPropose({
-                publicClient,
-                walletClient,
-                account,
-                config,
-                ogModule: config.ogModule,
-                transactions: builtTransactions,
-            });
-            outputs.push({
-                callId: 'auto_post_bond_and_propose',
-                name: 'post_bond_and_propose',
-                output: safeStringify({
-                    status: 'submitted',
-                    ...result,
-                }),
-            });
+            try {
+                const result = await postBondAndPropose({
+                    publicClient,
+                    walletClient,
+                    account,
+                    config,
+                    ogModule: config.ogModule,
+                    transactions: builtTransactions,
+                });
+                outputs.push({
+                    callId: 'auto_post_bond_and_propose',
+                    name: 'post_bond_and_propose',
+                    output: safeStringify({
+                        status: result?.skipped ? 'skipped' : 'submitted',
+                        ...result,
+                    }),
+                });
+            } catch (error) {
+                const timeout = isReceiptWaitTimeoutError(error);
+                outputs.push({
+                    callId: 'auto_post_bond_and_propose',
+                    name: 'post_bond_and_propose',
+                    output: safeStringify({
+                        status: timeout ? 'pending' : 'error',
+                        message: error?.message ?? String(error),
+                        retryable: timeout,
+                    }),
+                });
+            }
         }
     }
 
