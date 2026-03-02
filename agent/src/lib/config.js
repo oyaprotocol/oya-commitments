@@ -14,12 +14,27 @@ function parseFeeTierList(raw) {
     return values;
 }
 
+function parsePositiveBigInt(raw, envName) {
+    if (!raw) return undefined;
+    let parsed;
+    try {
+        parsed = BigInt(raw);
+    } catch (error) {
+        throw new Error(`${envName} must be a positive integer`);
+    }
+    if (parsed <= 0n) {
+        throw new Error(`${envName} must be a positive integer`);
+    }
+    return parsed;
+}
+
 function buildConfig() {
     return {
         rpcUrl: mustGetEnv('RPC_URL'),
         commitmentSafe: getAddress(mustGetEnv('COMMITMENT_SAFE')),
         ogModule: getAddress(mustGetEnv('OG_MODULE')),
         pollIntervalMs: Number(process.env.POLL_INTERVAL_MS ?? 10_000),
+        logChunkSize: parsePositiveBigInt(process.env.LOG_CHUNK_SIZE, 'LOG_CHUNK_SIZE'),
         startBlock: process.env.START_BLOCK ? BigInt(process.env.START_BLOCK) : undefined,
         watchAssets: parseAddressList(process.env.WATCH_ASSETS),
         watchNativeBalance:
@@ -53,6 +68,12 @@ function buildConfig() {
                 ? true
                 : process.env.DISPUTE_ENABLED.toLowerCase() !== 'false',
         disputeRetryMs: Number(process.env.DISPUTE_RETRY_MS ?? 60_000),
+        proposalHashResolveTimeoutMs: Number(
+            process.env.PROPOSAL_HASH_RESOLVE_TIMEOUT_MS ?? 15_000
+        ),
+        proposalHashResolvePollIntervalMs: Number(
+            process.env.PROPOSAL_HASH_RESOLVE_POLL_INTERVAL_MS ?? 1_500
+        ),
         agentModule: process.env.AGENT_MODULE,
         chainlinkPriceFeed: process.env.CHAINLINK_PRICE_FEED
             ? getAddress(process.env.CHAINLINK_PRICE_FEED)

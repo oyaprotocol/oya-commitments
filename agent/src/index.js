@@ -151,7 +151,132 @@ async function getActivePriceTriggers({ rulesText }) {
     return [];
 }
 
+async function processAgentToolCalls({
+    toolCalls,
+    signals,
+    commitmentText,
+    onchainPendingProposal,
+    decisionResponseId,
+}) {
+    let approvedToolCalls = toolCalls;
+    if (typeof agentModule?.validateToolCalls === 'function') {
+        try {
+            const validated = await agentModule.validateToolCalls({
+                toolCalls: toolCalls.map((call) => ({
+                    ...call,
+                    parsedArguments: parseToolArguments(call.arguments),
+                })),
+                signals,
+                commitmentText,
+                commitmentSafe: config.commitmentSafe,
+                agentAddress,
+                publicClient,
+                config,
+                onchainPendingProposal,
+            });
+            if (Array.isArray(validated)) {
+                approvedToolCalls = validated.map((call) => ({
+                    name: call.name,
+                    callId: call.callId,
+                    arguments:
+                        call.parsedArguments !== undefined
+                            ? JSON.stringify(call.parsedArguments)
+                            : call.arguments !== undefined
+                                ? call.arguments
+                                : JSON.stringify({}),
+                }));
+            } else {
+                approvedToolCalls = [];
+            }
+        } catch (error) {
+            console.warn(
+                '[agent] validateToolCalls rejected tool calls:',
+                error?.message ?? error
+            );
+            approvedToolCalls = [];
+        }
+    }
+
+    if (approvedToolCalls.length === 0) {
+        return false;
+    }
+
+    const toolOutputs = await executeToolCalls({
+        toolCalls: approvedToolCalls,
+        publicClient,
+        walletClient,
+        account,
+        config,
+        ogContext,
+    });
+    if (toolOutputs.length > 0 && agentModule?.onToolOutput) {
+        for (const output of toolOutputs) {
+            if (!output?.name || !output?.output) continue;
+            let parsed;
+            try {
+                parsed = JSON.parse(output.output);
+            } catch (error) {
+                parsed = null;
+            }
+            await agentModule.onToolOutput({
+                name: output.name,
+                parsedOutput: parsed,
+                commitmentText,
+                commitmentSafe: config.commitmentSafe,
+                agentAddress,
+            });
+        }
+    }
+    const modelCallIds = new Set(
+        approvedToolCalls
+            .map((call) => call?.callId)
+            .filter((callId) => typeof callId === 'string' && callId.length > 0)
+    );
+    const explainableOutputs = toolOutputs.filter(
+        (output) => output?.callId && modelCallIds.has(output.callId)
+    );
+
+    if (decisionResponseId && explainableOutputs.length > 0) {
+        const explanation = await explainToolCalls({
+            config,
+            previousResponseId: decisionResponseId,
+            toolOutputs: explainableOutputs,
+        });
+        if (explanation) {
+            console.log('[agent] Agent explanation:', explanation);
+        }
+    }
+    return true;
+}
+
 async function decideOnSignals(signals, { onchainPendingProposal = false } = {}) {
+    if (typeof agentModule?.getDeterministicToolCalls === 'function') {
+        try {
+            const deterministicCalls = await agentModule.getDeterministicToolCalls({
+                signals,
+                commitmentText,
+                commitmentSafe: config.commitmentSafe,
+                agentAddress,
+                publicClient,
+                config,
+                onchainPendingProposal,
+            });
+            if (Array.isArray(deterministicCalls) && deterministicCalls.length > 0) {
+                return processAgentToolCalls({
+                    toolCalls: deterministicCalls,
+                    signals,
+                    commitmentText,
+                    onchainPendingProposal,
+                    decisionResponseId: null,
+                });
+            }
+            return false;
+        } catch (error) {
+            console.error('[agent] Deterministic tool-call generation failed', error);
+            return false;
+        }
+    }
+
     if (!config.openAiApiKey) {
         return false;
     }
@@ -198,95 +323,13 @@ async function decideOnSignals(signals, { onchainPendingProposal = false } = {})
         }
 
         if (decision.toolCalls.length > 0) {
-            let approvedToolCalls = decision.toolCalls;
-            if (typeof agentModule?.validateToolCalls === 'function') {
-                try {
-                    const validated = await agentModule.validateToolCalls({
-                        toolCalls: decision.toolCalls.map((call) => ({
-                            ...call,
-                            parsedArguments: parseToolArguments(call.arguments),
-                        })),
-                        signals,
-                        commitmentText,
-                        commitmentSafe: config.commitmentSafe,
-                        agentAddress,
-                        publicClient,
-                        config,
-                        onchainPendingProposal,
-                    });
-                    if (Array.isArray(validated)) {
-                        approvedToolCalls = validated.map((call) => ({
-                            name: call.name,
-                            callId: call.callId,
-                            arguments:
-                                call.parsedArguments !== undefined
-                                    ? JSON.stringify(call.parsedArguments)
-                                    : call.arguments !== undefined
-                                        ? call.arguments
-                                        : JSON.stringify({}),
-                        }));
-                    } else {
-                        approvedToolCalls = [];
-                    }
-                } catch (error) {
-                    console.warn(
-                        '[agent] validateToolCalls rejected tool calls:',
-                        error?.message ?? error
-                    );
-                    approvedToolCalls = [];
-                }
-            }
-
-            if (approvedToolCalls.length === 0) {
-                return false;
-            }
-
-            const toolOutputs = await executeToolCalls({
-                toolCalls: approvedToolCalls,
-                publicClient,
-                walletClient,
-                account,
-                config,
-                ogContext,
+            return processAgentToolCalls({
+                toolCalls: decision.toolCalls,
+                signals,
+                commitmentText,
+                onchainPendingProposal,
+                decisionResponseId: decision.responseId,
             });
-            if (toolOutputs.length > 0 && agentModule?.onToolOutput) {
-                for (const output of toolOutputs) {
-                    if (!output?.name || !output?.output) continue;
-                    let parsed;
-                    try {
-                        parsed = JSON.parse(output.output);
-                    } catch (error) {
-                        parsed = null;
-                    }
-                    await agentModule.onToolOutput({
-                        name: output.name,
-                        parsedOutput: parsed,
-                        commitmentText,
-                        commitmentSafe: config.commitmentSafe,
-                        agentAddress,
-                    });
-                }
-            }
-            const modelCallIds = new Set(
-                approvedToolCalls
-                    .map((call) => call?.callId)
-                    .filter((callId) => typeof callId === 'string' && callId.length > 0)
-            );
-            const explainableOutputs = toolOutputs.filter(
-                (output) => output?.callId && modelCallIds.has(output.callId)
-            );
-
-            if (decision.responseId && explainableOutputs.length > 0) {
-                const explanation = await explainToolCalls({
-                    config,
-                    previousResponseId: decision.responseId,
-                    toolOutputs: explainableOutputs,
-                });
-                if (explanation) {
-                    console.log('[agent] Agent explanation:', explanation);
-                }
-            }
-            return true;
         }
 
         if (decision?.textDecision) {
@@ -352,6 +395,7 @@ async function agentLoop() {
                 ogModule: config.ogModule,
                 lastProposalCheckedBlock,
                 proposalsByHash,
+                startBlock: config.startBlock,
             });
         lastProposalCheckedBlock = nextProposalBlock;
         const executedProposalCount = executedProposals?.length ?? 0;
@@ -473,10 +517,6 @@ async function startAgent() {
     if (lastCheckedBlock === undefined) {
         lastCheckedBlock = await publicClient.getBlockNumber();
     }
-    if (lastProposalCheckedBlock === undefined) {
-        lastProposalCheckedBlock = lastCheckedBlock;
-    }
-
     lastNativeBalance = await primeBalances({
         publicClient,
         commitmentSafe: config.commitmentSafe,
