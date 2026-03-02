@@ -343,82 +343,92 @@ async function pollProposalChanges({
         currentFrom = currentTo + 1n;
     }
 
-    // Treat any proposal hash that was finalized within this scanned window as stale.
-    // This prevents startup backfill from surfacing already executed/deleted proposals
-    // as fresh "proposal" signals to agent modules.
-    const finalizedProposalHashes = new Set();
-    for (const log of executedLogs) {
-        const proposalHash = log.args?.proposalHash;
-        if (proposalHash) finalizedProposalHashes.add(proposalHash);
-    }
-    for (const log of deletedLogs) {
-        const proposalHash = log.args?.proposalHash;
-        if (proposalHash) finalizedProposalHashes.add(proposalHash);
-    }
-
-    const newProposals = [];
-    for (const log of proposedLogs) {
-        const proposalHash = log.args?.proposalHash;
-        const assertionId = log.args?.assertionId;
-        const proposal = log.args?.proposal;
-        const challengeWindowEnds = log.args?.challengeWindowEnds;
-        if (!proposalHash || !proposal?.transactions) continue;
-        if (finalizedProposalHashes.has(proposalHash)) continue;
-        const proposer = log.args?.proposer;
-        const explanationHex = log.args?.explanation;
-        const rules = log.args?.rules;
-        let explanation;
-        if (explanationHex && typeof explanationHex === 'string') {
-            if (explanationHex.startsWith('0x')) {
-                try {
-                    explanation = hexToString(explanationHex);
-                } catch (error) {
-                    explanation = undefined;
-                }
-            } else {
-                explanation = explanationHex;
-            }
+    // Process proposal lifecycle events in strict chain order so startup backfills
+    // do not emit stale proposals that are finalized later in the same scan range.
+    const lifecycleEvents = [
+        ...proposedLogs.map((log) => ({ kind: 'proposed', log })),
+        ...executedLogs.map((log) => ({ kind: 'executed', log })),
+        ...deletedLogs.map((log) => ({ kind: 'deleted', log })),
+    ].sort((left, right) => {
+        const leftBlock = BigInt(left.log?.blockNumber ?? 0n);
+        const rightBlock = BigInt(right.log?.blockNumber ?? 0n);
+        if (leftBlock !== rightBlock) {
+            return leftBlock < rightBlock ? -1 : 1;
         }
+        const leftLogIndex = BigInt(left.log?.logIndex ?? 0);
+        const rightLogIndex = BigInt(right.log?.logIndex ?? 0);
+        if (leftLogIndex === rightLogIndex) return 0;
+        return leftLogIndex < rightLogIndex ? -1 : 1;
+    });
 
-        const transactions = proposal.transactions.map((tx) => ({
-            to: getAddress(tx.to),
-            operation: Number(tx.operation ?? 0),
-            value: BigInt(tx.value ?? 0),
-            data: tx.data ?? '0x',
-        }));
-
-        const proposalRecord = {
-            proposalHash,
-            assertionId,
-            proposer: proposer ? getAddress(proposer) : undefined,
-            challengeWindowEnds: BigInt(challengeWindowEnds ?? 0),
-            transactions,
-            lastAttemptMs: 0,
-            disputeAttemptMs: 0,
-            rules,
-            explanation,
-        };
-        proposalsByHash.set(proposalHash, proposalRecord);
-        newProposals.push(proposalRecord);
-    }
-
+    const newProposalsByHash = new Map();
     const executedProposals = [];
-    for (const log of executedLogs) {
-        const proposalHash = log.args?.proposalHash;
-        if (proposalHash) {
-            proposalsByHash.delete(proposalHash);
-            executedProposals.push(proposalHash);
+    const deletedProposals = [];
+
+    for (const event of lifecycleEvents) {
+        const log = event.log;
+        if (event.kind === 'proposed') {
+            const proposalHash = log.args?.proposalHash;
+            const assertionId = log.args?.assertionId;
+            const proposal = log.args?.proposal;
+            const challengeWindowEnds = log.args?.challengeWindowEnds;
+            if (!proposalHash || !proposal?.transactions) continue;
+
+            const proposer = log.args?.proposer;
+            const explanationHex = log.args?.explanation;
+            const rules = log.args?.rules;
+            let explanation;
+            if (explanationHex && typeof explanationHex === 'string') {
+                if (explanationHex.startsWith('0x')) {
+                    try {
+                        explanation = hexToString(explanationHex);
+                    } catch (error) {
+                        explanation = undefined;
+                    }
+                } else {
+                    explanation = explanationHex;
+                }
+            }
+
+            const transactions = proposal.transactions.map((tx) => ({
+                to: getAddress(tx.to),
+                operation: Number(tx.operation ?? 0),
+                value: BigInt(tx.value ?? 0),
+                data: tx.data ?? '0x',
+            }));
+
+            const proposalRecord = {
+                proposalHash,
+                assertionId,
+                proposer: proposer ? getAddress(proposer) : undefined,
+                challengeWindowEnds: BigInt(challengeWindowEnds ?? 0),
+                transactions,
+                lastAttemptMs: 0,
+                disputeAttemptMs: 0,
+                rules,
+                explanation,
+            };
+
+            proposalsByHash.set(proposalHash, proposalRecord);
+            newProposalsByHash.set(proposalHash, proposalRecord);
+            continue;
         }
+
+        const proposalHash = log.args?.proposalHash;
+        if (!proposalHash) continue;
+
+        proposalsByHash.delete(proposalHash);
+        newProposalsByHash.delete(proposalHash);
+
+        if (event.kind === 'executed') {
+            executedProposals.push(proposalHash);
+            continue;
+        }
+
+        deletedProposals.push(proposalHash);
     }
 
-    const deletedProposals = [];
-    for (const log of deletedLogs) {
-        const proposalHash = log.args?.proposalHash;
-        if (proposalHash) {
-            proposalsByHash.delete(proposalHash);
-            deletedProposals.push(proposalHash);
-        }
-    }
+    const newProposals = [...newProposalsByHash.values()];
 
     return { newProposals, executedProposals, deletedProposals, lastProposalCheckedBlock: toBlock };
 }

@@ -68,6 +68,21 @@ function extractProposalHashFromReceipt({ receipt, ogModule }) {
     return null;
 }
 
+function isDuplicateProposalError(error) {
+    const message = [
+        error?.shortMessage,
+        error?.message,
+        error?.cause?.shortMessage,
+        error?.cause?.message,
+        error?.reason,
+        error?.cause?.reason,
+    ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+    return message.includes('duplicate proposals not allowed');
+}
+
 function sleep(ms) {
     return new Promise((resolve) => {
         setTimeout(resolve, ms);
@@ -245,6 +260,20 @@ async function postBondAndPropose({
             error?.shortMessage ?? error?.message ?? summarizeViemError(error)?.message ?? String(error);
         console.warn('[agent] Proposal simulation failed:', simulationMessage);
         if (!config.allowProposeOnSimulationFail) {
+            if (isDuplicateProposalError(error)) {
+                console.log('[agent] Proposal skipped: duplicate proposal already exists onchain.');
+                return {
+                    transactionHash: null,
+                    proposalHash: null,
+                    ogProposalHash: null,
+                    bondAmount,
+                    collateral,
+                    optimisticOracle,
+                    skipped: true,
+                    skipReason: 'duplicate_proposal',
+                    submissionError: summarizeViemError(error),
+                };
+            }
             throw error;
         }
         console.warn('[agent] Simulation failed; attempting to propose anyway.');
