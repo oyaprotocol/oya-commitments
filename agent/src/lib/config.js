@@ -76,7 +76,9 @@ function parseMessageApiKeys(raw) {
 
 function buildConfig() {
     const messageApiEnabled = parseBoolean(process.env.MESSAGE_API_ENABLED, false);
-    const messageApiKeys = parseMessageApiKeys(process.env.MESSAGE_API_KEYS_JSON);
+    const messageApiKeys = messageApiEnabled
+        ? parseMessageApiKeys(process.env.MESSAGE_API_KEYS_JSON)
+        : {};
     if (messageApiEnabled && Object.keys(messageApiKeys).length === 0) {
         throw new Error('MESSAGE_API_ENABLED=true requires MESSAGE_API_KEYS_JSON with at least one key');
     }

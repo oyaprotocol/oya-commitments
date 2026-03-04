@@ -50,6 +50,11 @@ const priceTriggerState = new Map();
 const tokenMetaCache = new Map();
 const poolMetaCache = new Map();
 const resolvedPoolCache = new Map();
+const DECISION_STATUS = Object.freeze({
+    HANDLED: 'handled',
+    NO_ACTION: 'no_action',
+    FAILED: 'failed',
+});
 const messageInbox = config.messageApiEnabled
     ? createMessageInbox({
         queueLimit: config.messageApiQueueLimit,
@@ -213,17 +218,24 @@ async function processAgentToolCalls({
     }
 
     if (approvedToolCalls.length === 0) {
-        return false;
+        return DECISION_STATUS.NO_ACTION;
     }
 
-    const toolOutputs = await executeToolCalls({
-        toolCalls: approvedToolCalls,
-        publicClient,
-        walletClient,
-        account,
-        config,
-        ogContext,
-    });
+    let toolOutputs;
+    try {
+        toolOutputs = await executeToolCalls({
+            toolCalls: approvedToolCalls,
+            publicClient,
+            walletClient,
+            account,
+            config,
+            ogContext,
+        });
+    } catch (error) {
+        console.error('[agent] Tool execution failed:', error?.message ?? error);
+        return DECISION_STATUS.FAILED;
+    }
+
     if (toolOutputs.length > 0 && agentModule?.onToolOutput) {
         for (const output of toolOutputs) {
             if (!output?.name || !output?.output) continue;
@@ -233,13 +245,17 @@ async function processAgentToolCalls({
             } catch (error) {
                 parsed = null;
             }
-            await agentModule.onToolOutput({
-                name: output.name,
-                parsedOutput: parsed,
-                commitmentText,
-                commitmentSafe: config.commitmentSafe,
-                agentAddress,
-            });
+            try {
+                await agentModule.onToolOutput({
+                    name: output.name,
+                    parsedOutput: parsed,
+                    commitmentText,
+                    commitmentSafe: config.commitmentSafe,
+                    agentAddress,
+                });
+            } catch (error) {
+                console.warn('[agent] onToolOutput hook failed:', error?.message ?? error);
+            }
         }
     }
     const modelCallIds = new Set(
@@ -252,16 +268,20 @@ async function processAgentToolCalls({
     );
 
     if (decisionResponseId && explainableOutputs.length > 0) {
-        const explanation = await explainToolCalls({
-            config,
-            previousResponseId: decisionResponseId,
-            toolOutputs: explainableOutputs,
-        });
-        if (explanation) {
-            console.log('[agent] Agent explanation:', explanation);
+        try {
+            const explanation = await explainToolCalls({
+                config,
+                previousResponseId: decisionResponseId,
+                toolOutputs: explainableOutputs,
+            });
+            if (explanation) {
+                console.log('[agent] Agent explanation:', explanation);
+            }
+        } catch (error) {
+            console.warn('[agent] Failed to fetch post-tool explanation:', error?.message ?? error);
         }
     }
-    return true;
+    return DECISION_STATUS.HANDLED;
 }
 
 async function decideOnSignals(signals, { onchainPendingProposal = false } = {}) {
@@ -285,33 +305,33 @@ async function decideOnSignals(signals, { onchainPendingProposal = false } = {})
                     decisionResponseId: null,
                 });
             }
-            return false;
+            return DECISION_STATUS.NO_ACTION;
         } catch (error) {
             console.error('[agent] Deterministic tool-call generation failed', error);
-            return false;
+            return DECISION_STATUS.FAILED;
         }
     }
 
     if (!config.openAiApiKey) {
-        return false;
+        return DECISION_STATUS.NO_ACTION;
     }
-
-    if (!ogContext) {
-        ogContext = await loadOgContext({
-            publicClient,
-            ogModule: config.ogModule,
-        });
-    }
-
-    const systemPrompt =
-        agentModule?.getSystemPrompt?.({
-            proposeEnabled: config.proposeEnabled,
-            disputeEnabled: config.disputeEnabled,
-            commitmentText,
-        }) ??
-        'You are an agent monitoring an onchain commitment (Safe + Optimistic Governor).';
 
     try {
+        if (!ogContext) {
+            ogContext = await loadOgContext({
+                publicClient,
+                ogModule: config.ogModule,
+            });
+        }
+
+        const systemPrompt =
+            agentModule?.getSystemPrompt?.({
+                proposeEnabled: config.proposeEnabled,
+                disputeEnabled: config.disputeEnabled,
+                commitmentText,
+            }) ??
+            'You are an agent monitoring an onchain commitment (Safe + Optimistic Governor).';
+
         const executableToolsEnabled =
             config.proposeEnabled || config.disputeEnabled || config.polymarketClobEnabled;
         const tools = toolDefinitions({
@@ -334,7 +354,7 @@ async function decideOnSignals(signals, { onchainPendingProposal = false } = {})
 
         if (!allowTools && decision?.textDecision) {
             console.log('[agent] Opinion:', decision.textDecision);
-            return true;
+            return DECISION_STATUS.HANDLED;
         }
 
         if (decision.toolCalls.length > 0) {
@@ -349,13 +369,14 @@ async function decideOnSignals(signals, { onchainPendingProposal = false } = {})
 
         if (decision?.textDecision) {
             console.log('[agent] Decision:', decision.textDecision);
-            return true;
+            return DECISION_STATUS.HANDLED;
         }
     } catch (error) {
         console.error('[agent] Agent call failed', error);
+        return DECISION_STATUS.FAILED;
     }
 
-    return false;
+    return DECISION_STATUS.NO_ACTION;
 }
 
 async function agentLoop() {
@@ -527,16 +548,21 @@ async function agentLoop() {
             }
         }
 
+        let decisionStatus = DECISION_STATUS.NO_ACTION;
         if (signalsToProcess.length > 0) {
-            const decisionOk = await decideOnSignals(signalsToProcess, {
+            decisionStatus = await decideOnSignals(signalsToProcess, {
                 onchainPendingProposal: proposalsByHash.size > 0,
             });
-            if (decisionOk && dueTimelocks.length > 0) {
+            if (decisionStatus === DECISION_STATUS.HANDLED && dueTimelocks.length > 0) {
                 markTimelocksFired(dueTimelocks);
             }
         }
         if (messageInbox && inFlightMessageIds.length > 0) {
-            messageInbox.ackBatch(inFlightMessageIds);
+            if (decisionStatus === DECISION_STATUS.FAILED) {
+                messageInbox.requeueBatch(inFlightMessageIds);
+            } else {
+                messageInbox.ackBatch(inFlightMessageIds);
+            }
             inFlightMessageIds = [];
         }
     } catch (error) {
