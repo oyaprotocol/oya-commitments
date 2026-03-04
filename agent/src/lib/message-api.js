@@ -6,6 +6,7 @@ function isPlainObject(value) {
 }
 
 function safeTokenEquals(leftRaw, rightRaw) {
+    // Constant-time equality avoids leaking token prefix matches.
     const left = Buffer.from(String(leftRaw));
     const right = Buffer.from(String(rightRaw));
     if (left.length !== right.length) {
@@ -150,6 +151,7 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
                 return;
             }
 
+            // All write paths require a valid Bearer token mapped to a configured key id.
             const keyId = authenticateRequest({
                 authorizationHeader: req.headers.authorization,
                 keyEntries,
@@ -204,6 +206,7 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
             });
 
             if (!result.ok) {
+                // Propagate inbox backpressure/rate-limit outcomes with HTTP-compatible semantics.
                 if (result.code === 'rate_limited') {
                     sendJson(
                         res,

@@ -76,6 +76,7 @@ function parseMessageApiKeys(raw) {
 
 function buildConfig() {
     const messageApiEnabled = parseBoolean(process.env.MESSAGE_API_ENABLED, false);
+    // Keep optional ingress isolated: malformed keys should only fail when the feature is enabled.
     const messageApiKeys = messageApiEnabled
         ? parseMessageApiKeys(process.env.MESSAGE_API_KEYS_JSON)
         : {};

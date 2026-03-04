@@ -50,6 +50,7 @@ const priceTriggerState = new Map();
 const tokenMetaCache = new Map();
 const poolMetaCache = new Map();
 const resolvedPoolCache = new Map();
+// Distinguish "nothing to do" from true failures so message retry behavior is safe.
 const DECISION_STATUS = Object.freeze({
     HANDLED: 'handled',
     NO_ACTION: 'no_action',
@@ -254,6 +255,7 @@ async function processAgentToolCalls({
                     agentAddress,
                 });
             } catch (error) {
+                // Tool already executed; hook failures should not trigger message replay.
                 console.warn('[agent] onToolOutput hook failed:', error?.message ?? error);
             }
         }
@@ -278,6 +280,7 @@ async function processAgentToolCalls({
                 console.log('[agent] Agent explanation:', explanation);
             }
         } catch (error) {
+            // Explanation is observability-only and should not affect ack/requeue outcomes.
             console.warn('[agent] Failed to fetch post-tool explanation:', error?.message ?? error);
         }
     }
@@ -558,6 +561,7 @@ async function agentLoop() {
             }
         }
         if (messageInbox && inFlightMessageIds.length > 0) {
+            // Requeue only on true decision-path failure; no_action means safely ignored.
             if (decisionStatus === DECISION_STATUS.FAILED) {
                 messageInbox.requeueBatch(inFlightMessageIds);
             } else {
