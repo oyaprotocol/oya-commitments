@@ -21,6 +21,8 @@ import { executeToolCalls, toolDefinitions } from './lib/tools.js';
 import { makeDeposit, postBondAndDispute, postBondAndPropose } from './lib/tx.js';
 import { extractTimelockTriggers } from './lib/timelock.js';
 import { collectPriceTriggerSignals } from './lib/uniswapV3Price.js';
+import { createMessageInbox } from './lib/message-inbox.js';
+import { createMessageApiServer } from './lib/message-api.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -48,6 +50,19 @@ const priceTriggerState = new Map();
 const tokenMetaCache = new Map();
 const poolMetaCache = new Map();
 const resolvedPoolCache = new Map();
+const messageInbox = config.messageApiEnabled
+    ? createMessageInbox({
+        queueLimit: config.messageApiQueueLimit,
+        defaultTtlSeconds: config.messageApiDefaultTtlSeconds,
+        minTtlSeconds: config.messageApiMinTtlSeconds,
+        maxTtlSeconds: config.messageApiMaxTtlSeconds,
+        idempotencyTtlSeconds: config.messageApiIdempotencyTtlSeconds,
+        maxTextLength: config.messageApiMaxTextLength,
+        rateLimitPerMinute: config.messageApiRateLimitPerMinute,
+        rateLimitBurst: config.messageApiRateLimitBurst,
+    })
+    : null;
+let messageApiServer;
 
 async function loadAgentModule() {
     const agentRef = config.agentModule ?? 'default';
@@ -344,6 +359,7 @@ async function decideOnSignals(signals, { onchainPendingProposal = false } = {})
 }
 
 async function agentLoop() {
+    let inFlightMessageIds = [];
     try {
         const triggerSeedRulesText = ogContext?.rules ?? commitmentText ?? '';
         const triggerSeed = await getActivePriceTriggers({ rulesText: triggerSeedRulesText });
@@ -439,6 +455,27 @@ async function agentLoop() {
             poolMetaCache,
             resolvedPoolCache,
         });
+        const messageSignals = [];
+        if (messageInbox) {
+            const queuedMessages = messageInbox.takeBatch({
+                maxItems: config.messageApiBatchSize,
+                nowMs: Date.now(),
+            });
+            inFlightMessageIds = queuedMessages.map((message) => message.messageId);
+            for (const message of queuedMessages) {
+                messageSignals.push({
+                    kind: 'userMessage',
+                    messageId: message.messageId,
+                    text: message.text,
+                    command: message.command,
+                    args: message.args,
+                    metadata: message.metadata,
+                    sender: message.sender,
+                    receivedAtMs: message.receivedAtMs,
+                    expiresAtMs: message.expiresAtMs,
+                });
+            }
+        }
 
         const combinedSignals = deposits.concat(
             balanceSnapshots,
@@ -465,6 +502,7 @@ async function agentLoop() {
             });
         }
         combinedSignals.push(...duePriceSignals);
+        combinedSignals.push(...messageSignals);
 
         // Allow agent module to augment signals (e.g., add timer signals)
         let signalsToProcess = combinedSignals;
@@ -497,7 +535,14 @@ async function agentLoop() {
                 markTimelocksFired(dueTimelocks);
             }
         }
+        if (messageInbox && inFlightMessageIds.length > 0) {
+            messageInbox.ackBatch(inFlightMessageIds);
+            inFlightMessageIds = [];
+        }
     } catch (error) {
+        if (messageInbox && inFlightMessageIds.length > 0) {
+            messageInbox.requeueBatch(inFlightMessageIds);
+        }
         console.error('[agent] loop error', error);
     }
 
@@ -523,6 +568,14 @@ async function startAgent() {
         watchNativeBalance: config.watchNativeBalance,
         blockNumber: lastCheckedBlock,
     });
+
+    if (messageInbox && !messageApiServer) {
+        messageApiServer = createMessageApiServer({
+            config,
+            inbox: messageInbox,
+        });
+        await messageApiServer.start();
+    }
 
     console.log('[agent] running...');
 
