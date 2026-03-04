@@ -23,6 +23,12 @@ import { extractTimelockTriggers } from './lib/timelock.js';
 import { collectPriceTriggerSignals } from './lib/uniswapV3Price.js';
 import { createMessageInbox } from './lib/message-inbox.js';
 import { createMessageApiServer } from './lib/message-api.js';
+import {
+    DECISION_STATUS,
+    hasDeterministicDecisionEngine,
+    validateMessageApiDecisionEngine,
+    shouldRequeueMessagesForDecisionStatus,
+} from './lib/decision-support.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -50,12 +56,6 @@ const priceTriggerState = new Map();
 const tokenMetaCache = new Map();
 const poolMetaCache = new Map();
 const resolvedPoolCache = new Map();
-// Distinguish "nothing to do" from true failures so message retry behavior is safe.
-const DECISION_STATUS = Object.freeze({
-    HANDLED: 'handled',
-    NO_ACTION: 'no_action',
-    FAILED: 'failed',
-});
 const messageInbox = config.messageApiEnabled
     ? createMessageInbox({
         queueLimit: config.messageApiQueueLimit,
@@ -91,6 +91,7 @@ async function loadAgentModule() {
 }
 
 const { agentModule, commitmentText } = await loadAgentModule();
+validateMessageApiDecisionEngine({ config, agentModule });
 const pollingOptions = (() => {
     if (typeof agentModule?.getPollingOptions !== 'function') {
         return {};
@@ -233,8 +234,10 @@ async function processAgentToolCalls({
             ogContext,
         });
     } catch (error) {
-        console.error('[agent] Tool execution failed:', error?.message ?? error);
-        return DECISION_STATUS.FAILED;
+        // Tool execution may have partially completed side effects before throwing.
+        // Mark this as non-retryable to avoid replaying user messages and duplicating actions.
+        console.error('[agent] Tool execution failed after partial processing:', error?.message ?? error);
+        return DECISION_STATUS.FAILED_NON_RETRYABLE;
     }
 
     if (toolOutputs.length > 0 && agentModule?.onToolOutput) {
@@ -288,7 +291,7 @@ async function processAgentToolCalls({
 }
 
 async function decideOnSignals(signals, { onchainPendingProposal = false } = {}) {
-    if (typeof agentModule?.getDeterministicToolCalls === 'function') {
+    if (hasDeterministicDecisionEngine(agentModule)) {
         try {
             const deterministicCalls = await agentModule.getDeterministicToolCalls({
                 signals,
@@ -311,7 +314,7 @@ async function decideOnSignals(signals, { onchainPendingProposal = false } = {})
             return DECISION_STATUS.NO_ACTION;
         } catch (error) {
             console.error('[agent] Deterministic tool-call generation failed', error);
-            return DECISION_STATUS.FAILED;
+            return DECISION_STATUS.FAILED_RETRYABLE;
         }
     }
 
@@ -376,7 +379,7 @@ async function decideOnSignals(signals, { onchainPendingProposal = false } = {})
         }
     } catch (error) {
         console.error('[agent] Agent call failed', error);
-        return DECISION_STATUS.FAILED;
+        return DECISION_STATUS.FAILED_RETRYABLE;
     }
 
     return DECISION_STATUS.NO_ACTION;
@@ -561,8 +564,8 @@ async function agentLoop() {
             }
         }
         if (messageInbox && inFlightMessageIds.length > 0) {
-            // Requeue only on true decision-path failure; no_action means safely ignored.
-            if (decisionStatus === DECISION_STATUS.FAILED) {
+            // Requeue only on failures that occurred before tool side effects.
+            if (shouldRequeueMessagesForDecisionStatus(decisionStatus)) {
                 messageInbox.requeueBatch(inFlightMessageIds);
             } else {
                 messageInbox.ackBatch(inFlightMessageIds);
