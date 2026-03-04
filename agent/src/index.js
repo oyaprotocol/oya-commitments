@@ -17,7 +17,7 @@ import {
     primeBalances,
 } from './lib/polling.js';
 import { callAgent, explainToolCalls, parseToolArguments } from './lib/llm.js';
-import { executeToolCalls, toolDefinitions } from './lib/tools.js';
+import { executeToolCalls, hasCommittedToolSideEffects, toolDefinitions } from './lib/tools.js';
 import { makeDeposit, postBondAndDispute, postBondAndPropose } from './lib/tx.js';
 import { extractTimelockTriggers } from './lib/timelock.js';
 import { collectPriceTriggerSignals } from './lib/uniswapV3Price.js';
@@ -234,10 +234,12 @@ async function processAgentToolCalls({
             ogContext,
         });
     } catch (error) {
-        // Tool execution may have partially completed side effects before throwing.
-        // Mark this as non-retryable to avoid replaying user messages and duplicating actions.
-        console.error('[agent] Tool execution failed after partial processing:', error?.message ?? error);
-        return DECISION_STATUS.FAILED_NON_RETRYABLE;
+        const sideEffectsLikelyCommitted = hasCommittedToolSideEffects(error);
+        console.error('[agent] Tool execution failed:', error?.message ?? error);
+        // Retry only when the failure happened before likely side effects.
+        return sideEffectsLikelyCommitted
+            ? DECISION_STATUS.FAILED_NON_RETRYABLE
+            : DECISION_STATUS.FAILED_RETRYABLE;
     }
 
     if (toolOutputs.length > 0 && agentModule?.onToolOutput) {
