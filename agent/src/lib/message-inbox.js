@@ -37,6 +37,7 @@ function createMessageInbox(options = {}) {
     const rateLimitState = new Map();
 
     function pruneExpired(nowMs) {
+        // Keep queue/in-flight/idempotency bounded without a background timer.
         if (queue.length > 0) {
             let writeIndex = 0;
             for (const message of queue) {
@@ -77,6 +78,7 @@ function createMessageInbox(options = {}) {
             return { allowed: true };
         }
 
+        // Simple token-bucket per API key: refill continuously, consume 1 token/request.
         const ratePerMs = rateLimitPerMinute / 60_000;
         const state = rateLimitState.get(senderKeyId) ?? {
             tokens: rateLimitBurst,
@@ -248,6 +250,7 @@ function createMessageInbox(options = {}) {
             return normalized;
         }
 
+        // Idempotent replays should not consume additional queue capacity.
         if (normalized.idempotencyKey) {
             const cacheKey = `${senderKeyId}:${normalized.idempotencyKey}`;
             const cached = idempotencyCache.get(cacheKey);
@@ -313,6 +316,7 @@ function createMessageInbox(options = {}) {
     }
 
     function ackBatch(messageIds = [], nowMs = Date.now()) {
+        // Ack removes messages after a loop that completed without a decision-path failure.
         pruneExpired(nowMs);
         for (const messageId of messageIds) {
             if (typeof messageId !== 'string') continue;
@@ -321,6 +325,7 @@ function createMessageInbox(options = {}) {
     }
 
     function requeueBatch(messageIds = [], nowMs = Date.now()) {
+        // Requeue preserves at-least-once delivery semantics on transient runner failures.
         pruneExpired(nowMs);
         const toRequeue = [];
         for (const messageId of messageIds) {

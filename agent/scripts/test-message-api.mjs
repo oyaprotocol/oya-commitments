@@ -40,10 +40,12 @@ async function main() {
     const baseUrl = `http://${config.messageApiHost}:${address.port}`;
 
     try {
+        // Health endpoint should always be probe-friendly and unauthenticated.
         const health = await fetch(`${baseUrl}/healthz`);
         assert.equal(health.status, 200);
         assert.deepEqual(await health.json(), { ok: true });
 
+        // Message submission must reject unauthenticated callers.
         const unauthorized = await fetch(`${baseUrl}/v1/messages`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -51,6 +53,7 @@ async function main() {
         });
         assert.equal(unauthorized.status, 401);
 
+        // First authenticated request should enqueue.
         const accepted = await fetch(`${baseUrl}/v1/messages`, {
             method: 'POST',
             headers: {
@@ -69,6 +72,7 @@ async function main() {
         assert.equal(acceptedJson.status, 'queued');
         assert.ok(acceptedJson.messageId);
 
+        // Same idempotency key should return existing message id, not enqueue again.
         const duplicate = await fetch(`${baseUrl}/v1/messages`, {
             method: 'POST',
             headers: {
@@ -87,6 +91,7 @@ async function main() {
         assert.equal(duplicateJson.status, 'duplicate');
         assert.equal(duplicateJson.messageId, acceptedJson.messageId);
 
+        // Body validation should catch schema violations.
         const badRequest = await fetch(`${baseUrl}/v1/messages`, {
             method: 'POST',
             headers: {
@@ -97,6 +102,7 @@ async function main() {
         });
         assert.equal(badRequest.status, 400);
 
+        // Inbox should contain exactly one queued userMessage from the accepted request.
         const batch = inbox.takeBatch({ maxItems: 2 });
         assert.equal(batch.length, 1);
         assert.equal(batch[0].kind, 'userMessage');
