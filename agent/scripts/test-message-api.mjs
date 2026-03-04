@@ -4,8 +4,8 @@ import { createMessageApiServer } from '../src/lib/message-api.js';
 
 function buildServerConfig() {
     return {
-        // Blank host should normalize to loopback default in buildConfig/startup config.
-        messageApiHost: '',
+        // Bind to loopback for deterministic local tests.
+        messageApiHost: '127.0.0.1',
         messageApiPort: 0,
         messageApiKeys: {
             ops: 'k_test_ops_secret',
@@ -112,6 +112,46 @@ async function main() {
     } finally {
         await messageApi.stop();
     }
+
+    // If a bind fails (for example port already in use), start() should remain retryable.
+    const blockerInbox = buildInbox();
+    const blockerApi = createMessageApiServer({
+        config: buildServerConfig(),
+        inbox: blockerInbox,
+        logger: { log() {} },
+    });
+    const blockerServer = await blockerApi.start();
+    const blockerAddress = blockerServer.address();
+    assert.ok(
+        blockerAddress &&
+            typeof blockerAddress === 'object' &&
+            typeof blockerAddress.port === 'number'
+    );
+
+    const retryInbox = buildInbox();
+    const retryApi = createMessageApiServer({
+        config: {
+            ...buildServerConfig(),
+            messageApiPort: blockerAddress.port,
+        },
+        inbox: retryInbox,
+        logger: { log() {} },
+    });
+
+    let bindError;
+    try {
+        await retryApi.start();
+    } catch (error) {
+        bindError = error;
+    }
+    assert.ok(bindError);
+    assert.equal(bindError.code, 'EADDRINUSE');
+
+    // Once the conflicting listener is gone, the same API instance should start cleanly.
+    await blockerApi.stop();
+    const recoveredServer = await retryApi.start();
+    assert.equal(recoveredServer.listening, true);
+    await retryApi.stop();
 
     console.log('[test] message API OK');
 }
