@@ -89,6 +89,83 @@ function buildConfig() {
     if (messageApiEnabled && Object.keys(messageApiKeys).length === 0) {
         throw new Error('MESSAGE_API_ENABLED=true requires MESSAGE_API_KEYS_JSON with at least one key');
     }
+    // Keep disabled ingress fully inert: optional MESSAGE_API_* parsing/validation
+    // should not abort unrelated agent runs when the API is turned off.
+    const messageApiConfig = messageApiEnabled
+        ? {
+              messageApiHost: parseHost(process.env.MESSAGE_API_HOST, '127.0.0.1'),
+              messageApiPort: parsePositiveInteger(
+                  process.env.MESSAGE_API_PORT,
+                  'MESSAGE_API_PORT',
+                  8787
+              ),
+              messageApiMaxBodyBytes: parsePositiveInteger(
+                  process.env.MESSAGE_API_MAX_BODY_BYTES,
+                  'MESSAGE_API_MAX_BODY_BYTES',
+                  8192
+              ),
+              messageApiMaxTextLength: parsePositiveInteger(
+                  process.env.MESSAGE_API_MAX_TEXT_LENGTH,
+                  'MESSAGE_API_MAX_TEXT_LENGTH',
+                  2000
+              ),
+              messageApiQueueLimit: parsePositiveInteger(
+                  process.env.MESSAGE_API_QUEUE_LIMIT,
+                  'MESSAGE_API_QUEUE_LIMIT',
+                  500
+              ),
+              messageApiBatchSize: parsePositiveInteger(
+                  process.env.MESSAGE_API_BATCH_SIZE,
+                  'MESSAGE_API_BATCH_SIZE',
+                  25
+              ),
+              messageApiDefaultTtlSeconds: parsePositiveInteger(
+                  process.env.MESSAGE_API_DEFAULT_TTL_SECONDS,
+                  'MESSAGE_API_DEFAULT_TTL_SECONDS',
+                  3600
+              ),
+              messageApiMinTtlSeconds: parsePositiveInteger(
+                  process.env.MESSAGE_API_MIN_TTL_SECONDS,
+                  'MESSAGE_API_MIN_TTL_SECONDS',
+                  30
+              ),
+              messageApiMaxTtlSeconds: parsePositiveInteger(
+                  process.env.MESSAGE_API_MAX_TTL_SECONDS,
+                  'MESSAGE_API_MAX_TTL_SECONDS',
+                  86400
+              ),
+              messageApiIdempotencyTtlSeconds: parsePositiveInteger(
+                  process.env.MESSAGE_API_IDEMPOTENCY_TTL_SECONDS,
+                  'MESSAGE_API_IDEMPOTENCY_TTL_SECONDS',
+                  86400
+              ),
+              messageApiRateLimitPerMinute: parsePositiveInteger(
+                  process.env.MESSAGE_API_RATE_LIMIT_PER_MINUTE,
+                  'MESSAGE_API_RATE_LIMIT_PER_MINUTE',
+                  30,
+                  { min: 0 }
+              ),
+              messageApiRateLimitBurst: parsePositiveInteger(
+                  process.env.MESSAGE_API_RATE_LIMIT_BURST,
+                  'MESSAGE_API_RATE_LIMIT_BURST',
+                  10,
+                  { min: 0 }
+              ),
+          }
+        : {
+              messageApiHost: '127.0.0.1',
+              messageApiPort: 8787,
+              messageApiMaxBodyBytes: 8192,
+              messageApiMaxTextLength: 2000,
+              messageApiQueueLimit: 500,
+              messageApiBatchSize: 25,
+              messageApiDefaultTtlSeconds: 3600,
+              messageApiMinTtlSeconds: 30,
+              messageApiMaxTtlSeconds: 86400,
+              messageApiIdempotencyTtlSeconds: 86400,
+              messageApiRateLimitPerMinute: 30,
+              messageApiRateLimitBurst: 10,
+          };
 
     return {
         rpcUrl: mustGetEnv('RPC_URL'),
@@ -216,65 +293,8 @@ function buildConfig() {
             : undefined,
         uniswapV3FeeTiers: parseFeeTierList(process.env.UNISWAP_V3_FEE_TIERS),
         messageApiEnabled,
-        messageApiHost: parseHost(process.env.MESSAGE_API_HOST, '127.0.0.1'),
-        messageApiPort: parsePositiveInteger(
-            process.env.MESSAGE_API_PORT,
-            'MESSAGE_API_PORT',
-            8787
-        ),
         messageApiKeys,
-        messageApiMaxBodyBytes: parsePositiveInteger(
-            process.env.MESSAGE_API_MAX_BODY_BYTES,
-            'MESSAGE_API_MAX_BODY_BYTES',
-            8192
-        ),
-        messageApiMaxTextLength: parsePositiveInteger(
-            process.env.MESSAGE_API_MAX_TEXT_LENGTH,
-            'MESSAGE_API_MAX_TEXT_LENGTH',
-            2000
-        ),
-        messageApiQueueLimit: parsePositiveInteger(
-            process.env.MESSAGE_API_QUEUE_LIMIT,
-            'MESSAGE_API_QUEUE_LIMIT',
-            500
-        ),
-        messageApiBatchSize: parsePositiveInteger(
-            process.env.MESSAGE_API_BATCH_SIZE,
-            'MESSAGE_API_BATCH_SIZE',
-            25
-        ),
-        messageApiDefaultTtlSeconds: parsePositiveInteger(
-            process.env.MESSAGE_API_DEFAULT_TTL_SECONDS,
-            'MESSAGE_API_DEFAULT_TTL_SECONDS',
-            3600
-        ),
-        messageApiMinTtlSeconds: parsePositiveInteger(
-            process.env.MESSAGE_API_MIN_TTL_SECONDS,
-            'MESSAGE_API_MIN_TTL_SECONDS',
-            30
-        ),
-        messageApiMaxTtlSeconds: parsePositiveInteger(
-            process.env.MESSAGE_API_MAX_TTL_SECONDS,
-            'MESSAGE_API_MAX_TTL_SECONDS',
-            86400
-        ),
-        messageApiIdempotencyTtlSeconds: parsePositiveInteger(
-            process.env.MESSAGE_API_IDEMPOTENCY_TTL_SECONDS,
-            'MESSAGE_API_IDEMPOTENCY_TTL_SECONDS',
-            86400
-        ),
-        messageApiRateLimitPerMinute: parsePositiveInteger(
-            process.env.MESSAGE_API_RATE_LIMIT_PER_MINUTE,
-            'MESSAGE_API_RATE_LIMIT_PER_MINUTE',
-            30,
-            { min: 0 }
-        ),
-        messageApiRateLimitBurst: parsePositiveInteger(
-            process.env.MESSAGE_API_RATE_LIMIT_BURST,
-            'MESSAGE_API_RATE_LIMIT_BURST',
-            10,
-            { min: 0 }
-        ),
+        ...messageApiConfig,
     };
 }
 
