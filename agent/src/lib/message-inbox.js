@@ -256,7 +256,19 @@ function createMessageInbox(options = {}) {
             return normalized;
         }
 
-        // Idempotent replays should not consume additional queue capacity.
+        const rateLimitResult = consumeRateLimit(senderKeyId, nowMs);
+        if (!rateLimitResult.allowed) {
+            return {
+                ok: false,
+                code: 'rate_limited',
+                message: 'Rate limit exceeded.',
+                retryAfterSeconds: rateLimitResult.retryAfterSeconds,
+                queueDepth: queue.length,
+            };
+        }
+
+        // Duplicate replays should still consume per-key rate-limit budget so repeated
+        // retries cannot bypass MESSAGE_API_RATE_LIMIT_* controls.
         if (normalized.idempotencyKey) {
             const senderCache = idempotencyCache.get(senderKeyId);
             const cached = senderCache?.get(normalized.idempotencyKey);
@@ -275,17 +287,6 @@ function createMessageInbox(options = {}) {
                     idempotencyCache.delete(senderKeyId);
                 }
             }
-        }
-
-        const rateLimitResult = consumeRateLimit(senderKeyId, nowMs);
-        if (!rateLimitResult.allowed) {
-            return {
-                ok: false,
-                code: 'rate_limited',
-                message: 'Rate limit exceeded.',
-                retryAfterSeconds: rateLimitResult.retryAfterSeconds,
-                queueDepth: queue.length,
-            };
         }
 
         if (queue.length + inFlight.size >= queueLimit) {

@@ -132,7 +132,9 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
             return server;
         }
 
-        server = http.createServer(async (req, res) => {
+        // Keep the candidate server local until listen succeeds so failed binds
+        // do not leave behind stale state that blocks retry-based startup loops.
+        const nextServer = http.createServer(async (req, res) => {
             let url;
             try {
                 url = new URL(req.url ?? '/', 'http://localhost');
@@ -244,13 +246,21 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
             });
         });
 
-        await new Promise((resolve, reject) => {
-            server.once('error', reject);
-            server.listen(config.messageApiPort, config.messageApiHost, () => {
-                server.off('error', reject);
-                resolve();
+        try {
+            await new Promise((resolve, reject) => {
+                nextServer.once('error', reject);
+                nextServer.listen(config.messageApiPort, config.messageApiHost, () => {
+                    nextServer.off('error', reject);
+                    resolve();
+                });
             });
-        });
+        } catch (error) {
+            // Ensure callers can retry start() after EADDRINUSE and similar bind errors.
+            nextServer.removeAllListeners();
+            throw error;
+        }
+
+        server = nextServer;
 
         const address = server.address();
         const boundPort =
