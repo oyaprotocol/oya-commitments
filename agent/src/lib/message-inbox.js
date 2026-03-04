@@ -33,6 +33,7 @@ function createMessageInbox(options = {}) {
 
     const queue = [];
     const inFlight = new Map();
+    // senderKeyId -> (idempotencyKey -> cached message metadata)
     const idempotencyCache = new Map();
     const rateLimitState = new Map();
 
@@ -57,9 +58,14 @@ function createMessageInbox(options = {}) {
         }
 
         if (idempotencyCache.size > 0) {
-            for (const [key, value] of idempotencyCache.entries()) {
-                if (value.expiresAtMs <= nowMs) {
-                    idempotencyCache.delete(key);
+            for (const [senderKeyId, senderCache] of idempotencyCache.entries()) {
+                for (const [idempotencyKey, value] of senderCache.entries()) {
+                    if (value.expiresAtMs <= nowMs) {
+                        senderCache.delete(idempotencyKey);
+                    }
+                }
+                if (senderCache.size === 0) {
+                    idempotencyCache.delete(senderKeyId);
                 }
             }
         }
@@ -252,8 +258,8 @@ function createMessageInbox(options = {}) {
 
         // Idempotent replays should not consume additional queue capacity.
         if (normalized.idempotencyKey) {
-            const cacheKey = `${senderKeyId}:${normalized.idempotencyKey}`;
-            const cached = idempotencyCache.get(cacheKey);
+            const senderCache = idempotencyCache.get(senderKeyId);
+            const cached = senderCache?.get(normalized.idempotencyKey);
             if (cached && cached.expiresAtMs > nowMs && cached.message?.expiresAtMs > nowMs) {
                 return {
                     ok: true,
@@ -264,7 +270,10 @@ function createMessageInbox(options = {}) {
             }
             // Preserve idempotency only while the original message remains deliverable.
             if (cached && cached.message?.expiresAtMs <= nowMs) {
-                idempotencyCache.delete(cacheKey);
+                senderCache.delete(normalized.idempotencyKey);
+                if (senderCache.size === 0) {
+                    idempotencyCache.delete(senderKeyId);
+                }
             }
         }
 
@@ -290,8 +299,12 @@ function createMessageInbox(options = {}) {
 
         queue.push(normalized.message);
         if (normalized.idempotencyKey) {
-            const cacheKey = `${senderKeyId}:${normalized.idempotencyKey}`;
-            idempotencyCache.set(cacheKey, {
+            let senderCache = idempotencyCache.get(senderKeyId);
+            if (!senderCache) {
+                senderCache = new Map();
+                idempotencyCache.set(senderKeyId, senderCache);
+            }
+            senderCache.set(normalized.idempotencyKey, {
                 message: normalized.message,
                 expiresAtMs: nowMs + idempotencyTtlSeconds * 1000,
             });

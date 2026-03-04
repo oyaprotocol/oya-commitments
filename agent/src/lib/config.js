@@ -47,6 +47,12 @@ function parseBoolean(raw, fallback) {
     return String(raw).toLowerCase() !== 'false';
 }
 
+function parseHost(raw, fallback) {
+    if (raw === undefined || raw === null) return fallback;
+    const trimmed = String(raw).trim();
+    return trimmed || fallback;
+}
+
 function parseMessageApiKeys(raw) {
     if (!raw) return {};
     let parsed;
@@ -210,7 +216,7 @@ function buildConfig() {
             : undefined,
         uniswapV3FeeTiers: parseFeeTierList(process.env.UNISWAP_V3_FEE_TIERS),
         messageApiEnabled,
-        messageApiHost: process.env.MESSAGE_API_HOST ?? '127.0.0.1',
+        messageApiHost: parseHost(process.env.MESSAGE_API_HOST, '127.0.0.1'),
         messageApiPort: parsePositiveInteger(
             process.env.MESSAGE_API_PORT,
             'MESSAGE_API_PORT',
