@@ -28,7 +28,59 @@ function parsePositiveBigInt(raw, envName) {
     return parsed;
 }
 
+function parsePositiveInteger(raw, envName, fallback, { min = 1, max = undefined } = {}) {
+    const parsed = raw === undefined || raw === null || raw === '' ? fallback : Number(raw);
+    if (!Number.isInteger(parsed)) {
+        throw new Error(`${envName} must be an integer`);
+    }
+    if (parsed < min) {
+        throw new Error(`${envName} must be >= ${min}`);
+    }
+    if (max !== undefined && parsed > max) {
+        throw new Error(`${envName} must be <= ${max}`);
+    }
+    return parsed;
+}
+
+function parseBoolean(raw, fallback) {
+    if (raw === undefined) return fallback;
+    return String(raw).toLowerCase() !== 'false';
+}
+
+function parseMessageApiKeys(raw) {
+    if (!raw) return {};
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    } catch (error) {
+        throw new Error('MESSAGE_API_KEYS_JSON must be valid JSON object');
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('MESSAGE_API_KEYS_JSON must be a JSON object');
+    }
+
+    const out = {};
+    for (const [keyIdRaw, tokenRaw] of Object.entries(parsed)) {
+        const keyId = String(keyIdRaw).trim();
+        if (!keyId) {
+            throw new Error('MESSAGE_API_KEYS_JSON includes empty key id');
+        }
+        const token = typeof tokenRaw === 'string' ? tokenRaw.trim() : '';
+        if (!token) {
+            throw new Error(`MESSAGE_API_KEYS_JSON token for key "${keyId}" must be non-empty`);
+        }
+        out[keyId] = token;
+    }
+    return out;
+}
+
 function buildConfig() {
+    const messageApiEnabled = parseBoolean(process.env.MESSAGE_API_ENABLED, false);
+    const messageApiKeys = parseMessageApiKeys(process.env.MESSAGE_API_KEYS_JSON);
+    if (messageApiEnabled && Object.keys(messageApiKeys).length === 0) {
+        throw new Error('MESSAGE_API_ENABLED=true requires MESSAGE_API_KEYS_JSON with at least one key');
+    }
+
     return {
         rpcUrl: mustGetEnv('RPC_URL'),
         commitmentSafe: getAddress(mustGetEnv('COMMITMENT_SAFE')),
@@ -154,6 +206,66 @@ function buildConfig() {
             ? getAddress(process.env.UNISWAP_V3_QUOTER)
             : undefined,
         uniswapV3FeeTiers: parseFeeTierList(process.env.UNISWAP_V3_FEE_TIERS),
+        messageApiEnabled,
+        messageApiHost: process.env.MESSAGE_API_HOST ?? '127.0.0.1',
+        messageApiPort: parsePositiveInteger(
+            process.env.MESSAGE_API_PORT,
+            'MESSAGE_API_PORT',
+            8787
+        ),
+        messageApiKeys,
+        messageApiMaxBodyBytes: parsePositiveInteger(
+            process.env.MESSAGE_API_MAX_BODY_BYTES,
+            'MESSAGE_API_MAX_BODY_BYTES',
+            8192
+        ),
+        messageApiMaxTextLength: parsePositiveInteger(
+            process.env.MESSAGE_API_MAX_TEXT_LENGTH,
+            'MESSAGE_API_MAX_TEXT_LENGTH',
+            2000
+        ),
+        messageApiQueueLimit: parsePositiveInteger(
+            process.env.MESSAGE_API_QUEUE_LIMIT,
+            'MESSAGE_API_QUEUE_LIMIT',
+            500
+        ),
+        messageApiBatchSize: parsePositiveInteger(
+            process.env.MESSAGE_API_BATCH_SIZE,
+            'MESSAGE_API_BATCH_SIZE',
+            25
+        ),
+        messageApiDefaultTtlSeconds: parsePositiveInteger(
+            process.env.MESSAGE_API_DEFAULT_TTL_SECONDS,
+            'MESSAGE_API_DEFAULT_TTL_SECONDS',
+            3600
+        ),
+        messageApiMinTtlSeconds: parsePositiveInteger(
+            process.env.MESSAGE_API_MIN_TTL_SECONDS,
+            'MESSAGE_API_MIN_TTL_SECONDS',
+            30
+        ),
+        messageApiMaxTtlSeconds: parsePositiveInteger(
+            process.env.MESSAGE_API_MAX_TTL_SECONDS,
+            'MESSAGE_API_MAX_TTL_SECONDS',
+            86400
+        ),
+        messageApiIdempotencyTtlSeconds: parsePositiveInteger(
+            process.env.MESSAGE_API_IDEMPOTENCY_TTL_SECONDS,
+            'MESSAGE_API_IDEMPOTENCY_TTL_SECONDS',
+            86400
+        ),
+        messageApiRateLimitPerMinute: parsePositiveInteger(
+            process.env.MESSAGE_API_RATE_LIMIT_PER_MINUTE,
+            'MESSAGE_API_RATE_LIMIT_PER_MINUTE',
+            30,
+            { min: 0 }
+        ),
+        messageApiRateLimitBurst: parsePositiveInteger(
+            process.env.MESSAGE_API_RATE_LIMIT_BURST,
+            'MESSAGE_API_RATE_LIMIT_BURST',
+            10,
+            { min: 0 }
+        ),
     };
 }
 
