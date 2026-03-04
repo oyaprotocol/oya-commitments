@@ -4,7 +4,8 @@ import { createMessageApiServer } from '../src/lib/message-api.js';
 
 function buildServerConfig() {
     return {
-        messageApiHost: '127.0.0.1',
+        // Blank host should normalize to loopback default in buildConfig/startup config.
+        messageApiHost: '',
         messageApiPort: 0,
         messageApiKeys: {
             ops: 'k_test_ops_secret',
@@ -37,7 +38,7 @@ async function main() {
     const server = await messageApi.start();
     const address = server.address();
     assert.ok(address && typeof address === 'object' && typeof address.port === 'number');
-    const baseUrl = `http://${config.messageApiHost}:${address.port}`;
+    const baseUrl = `http://127.0.0.1:${address.port}`;
 
     try {
         // Health endpoint should always be probe-friendly and unauthenticated.
