@@ -254,13 +254,17 @@ function createMessageInbox(options = {}) {
         if (normalized.idempotencyKey) {
             const cacheKey = `${senderKeyId}:${normalized.idempotencyKey}`;
             const cached = idempotencyCache.get(cacheKey);
-            if (cached && cached.expiresAtMs > nowMs) {
+            if (cached && cached.expiresAtMs > nowMs && cached.message?.expiresAtMs > nowMs) {
                 return {
                     ok: true,
                     status: 'duplicate',
                     message: cached.message,
                     queueDepth: queue.length,
                 };
+            }
+            // Preserve idempotency only while the original message remains deliverable.
+            if (cached && cached.message?.expiresAtMs <= nowMs) {
+                idempotencyCache.delete(cacheKey);
             }
         }
 
