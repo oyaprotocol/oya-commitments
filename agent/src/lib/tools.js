@@ -986,9 +986,7 @@ async function executeToolCalls({
                     }),
                 });
             } catch (error) {
-                if (!isReceiptWaitTimeoutError(error)) {
-                    throw error;
-                }
+                const timeout = isReceiptWaitTimeoutError(error);
                 outputs.push({
                     callId: call.callId,
                     name: call.name,
@@ -996,8 +994,11 @@ async function executeToolCalls({
                         status: 'submitted',
                         transactionHash: String(txHash),
                         pendingConfirmation: true,
+                        receiptCheckError: timeout ? undefined : error?.message ?? String(error),
                         warning:
-                            'Timed out waiting for deposit receipt; transaction may still be pending or mined.',
+                            timeout
+                                ? 'Timed out waiting for deposit receipt; transaction may still be pending or mined.'
+                                : 'Failed to verify deposit receipt after submission; transaction may still be pending or mined.',
                     }),
                 });
             }
@@ -1037,9 +1038,7 @@ async function executeToolCalls({
                     }),
                 });
             } catch (error) {
-                if (!isReceiptWaitTimeoutError(error)) {
-                    throw error;
-                }
+                const timeout = isReceiptWaitTimeoutError(error);
                 outputs.push({
                     callId: call.callId,
                     name: call.name,
@@ -1047,8 +1046,11 @@ async function executeToolCalls({
                         status: 'submitted',
                         transactionHash: String(txHash),
                         pendingConfirmation: true,
+                        receiptCheckError: timeout ? undefined : error?.message ?? String(error),
                         warning:
-                            'Timed out waiting for ERC1155 deposit receipt; transaction may still be pending or mined.',
+                            timeout
+                                ? 'Timed out waiting for ERC1155 deposit receipt; transaction may still be pending or mined.'
+                                : 'Failed to verify ERC1155 deposit receipt after submission; transaction may still be pending or mined.',
                     }),
                 });
             }
