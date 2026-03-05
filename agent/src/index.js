@@ -27,6 +27,7 @@ import {
     DECISION_STATUS,
     evaluateToolOutputsDecisionStatus,
     hasDeterministicDecisionEngine,
+    isRetryableDecisionError,
     validateMessageApiDecisionEngine,
     shouldRequeueMessagesForDecisionStatus,
 } from './lib/decision-support.js';
@@ -213,11 +214,14 @@ async function processAgentToolCalls({
                 approvedToolCalls = [];
             }
         } catch (error) {
+            const retryableValidationError = isRetryableDecisionError(error);
             console.warn(
-                '[agent] validateToolCalls rejected tool calls:',
+                '[agent] validateToolCalls failed:',
                 error?.message ?? error
             );
-            approvedToolCalls = [];
+            return retryableValidationError
+                ? DECISION_STATUS.FAILED_RETRYABLE
+                : DECISION_STATUS.FAILED_NON_RETRYABLE;
         }
     }
 

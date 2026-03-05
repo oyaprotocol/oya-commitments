@@ -3,6 +3,7 @@ import {
     DECISION_STATUS,
     evaluateToolOutputsDecisionStatus,
     validateMessageApiDecisionEngine,
+    isRetryableDecisionError,
     shouldRequeueMessagesForDecisionStatus,
 } from '../src/lib/decision-support.js';
 
@@ -15,6 +16,10 @@ async function run() {
     );
     assert.equal(shouldRequeueMessagesForDecisionStatus(DECISION_STATUS.HANDLED), false);
     assert.equal(shouldRequeueMessagesForDecisionStatus(DECISION_STATUS.NO_ACTION), false);
+
+    assert.equal(isRetryableDecisionError(new Error('network error while calling RPC')), true);
+    assert.equal(isRetryableDecisionError({ code: 'ECONNRESET' }), true);
+    assert.equal(isRetryableDecisionError(new Error('Cannot read properties of undefined')), false);
 
     assert.equal(evaluateToolOutputsDecisionStatus([]), DECISION_STATUS.HANDLED);
     assert.equal(
