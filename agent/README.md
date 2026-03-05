@@ -89,7 +89,6 @@ Enable inbound user messages with one or both auth modes:
 - `MESSAGE_API_KEYS_JSON`: JSON object of API key ids to tokens, for example `{"ops":"k_live_replace_me"}`.
 - `MESSAGE_API_SIGNER_ALLOWLIST`: Comma-separated EVM addresses allowed to use signed auth.
 - `MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS`: Max signature age (default `300`).
-- `MESSAGE_API_SIGNATURE_DOMAIN`: Signature domain scope (default `oya-agent:<commitment_safe>:<og_module>`).
 - `MESSAGE_API_MAX_BODY_BYTES`: Request body limit in bytes (default `8192`).
 - `MESSAGE_API_MAX_TEXT_LENGTH`: Max `text` length (default `2000`).
 - `MESSAGE_API_QUEUE_LIMIT`: Max queued/in-flight messages (default `500`).
@@ -133,8 +132,7 @@ Endpoints:
 - `auth.type` must be `eip191`
 - `idempotencyKey` is required
 - signature is verified against a canonical payload that includes
-  `domain`, `address`, `timestampMs`, `text`, `command`, `args`, `metadata`, `idempotencyKey`, and `ttlSeconds`
-- `domain` is taken from `MESSAGE_API_SIGNATURE_DOMAIN` (or its default derived from commitment + module), so messages stay natural-language while signatures remain deployment-scoped
+  `address`, `timestampMs`, `text`, `command`, `args`, `metadata`, `idempotencyKey`, and `ttlSeconds`
 - signed requests keep idempotency replay-locked for at least `MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS`; replays during that window return `409` with code `idempotency_replay_blocked`
 
 Example request:
@@ -159,7 +157,6 @@ Signed send helper:
 node agent/scripts/send-signed-message.mjs \
   --text="Pause proposals for 2 hours" \
   --private-key="0x<signer-private-key>" \
-  --domain="sepolia:ops-agent" \
   --url="http://127.0.0.1:8787" \
   --command="pause_proposals" \
   --args-json='{"hours":2}'
