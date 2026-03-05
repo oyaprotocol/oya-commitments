@@ -1,9 +1,5 @@
 import { getAddress } from 'viem';
 import { mustGetEnv, parseAddressList } from './utils.js';
-import {
-    buildDefaultMessageSignatureDomain,
-    normalizeSignatureDomain,
-} from './message-signing.js';
 
 function parseFeeTierList(raw) {
     if (!raw) return [500, 3000, 10000];
@@ -57,13 +53,6 @@ function parseHost(raw, fallback) {
     return trimmed || fallback;
 }
 
-function parseSignatureDomain(raw, fallback) {
-    if (raw === undefined || raw === null || raw === '') {
-        return normalizeSignatureDomain(fallback);
-    }
-    return normalizeSignatureDomain(String(raw));
-}
-
 function parseMessageApiKeys(raw) {
     if (!raw) return {};
     let parsed;
@@ -95,10 +84,6 @@ function buildConfig() {
     const rpcUrl = mustGetEnv('RPC_URL');
     const commitmentSafe = getAddress(mustGetEnv('COMMITMENT_SAFE'));
     const ogModule = getAddress(mustGetEnv('OG_MODULE'));
-    const defaultMessageApiSignatureDomain = buildDefaultMessageSignatureDomain({
-        commitmentSafe,
-        ogModule,
-    });
 
     const messageApiEnabled = parseBoolean(process.env.MESSAGE_API_ENABLED, false);
     // Keep optional ingress isolated: malformed keys should only fail when the feature is enabled.
@@ -185,10 +170,6 @@ function buildConfig() {
                   'MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS',
                   300
               ),
-              messageApiSignatureDomain: parseSignatureDomain(
-                  process.env.MESSAGE_API_SIGNATURE_DOMAIN,
-                  defaultMessageApiSignatureDomain
-              ),
           }
         : {
               messageApiHost: '127.0.0.1',
@@ -205,7 +186,6 @@ function buildConfig() {
               messageApiRateLimitBurst: 10,
               messageApiSignerAllowlist: [],
               messageApiSignatureMaxAgeSeconds: 300,
-              messageApiSignatureDomain: defaultMessageApiSignatureDomain,
           };
 
     return {

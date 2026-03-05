@@ -3,11 +3,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { privateKeyToAccount } from 'viem/accounts';
-import {
-    buildDefaultMessageSignatureDomain,
-    buildSignedMessagePayload,
-    normalizeSignatureDomain,
-} from '../src/lib/message-signing.js';
+import { buildSignedMessagePayload } from '../src/lib/message-signing.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -68,23 +64,6 @@ function buildBaseUrl() {
     return `${scheme}://${host}:${port}`;
 }
 
-function resolveSignatureDomain() {
-    const explicit = getArgValue('--domain=') ?? process.env.MESSAGE_API_SIGNATURE_DOMAIN;
-    if (explicit !== undefined && explicit !== null) {
-        return normalizeSignatureDomain(String(explicit));
-    }
-
-    const commitmentSafe = process.env.COMMITMENT_SAFE;
-    const ogModule = process.env.OG_MODULE;
-    if (commitmentSafe && ogModule) {
-        return buildDefaultMessageSignatureDomain({ commitmentSafe, ogModule });
-    }
-
-    throw new Error(
-        'Missing signature domain. Provide --domain or MESSAGE_API_SIGNATURE_DOMAIN, or set COMMITMENT_SAFE and OG_MODULE.'
-    );
-}
-
 function printUsage() {
     console.log(`Usage:
   node agent/scripts/send-signed-message.mjs --text="Pause proposals for 2 hours" [options]
@@ -104,7 +83,6 @@ Optional:
   --idempotency-key=<string>           Optional (auto-generated when omitted)
   --ttl-seconds=<int>                  Optional message TTL
   --timestamp-ms=<int>                 Optional signature timestamp (default now)
-  --domain=<string>                    Optional signature domain (defaults to MESSAGE_API_SIGNATURE_DOMAIN or derived from COMMITMENT_SAFE + OG_MODULE)
   --timeout-ms=<int>                   HTTP timeout (default 10000)
   --dry-run                            Print signed payload and request body without sending
   --help                               Show this help
@@ -128,7 +106,6 @@ async function main() {
     const account = privateKeyToAccount(normalizedPrivateKey);
 
     const baseUrl = buildBaseUrl();
-    const signatureDomain = resolveSignatureDomain();
     const command = getArgValue('--command=') ?? undefined;
     const args = parseOptionalObject(getArgValue('--args-json='), '--args-json');
     const metadata = parseOptionalObject(getArgValue('--metadata-json='), '--metadata-json');
@@ -147,7 +124,6 @@ async function main() {
     const timeoutMs = parseInteger(timeoutRaw, '--timeout-ms');
 
     const payload = buildSignedMessagePayload({
-        domain: signatureDomain,
         address: account.address,
         timestampMs,
         text,
@@ -179,7 +155,6 @@ async function main() {
             JSON.stringify(
                 {
                     baseUrl,
-                    signatureDomain,
                     payload,
                     body,
                 },
@@ -216,7 +191,6 @@ async function main() {
     const output = {
         endpoint,
         signer: account.address,
-        signatureDomain,
         idempotencyKey,
         status: response.status,
         ok: response.ok,

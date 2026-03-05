@@ -20,27 +20,14 @@ function buildInbox() {
 async function main() {
     const account = privateKeyToAccount(`0x${'1'.repeat(64)}`);
     const inbox = buildInbox();
-    const signatureDomain = 'oya-agent:test-signature-domain';
     const config = {
         messageApiHost: '127.0.0.1',
         messageApiPort: 0,
         messageApiKeys: {},
         messageApiSignerAllowlist: [account.address],
         messageApiSignatureMaxAgeSeconds: 300,
-        messageApiSignatureDomain: signatureDomain,
         messageApiMaxBodyBytes: 2048,
     };
-
-    // Signed auth must have a non-empty signature domain at server startup.
-    assert.throws(
-        () =>
-            createMessageApiServer({
-                config: { ...config, messageApiSignatureDomain: '   ' },
-                inbox: buildInbox(),
-                logger: { log() {} },
-            }),
-        /Signed auth requires messageApiSignatureDomain/
-    );
 
     const messageApi = createMessageApiServer({
         config,
@@ -63,7 +50,6 @@ async function main() {
             ttlSeconds: 60,
         };
         const payload = buildSignedMessagePayload({
-            domain: signatureDomain,
             address: account.address,
             timestampMs,
             ...signedBody,
@@ -103,7 +89,6 @@ async function main() {
             ttlSeconds: 1,
         };
         const shortTtlPayload = buildSignedMessagePayload({
-            domain: signatureDomain,
             address: account.address,
             timestampMs: shortTtlTimestampMs,
             ...shortTtlBody,
@@ -159,30 +144,6 @@ async function main() {
         });
         assert.equal(tampered.status, 401);
 
-        // Signature payloads are domain-scoped to the target deployment.
-        const wrongDomainPayload = buildSignedMessagePayload({
-            domain: `${signatureDomain}:other-deployment`,
-            address: account.address,
-            timestampMs,
-            ...signedBody,
-        });
-        const wrongDomainSignature = await account.signMessage({ message: wrongDomainPayload });
-        const wrongDomain = await fetch(`${baseUrl}/v1/messages`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                ...signedBody,
-                idempotencyKey: 'sig-pause-2h-wrong-domain',
-                auth: {
-                    type: 'eip191',
-                    address: account.address,
-                    timestampMs,
-                    signature: wrongDomainSignature,
-                },
-            }),
-        });
-        assert.equal(wrongDomain.status, 401);
-
         // Signed auth requires an idempotency key to harden replay behavior.
         const missingIdempotency = await fetch(`${baseUrl}/v1/messages`, {
             method: 'POST',
@@ -206,7 +167,6 @@ async function main() {
         // Expired signatures should be rejected.
         const expiredTimestampMs = timestampMs - 10 * 60 * 1000;
         const expiredPayload = buildSignedMessagePayload({
-            domain: signatureDomain,
             address: account.address,
             timestampMs: expiredTimestampMs,
             ...signedBody,
