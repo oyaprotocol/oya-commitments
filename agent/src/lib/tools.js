@@ -14,6 +14,7 @@ import {
     signClobOrder,
 } from './polymarket.js';
 import { parseToolArguments } from './utils.js';
+import { annotateToolExecutionError, hasCommittedToolSideEffects } from './tool-execution-error.js';
 
 function safeStringify(value) {
     return JSON.stringify(value, (_, item) => (typeof item === 'bigint' ? item.toString() : item));
@@ -28,17 +29,40 @@ function isReceiptWaitTimeoutError(error) {
     return message.includes('timed out while waiting for transaction');
 }
 
-const TOOL_EXECUTION_SIDE_EFFECTS_FLAG = 'toolExecutionSideEffectsLikelyCommitted';
+function isRetryableToolError(error) {
+    const code = String(error?.code ?? '').toUpperCase();
+    if (
+        code === 'ETIMEDOUT' ||
+        code === 'ECONNRESET' ||
+        code === 'ECONNREFUSED' ||
+        code === 'ENOTFOUND' ||
+        code === 'EAI_AGAIN' ||
+        code === 'UND_ERR_CONNECT_TIMEOUT' ||
+        code === 'UND_ERR_HEADERS_TIMEOUT' ||
+        code === 'UND_ERR_SOCKET'
+    ) {
+        return true;
+    }
 
-function annotateToolExecutionError(error, { sideEffectsLikelyCommitted }) {
-    const wrapped = error instanceof Error ? error : new Error(String(error));
-    // Preserve whether we likely crossed an external side-effect boundary before failing.
-    wrapped[TOOL_EXECUTION_SIDE_EFFECTS_FLAG] = Boolean(sideEffectsLikelyCommitted);
-    return wrapped;
-}
+    const name = String(error?.name ?? '');
+    if (/(Timeout|Network|HttpRequest|Fetch|Socket|Connection|RateLimit)/i.test(name)) {
+        return true;
+    }
 
-function hasCommittedToolSideEffects(error) {
-    return Boolean(error?.[TOOL_EXECUTION_SIDE_EFFECTS_FLAG]);
+    const message = String(error?.shortMessage ?? error?.message ?? '').toLowerCase();
+    return (
+        message.includes('timed out') ||
+        message.includes('timeout') ||
+        message.includes('network error') ||
+        message.includes('failed to fetch') ||
+        message.includes('connection refused') ||
+        message.includes('connection reset') ||
+        message.includes('temporarily unavailable') ||
+        message.includes('service unavailable') ||
+        message.includes('gateway timeout') ||
+        message.includes('too many requests') ||
+        message.includes('429')
+    );
 }
 
 function normalizeOrderSide(value) {
@@ -1104,23 +1128,56 @@ async function executeToolCalls({
                     ogModule: config.ogModule,
                     transactions,
                 });
-                outputs.push({
-                    callId: call.callId,
-                    name: call.name,
-                    output: safeStringify({
-                        status: result?.skipped ? 'skipped' : 'submitted',
-                        ...result,
-                    }),
-                });
+                const proposalTxHash =
+                    typeof result?.transactionHash === 'string' && result.transactionHash
+                        ? result.transactionHash
+                        : undefined;
+                const committedSideEffects = Boolean(
+                    result?.sideEffectsLikelyCommitted || proposalTxHash
+                );
+                if (committedSideEffects) {
+                    sideEffectsLikelyCommitted = true;
+                }
+
+                const submissionError = result?.submissionError ?? null;
+                if (!result?.skipped && !proposalTxHash && submissionError) {
+                    outputs.push({
+                        callId: call.callId,
+                        name: call.name,
+                        output: safeStringify({
+                            status: 'error',
+                            message:
+                                submissionError?.message ??
+                                'Proposal submission failed before transaction broadcast.',
+                            retryable: !committedSideEffects && isRetryableToolError(submissionError),
+                            sideEffectsLikelyCommitted: committedSideEffects,
+                            submissionError,
+                        }),
+                    });
+                } else {
+                    outputs.push({
+                        callId: call.callId,
+                        name: call.name,
+                        output: safeStringify({
+                            status: result?.skipped ? 'skipped' : 'submitted',
+                            ...result,
+                        }),
+                    });
+                }
             } catch (error) {
                 const timeout = isReceiptWaitTimeoutError(error);
+                const committedSideEffects = hasCommittedToolSideEffects(error);
+                if (committedSideEffects) {
+                    sideEffectsLikelyCommitted = true;
+                }
                 outputs.push({
                     callId: call.callId,
                     name: call.name,
                     output: safeStringify({
                         status: timeout ? 'pending' : 'error',
                         message: error?.message ?? String(error),
-                        retryable: timeout,
+                        retryable: !committedSideEffects && (timeout || isRetryableToolError(error)),
+                        sideEffectsLikelyCommitted: committedSideEffects,
                     }),
                 });
             }
@@ -1150,6 +1207,9 @@ async function executeToolCalls({
                     assertionId: args.assertionId,
                     explanation: args.explanation,
                 });
+                if (result?.disputeHash) {
+                    sideEffectsLikelyCommitted = true;
+                }
                 outputs.push({
                     callId: call.callId,
                     name: call.name,
@@ -1159,12 +1219,18 @@ async function executeToolCalls({
                     }),
                 });
             } catch (error) {
+                const committedSideEffects = hasCommittedToolSideEffects(error);
+                if (committedSideEffects) {
+                    sideEffectsLikelyCommitted = true;
+                }
                 outputs.push({
                     callId: call.callId,
                     name: call.name,
                     output: safeStringify({
                         status: 'error',
                         message: error?.message ?? String(error),
+                        retryable: !committedSideEffects && isRetryableToolError(error),
+                        sideEffectsLikelyCommitted: committedSideEffects,
                     }),
                 });
             }
@@ -1192,23 +1258,57 @@ async function executeToolCalls({
                         ogModule: config.ogModule,
                         transactions: builtTransactions,
                     });
-                    outputs.push({
-                        callId: 'auto_post_bond_and_propose',
-                        name: 'post_bond_and_propose',
-                        output: safeStringify({
-                            status: result?.skipped ? 'skipped' : 'submitted',
-                            ...result,
-                        }),
-                    });
+                    const proposalTxHash =
+                        typeof result?.transactionHash === 'string' && result.transactionHash
+                            ? result.transactionHash
+                            : undefined;
+                    const committedSideEffects = Boolean(
+                        result?.sideEffectsLikelyCommitted || proposalTxHash
+                    );
+                    if (committedSideEffects) {
+                        sideEffectsLikelyCommitted = true;
+                    }
+
+                    const submissionError = result?.submissionError ?? null;
+                    if (!result?.skipped && !proposalTxHash && submissionError) {
+                        outputs.push({
+                            callId: 'auto_post_bond_and_propose',
+                            name: 'post_bond_and_propose',
+                            output: safeStringify({
+                                status: 'error',
+                                message:
+                                    submissionError?.message ??
+                                    'Proposal submission failed before transaction broadcast.',
+                                retryable:
+                                    !committedSideEffects && isRetryableToolError(submissionError),
+                                sideEffectsLikelyCommitted: committedSideEffects,
+                                submissionError,
+                            }),
+                        });
+                    } else {
+                        outputs.push({
+                            callId: 'auto_post_bond_and_propose',
+                            name: 'post_bond_and_propose',
+                            output: safeStringify({
+                                status: result?.skipped ? 'skipped' : 'submitted',
+                                ...result,
+                            }),
+                        });
+                    }
                 } catch (error) {
                     const timeout = isReceiptWaitTimeoutError(error);
+                    const committedSideEffects = hasCommittedToolSideEffects(error);
+                    if (committedSideEffects) {
+                        sideEffectsLikelyCommitted = true;
+                    }
                     outputs.push({
                         callId: 'auto_post_bond_and_propose',
                         name: 'post_bond_and_propose',
                         output: safeStringify({
                             status: timeout ? 'pending' : 'error',
                             message: error?.message ?? String(error),
-                            retryable: timeout,
+                            retryable: !committedSideEffects && (timeout || isRetryableToolError(error)),
+                            sideEffectsLikelyCommitted: committedSideEffects,
                         }),
                     });
                 }

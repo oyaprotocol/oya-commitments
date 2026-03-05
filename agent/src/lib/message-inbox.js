@@ -29,6 +29,9 @@ function createMessageInbox(options = {}) {
     const maxTextLength = normalizeInteger(options.maxTextLength, 2000, { min: 1 });
     const rateLimitPerMinute = normalizeInteger(options.rateLimitPerMinute, 30, { min: 0 });
     const rateLimitBurst = normalizeInteger(options.rateLimitBurst, 10, { min: 0 });
+    const signedReplayWindowSeconds = normalizeInteger(options.signedReplayWindowSeconds, 0, {
+        min: 0,
+    });
     const staleRateWindowMs = Math.max(idempotencyTtlSeconds * 1000, 60_000);
 
     const queue = [];
@@ -280,16 +283,31 @@ function createMessageInbox(options = {}) {
         if (normalized.idempotencyKey) {
             const senderCache = idempotencyCache.get(senderKeyId);
             const cached = senderCache?.get(normalized.idempotencyKey);
-            if (cached && cached.expiresAtMs > nowMs && cached.message?.expiresAtMs > nowMs) {
-                return {
-                    ok: true,
-                    status: 'duplicate',
-                    message: cached.message,
-                    queueDepth: queue.length,
-                };
-            }
-            // Preserve idempotency only while the original message remains deliverable.
-            if (cached && cached.message?.expiresAtMs <= nowMs) {
+            if (cached && cached.expiresAtMs > nowMs) {
+                if (cached.message?.expiresAtMs > nowMs) {
+                    return {
+                        ok: true,
+                        status: 'duplicate',
+                        message: cached.message,
+                        queueDepth: queue.length,
+                    };
+                }
+
+                if (cached.lockReplayAfterMessageExpiry) {
+                    // Signed requests must keep idempotency replay-protected for the full
+                    // replay window, even after the original queued message TTL expires.
+                    return {
+                        ok: false,
+                        code: 'idempotency_replay_blocked',
+                        message:
+                            'idempotencyKey already used for a signed message and is still replay-locked.',
+                        messageId: cached.message?.messageId,
+                        replayLockedUntilMs: cached.expiresAtMs,
+                        queueDepth: queue.length,
+                    };
+                }
+
+                // API-key messages may reuse idempotency keys once the original TTL elapses.
                 senderCache.delete(normalized.idempotencyKey);
                 if (senderCache.size === 0) {
                     idempotencyCache.delete(senderKeyId);
@@ -313,9 +331,14 @@ function createMessageInbox(options = {}) {
                 senderCache = new Map();
                 idempotencyCache.set(senderKeyId, senderCache);
             }
+            const lockReplayAfterMessageExpiry = normalized.message?.sender?.authType === 'eip191';
+            const cacheTtlMs = idempotencyTtlSeconds * 1000;
+            const replayWindowMs = signedReplayWindowSeconds * 1000;
             senderCache.set(normalized.idempotencyKey, {
                 message: normalized.message,
-                expiresAtMs: nowMs + idempotencyTtlSeconds * 1000,
+                expiresAtMs:
+                    nowMs + (lockReplayAfterMessageExpiry ? Math.max(cacheTtlMs, replayWindowMs) : cacheTtlMs),
+                lockReplayAfterMessageExpiry,
             });
         }
 

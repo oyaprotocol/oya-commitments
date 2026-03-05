@@ -25,6 +25,7 @@ import { createMessageInbox } from './lib/message-inbox.js';
 import { createMessageApiServer } from './lib/message-api.js';
 import {
     DECISION_STATUS,
+    evaluateToolOutputsDecisionStatus,
     hasDeterministicDecisionEngine,
     validateMessageApiDecisionEngine,
     shouldRequeueMessagesForDecisionStatus,
@@ -63,6 +64,7 @@ const messageInbox = config.messageApiEnabled
         minTtlSeconds: config.messageApiMinTtlSeconds,
         maxTtlSeconds: config.messageApiMaxTtlSeconds,
         idempotencyTtlSeconds: config.messageApiIdempotencyTtlSeconds,
+        signedReplayWindowSeconds: config.messageApiSignatureMaxAgeSeconds,
         maxTextLength: config.messageApiMaxTextLength,
         rateLimitPerMinute: config.messageApiRateLimitPerMinute,
         rateLimitBurst: config.messageApiRateLimitBurst,
@@ -289,7 +291,7 @@ async function processAgentToolCalls({
             console.warn('[agent] Failed to fetch post-tool explanation:', error?.message ?? error);
         }
     }
-    return DECISION_STATUS.HANDLED;
+    return evaluateToolOutputsDecisionStatus(toolOutputs);
 }
 
 async function decideOnSignals(signals, { onchainPendingProposal = false } = {}) {

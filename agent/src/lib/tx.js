@@ -18,6 +18,7 @@ import {
     relayPolymarketTransaction,
     resolveRelayerProxyWallet,
 } from './polymarket-relayer.js';
+import { annotateToolExecutionError } from './tool-execution-error.js';
 import { normalizeHashOrNull, summarizeViemError } from './utils.js';
 
 const conditionalTokensAbi = parseAbi([
@@ -154,195 +155,209 @@ async function postBondAndPropose({
         throw new Error('Proposals disabled via PROPOSE_ENABLED.');
     }
 
-    const normalizedTransactions = normalizeOgTransactions(transactions);
-    const proposerBalance = await publicClient.getBalance({ address: account.address });
-    const [collateral, bondAmount, optimisticOracle] = await Promise.all([
-        publicClient.readContract({
-            address: ogModule,
-            abi: optimisticGovernorAbi,
-            functionName: 'collateral',
-        }),
-        publicClient.readContract({
-            address: ogModule,
-            abi: optimisticGovernorAbi,
-            functionName: 'bondAmount',
-        }),
-        publicClient.readContract({
-            address: ogModule,
-            abi: optimisticGovernorAbi,
-            functionName: 'optimisticOracleV3',
-        }),
-    ]);
-    let minimumBond = 0n;
+    let sideEffectsLikelyCommitted = false;
     try {
-        minimumBond = await publicClient.readContract({
-            address: optimisticOracle,
-            abi: optimisticOracleAbi,
-            functionName: 'getMinimumBond',
-            args: [collateral],
-        });
-    } catch (error) {
-        console.warn('[agent] Failed to fetch minimum bond from optimistic oracle:', error);
-    }
-
-    const requiredBond = bondAmount > minimumBond ? bondAmount : minimumBond;
-
-    if (requiredBond > 0n) {
-        const collateralBalance = await publicClient.readContract({
-            address: collateral,
-            abi: erc20Abi,
-            functionName: 'balanceOf',
-            args: [account.address],
-        });
-        if (collateralBalance < requiredBond) {
-            throw new Error(
-                `Insufficient bond collateral balance: need ${requiredBond.toString()} wei, have ${collateralBalance.toString()}.`
-            );
+        const normalizedTransactions = normalizeOgTransactions(transactions);
+        const proposerBalance = await publicClient.getBalance({ address: account.address });
+        const [collateral, bondAmount, optimisticOracle] = await Promise.all([
+            publicClient.readContract({
+                address: ogModule,
+                abi: optimisticGovernorAbi,
+                functionName: 'collateral',
+            }),
+            publicClient.readContract({
+                address: ogModule,
+                abi: optimisticGovernorAbi,
+                functionName: 'bondAmount',
+            }),
+            publicClient.readContract({
+                address: ogModule,
+                abi: optimisticGovernorAbi,
+                functionName: 'optimisticOracleV3',
+            }),
+        ]);
+        let minimumBond = 0n;
+        try {
+            minimumBond = await publicClient.readContract({
+                address: optimisticOracle,
+                abi: optimisticOracleAbi,
+                functionName: 'getMinimumBond',
+                args: [collateral],
+            });
+        } catch (error) {
+            console.warn('[agent] Failed to fetch minimum bond from optimistic oracle:', error);
         }
-        const spenders = [];
-        if (config.bondSpender === 'og' || config.bondSpender === 'both') {
-            spenders.push(ogModule);
-        }
-        if (config.bondSpender === 'oo' || config.bondSpender === 'both') {
-            spenders.push(optimisticOracle);
-        }
 
-        for (const spender of spenders) {
-            const approveHash = await walletClient.writeContract({
+        const requiredBond = bondAmount > minimumBond ? bondAmount : minimumBond;
+
+        if (requiredBond > 0n) {
+            const collateralBalance = await publicClient.readContract({
                 address: collateral,
                 abi: erc20Abi,
-                functionName: 'approve',
-                args: [spender, requiredBond],
+                functionName: 'balanceOf',
+                args: [account.address],
             });
-            await publicClient.waitForTransactionReceipt({ hash: approveHash });
-            const allowance = await publicClient.readContract({
-                address: collateral,
-                abi: erc20Abi,
-                functionName: 'allowance',
-                args: [account.address, spender],
-            });
-            if (allowance < requiredBond) {
+            if (collateralBalance < requiredBond) {
                 throw new Error(
-                    `Insufficient bond allowance: need ${requiredBond.toString()} wei, have ${allowance.toString()} for spender ${spender}.`
+                    `Insufficient bond collateral balance: need ${requiredBond.toString()} wei, have ${collateralBalance.toString()}.`
                 );
             }
+            const spenders = [];
+            if (config.bondSpender === 'og' || config.bondSpender === 'both') {
+                spenders.push(ogModule);
+            }
+            if (config.bondSpender === 'oo' || config.bondSpender === 'both') {
+                spenders.push(optimisticOracle);
+            }
+
+            for (const spender of spenders) {
+                const approveHash = await walletClient.writeContract({
+                    address: collateral,
+                    abi: erc20Abi,
+                    functionName: 'approve',
+                    args: [spender, requiredBond],
+                });
+                sideEffectsLikelyCommitted = true;
+                await publicClient.waitForTransactionReceipt({ hash: approveHash });
+                const allowance = await publicClient.readContract({
+                    address: collateral,
+                    abi: erc20Abi,
+                    functionName: 'allowance',
+                    args: [account.address, spender],
+                });
+                if (allowance < requiredBond) {
+                    throw new Error(
+                        `Insufficient bond allowance: need ${requiredBond.toString()} wei, have ${allowance.toString()} for spender ${spender}.`
+                    );
+                }
+            }
         }
-    }
 
-    if (proposerBalance === 0n) {
-        throw new Error(
-            `Proposer ${account.address} has 0 native balance; cannot pay gas to propose.`
-        );
-    }
+        if (proposerBalance === 0n) {
+            throw new Error(
+                `Proposer ${account.address} has 0 native balance; cannot pay gas to propose.`
+            );
+        }
 
-    let proposalTxHash;
-    let proposalHash;
-    const explanation = 'Agent serving Oya commitment.';
-    const explanationBytes = stringToHex(explanation);
-    const proposalData = encodeFunctionData({
-        abi: optimisticGovernorAbi,
-        functionName: 'proposeTransactions',
-        args: [normalizedTransactions, explanationBytes],
-    });
-    let simulationError;
-    let submissionError;
-    try {
-        await publicClient.simulateContract({
-            address: ogModule,
+        let proposalTxHash;
+        let proposalHash;
+        const explanation = 'Agent serving Oya commitment.';
+        const explanationBytes = stringToHex(explanation);
+        const proposalData = encodeFunctionData({
             abi: optimisticGovernorAbi,
             functionName: 'proposeTransactions',
             args: [normalizedTransactions, explanationBytes],
-            account: account.address,
         });
-    } catch (error) {
-        simulationError = error;
-        const simulationMessage =
-            error?.shortMessage ?? error?.message ?? summarizeViemError(error)?.message ?? String(error);
-        console.warn('[agent] Proposal simulation failed:', simulationMessage);
-        if (!config.allowProposeOnSimulationFail) {
-            if (isDuplicateProposalError(error)) {
-                console.log('[agent] Proposal skipped: duplicate proposal already exists onchain.');
-                return {
-                    transactionHash: null,
-                    proposalHash: null,
-                    ogProposalHash: null,
-                    bondAmount,
-                    collateral,
-                    optimisticOracle,
-                    skipped: true,
-                    skipReason: 'duplicate_proposal',
-                    submissionError: summarizeViemError(error),
-                };
-            }
-            throw error;
-        }
-        console.warn('[agent] Simulation failed; attempting to propose anyway.');
-    }
-
-    try {
-        if (simulationError) {
-            proposalTxHash = await walletClient.sendTransaction({
-                account,
-                to: ogModule,
-                data: proposalData,
-                value: 0n,
-                gas: config.proposeGasLimit,
-            });
-        } else {
-            proposalTxHash = await walletClient.writeContract({
+        let simulationError;
+        let submissionError;
+        try {
+            await publicClient.simulateContract({
                 address: ogModule,
                 abi: optimisticGovernorAbi,
                 functionName: 'proposeTransactions',
                 args: [normalizedTransactions, explanationBytes],
+                account: account.address,
             });
+        } catch (error) {
+            simulationError = error;
+            const simulationMessage =
+                error?.shortMessage ??
+                error?.message ??
+                summarizeViemError(error)?.message ??
+                String(error);
+            console.warn('[agent] Proposal simulation failed:', simulationMessage);
+            if (!config.allowProposeOnSimulationFail) {
+                if (isDuplicateProposalError(error)) {
+                    console.log('[agent] Proposal skipped: duplicate proposal already exists onchain.');
+                    return {
+                        transactionHash: null,
+                        proposalHash: null,
+                        ogProposalHash: null,
+                        bondAmount,
+                        collateral,
+                        optimisticOracle,
+                        skipped: true,
+                        skipReason: 'duplicate_proposal',
+                        submissionError: summarizeViemError(error),
+                        sideEffectsLikelyCommitted,
+                    };
+                }
+                throw error;
+            }
+            console.warn('[agent] Simulation failed; attempting to propose anyway.');
         }
-    } catch (error) {
-        submissionError = error;
-        const message =
-            error?.shortMessage ??
-            error?.message ??
-            simulationError?.shortMessage ??
-            simulationError?.message ??
-            String(error ?? simulationError);
-        console.warn('[agent] Propose submission failed:', message);
-    }
 
-    if (proposalTxHash) {
-        console.log('[agent] Proposal submitted tx:', proposalTxHash);
         try {
-            proposalHash = await resolveProposalHashFromReceipt({
-                publicClient,
-                proposalTxHash,
-                ogModule,
-                timeoutMs: config.proposalHashResolveTimeoutMs,
-                pollIntervalMs: config.proposalHashResolvePollIntervalMs,
-            });
-            if (!proposalHash) {
-                console.log(
-                    '[agent] Proposal hash not yet available from receipt; continuing and relying on OG log polling.'
-                );
+            if (simulationError) {
+                proposalTxHash = await walletClient.sendTransaction({
+                    account,
+                    to: ogModule,
+                    data: proposalData,
+                    value: 0n,
+                    gas: config.proposeGasLimit,
+                });
+            } else {
+                proposalTxHash = await walletClient.writeContract({
+                    address: ogModule,
+                    abi: optimisticGovernorAbi,
+                    functionName: 'proposeTransactions',
+                    args: [normalizedTransactions, explanationBytes],
+                });
+            }
+            if (proposalTxHash) {
+                sideEffectsLikelyCommitted = true;
             }
         } catch (error) {
-            const reason = error?.shortMessage ?? error?.message ?? String(error);
-            console.warn('[agent] Failed to resolve OG proposalHash from receipt:', reason);
+            submissionError = error;
+            const message =
+                error?.shortMessage ??
+                error?.message ??
+                simulationError?.shortMessage ??
+                simulationError?.message ??
+                String(error ?? simulationError);
+            console.warn('[agent] Propose submission failed:', message);
         }
-    }
 
-    if (proposalHash) {
-        console.log('[agent] OG proposal hash:', proposalHash);
-    }
+        if (proposalTxHash) {
+            console.log('[agent] Proposal submitted tx:', proposalTxHash);
+            try {
+                proposalHash = await resolveProposalHashFromReceipt({
+                    publicClient,
+                    proposalTxHash,
+                    ogModule,
+                    timeoutMs: config.proposalHashResolveTimeoutMs,
+                    pollIntervalMs: config.proposalHashResolvePollIntervalMs,
+                });
+                if (!proposalHash) {
+                    console.log(
+                        '[agent] Proposal hash not yet available from receipt; continuing and relying on OG log polling.'
+                    );
+                }
+            } catch (error) {
+                const reason = error?.shortMessage ?? error?.message ?? String(error);
+                console.warn('[agent] Failed to resolve OG proposalHash from receipt:', reason);
+            }
+        }
 
-    return {
-        transactionHash: proposalTxHash,
-        // Backward-compatible alias: legacy agents read `proposalHash` as submission tx hash.
-        proposalHash: proposalTxHash,
-        // New explicit OG proposal hash extracted from TransactionsProposed logs.
-        ogProposalHash: proposalHash,
-        bondAmount,
-        collateral,
-        optimisticOracle,
-        submissionError: submissionError ? summarizeViemError(submissionError) : null,
-    };
+        if (proposalHash) {
+            console.log('[agent] OG proposal hash:', proposalHash);
+        }
+
+        return {
+            transactionHash: proposalTxHash,
+            // Backward-compatible alias: legacy agents read `proposalHash` as submission tx hash.
+            proposalHash: proposalTxHash,
+            // New explicit OG proposal hash extracted from TransactionsProposed logs.
+            ogProposalHash: proposalHash,
+            bondAmount,
+            collateral,
+            optimisticOracle,
+            submissionError: submissionError ? summarizeViemError(submissionError) : null,
+            sideEffectsLikelyCommitted,
+        };
+    } catch (error) {
+        throw annotateToolExecutionError(error, { sideEffectsLikelyCommitted });
+    }
 }
 
 async function postBondAndDispute({
@@ -358,101 +373,111 @@ async function postBondAndDispute({
         throw new Error('Disputes disabled via DISPUTE_ENABLED.');
     }
 
-    const proposerBalance = await publicClient.getBalance({ address: account.address });
-    if (proposerBalance === 0n) {
-        throw new Error(
-            `Disputer ${account.address} has 0 native balance; cannot pay gas to dispute.`
-        );
-    }
-
-    const optimisticOracle = ogContext?.optimisticOracle;
-    if (!optimisticOracle) {
-        throw new Error('Missing optimistic oracle address.');
-    }
-
-    const assertionRaw = await publicClient.readContract({
-        address: optimisticOracle,
-        abi: optimisticOracleAbi,
-        functionName: 'getAssertion',
-        args: [assertionId],
-    });
-    const assertion = normalizeAssertion(assertionRaw);
-
-    const nowBlock = await publicClient.getBlock();
-    const now = BigInt(nowBlock.timestamp);
-    const expirationTime = BigInt(assertion.expirationTime ?? 0);
-    const disputer = assertion.disputer ? getAddress(assertion.disputer) : zeroAddress;
-    const settled = Boolean(assertion.settled);
-    if (settled) {
-        throw new Error(`Assertion ${assertionId} already settled.`);
-    }
-    if (expirationTime !== 0n && now >= expirationTime) {
-        throw new Error(`Assertion ${assertionId} expired at ${expirationTime}.`);
-    }
-    if (disputer !== zeroAddress) {
-        throw new Error(`Assertion ${assertionId} already disputed by ${disputer}.`);
-    }
-
-    const bond = BigInt(assertion.bond ?? 0);
-    const currency = assertion.currency ? getAddress(assertion.currency) : zeroAddress;
-    if (currency === zeroAddress) {
-        throw new Error('Assertion currency is zero address; cannot post bond.');
-    }
-
-    if (bond > 0n) {
-        const collateralBalance = await publicClient.readContract({
-            address: currency,
-            abi: erc20Abi,
-            functionName: 'balanceOf',
-            args: [account.address],
-        });
-        if (collateralBalance < bond) {
+    let sideEffectsLikelyCommitted = false;
+    try {
+        const proposerBalance = await publicClient.getBalance({ address: account.address });
+        if (proposerBalance === 0n) {
             throw new Error(
-                `Insufficient dispute bond balance: need ${bond.toString()} wei, have ${collateralBalance.toString()}.`
+                `Disputer ${account.address} has 0 native balance; cannot pay gas to dispute.`
             );
         }
 
-        const approveHash = await walletClient.writeContract({
-            address: currency,
-            abi: erc20Abi,
-            functionName: 'approve',
-            args: [optimisticOracle, bond],
-        });
-        await publicClient.waitForTransactionReceipt({ hash: approveHash });
-    }
+        const optimisticOracle = ogContext?.optimisticOracle;
+        if (!optimisticOracle) {
+            throw new Error('Missing optimistic oracle address.');
+        }
 
-    let disputeHash;
-    try {
-        await publicClient.simulateContract({
+        const assertionRaw = await publicClient.readContract({
             address: optimisticOracle,
             abi: optimisticOracleAbi,
-            functionName: 'disputeAssertion',
-            args: [assertionId, account.address],
-            account: account.address,
+            functionName: 'getAssertion',
+            args: [assertionId],
         });
-        disputeHash = await walletClient.writeContract({
-            address: optimisticOracle,
-            abi: optimisticOracleAbi,
-            functionName: 'disputeAssertion',
-            args: [assertionId, account.address],
-        });
+        const assertion = normalizeAssertion(assertionRaw);
+
+        const nowBlock = await publicClient.getBlock();
+        const now = BigInt(nowBlock.timestamp);
+        const expirationTime = BigInt(assertion.expirationTime ?? 0);
+        const disputer = assertion.disputer ? getAddress(assertion.disputer) : zeroAddress;
+        const settled = Boolean(assertion.settled);
+        if (settled) {
+            throw new Error(`Assertion ${assertionId} already settled.`);
+        }
+        if (expirationTime !== 0n && now >= expirationTime) {
+            throw new Error(`Assertion ${assertionId} expired at ${expirationTime}.`);
+        }
+        if (disputer !== zeroAddress) {
+            throw new Error(`Assertion ${assertionId} already disputed by ${disputer}.`);
+        }
+
+        const bond = BigInt(assertion.bond ?? 0);
+        const currency = assertion.currency ? getAddress(assertion.currency) : zeroAddress;
+        if (currency === zeroAddress) {
+            throw new Error('Assertion currency is zero address; cannot post bond.');
+        }
+
+        if (bond > 0n) {
+            const collateralBalance = await publicClient.readContract({
+                address: currency,
+                abi: erc20Abi,
+                functionName: 'balanceOf',
+                args: [account.address],
+            });
+            if (collateralBalance < bond) {
+                throw new Error(
+                    `Insufficient dispute bond balance: need ${bond.toString()} wei, have ${collateralBalance.toString()}.`
+                );
+            }
+
+            const approveHash = await walletClient.writeContract({
+                address: currency,
+                abi: erc20Abi,
+                functionName: 'approve',
+                args: [optimisticOracle, bond],
+            });
+            sideEffectsLikelyCommitted = true;
+            await publicClient.waitForTransactionReceipt({ hash: approveHash });
+        }
+
+        let disputeHash;
+        try {
+            await publicClient.simulateContract({
+                address: optimisticOracle,
+                abi: optimisticOracleAbi,
+                functionName: 'disputeAssertion',
+                args: [assertionId, account.address],
+                account: account.address,
+            });
+            disputeHash = await walletClient.writeContract({
+                address: optimisticOracle,
+                abi: optimisticOracleAbi,
+                functionName: 'disputeAssertion',
+                args: [assertionId, account.address],
+            });
+            if (disputeHash) {
+                sideEffectsLikelyCommitted = true;
+            }
+        } catch (error) {
+            const message = error?.shortMessage ?? error?.message ?? String(error);
+            throw new Error(`Dispute submission failed: ${message}`);
+        }
+
+        if (explanation) {
+            console.log(`[agent] Dispute rationale: ${explanation}`);
+        }
+
+        console.log('[agent] Dispute submitted:', disputeHash);
+
+        return {
+            disputeHash,
+            bondAmount: bond,
+            collateral: currency,
+            optimisticOracle,
+            sideEffectsLikelyCommitted,
+        };
     } catch (error) {
-        const message = error?.shortMessage ?? error?.message ?? String(error);
-        throw new Error(`Dispute submission failed: ${message}`);
+        throw annotateToolExecutionError(error, { sideEffectsLikelyCommitted });
     }
-
-    if (explanation) {
-        console.log(`[agent] Dispute rationale: ${explanation}`);
-    }
-
-    console.log('[agent] Dispute submitted:', disputeHash);
-
-    return {
-        disputeHash,
-        bondAmount: bond,
-        collateral: currency,
-        optimisticOracle,
-    };
 }
 
 function normalizeOgTransactions(transactions) {

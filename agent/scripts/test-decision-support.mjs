@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
     DECISION_STATUS,
+    evaluateToolOutputsDecisionStatus,
     validateMessageApiDecisionEngine,
     shouldRequeueMessagesForDecisionStatus,
 } from '../src/lib/decision-support.js';
@@ -14,6 +15,52 @@ async function run() {
     );
     assert.equal(shouldRequeueMessagesForDecisionStatus(DECISION_STATUS.HANDLED), false);
     assert.equal(shouldRequeueMessagesForDecisionStatus(DECISION_STATUS.NO_ACTION), false);
+
+    assert.equal(evaluateToolOutputsDecisionStatus([]), DECISION_STATUS.HANDLED);
+    assert.equal(
+        evaluateToolOutputsDecisionStatus([
+            {
+                output: JSON.stringify({
+                    status: 'error',
+                    message: 'rpc unavailable',
+                    retryable: true,
+                    sideEffectsLikelyCommitted: false,
+                }),
+            },
+        ]),
+        DECISION_STATUS.FAILED_RETRYABLE
+    );
+    assert.equal(
+        evaluateToolOutputsDecisionStatus([
+            {
+                output: JSON.stringify({
+                    status: 'error',
+                    message: 'rpc unavailable',
+                    retryable: true,
+                    sideEffectsLikelyCommitted: false,
+                }),
+            },
+            {
+                output: JSON.stringify({
+                    status: 'submitted',
+                    transactionHash: `0x${'a'.repeat(64)}`,
+                }),
+            },
+        ]),
+        DECISION_STATUS.HANDLED
+    );
+    assert.equal(
+        evaluateToolOutputsDecisionStatus([
+            {
+                output: JSON.stringify({
+                    status: 'error',
+                    message: 'validation failed',
+                    retryable: false,
+                }),
+            },
+        ]),
+        DECISION_STATUS.HANDLED
+    );
 
     // Disabled message API should not require any decision engine.
     assert.doesNotThrow(() => {

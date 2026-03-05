@@ -95,6 +95,53 @@ async function main() {
         assert.equal(queued[0].sender.signedAtMs, timestampMs);
         inbox.ackBatch(queued.map((message) => message.messageId));
 
+        // Signed idempotency keys remain replay-locked beyond message TTL.
+        const shortTtlTimestampMs = Date.now();
+        const shortTtlBody = {
+            text: 'Short TTL signed command',
+            idempotencyKey: 'sig-short-ttl',
+            ttlSeconds: 1,
+        };
+        const shortTtlPayload = buildSignedMessagePayload({
+            domain: signatureDomain,
+            address: account.address,
+            timestampMs: shortTtlTimestampMs,
+            ...shortTtlBody,
+        });
+        const shortTtlSignature = await account.signMessage({ message: shortTtlPayload });
+        const shortTtlAccepted = await fetch(`${baseUrl}/v1/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ...shortTtlBody,
+                auth: {
+                    type: 'eip191',
+                    address: account.address,
+                    timestampMs: shortTtlTimestampMs,
+                    signature: shortTtlSignature,
+                },
+            }),
+        });
+        assert.equal(shortTtlAccepted.status, 202);
+        await new Promise((resolve) => setTimeout(resolve, 1_100));
+
+        const shortTtlReplay = await fetch(`${baseUrl}/v1/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ...shortTtlBody,
+                auth: {
+                    type: 'eip191',
+                    address: account.address,
+                    timestampMs: shortTtlTimestampMs,
+                    signature: shortTtlSignature,
+                },
+            }),
+        });
+        assert.equal(shortTtlReplay.status, 409);
+        const shortTtlReplayJson = await shortTtlReplay.json();
+        assert.equal(shortTtlReplayJson.code, 'idempotency_replay_blocked');
+
         // Tampered request body with old signature must fail authentication.
         const tampered = await fetch(`${baseUrl}/v1/messages`, {
             method: 'POST',
