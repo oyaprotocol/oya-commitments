@@ -371,6 +371,16 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
                     });
                     return;
                 }
+                if (result.code === 'idempotency_replay_blocked') {
+                    sendJson(res, 409, {
+                        error: result.message,
+                        code: result.code,
+                        messageId: result.messageId,
+                        replayLockedUntilMs: result.replayLockedUntilMs,
+                        queueDepth: result.queueDepth,
+                    });
+                    return;
+                }
                 sendJson(res, 400, {
                     error: result.message ?? 'Invalid request.',
                     code: result.code ?? 'invalid_request',

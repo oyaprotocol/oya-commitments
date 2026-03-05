@@ -135,6 +135,7 @@ Endpoints:
 - signature is verified against a canonical payload that includes
   `domain`, `address`, `timestampMs`, `text`, `command`, `args`, `metadata`, `idempotencyKey`, and `ttlSeconds`
 - `domain` is taken from `MESSAGE_API_SIGNATURE_DOMAIN` (or its default derived from commitment + module), so messages stay natural-language while signatures remain deployment-scoped
+- signed requests keep idempotency replay-locked for at least `MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS`; replays during that window return `409` with code `idempotency_replay_blocked`
 
 Example request:
 

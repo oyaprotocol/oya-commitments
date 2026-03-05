@@ -23,7 +23,7 @@ async function run() {
     assert.equal(first.ok, true);
     assert.equal(first.status, 'queued');
 
-    // After message TTL, duplicate should not be accepted from stale idempotency cache.
+    // API-key callers may reuse keys after message TTL if replay-lock mode is not enabled.
     const retryAfterMessageExpiry = inbox.submitMessage({
         text: 'first command retry',
         idempotencyKey: 'cmd-1',
