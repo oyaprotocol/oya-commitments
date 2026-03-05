@@ -119,10 +119,14 @@ function createMessageInbox(options = {}) {
         ttlSeconds,
         idempotencyKey,
         senderKeyId,
+        sender,
         nowMs,
     }) {
         if (typeof senderKeyId !== 'string' || senderKeyId.trim() === '') {
             return { ok: false, code: 'invalid_request', message: 'senderKeyId is required.' };
+        }
+        if (sender !== undefined && !isPlainObject(sender)) {
+            return { ok: false, code: 'invalid_request', message: 'sender must be an object.' };
         }
 
         if (typeof text !== 'string') {
@@ -219,10 +223,12 @@ function createMessageInbox(options = {}) {
                 command: command === undefined ? undefined : command.trim(),
                 args: args === undefined ? undefined : args,
                 metadata: metadata === undefined ? undefined : metadata,
-                sender: {
-                    authType: 'apiKey',
-                    keyId: senderKeyId,
-                },
+                sender:
+                    sender ??
+                    {
+                        authType: 'apiKey',
+                        keyId: senderKeyId,
+                    },
                 receivedAtMs,
                 expiresAtMs,
             },
@@ -238,6 +244,7 @@ function createMessageInbox(options = {}) {
         ttlSeconds,
         idempotencyKey,
         senderKeyId,
+        sender,
         nowMs = Date.now(),
     }) {
         pruneExpired(nowMs);
@@ -250,6 +257,7 @@ function createMessageInbox(options = {}) {
             ttlSeconds,
             idempotencyKey,
             senderKeyId,
+            sender,
             nowMs,
         });
         if (!normalized.ok) {

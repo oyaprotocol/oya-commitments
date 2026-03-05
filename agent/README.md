@@ -78,12 +78,17 @@ Export `getPriceTriggers({ commitmentText, config })` from `agent-library/agents
 
 ### Message API (Optional)
 
-Enable inbound user messages with Bearer-token auth:
+Enable inbound user messages with one or both auth modes:
+
+- Bearer tokens (`Authorization: Bearer ...`)
+- Signed requests (EIP-191 message signatures from allowlisted addresses)
 
 - `MESSAGE_API_ENABLED`: Set to `true` to start the API server.
 - `MESSAGE_API_HOST`: Bind host (default `127.0.0.1`).
 - `MESSAGE_API_PORT`: Bind port (default `8787`).
 - `MESSAGE_API_KEYS_JSON`: JSON object of API key ids to tokens, for example `{"ops":"k_live_replace_me"}`.
+- `MESSAGE_API_SIGNER_ALLOWLIST`: Comma-separated EVM addresses allowed to use signed auth.
+- `MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS`: Max signature age (default `300`).
 - `MESSAGE_API_MAX_BODY_BYTES`: Request body limit in bytes (default `8192`).
 - `MESSAGE_API_MAX_TEXT_LENGTH`: Max `text` length (default `2000`).
 - `MESSAGE_API_QUEUE_LIMIT`: Max queued/in-flight messages (default `500`).
@@ -94,6 +99,10 @@ Enable inbound user messages with Bearer-token auth:
 - `MESSAGE_API_IDEMPOTENCY_TTL_SECONDS`: Idempotency cache window (default `86400`).
 - `MESSAGE_API_RATE_LIMIT_PER_MINUTE`: Per-key refill rate (default `30`).
 - `MESSAGE_API_RATE_LIMIT_BURST`: Per-key burst capacity (default `10`).
+
+When `MESSAGE_API_ENABLED=true`, configure at least one of:
+- `MESSAGE_API_KEYS_JSON`
+- `MESSAGE_API_SIGNER_ALLOWLIST`
 
 Endpoints:
 
@@ -109,9 +118,21 @@ Endpoints:
   "args": { "hours": 2 },
   "metadata": { "ticket": "INC-42" },
   "idempotencyKey": "inc-42-pause",
-  "ttlSeconds": 7200
+  "ttlSeconds": 7200,
+  "auth": {
+    "type": "eip191",
+    "address": "0x1111111111111111111111111111111111111111",
+    "timestampMs": 1735689600000,
+    "signature": "0x..."
+  }
 }
 ```
+
+`auth` is optional for Bearer-token requests. For signed auth:
+- `auth.type` must be `eip191`
+- `idempotencyKey` is required
+- signature is verified against a canonical payload that includes
+  `address`, `timestampMs`, `text`, `command`, `args`, `metadata`, `idempotencyKey`, and `ttlSeconds`
 
 Example request:
 
@@ -121,6 +142,12 @@ curl -sS \
   -H "Authorization: Bearer k_live_replace_me" \
   -H "Content-Type: application/json" \
   -d '{"text":"Pause proposals for 2 hours","command":"pause_proposals","args":{"hours":2},"idempotencyKey":"pause-2h"}'
+```
+
+Signed-auth test script:
+
+```bash
+node agent/scripts/test-message-api-signature-auth.mjs
 ```
 
 ### Uniswap Swap Action in `build_og_transactions`

@@ -11,6 +11,8 @@ const MANAGED_ENV_KEYS = [
     ...Object.keys(REQUIRED_BASE_ENV),
     'MESSAGE_API_ENABLED',
     'MESSAGE_API_KEYS_JSON',
+    'MESSAGE_API_SIGNER_ALLOWLIST',
+    'MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS',
     'MESSAGE_API_PORT',
     'MESSAGE_API_MAX_BODY_BYTES',
     'MESSAGE_API_RATE_LIMIT_PER_MINUTE',
@@ -57,6 +59,8 @@ async function run() {
             MESSAGE_API_MAX_BODY_BYTES: 'not-a-number',
             MESSAGE_API_RATE_LIMIT_PER_MINUTE: '??',
             MESSAGE_API_KEYS_JSON: '{not-json}',
+            MESSAGE_API_SIGNER_ALLOWLIST: 'not-an-address',
+            MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS: 'not-an-int',
         },
         () => {
             const config = buildConfig();
@@ -64,6 +68,7 @@ async function run() {
             assert.equal(config.messageApiPort, 8787);
             assert.equal(config.messageApiMaxBodyBytes, 8192);
             assert.equal(config.messageApiRateLimitPerMinute, 30);
+            assert.equal(config.messageApiSignatureMaxAgeSeconds, 300);
         }
     );
 
@@ -76,6 +81,20 @@ async function run() {
         },
         () => {
             assert.throws(() => buildConfig(), /MESSAGE_API_PORT must be an integer/);
+        }
+    );
+
+    // Enabled API can run with signer allowlist auth even without bearer keys.
+    withManagedEnv(
+        {
+            MESSAGE_API_ENABLED: 'true',
+            MESSAGE_API_KEYS_JSON: undefined,
+            MESSAGE_API_SIGNER_ALLOWLIST: '0x3333333333333333333333333333333333333333',
+        },
+        () => {
+            const config = buildConfig();
+            assert.equal(config.messageApiSignerAllowlist.length, 1);
+            assert.equal(config.messageApiSignerAllowlist[0], '0x3333333333333333333333333333333333333333');
         }
     );
 

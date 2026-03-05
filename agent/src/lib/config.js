@@ -86,8 +86,17 @@ function buildConfig() {
     const messageApiKeys = messageApiEnabled
         ? parseMessageApiKeys(process.env.MESSAGE_API_KEYS_JSON)
         : {};
-    if (messageApiEnabled && Object.keys(messageApiKeys).length === 0) {
-        throw new Error('MESSAGE_API_ENABLED=true requires MESSAGE_API_KEYS_JSON with at least one key');
+    const messageApiSignerAllowlist = messageApiEnabled
+        ? parseAddressList(process.env.MESSAGE_API_SIGNER_ALLOWLIST)
+        : [];
+    if (
+        messageApiEnabled &&
+        Object.keys(messageApiKeys).length === 0 &&
+        messageApiSignerAllowlist.length === 0
+    ) {
+        throw new Error(
+            'MESSAGE_API_ENABLED=true requires MESSAGE_API_KEYS_JSON or MESSAGE_API_SIGNER_ALLOWLIST.'
+        );
     }
     // Keep disabled ingress fully inert: optional MESSAGE_API_* parsing/validation
     // should not abort unrelated agent runs when the API is turned off.
@@ -151,6 +160,12 @@ function buildConfig() {
                   10,
                   { min: 0 }
               ),
+              messageApiSignerAllowlist,
+              messageApiSignatureMaxAgeSeconds: parsePositiveInteger(
+                  process.env.MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS,
+                  'MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS',
+                  300
+              ),
           }
         : {
               messageApiHost: '127.0.0.1',
@@ -165,6 +180,8 @@ function buildConfig() {
               messageApiIdempotencyTtlSeconds: 86400,
               messageApiRateLimitPerMinute: 30,
               messageApiRateLimitBurst: 10,
+              messageApiSignerAllowlist: [],
+              messageApiSignatureMaxAgeSeconds: 300,
           };
 
     return {

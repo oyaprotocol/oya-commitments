@@ -1,5 +1,7 @@
 import http from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
+import { getAddress, recoverMessageAddress } from 'viem';
+import { buildSignedMessagePayload } from './message-signing.js';
 
 function isPlainObject(value) {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -29,6 +31,98 @@ function authenticateRequest({ authorizationHeader, keyEntries }) {
         }
     }
     return matchedKeyId;
+}
+
+async function authenticateSignedRequest({
+    body,
+    signerAllowlist,
+    signatureMaxAgeSeconds,
+    nowMs,
+}) {
+    if (!body?.auth) return null;
+    if (!isPlainObject(body.auth)) {
+        return { ok: false, statusCode: 400, message: 'auth must be an object when provided.' };
+    }
+
+    const auth = body.auth;
+    if (auth.type !== 'eip191') {
+        return { ok: false, statusCode: 400, message: 'auth.type must be "eip191".' };
+    }
+    if (typeof auth.address !== 'string') {
+        return { ok: false, statusCode: 400, message: 'auth.address must be a string.' };
+    }
+    if (typeof auth.signature !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(auth.signature)) {
+        return { ok: false, statusCode: 400, message: 'auth.signature must be a 65-byte hex string.' };
+    }
+    if (!Number.isInteger(auth.timestampMs)) {
+        return { ok: false, statusCode: 400, message: 'auth.timestampMs must be an integer.' };
+    }
+    if (typeof body.idempotencyKey !== 'string' || !body.idempotencyKey.trim()) {
+        return {
+            ok: false,
+            statusCode: 400,
+            message: 'idempotencyKey is required when using signed auth.',
+        };
+    }
+
+    let declaredAddress;
+    try {
+        declaredAddress = getAddress(auth.address);
+    } catch (error) {
+        return { ok: false, statusCode: 400, message: 'auth.address must be a valid EVM address.' };
+    }
+    const normalizedDeclared = declaredAddress.toLowerCase();
+    if (!signerAllowlist.has(normalizedDeclared)) {
+        return { ok: false, statusCode: 401, message: 'Signer is not allowlisted.' };
+    }
+
+    const maxAgeMs = signatureMaxAgeSeconds * 1000;
+    const maxFutureSkewMs = 30_000;
+    const ageMs = nowMs - auth.timestampMs;
+    if (ageMs < -maxFutureSkewMs || ageMs > maxAgeMs) {
+        return {
+            ok: false,
+            statusCode: 401,
+            message: 'Signed request expired or has an invalid timestamp.',
+        };
+    }
+
+    const payload = buildSignedMessagePayload({
+        address: declaredAddress,
+        timestampMs: auth.timestampMs,
+        text: body.text,
+        command: body.command,
+        args: body.args,
+        metadata: body.metadata,
+        idempotencyKey: body.idempotencyKey,
+        ttlSeconds: body.ttlSeconds,
+    });
+
+    let recoveredAddress;
+    try {
+        recoveredAddress = getAddress(
+            await recoverMessageAddress({
+                message: payload,
+                signature: auth.signature,
+            })
+        );
+    } catch (error) {
+        return { ok: false, statusCode: 401, message: 'Invalid message signature.' };
+    }
+
+    if (recoveredAddress.toLowerCase() !== normalizedDeclared) {
+        return { ok: false, statusCode: 401, message: 'Signature does not match auth.address.' };
+    }
+
+    return {
+        ok: true,
+        senderKeyId: `addr:${normalizedDeclared}`,
+        sender: {
+            authType: 'eip191',
+            address: declaredAddress,
+            signedAtMs: auth.timestampMs,
+        },
+    };
 }
 
 async function readJsonBody(req, { maxBytes }) {
@@ -71,6 +165,7 @@ function validateMessageBody(body) {
         'metadata',
         'idempotencyKey',
         'ttlSeconds',
+        'auth',
     ]);
     for (const field of Object.keys(body)) {
         if (!allowedFields.has(field)) {
@@ -95,6 +190,9 @@ function validateMessageBody(body) {
     }
     if (body.ttlSeconds !== undefined && !Number.isInteger(body.ttlSeconds)) {
         return { ok: false, message: 'ttlSeconds must be an integer when provided.' };
+    }
+    if (body.auth !== undefined && !isPlainObject(body.auth)) {
+        return { ok: false, message: 'auth must be an object when provided.' };
     }
 
     return { ok: true };
@@ -121,8 +219,14 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
         keyId,
         token,
     }));
-    if (keyEntries.length === 0) {
-        throw new Error('MESSAGE_API_KEYS_JSON must include at least one key when enabled.');
+    const signerAllowlist = new Set(
+        (config.messageApiSignerAllowlist ?? []).map((address) => getAddress(address).toLowerCase())
+    );
+    const signatureMaxAgeSeconds = Number(config.messageApiSignatureMaxAgeSeconds ?? 300);
+    if (keyEntries.length === 0 && signerAllowlist.size === 0) {
+        throw new Error(
+            'Message API requires at least one auth method: MESSAGE_API_KEYS_JSON or MESSAGE_API_SIGNER_ALLOWLIST.'
+        );
     }
 
     let server;
@@ -150,21 +254,6 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
 
             if (!(req.method === 'POST' && url.pathname === '/v1/messages')) {
                 sendJson(res, 404, { error: 'Not found.' });
-                return;
-            }
-
-            // All write paths require a valid Bearer token mapped to a configured key id.
-            const keyId = authenticateRequest({
-                authorizationHeader: req.headers.authorization,
-                keyEntries,
-            });
-            if (!keyId) {
-                sendJson(
-                    res,
-                    401,
-                    { error: 'Unauthorized.' },
-                    { 'WWW-Authenticate': 'Bearer realm="agent-message-api"' }
-                );
                 return;
             }
 
@@ -196,6 +285,43 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
                 return;
             }
 
+            const nowMs = Date.now();
+            let senderKeyId = authenticateRequest({
+                authorizationHeader: req.headers.authorization,
+                keyEntries,
+            });
+            let sender = senderKeyId
+                ? {
+                      authType: 'apiKey',
+                      keyId: senderKeyId,
+                  }
+                : undefined;
+            if (!senderKeyId && body.auth) {
+                const signedAuth = await authenticateSignedRequest({
+                    body,
+                    signerAllowlist,
+                    signatureMaxAgeSeconds,
+                    nowMs,
+                });
+                if (!signedAuth?.ok) {
+                    sendJson(res, signedAuth?.statusCode ?? 401, {
+                        error: signedAuth?.message ?? 'Unauthorized.',
+                    });
+                    return;
+                }
+                senderKeyId = signedAuth.senderKeyId;
+                sender = signedAuth.sender;
+            }
+            if (!senderKeyId) {
+                sendJson(
+                    res,
+                    401,
+                    { error: 'Unauthorized.' },
+                    { 'WWW-Authenticate': 'Bearer realm="agent-message-api"' }
+                );
+                return;
+            }
+
             const result = inbox.submitMessage({
                 text: body.text,
                 command: body.command,
@@ -203,8 +329,9 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
                 metadata: body.metadata,
                 idempotencyKey: body.idempotencyKey,
                 ttlSeconds: body.ttlSeconds,
-                senderKeyId: keyId,
-                nowMs: Date.now(),
+                senderKeyId,
+                sender,
+                nowMs,
             });
 
             if (!result.ok) {
