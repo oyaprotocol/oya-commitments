@@ -13,6 +13,7 @@ const MANAGED_ENV_KEYS = [
     'MESSAGE_API_KEYS_JSON',
     'MESSAGE_API_SIGNER_ALLOWLIST',
     'MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS',
+    'MESSAGE_API_SIGNATURE_DOMAIN',
     'MESSAGE_API_PORT',
     'MESSAGE_API_MAX_BODY_BYTES',
     'MESSAGE_API_RATE_LIMIT_PER_MINUTE',
@@ -51,6 +52,8 @@ function withManagedEnv(overrides, fn) {
 }
 
 async function run() {
+    const expectedDefaultDomain = `oya-agent:${REQUIRED_BASE_ENV.COMMITMENT_SAFE.toLowerCase()}:${REQUIRED_BASE_ENV.OG_MODULE.toLowerCase()}`;
+
     // Disabled API should not parse optional numeric fields from env.
     withManagedEnv(
         {
@@ -61,6 +64,7 @@ async function run() {
             MESSAGE_API_KEYS_JSON: '{not-json}',
             MESSAGE_API_SIGNER_ALLOWLIST: 'not-an-address',
             MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS: 'not-an-int',
+            MESSAGE_API_SIGNATURE_DOMAIN: '   ',
         },
         () => {
             const config = buildConfig();
@@ -69,6 +73,7 @@ async function run() {
             assert.equal(config.messageApiMaxBodyBytes, 8192);
             assert.equal(config.messageApiRateLimitPerMinute, 30);
             assert.equal(config.messageApiSignatureMaxAgeSeconds, 300);
+            assert.equal(config.messageApiSignatureDomain, expectedDefaultDomain);
         }
     );
 
@@ -95,6 +100,32 @@ async function run() {
             const config = buildConfig();
             assert.equal(config.messageApiSignerAllowlist.length, 1);
             assert.equal(config.messageApiSignerAllowlist[0], '0x3333333333333333333333333333333333333333');
+            assert.equal(config.messageApiSignatureDomain, expectedDefaultDomain);
+        }
+    );
+
+    // Enabled API should reject blank signature domain overrides.
+    withManagedEnv(
+        {
+            MESSAGE_API_ENABLED: 'true',
+            MESSAGE_API_KEYS_JSON: '{"ops":"k_test"}',
+            MESSAGE_API_SIGNATURE_DOMAIN: '   ',
+        },
+        () => {
+            assert.throws(() => buildConfig(), /signature domain must be non-empty/);
+        }
+    );
+
+    // Explicit signature domain overrides should be honored when enabled.
+    withManagedEnv(
+        {
+            MESSAGE_API_ENABLED: 'true',
+            MESSAGE_API_KEYS_JSON: '{"ops":"k_test"}',
+            MESSAGE_API_SIGNATURE_DOMAIN: 'sepolia:ops-agent',
+        },
+        () => {
+            const config = buildConfig();
+            assert.equal(config.messageApiSignatureDomain, 'sepolia:ops-agent');
         }
     );
 

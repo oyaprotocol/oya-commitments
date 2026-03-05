@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { getAddress, recoverMessageAddress } from 'viem';
-import { buildSignedMessagePayload } from './message-signing.js';
+import { buildSignedMessagePayload, normalizeSignatureDomain } from './message-signing.js';
 
 function isPlainObject(value) {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -37,6 +37,7 @@ async function authenticateSignedRequest({
     body,
     signerAllowlist,
     signatureMaxAgeSeconds,
+    signatureDomain,
     nowMs,
 }) {
     if (!body?.auth) return null;
@@ -88,6 +89,7 @@ async function authenticateSignedRequest({
     }
 
     const payload = buildSignedMessagePayload({
+        domain: signatureDomain,
         address: declaredAddress,
         timestampMs: auth.timestampMs,
         text: body.text,
@@ -223,6 +225,16 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
         (config.messageApiSignerAllowlist ?? []).map((address) => getAddress(address).toLowerCase())
     );
     const signatureMaxAgeSeconds = Number(config.messageApiSignatureMaxAgeSeconds ?? 300);
+    let signatureDomain;
+    if (signerAllowlist.size > 0) {
+        try {
+            signatureDomain = normalizeSignatureDomain(config.messageApiSignatureDomain ?? '');
+        } catch (error) {
+            throw new Error(
+                `Signed auth requires messageApiSignatureDomain: ${error?.message ?? error}`
+            );
+        }
+    }
     if (keyEntries.length === 0 && signerAllowlist.size === 0) {
         throw new Error(
             'Message API requires at least one auth method: MESSAGE_API_KEYS_JSON or MESSAGE_API_SIGNER_ALLOWLIST.'
@@ -301,6 +313,7 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
                     body,
                     signerAllowlist,
                     signatureMaxAgeSeconds,
+                    signatureDomain,
                     nowMs,
                 });
                 if (!signedAuth?.ok) {
