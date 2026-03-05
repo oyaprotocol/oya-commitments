@@ -55,6 +55,45 @@ async function run() {
     assert.equal(acceptedAfterWindow.status, 'queued');
     assert.notEqual(acceptedAfterWindow.message.messageId, first.message.messageId);
 
+    // Future-skewed signed timestamps should extend replay lock to signedAt + replay window.
+    const futureSkewSender = {
+        ...sender,
+        signedAtMs: 13_000,
+    };
+    const skewed = inbox.submitMessage({
+        text: 'future-skewed signed command',
+        idempotencyKey: 'sig-future-skew',
+        senderKeyId: 'addr:0x1111111111111111111111111111111111111111',
+        sender: futureSkewSender,
+        nowMs: 10_000,
+    });
+    assert.equal(skewed.ok, true);
+    assert.equal(skewed.status, 'queued');
+
+    // This would have been accepted previously at 15_001 (now + replay window),
+    // but should stay blocked until signedAt + replay window (18_000).
+    const blockedBeforeSignedWindowEnd = inbox.submitMessage({
+        text: 'future-skewed replay',
+        idempotencyKey: 'sig-future-skew',
+        senderKeyId: 'addr:0x1111111111111111111111111111111111111111',
+        sender: futureSkewSender,
+        nowMs: 16_000,
+    });
+    assert.equal(blockedBeforeSignedWindowEnd.ok, false);
+    assert.equal(blockedBeforeSignedWindowEnd.code, 'idempotency_replay_blocked');
+    assert.equal(blockedBeforeSignedWindowEnd.replayLockedUntilMs, 18_000);
+
+    const acceptedAfterSignedWindowEnd = inbox.submitMessage({
+        text: 'future-skewed replay after signed window',
+        idempotencyKey: 'sig-future-skew',
+        senderKeyId: 'addr:0x1111111111111111111111111111111111111111',
+        sender: futureSkewSender,
+        nowMs: 18_100,
+    });
+    assert.equal(acceptedAfterSignedWindowEnd.ok, true);
+    assert.equal(acceptedAfterSignedWindowEnd.status, 'queued');
+    assert.notEqual(acceptedAfterSignedWindowEnd.message.messageId, skewed.message.messageId);
+
     console.log('[test] message inbox signed replay lock OK');
 }
 
