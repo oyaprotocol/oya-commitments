@@ -6,6 +6,16 @@ const DECISION_STATUS = Object.freeze({
 });
 
 const SIDE_EFFECT_STATUSES = new Set(['submitted', 'confirmed', 'pending']);
+const RETRYABLE_DECISION_ERROR_CODES = new Set([
+    'ETIMEDOUT',
+    'ECONNRESET',
+    'ECONNREFUSED',
+    'ENOTFOUND',
+    'EAI_AGAIN',
+    'UND_ERR_CONNECT_TIMEOUT',
+    'UND_ERR_HEADERS_TIMEOUT',
+    'UND_ERR_SOCKET',
+]);
 
 function hasDeterministicDecisionEngine(agentModule) {
     return typeof agentModule?.getDeterministicToolCalls === 'function';
@@ -13,6 +23,34 @@ function hasDeterministicDecisionEngine(agentModule) {
 
 function hasLlmDecisionEngine(config) {
     return Boolean(config?.openAiApiKey);
+}
+
+function isRetryableDecisionError(error) {
+    const code = String(error?.code ?? '').toUpperCase();
+    if (RETRYABLE_DECISION_ERROR_CODES.has(code)) {
+        return true;
+    }
+
+    const name = String(error?.name ?? '');
+    if (/(Timeout|Network|HttpRequest|Fetch|Socket|Connection|RateLimit|Rpc)/i.test(name)) {
+        return true;
+    }
+
+    const message = String(error?.shortMessage ?? error?.message ?? '').toLowerCase();
+    return (
+        message.includes('timed out') ||
+        message.includes('timeout') ||
+        message.includes('network error') ||
+        message.includes('failed to fetch') ||
+        message.includes('connection refused') ||
+        message.includes('connection reset') ||
+        message.includes('temporarily unavailable') ||
+        message.includes('service unavailable') ||
+        message.includes('gateway timeout') ||
+        message.includes('too many requests') ||
+        message.includes('429') ||
+        message.includes('rpc unavailable')
+    );
 }
 
 function validateMessageApiDecisionEngine({ config, agentModule }) {
@@ -86,6 +124,7 @@ export {
     evaluateToolOutputsDecisionStatus,
     hasDeterministicDecisionEngine,
     hasLlmDecisionEngine,
+    isRetryableDecisionError,
     validateMessageApiDecisionEngine,
     shouldRequeueMessagesForDecisionStatus,
 };
