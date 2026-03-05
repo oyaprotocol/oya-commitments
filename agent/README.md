@@ -150,6 +150,17 @@ Signed-auth test script:
 node agent/scripts/test-message-api-signature-auth.mjs
 ```
 
+Signed send helper:
+
+```bash
+node agent/scripts/send-signed-message.mjs \
+  --text="Pause proposals for 2 hours" \
+  --private-key="0x<signer-private-key>" \
+  --url="http://127.0.0.1:8787" \
+  --command="pause_proposals" \
+  --args-json='{"hours":2}'
+```
+
 ### Uniswap Swap Action in `build_og_transactions`
 
 `build_og_transactions` supports action kind `uniswap_v3_exact_input_single`, which expands to:
