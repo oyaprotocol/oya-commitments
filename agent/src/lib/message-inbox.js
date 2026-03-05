@@ -334,10 +334,18 @@ function createMessageInbox(options = {}) {
             const lockReplayAfterMessageExpiry = normalized.message?.sender?.authType === 'eip191';
             const cacheTtlMs = idempotencyTtlSeconds * 1000;
             const replayWindowMs = signedReplayWindowSeconds * 1000;
+            const signedAtMs = Number(normalized.message?.sender?.signedAtMs);
+            // Signed requests can be accepted with slight future skew. Anchor replay lock
+            // to max(now, signedAt) so lock duration fully covers signature-validity window.
+            const signedReplayAnchorMs =
+                Number.isInteger(signedAtMs) && signedAtMs > nowMs ? signedAtMs : nowMs;
             senderCache.set(normalized.idempotencyKey, {
                 message: normalized.message,
                 expiresAtMs:
-                    nowMs + (lockReplayAfterMessageExpiry ? Math.max(cacheTtlMs, replayWindowMs) : cacheTtlMs),
+                    nowMs +
+                    (lockReplayAfterMessageExpiry
+                        ? Math.max(cacheTtlMs, signedReplayAnchorMs - nowMs + replayWindowMs)
+                        : cacheTtlMs),
                 lockReplayAfterMessageExpiry,
             });
         }
