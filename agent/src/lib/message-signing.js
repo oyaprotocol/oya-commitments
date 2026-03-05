@@ -18,7 +18,26 @@ function canonicalize(value) {
     return value;
 }
 
+function normalizeSignatureDomain(domain) {
+    if (typeof domain !== 'string') {
+        throw new Error('signature domain must be a string.');
+    }
+    const trimmed = domain.trim();
+    if (!trimmed) {
+        throw new Error('signature domain must be non-empty.');
+    }
+    return trimmed;
+}
+
+function buildDefaultMessageSignatureDomain({ commitmentSafe, ogModule }) {
+    const normalizedSafe = getAddress(commitmentSafe).toLowerCase();
+    const normalizedOgModule = getAddress(ogModule).toLowerCase();
+    // Scope signatures to the concrete commitment deployment by default.
+    return `oya-agent:${normalizedSafe}:${normalizedOgModule}`;
+}
+
 function buildSignedMessagePayload({
+    domain,
     address,
     timestampMs,
     text,
@@ -28,6 +47,7 @@ function buildSignedMessagePayload({
     idempotencyKey,
     ttlSeconds,
 }) {
+    const normalizedDomain = normalizeSignatureDomain(domain);
     const normalizedAddress = getAddress(address).toLowerCase();
     const normalizedTimestamp = Number(timestampMs);
     if (!Number.isInteger(normalizedTimestamp)) {
@@ -36,6 +56,7 @@ function buildSignedMessagePayload({
 
     const canonical = canonicalize({
         version: 'oya-agent-message-v1',
+        domain: normalizedDomain,
         address: normalizedAddress,
         timestampMs: normalizedTimestamp,
         idempotencyKey: idempotencyKey ?? null,
@@ -49,4 +70,4 @@ function buildSignedMessagePayload({
     return JSON.stringify(canonical);
 }
 
-export { buildSignedMessagePayload };
+export { buildDefaultMessageSignatureDomain, buildSignedMessagePayload, normalizeSignatureDomain };

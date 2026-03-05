@@ -1,5 +1,9 @@
 import { getAddress } from 'viem';
 import { mustGetEnv, parseAddressList } from './utils.js';
+import {
+    buildDefaultMessageSignatureDomain,
+    normalizeSignatureDomain,
+} from './message-signing.js';
 
 function parseFeeTierList(raw) {
     if (!raw) return [500, 3000, 10000];
@@ -53,6 +57,13 @@ function parseHost(raw, fallback) {
     return trimmed || fallback;
 }
 
+function parseSignatureDomain(raw, fallback) {
+    if (raw === undefined || raw === null || raw === '') {
+        return normalizeSignatureDomain(fallback);
+    }
+    return normalizeSignatureDomain(String(raw));
+}
+
 function parseMessageApiKeys(raw) {
     if (!raw) return {};
     let parsed;
@@ -81,6 +92,14 @@ function parseMessageApiKeys(raw) {
 }
 
 function buildConfig() {
+    const rpcUrl = mustGetEnv('RPC_URL');
+    const commitmentSafe = getAddress(mustGetEnv('COMMITMENT_SAFE'));
+    const ogModule = getAddress(mustGetEnv('OG_MODULE'));
+    const defaultMessageApiSignatureDomain = buildDefaultMessageSignatureDomain({
+        commitmentSafe,
+        ogModule,
+    });
+
     const messageApiEnabled = parseBoolean(process.env.MESSAGE_API_ENABLED, false);
     // Keep optional ingress isolated: malformed keys should only fail when the feature is enabled.
     const messageApiKeys = messageApiEnabled
@@ -166,6 +185,10 @@ function buildConfig() {
                   'MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS',
                   300
               ),
+              messageApiSignatureDomain: parseSignatureDomain(
+                  process.env.MESSAGE_API_SIGNATURE_DOMAIN,
+                  defaultMessageApiSignatureDomain
+              ),
           }
         : {
               messageApiHost: '127.0.0.1',
@@ -182,12 +205,13 @@ function buildConfig() {
               messageApiRateLimitBurst: 10,
               messageApiSignerAllowlist: [],
               messageApiSignatureMaxAgeSeconds: 300,
+              messageApiSignatureDomain: defaultMessageApiSignatureDomain,
           };
 
     return {
-        rpcUrl: mustGetEnv('RPC_URL'),
-        commitmentSafe: getAddress(mustGetEnv('COMMITMENT_SAFE')),
-        ogModule: getAddress(mustGetEnv('OG_MODULE')),
+        rpcUrl,
+        commitmentSafe,
+        ogModule,
         pollIntervalMs: Number(process.env.POLL_INTERVAL_MS ?? 10_000),
         logChunkSize: parsePositiveBigInt(process.env.LOG_CHUNK_SIZE, 'LOG_CHUNK_SIZE'),
         startBlock: process.env.START_BLOCK ? BigInt(process.env.START_BLOCK) : undefined,
