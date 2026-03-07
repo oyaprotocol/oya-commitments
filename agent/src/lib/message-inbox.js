@@ -335,17 +335,25 @@ function createMessageInbox(options = {}) {
             const cacheTtlMs = idempotencyTtlSeconds * 1000;
             const replayWindowMs = signedReplayWindowSeconds * 1000;
             const signedAtMs = Number(normalized.message?.sender?.signedAtMs);
+            const messageExpiryMs = Number(normalized.message?.expiresAtMs);
+            const messageLifetimeMs =
+                Number.isInteger(messageExpiryMs) && messageExpiryMs > nowMs
+                    ? messageExpiryMs - nowMs
+                    : 0;
             // Signed requests can be accepted with slight future skew. Anchor replay lock
             // to max(now, signedAt) so lock duration fully covers signature-validity window.
             const signedReplayAnchorMs =
                 Number.isInteger(signedAtMs) && signedAtMs > nowMs ? signedAtMs : nowMs;
+            const signedReplayLockMs =
+                signedReplayAnchorMs - nowMs + replayWindowMs;
+            // Keep idempotency entries alive at least as long as the queued message itself
+            // so duplicate requests cannot enqueue a second live copy.
+            const retentionMs = lockReplayAfterMessageExpiry
+                ? Math.max(cacheTtlMs, messageLifetimeMs, signedReplayLockMs)
+                : Math.max(cacheTtlMs, messageLifetimeMs);
             senderCache.set(normalized.idempotencyKey, {
                 message: normalized.message,
-                expiresAtMs:
-                    nowMs +
-                    (lockReplayAfterMessageExpiry
-                        ? Math.max(cacheTtlMs, signedReplayAnchorMs - nowMs + replayWindowMs)
-                        : cacheTtlMs),
+                expiresAtMs: nowMs + retentionMs,
                 lockReplayAfterMessageExpiry,
             });
         }
