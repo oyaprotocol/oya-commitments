@@ -43,8 +43,10 @@ function parsePositiveInteger(raw, envName, fallback, { min = 1, max = undefined
 }
 
 function parseBoolean(raw, fallback) {
-    if (raw === undefined) return fallback;
-    return String(raw).toLowerCase() !== 'false';
+    if (raw === undefined || raw === null) return fallback;
+    const normalized = String(raw).trim().toLowerCase();
+    if (!normalized) return fallback;
+    return normalized !== 'false';
 }
 
 function parseHost(raw, fallback) {
