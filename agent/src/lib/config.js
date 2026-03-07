@@ -28,11 +28,172 @@ function parsePositiveBigInt(raw, envName) {
     return parsed;
 }
 
+function parsePositiveInteger(raw, envName, fallback, { min = 1, max = undefined } = {}) {
+    const parsed = raw === undefined || raw === null || raw === '' ? fallback : Number(raw);
+    if (!Number.isInteger(parsed)) {
+        throw new Error(`${envName} must be an integer`);
+    }
+    if (parsed < min) {
+        throw new Error(`${envName} must be >= ${min}`);
+    }
+    if (max !== undefined && parsed > max) {
+        throw new Error(`${envName} must be <= ${max}`);
+    }
+    return parsed;
+}
+
+function parseBoolean(raw, fallback) {
+    if (raw === undefined || raw === null) return fallback;
+    const normalized = String(raw).trim().toLowerCase();
+    if (!normalized) return fallback;
+    return normalized !== 'false';
+}
+
+function parseHost(raw, fallback) {
+    if (raw === undefined || raw === null) return fallback;
+    const trimmed = String(raw).trim();
+    return trimmed || fallback;
+}
+
+function parseMessageApiKeys(raw) {
+    if (!raw) return {};
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    } catch (error) {
+        throw new Error('MESSAGE_API_KEYS_JSON must be valid JSON object');
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('MESSAGE_API_KEYS_JSON must be a JSON object');
+    }
+
+    const out = {};
+    for (const [keyIdRaw, tokenRaw] of Object.entries(parsed)) {
+        const keyId = String(keyIdRaw).trim();
+        if (!keyId) {
+            throw new Error('MESSAGE_API_KEYS_JSON includes empty key id');
+        }
+        const token = typeof tokenRaw === 'string' ? tokenRaw.trim() : '';
+        if (!token) {
+            throw new Error(`MESSAGE_API_KEYS_JSON token for key "${keyId}" must be non-empty`);
+        }
+        out[keyId] = token;
+    }
+    return out;
+}
+
 function buildConfig() {
+    const rpcUrl = mustGetEnv('RPC_URL');
+    const commitmentSafe = getAddress(mustGetEnv('COMMITMENT_SAFE'));
+    const ogModule = getAddress(mustGetEnv('OG_MODULE'));
+
+    const messageApiEnabled = parseBoolean(process.env.MESSAGE_API_ENABLED, false);
+    // Keep optional ingress isolated: malformed keys should only fail when the feature is enabled.
+    const messageApiKeys = messageApiEnabled
+        ? parseMessageApiKeys(process.env.MESSAGE_API_KEYS_JSON)
+        : {};
+    const messageApiSignerAllowlist = messageApiEnabled
+        ? parseAddressList(process.env.MESSAGE_API_SIGNER_ALLOWLIST)
+        : [];
+    if (
+        messageApiEnabled &&
+        Object.keys(messageApiKeys).length === 0 &&
+        messageApiSignerAllowlist.length === 0
+    ) {
+        throw new Error(
+            'MESSAGE_API_ENABLED=true requires MESSAGE_API_KEYS_JSON or MESSAGE_API_SIGNER_ALLOWLIST.'
+        );
+    }
+    // Keep disabled ingress fully inert: optional MESSAGE_API_* parsing/validation
+    // should not abort unrelated agent runs when the API is turned off.
+    const messageApiConfig = messageApiEnabled
+        ? {
+              messageApiHost: parseHost(process.env.MESSAGE_API_HOST, '127.0.0.1'),
+              messageApiPort: parsePositiveInteger(
+                  process.env.MESSAGE_API_PORT,
+                  'MESSAGE_API_PORT',
+                  8787
+              ),
+              messageApiMaxBodyBytes: parsePositiveInteger(
+                  process.env.MESSAGE_API_MAX_BODY_BYTES,
+                  'MESSAGE_API_MAX_BODY_BYTES',
+                  8192
+              ),
+              messageApiMaxTextLength: parsePositiveInteger(
+                  process.env.MESSAGE_API_MAX_TEXT_LENGTH,
+                  'MESSAGE_API_MAX_TEXT_LENGTH',
+                  2000
+              ),
+              messageApiQueueLimit: parsePositiveInteger(
+                  process.env.MESSAGE_API_QUEUE_LIMIT,
+                  'MESSAGE_API_QUEUE_LIMIT',
+                  500
+              ),
+              messageApiBatchSize: parsePositiveInteger(
+                  process.env.MESSAGE_API_BATCH_SIZE,
+                  'MESSAGE_API_BATCH_SIZE',
+                  25
+              ),
+              messageApiDefaultTtlSeconds: parsePositiveInteger(
+                  process.env.MESSAGE_API_DEFAULT_TTL_SECONDS,
+                  'MESSAGE_API_DEFAULT_TTL_SECONDS',
+                  3600
+              ),
+              messageApiMinTtlSeconds: parsePositiveInteger(
+                  process.env.MESSAGE_API_MIN_TTL_SECONDS,
+                  'MESSAGE_API_MIN_TTL_SECONDS',
+                  30
+              ),
+              messageApiMaxTtlSeconds: parsePositiveInteger(
+                  process.env.MESSAGE_API_MAX_TTL_SECONDS,
+                  'MESSAGE_API_MAX_TTL_SECONDS',
+                  86400
+              ),
+              messageApiIdempotencyTtlSeconds: parsePositiveInteger(
+                  process.env.MESSAGE_API_IDEMPOTENCY_TTL_SECONDS,
+                  'MESSAGE_API_IDEMPOTENCY_TTL_SECONDS',
+                  86400
+              ),
+              messageApiRateLimitPerMinute: parsePositiveInteger(
+                  process.env.MESSAGE_API_RATE_LIMIT_PER_MINUTE,
+                  'MESSAGE_API_RATE_LIMIT_PER_MINUTE',
+                  30,
+                  { min: 0 }
+              ),
+              messageApiRateLimitBurst: parsePositiveInteger(
+                  process.env.MESSAGE_API_RATE_LIMIT_BURST,
+                  'MESSAGE_API_RATE_LIMIT_BURST',
+                  10,
+                  { min: 0 }
+              ),
+              messageApiSignerAllowlist,
+              messageApiSignatureMaxAgeSeconds: parsePositiveInteger(
+                  process.env.MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS,
+                  'MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS',
+                  300
+              ),
+          }
+        : {
+              messageApiHost: '127.0.0.1',
+              messageApiPort: 8787,
+              messageApiMaxBodyBytes: 8192,
+              messageApiMaxTextLength: 2000,
+              messageApiQueueLimit: 500,
+              messageApiBatchSize: 25,
+              messageApiDefaultTtlSeconds: 3600,
+              messageApiMinTtlSeconds: 30,
+              messageApiMaxTtlSeconds: 86400,
+              messageApiIdempotencyTtlSeconds: 86400,
+              messageApiRateLimitPerMinute: 30,
+              messageApiRateLimitBurst: 10,
+              messageApiSignerAllowlist: [],
+              messageApiSignatureMaxAgeSeconds: 300,
+          };
+
     return {
-        rpcUrl: mustGetEnv('RPC_URL'),
-        commitmentSafe: getAddress(mustGetEnv('COMMITMENT_SAFE')),
-        ogModule: getAddress(mustGetEnv('OG_MODULE')),
+        rpcUrl,
+        commitmentSafe,
+        ogModule,
         pollIntervalMs: Number(process.env.POLL_INTERVAL_MS ?? 10_000),
         logChunkSize: parsePositiveBigInt(process.env.LOG_CHUNK_SIZE, 'LOG_CHUNK_SIZE'),
         startBlock: process.env.START_BLOCK ? BigInt(process.env.START_BLOCK) : undefined,
@@ -154,6 +315,9 @@ function buildConfig() {
             ? getAddress(process.env.UNISWAP_V3_QUOTER)
             : undefined,
         uniswapV3FeeTiers: parseFeeTierList(process.env.UNISWAP_V3_FEE_TIERS),
+        messageApiEnabled,
+        messageApiKeys,
+        ...messageApiConfig,
     };
 }
 

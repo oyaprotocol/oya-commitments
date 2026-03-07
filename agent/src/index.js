@@ -17,10 +17,20 @@ import {
     primeBalances,
 } from './lib/polling.js';
 import { callAgent, explainToolCalls, parseToolArguments } from './lib/llm.js';
-import { executeToolCalls, toolDefinitions } from './lib/tools.js';
+import { executeToolCalls, hasCommittedToolSideEffects, toolDefinitions } from './lib/tools.js';
 import { makeDeposit, postBondAndDispute, postBondAndPropose } from './lib/tx.js';
 import { extractTimelockTriggers } from './lib/timelock.js';
 import { collectPriceTriggerSignals } from './lib/uniswapV3Price.js';
+import { createMessageInbox } from './lib/message-inbox.js';
+import { createMessageApiServer } from './lib/message-api.js';
+import {
+    DECISION_STATUS,
+    evaluateToolOutputsDecisionStatus,
+    hasDeterministicDecisionEngine,
+    isRetryableDecisionError,
+    validateMessageApiDecisionEngine,
+    shouldRequeueMessagesForDecisionStatus,
+} from './lib/decision-support.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -48,6 +58,20 @@ const priceTriggerState = new Map();
 const tokenMetaCache = new Map();
 const poolMetaCache = new Map();
 const resolvedPoolCache = new Map();
+const messageInbox = config.messageApiEnabled
+    ? createMessageInbox({
+        queueLimit: config.messageApiQueueLimit,
+        defaultTtlSeconds: config.messageApiDefaultTtlSeconds,
+        minTtlSeconds: config.messageApiMinTtlSeconds,
+        maxTtlSeconds: config.messageApiMaxTtlSeconds,
+        idempotencyTtlSeconds: config.messageApiIdempotencyTtlSeconds,
+        signedReplayWindowSeconds: config.messageApiSignatureMaxAgeSeconds,
+        maxTextLength: config.messageApiMaxTextLength,
+        rateLimitPerMinute: config.messageApiRateLimitPerMinute,
+        rateLimitBurst: config.messageApiRateLimitBurst,
+    })
+    : null;
+let messageApiServer;
 
 async function loadAgentModule() {
     const agentRef = config.agentModule ?? 'default';
@@ -70,6 +94,7 @@ async function loadAgentModule() {
 }
 
 const { agentModule, commitmentText } = await loadAgentModule();
+validateMessageApiDecisionEngine({ config, agentModule });
 const pollingOptions = (() => {
     if (typeof agentModule?.getPollingOptions !== 'function') {
         return {};
@@ -189,26 +214,45 @@ async function processAgentToolCalls({
                 approvedToolCalls = [];
             }
         } catch (error) {
+            const retryableValidationError = isRetryableDecisionError(error);
             console.warn(
-                '[agent] validateToolCalls rejected tool calls:',
+                '[agent] validateToolCalls failed:',
                 error?.message ?? error
             );
-            approvedToolCalls = [];
+            return retryableValidationError
+                ? DECISION_STATUS.FAILED_RETRYABLE
+                : DECISION_STATUS.FAILED_NON_RETRYABLE;
         }
     }
 
     if (approvedToolCalls.length === 0) {
-        return false;
+        return DECISION_STATUS.NO_ACTION;
     }
 
-    const toolOutputs = await executeToolCalls({
-        toolCalls: approvedToolCalls,
-        publicClient,
-        walletClient,
-        account,
-        config,
-        ogContext,
-    });
+    let toolOutputs;
+    try {
+        toolOutputs = await executeToolCalls({
+            toolCalls: approvedToolCalls,
+            publicClient,
+            walletClient,
+            account,
+            config,
+            ogContext,
+        });
+    } catch (error) {
+        const sideEffectsLikelyCommitted = hasCommittedToolSideEffects(error);
+        const retryableExecutionError = isRetryableDecisionError(error);
+        console.error('[agent] Tool execution failed:', error?.message ?? error);
+        // Never replay messages when side effects may already be committed.
+        if (sideEffectsLikelyCommitted) {
+            return DECISION_STATUS.FAILED_NON_RETRYABLE;
+        }
+        // For pre-side-effect failures, retry only transient/network-like errors.
+        return retryableExecutionError
+            ? DECISION_STATUS.FAILED_RETRYABLE
+            : DECISION_STATUS.FAILED_NON_RETRYABLE;
+    }
+
     if (toolOutputs.length > 0 && agentModule?.onToolOutput) {
         for (const output of toolOutputs) {
             if (!output?.name || !output?.output) continue;
@@ -218,13 +262,18 @@ async function processAgentToolCalls({
             } catch (error) {
                 parsed = null;
             }
-            await agentModule.onToolOutput({
-                name: output.name,
-                parsedOutput: parsed,
-                commitmentText,
-                commitmentSafe: config.commitmentSafe,
-                agentAddress,
-            });
+            try {
+                await agentModule.onToolOutput({
+                    name: output.name,
+                    parsedOutput: parsed,
+                    commitmentText,
+                    commitmentSafe: config.commitmentSafe,
+                    agentAddress,
+                });
+            } catch (error) {
+                // Tool already executed; hook failures should not trigger message replay.
+                console.warn('[agent] onToolOutput hook failed:', error?.message ?? error);
+            }
         }
     }
     const modelCallIds = new Set(
@@ -237,20 +286,25 @@ async function processAgentToolCalls({
     );
 
     if (decisionResponseId && explainableOutputs.length > 0) {
-        const explanation = await explainToolCalls({
-            config,
-            previousResponseId: decisionResponseId,
-            toolOutputs: explainableOutputs,
-        });
-        if (explanation) {
-            console.log('[agent] Agent explanation:', explanation);
+        try {
+            const explanation = await explainToolCalls({
+                config,
+                previousResponseId: decisionResponseId,
+                toolOutputs: explainableOutputs,
+            });
+            if (explanation) {
+                console.log('[agent] Agent explanation:', explanation);
+            }
+        } catch (error) {
+            // Explanation is observability-only and should not affect ack/requeue outcomes.
+            console.warn('[agent] Failed to fetch post-tool explanation:', error?.message ?? error);
         }
     }
-    return true;
+    return evaluateToolOutputsDecisionStatus(toolOutputs);
 }
 
 async function decideOnSignals(signals, { onchainPendingProposal = false } = {}) {
-    if (typeof agentModule?.getDeterministicToolCalls === 'function') {
+    if (hasDeterministicDecisionEngine(agentModule)) {
         try {
             const deterministicCalls = await agentModule.getDeterministicToolCalls({
                 signals,
@@ -270,33 +324,33 @@ async function decideOnSignals(signals, { onchainPendingProposal = false } = {})
                     decisionResponseId: null,
                 });
             }
-            return false;
+            return DECISION_STATUS.NO_ACTION;
         } catch (error) {
             console.error('[agent] Deterministic tool-call generation failed', error);
-            return false;
+            return DECISION_STATUS.FAILED_RETRYABLE;
         }
     }
 
     if (!config.openAiApiKey) {
-        return false;
+        return DECISION_STATUS.NO_ACTION;
     }
-
-    if (!ogContext) {
-        ogContext = await loadOgContext({
-            publicClient,
-            ogModule: config.ogModule,
-        });
-    }
-
-    const systemPrompt =
-        agentModule?.getSystemPrompt?.({
-            proposeEnabled: config.proposeEnabled,
-            disputeEnabled: config.disputeEnabled,
-            commitmentText,
-        }) ??
-        'You are an agent monitoring an onchain commitment (Safe + Optimistic Governor).';
 
     try {
+        if (!ogContext) {
+            ogContext = await loadOgContext({
+                publicClient,
+                ogModule: config.ogModule,
+            });
+        }
+
+        const systemPrompt =
+            agentModule?.getSystemPrompt?.({
+                proposeEnabled: config.proposeEnabled,
+                disputeEnabled: config.disputeEnabled,
+                commitmentText,
+            }) ??
+            'You are an agent monitoring an onchain commitment (Safe + Optimistic Governor).';
+
         const executableToolsEnabled =
             config.proposeEnabled || config.disputeEnabled || config.polymarketClobEnabled;
         const tools = toolDefinitions({
@@ -319,7 +373,7 @@ async function decideOnSignals(signals, { onchainPendingProposal = false } = {})
 
         if (!allowTools && decision?.textDecision) {
             console.log('[agent] Opinion:', decision.textDecision);
-            return true;
+            return DECISION_STATUS.HANDLED;
         }
 
         if (decision.toolCalls.length > 0) {
@@ -334,16 +388,60 @@ async function decideOnSignals(signals, { onchainPendingProposal = false } = {})
 
         if (decision?.textDecision) {
             console.log('[agent] Decision:', decision.textDecision);
-            return true;
+            return DECISION_STATUS.HANDLED;
         }
     } catch (error) {
         console.error('[agent] Agent call failed', error);
+        return DECISION_STATUS.FAILED_RETRYABLE;
     }
 
-    return false;
+    return DECISION_STATUS.NO_ACTION;
+}
+
+function toUserMessageSignal(message) {
+    return {
+        kind: 'userMessage',
+        messageId: message.messageId,
+        text: message.text,
+        command: message.command,
+        args: message.args,
+        metadata: message.metadata,
+        sender: message.sender,
+        receivedAtMs: message.receivedAtMs,
+        expiresAtMs: message.expiresAtMs,
+    };
+}
+
+async function prepareSignalsForDecision(
+    signals,
+    { nowMs, latestBlock, onchainPendingProposal }
+) {
+    let signalsToProcess = signals;
+    if (agentModule?.augmentSignals) {
+        signalsToProcess = agentModule.augmentSignals(signalsToProcess, {
+            nowMs,
+            latestBlock,
+        });
+    }
+    if (agentModule?.enrichSignals) {
+        try {
+            signalsToProcess = await agentModule.enrichSignals(signalsToProcess, {
+                publicClient,
+                config,
+                account,
+                onchainPendingProposal,
+                nowMs,
+                latestBlock,
+            });
+        } catch (error) {
+            console.error('[agent] Failed to enrich signals:', error);
+        }
+    }
+    return Array.isArray(signalsToProcess) ? signalsToProcess : [];
 }
 
 async function agentLoop() {
+    const pendingMessageIds = new Set();
     try {
         const triggerSeedRulesText = ogContext?.rules ?? commitmentText ?? '';
         const triggerSeed = await getActivePriceTriggers({ rulesText: triggerSeedRulesText });
@@ -439,8 +537,19 @@ async function agentLoop() {
             poolMetaCache,
             resolvedPoolCache,
         });
+        const queuedMessages = [];
+        if (messageInbox) {
+            const batch = messageInbox.takeBatch({
+                maxItems: config.messageApiBatchSize,
+                nowMs: Date.now(),
+            });
+            for (const message of batch) {
+                queuedMessages.push(message);
+                pendingMessageIds.add(message.messageId);
+            }
+        }
 
-        const combinedSignals = deposits.concat(
+        const baseSignals = deposits.concat(
             balanceSnapshots,
             newProposals.map((proposal) => ({
                 kind: 'proposal',
@@ -455,7 +564,7 @@ async function agentLoop() {
         );
 
         for (const trigger of dueTimelocks) {
-            combinedSignals.push({
+            baseSignals.push({
                 kind: 'timelock',
                 triggerId: trigger.id,
                 triggerTimestampMs: trigger.timestampMs,
@@ -464,40 +573,64 @@ async function agentLoop() {
                 deposit: trigger.deposit,
             });
         }
-        combinedSignals.push(...duePriceSignals);
+        baseSignals.push(...duePriceSignals);
 
-        // Allow agent module to augment signals (e.g., add timer signals)
-        let signalsToProcess = combinedSignals;
-        if (agentModule?.augmentSignals) {
-            signalsToProcess = agentModule.augmentSignals(combinedSignals, {
+        const onchainPendingProposal = proposalsByHash.size > 0;
+        let decisionStatus = DECISION_STATUS.NO_ACTION;
+        if (baseSignals.length > 0) {
+            const signalsToProcess = await prepareSignalsForDecision(baseSignals, {
                 nowMs,
                 latestBlock,
+                onchainPendingProposal,
             });
-        }
-        if (agentModule?.enrichSignals) {
-            try {
-                signalsToProcess = await agentModule.enrichSignals(signalsToProcess, {
-                    publicClient,
-                    config,
-                    account,
-                    onchainPendingProposal: proposalsByHash.size > 0,
-                    nowMs,
-                    latestBlock,
+            if (signalsToProcess.length > 0) {
+                decisionStatus = await decideOnSignals(signalsToProcess, {
+                    onchainPendingProposal,
                 });
-            } catch (error) {
-                console.error('[agent] Failed to enrich signals:', error);
             }
-        }
-
-        if (signalsToProcess.length > 0) {
-            const decisionOk = await decideOnSignals(signalsToProcess, {
-                onchainPendingProposal: proposalsByHash.size > 0,
-            });
-            if (decisionOk && dueTimelocks.length > 0) {
+            if (decisionStatus === DECISION_STATUS.HANDLED && dueTimelocks.length > 0) {
                 markTimelocksFired(dueTimelocks);
             }
         }
+
+        // Process operator messages one-by-one so each message ID is settled from its own
+        // decision status. This prevents dropping unprocessed messages in mixed batches.
+        if (messageInbox && queuedMessages.length > 0) {
+            for (const message of queuedMessages) {
+                let messageDecisionStatus = DECISION_STATUS.NO_ACTION;
+                try {
+                    // Evaluate user messages with message-only signals so non-message events
+                    // are not replayed once per message in the same poll loop.
+                    const messageSignals = await prepareSignalsForDecision(
+                        [toUserMessageSignal(message)],
+                        {
+                            nowMs,
+                            latestBlock,
+                            onchainPendingProposal,
+                        }
+                    );
+                    if (messageSignals.length > 0) {
+                        messageDecisionStatus = await decideOnSignals(messageSignals, {
+                            onchainPendingProposal,
+                        });
+                    }
+                } catch (error) {
+                    console.error('[agent] Failed to process user message:', error);
+                    messageDecisionStatus = DECISION_STATUS.FAILED_RETRYABLE;
+                }
+
+                if (shouldRequeueMessagesForDecisionStatus(messageDecisionStatus)) {
+                    messageInbox.requeueBatch([message.messageId]);
+                } else {
+                    messageInbox.ackBatch([message.messageId]);
+                }
+                pendingMessageIds.delete(message.messageId);
+            }
+        }
     } catch (error) {
+        if (messageInbox && pendingMessageIds.size > 0) {
+            messageInbox.requeueBatch([...pendingMessageIds]);
+        }
         console.error('[agent] loop error', error);
     }
 
@@ -523,6 +656,14 @@ async function startAgent() {
         watchNativeBalance: config.watchNativeBalance,
         blockNumber: lastCheckedBlock,
     });
+
+    if (messageInbox && !messageApiServer) {
+        messageApiServer = createMessageApiServer({
+            config,
+            inbox: messageInbox,
+        });
+        await messageApiServer.start();
+    }
 
     console.log('[agent] running...');
 

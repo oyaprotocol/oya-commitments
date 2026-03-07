@@ -25,7 +25,7 @@ This is beta software provided “as is.” Use at your own risk. No guarantees 
      - `keychain`: `KEYCHAIN_SERVICE`, `KEYCHAIN_ACCOUNT` (macOS Keychain or Linux Secret Service)
      - `vault`: `VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_SECRET_PATH`, optional `VAULT_SECRET_KEY` (default `private_key`)
      - `kms`/`vault-signer`/`rpc`: `SIGNER_RPC_URL`, `SIGNER_ADDRESS` (JSON-RPC signer that accepts `eth_sendTransaction`)
-   - Optional tuning: `POLL_INTERVAL_MS`, `LOG_CHUNK_SIZE`, `PROPOSAL_HASH_RESOLVE_TIMEOUT_MS`, `PROPOSAL_HASH_RESOLVE_POLL_INTERVAL_MS`, `START_BLOCK`, `WATCH_NATIVE_BALANCE`, `DEFAULT_DEPOSIT_*`, `AGENT_MODULE`, `UNISWAP_V3_FACTORY`, `UNISWAP_V3_QUOTER`, `UNISWAP_V3_FEE_TIERS`, `POLYMARKET_*`
+   - Optional tuning: `POLL_INTERVAL_MS`, `LOG_CHUNK_SIZE`, `PROPOSAL_HASH_RESOLVE_TIMEOUT_MS`, `PROPOSAL_HASH_RESOLVE_POLL_INTERVAL_MS`, `START_BLOCK`, `WATCH_NATIVE_BALANCE`, `DEFAULT_DEPOSIT_*`, `AGENT_MODULE`, `UNISWAP_V3_FACTORY`, `UNISWAP_V3_QUOTER`, `UNISWAP_V3_FEE_TIERS`, `POLYMARKET_*`, `MESSAGE_API_*`
    - Optional proposals: `PROPOSE_ENABLED` (default true), `ALLOW_PROPOSE_ON_SIMULATION_FAIL` (default false)
    - Optional disputes: `DISPUTE_ENABLED` (default true), `DISPUTE_RETRY_MS` (default 60000)
    - Optional LLM: `OPENAI_API_KEY`, `OPENAI_MODEL` (default `gpt-4.1-mini`), `OPENAI_BASE_URL`
@@ -68,12 +68,99 @@ For interactions, swap the env var (e.g., `PROPOSER_PK`, `EXECUTOR_PK`). For sig
 - **Optional LLM decisions**: If `OPENAI_API_KEY` is set, the runner will call the OpenAI Responses API with signals and OG context and expect strict-JSON actions (propose/deposit/ignore). Wire your own validation/broadcast of any suggested actions in the agent module.
 - **Timelock triggers**: Parses plain language timelocks in rules (absolute dates or “X minutes after deposit”) and emits `timelock` signals when due.
 - **Price triggers**: If a module exports `getPriceTriggers({ commitmentText, config })`, the runner evaluates those parsed/inferred Uniswap V3 thresholds and emits `priceTrigger` signals.
+- **Optional message API**: When enabled, accepts authenticated user messages over HTTP and injects them as `userMessage` signals for the next decision cycle.
 
 All other behavior is intentionally left out. Implement your own agent in `agent-library/agents/<name>/agent.js` to add commitment-specific logic and tool use.
 
 ### Price Trigger Config
 
 Export `getPriceTriggers({ commitmentText, config })` from `agent-library/agents/<name>/agent.js` when your agent needs price-trigger behavior. This keeps commitment interpretation local to the module.
+
+### Message API (Optional)
+
+Enable inbound user messages with one or both auth modes:
+
+- Bearer tokens (`Authorization: Bearer ...`)
+- Signed requests (EIP-191 message signatures from allowlisted addresses)
+
+- `MESSAGE_API_ENABLED`: Set to `true` to start the API server.
+- `MESSAGE_API_HOST`: Bind host (default `127.0.0.1`).
+- `MESSAGE_API_PORT`: Bind port (default `8787`).
+- `MESSAGE_API_KEYS_JSON`: JSON object of API key ids to tokens, for example `{"ops":"k_live_replace_me"}`.
+- `MESSAGE_API_SIGNER_ALLOWLIST`: Comma-separated EVM addresses allowed to use signed auth.
+- `MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS`: Max signature age (default `300`).
+- `MESSAGE_API_MAX_BODY_BYTES`: Request body limit in bytes (default `8192`).
+- `MESSAGE_API_MAX_TEXT_LENGTH`: Max `text` length (default `2000`).
+- `MESSAGE_API_QUEUE_LIMIT`: Max queued/in-flight messages (default `500`).
+- `MESSAGE_API_BATCH_SIZE`: Max messages consumed per agent loop (default `25`).
+- `MESSAGE_API_DEFAULT_TTL_SECONDS`: Default TTL when omitted (default `3600`).
+- `MESSAGE_API_MIN_TTL_SECONDS`: Minimum allowed TTL (default `30`).
+- `MESSAGE_API_MAX_TTL_SECONDS`: Maximum allowed TTL (default `86400`).
+- `MESSAGE_API_IDEMPOTENCY_TTL_SECONDS`: Idempotency cache window (default `86400`).
+- `MESSAGE_API_RATE_LIMIT_PER_MINUTE`: Per-key refill rate (default `30`).
+- `MESSAGE_API_RATE_LIMIT_BURST`: Per-key burst capacity (default `10`).
+
+When `MESSAGE_API_ENABLED=true`, configure at least one of:
+- `MESSAGE_API_KEYS_JSON`
+- `MESSAGE_API_SIGNER_ALLOWLIST`
+
+Endpoints:
+
+- `GET /healthz`: health probe.
+- `POST /v1/messages`: queue a message for processing.
+
+`POST /v1/messages` body:
+
+```json
+{
+  "text": "Pause proposals for 2 hours",
+  "command": "pause_proposals",
+  "args": { "hours": 2 },
+  "metadata": { "ticket": "INC-42" },
+  "idempotencyKey": "inc-42-pause",
+  "ttlSeconds": 7200,
+  "auth": {
+    "type": "eip191",
+    "address": "0x1111111111111111111111111111111111111111",
+    "timestampMs": 1735689600000,
+    "signature": "0x..."
+  }
+}
+```
+
+`auth` is optional for Bearer-token requests. For signed auth:
+- `auth.type` must be `eip191`
+- `idempotencyKey` is required
+- signature is verified against a canonical payload that includes
+  `address`, `timestampMs`, `text`, `command`, `args`, `metadata`, `idempotencyKey`, and `ttlSeconds`
+- signed requests keep idempotency replay-locked for at least `MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS`; replays during that window return `409` with code `idempotency_replay_blocked`
+
+Example request:
+
+```bash
+curl -sS \
+  -X POST "http://127.0.0.1:8787/v1/messages" \
+  -H "Authorization: Bearer k_live_replace_me" \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Pause proposals for 2 hours","command":"pause_proposals","args":{"hours":2},"idempotencyKey":"pause-2h"}'
+```
+
+Signed-auth test script:
+
+```bash
+node agent/scripts/test-message-api-signature-auth.mjs
+```
+
+Signed send helper:
+
+```bash
+node agent/scripts/send-signed-message.mjs \
+  --text="Pause proposals for 2 hours" \
+  --private-key="0x<signer-private-key>" \
+  --url="http://127.0.0.1:8787" \
+  --command="pause_proposals" \
+  --args-json='{"hours":2}'
+```
 
 ### Uniswap Swap Action in `build_og_transactions`
 
