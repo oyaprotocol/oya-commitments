@@ -72,6 +72,33 @@ async function run() {
         }
     );
 
+    // Blank values should not implicitly enable the API.
+    withManagedEnv(
+        {
+            MESSAGE_API_ENABLED: '',
+            MESSAGE_API_PORT: 'abc',
+            MESSAGE_API_KEYS_JSON: '{not-json}',
+        },
+        () => {
+            const config = buildConfig();
+            assert.equal(config.messageApiEnabled, false);
+            assert.equal(config.messageApiPort, 8787);
+        }
+    );
+
+    // Whitespace-only values should also resolve to the fallback (disabled).
+    withManagedEnv(
+        {
+            MESSAGE_API_ENABLED: '   ',
+            MESSAGE_API_MAX_BODY_BYTES: 'not-a-number',
+        },
+        () => {
+            const config = buildConfig();
+            assert.equal(config.messageApiEnabled, false);
+            assert.equal(config.messageApiMaxBodyBytes, 8192);
+        }
+    );
+
     // Enabled API should continue to enforce numeric validation.
     withManagedEnv(
         {

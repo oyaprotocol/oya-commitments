@@ -241,11 +241,16 @@ async function processAgentToolCalls({
         });
     } catch (error) {
         const sideEffectsLikelyCommitted = hasCommittedToolSideEffects(error);
+        const retryableExecutionError = isRetryableDecisionError(error);
         console.error('[agent] Tool execution failed:', error?.message ?? error);
-        // Retry only when the failure happened before likely side effects.
-        return sideEffectsLikelyCommitted
-            ? DECISION_STATUS.FAILED_NON_RETRYABLE
-            : DECISION_STATUS.FAILED_RETRYABLE;
+        // Never replay messages when side effects may already be committed.
+        if (sideEffectsLikelyCommitted) {
+            return DECISION_STATUS.FAILED_NON_RETRYABLE;
+        }
+        // For pre-side-effect failures, retry only transient/network-like errors.
+        return retryableExecutionError
+            ? DECISION_STATUS.FAILED_RETRYABLE
+            : DECISION_STATUS.FAILED_NON_RETRYABLE;
     }
 
     if (toolOutputs.length > 0 && agentModule?.onToolOutput) {
