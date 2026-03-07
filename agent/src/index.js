@@ -398,8 +398,50 @@ async function decideOnSignals(signals, { onchainPendingProposal = false } = {})
     return DECISION_STATUS.NO_ACTION;
 }
 
+function toUserMessageSignal(message) {
+    return {
+        kind: 'userMessage',
+        messageId: message.messageId,
+        text: message.text,
+        command: message.command,
+        args: message.args,
+        metadata: message.metadata,
+        sender: message.sender,
+        receivedAtMs: message.receivedAtMs,
+        expiresAtMs: message.expiresAtMs,
+    };
+}
+
+async function prepareSignalsForDecision(
+    signals,
+    { nowMs, latestBlock, onchainPendingProposal }
+) {
+    let signalsToProcess = signals;
+    if (agentModule?.augmentSignals) {
+        signalsToProcess = agentModule.augmentSignals(signalsToProcess, {
+            nowMs,
+            latestBlock,
+        });
+    }
+    if (agentModule?.enrichSignals) {
+        try {
+            signalsToProcess = await agentModule.enrichSignals(signalsToProcess, {
+                publicClient,
+                config,
+                account,
+                onchainPendingProposal,
+                nowMs,
+                latestBlock,
+            });
+        } catch (error) {
+            console.error('[agent] Failed to enrich signals:', error);
+        }
+    }
+    return Array.isArray(signalsToProcess) ? signalsToProcess : [];
+}
+
 async function agentLoop() {
-    let inFlightMessageIds = [];
+    const pendingMessageIds = new Set();
     try {
         const triggerSeedRulesText = ogContext?.rules ?? commitmentText ?? '';
         const triggerSeed = await getActivePriceTriggers({ rulesText: triggerSeedRulesText });
@@ -495,29 +537,19 @@ async function agentLoop() {
             poolMetaCache,
             resolvedPoolCache,
         });
-        const messageSignals = [];
+        const queuedMessages = [];
         if (messageInbox) {
-            const queuedMessages = messageInbox.takeBatch({
+            const batch = messageInbox.takeBatch({
                 maxItems: config.messageApiBatchSize,
                 nowMs: Date.now(),
             });
-            inFlightMessageIds = queuedMessages.map((message) => message.messageId);
-            for (const message of queuedMessages) {
-                messageSignals.push({
-                    kind: 'userMessage',
-                    messageId: message.messageId,
-                    text: message.text,
-                    command: message.command,
-                    args: message.args,
-                    metadata: message.metadata,
-                    sender: message.sender,
-                    receivedAtMs: message.receivedAtMs,
-                    expiresAtMs: message.expiresAtMs,
-                });
+            for (const message of batch) {
+                queuedMessages.push(message);
+                pendingMessageIds.add(message.messageId);
             }
         }
 
-        const combinedSignals = deposits.concat(
+        const baseSignals = deposits.concat(
             balanceSnapshots,
             newProposals.map((proposal) => ({
                 kind: 'proposal',
@@ -532,7 +564,7 @@ async function agentLoop() {
         );
 
         for (const trigger of dueTimelocks) {
-            combinedSignals.push({
+            baseSignals.push({
                 kind: 'timelock',
                 triggerId: trigger.id,
                 triggerTimestampMs: trigger.timestampMs,
@@ -541,53 +573,63 @@ async function agentLoop() {
                 deposit: trigger.deposit,
             });
         }
-        combinedSignals.push(...duePriceSignals);
-        combinedSignals.push(...messageSignals);
+        baseSignals.push(...duePriceSignals);
 
-        // Allow agent module to augment signals (e.g., add timer signals)
-        let signalsToProcess = combinedSignals;
-        if (agentModule?.augmentSignals) {
-            signalsToProcess = agentModule.augmentSignals(combinedSignals, {
+        const onchainPendingProposal = proposalsByHash.size > 0;
+        let decisionStatus = DECISION_STATUS.NO_ACTION;
+        if (baseSignals.length > 0) {
+            const signalsToProcess = await prepareSignalsForDecision(baseSignals, {
                 nowMs,
                 latestBlock,
+                onchainPendingProposal,
             });
-        }
-        if (agentModule?.enrichSignals) {
-            try {
-                signalsToProcess = await agentModule.enrichSignals(signalsToProcess, {
-                    publicClient,
-                    config,
-                    account,
-                    onchainPendingProposal: proposalsByHash.size > 0,
-                    nowMs,
-                    latestBlock,
+            if (signalsToProcess.length > 0) {
+                decisionStatus = await decideOnSignals(signalsToProcess, {
+                    onchainPendingProposal,
                 });
-            } catch (error) {
-                console.error('[agent] Failed to enrich signals:', error);
             }
-        }
-
-        let decisionStatus = DECISION_STATUS.NO_ACTION;
-        if (signalsToProcess.length > 0) {
-            decisionStatus = await decideOnSignals(signalsToProcess, {
-                onchainPendingProposal: proposalsByHash.size > 0,
-            });
             if (decisionStatus === DECISION_STATUS.HANDLED && dueTimelocks.length > 0) {
                 markTimelocksFired(dueTimelocks);
             }
         }
-        if (messageInbox && inFlightMessageIds.length > 0) {
-            // Requeue only on failures that occurred before tool side effects.
-            if (shouldRequeueMessagesForDecisionStatus(decisionStatus)) {
-                messageInbox.requeueBatch(inFlightMessageIds);
-            } else {
-                messageInbox.ackBatch(inFlightMessageIds);
+
+        // Process operator messages one-by-one so each message ID is settled from its own
+        // decision status. This prevents dropping unprocessed messages in mixed batches.
+        if (messageInbox && queuedMessages.length > 0) {
+            for (const message of queuedMessages) {
+                let messageDecisionStatus = DECISION_STATUS.NO_ACTION;
+                try {
+                    // Evaluate user messages with message-only signals so non-message events
+                    // are not replayed once per message in the same poll loop.
+                    const messageSignals = await prepareSignalsForDecision(
+                        [toUserMessageSignal(message)],
+                        {
+                            nowMs,
+                            latestBlock,
+                            onchainPendingProposal,
+                        }
+                    );
+                    if (messageSignals.length > 0) {
+                        messageDecisionStatus = await decideOnSignals(messageSignals, {
+                            onchainPendingProposal,
+                        });
+                    }
+                } catch (error) {
+                    console.error('[agent] Failed to process user message:', error);
+                    messageDecisionStatus = DECISION_STATUS.FAILED_RETRYABLE;
+                }
+
+                if (shouldRequeueMessagesForDecisionStatus(messageDecisionStatus)) {
+                    messageInbox.requeueBatch([message.messageId]);
+                } else {
+                    messageInbox.ackBatch([message.messageId]);
+                }
+                pendingMessageIds.delete(message.messageId);
             }
-            inFlightMessageIds = [];
         }
     } catch (error) {
-        if (messageInbox && inFlightMessageIds.length > 0) {
-            messageInbox.requeueBatch(inFlightMessageIds);
+        if (messageInbox && pendingMessageIds.size > 0) {
+            messageInbox.requeueBatch([...pendingMessageIds]);
         }
         console.error('[agent] loop error', error);
     }
