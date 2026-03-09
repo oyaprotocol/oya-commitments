@@ -1,15 +1,15 @@
-Fast Withdrawal Commitment
+Fast Withdrawal Rule
 
-Users may request withdrawals from this Safe by sending signed messages authenticated with sender.authType = "eip191".
+If a withdrawal request is otherwise valid under this commitment, an agent may satisfy that withdrawal immediately by sending the requested asset directly to the approved recipient from the agent's own wallet.
 
-A valid withdrawal request must specify the asset, the amount, and the recipient address. The recipient address must match the authenticated signer.
+After completing the direct fill, the agent may propose exactly one reimbursement transfer from this Safe to the agent's own address for the same asset and amount that the agent delivered.
 
-When the agent receives a valid withdrawal request, the agent may immediately fulfill that withdrawal directly from the agent's own wallet to the requesting user.
+A fast-withdraw reimbursement is valid only if:
+- the direct fill was completed before the reimbursement proposal;
+- the reimbursement asset matches the filled asset;
+- the reimbursement amount exactly matches the filled amount; and
+- the reimbursement recipient is the agent's own address.
 
-After the direct fill is completed, the agent may propose exactly one reimbursement transfer from this Safe to the agent's own address for the same asset and amount that the agent delivered to the user.
+The agent must not perform a fast withdrawal unless this Safe holds enough of the relevant asset to reimburse the agent in full.
 
-The agent must not propose reimbursement before the direct fill is completed, must not reimburse more than it filled, and must not reimburse any address other than the agent's own address.
-
-If this Safe does not hold enough of the requested asset to reimburse the agent in full, the agent should not fill the withdrawal and should not propose reimbursement.
-
-No other withdrawals or reimbursement transfers are permitted.
+This rule does not authorize any reimbursement that is not backed by a completed direct fill.
