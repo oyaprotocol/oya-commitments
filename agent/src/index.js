@@ -448,6 +448,8 @@ async function prepareSignalsForDecision(
 
 async function agentLoop() {
     const pendingMessageIds = new Set();
+    let activeMessageId = null;
+    let activeMessageSettled = false;
     try {
         const triggerSeedRulesText = ogContext?.rules ?? commitmentText ?? '';
         const triggerSeed = await getActivePriceTriggers({ rulesText: triggerSeedRulesText });
@@ -602,6 +604,8 @@ async function agentLoop() {
         }
         if (messageInbox && queuedMessages.length > 0) {
             for (const message of queuedMessages) {
+                activeMessageId = message.messageId;
+                activeMessageSettled = false;
                 let messageDecisionStatus = DECISION_STATUS.NO_ACTION;
                 try {
                     // Evaluate user messages with message-only signals so non-message events
@@ -632,19 +636,18 @@ async function agentLoop() {
                 } else {
                     messageInbox.ackBatch([message.messageId]);
                 }
+                activeMessageSettled = true;
                 pendingMessageIds.delete(message.messageId);
+                activeMessageId = null;
             }
         }
     } catch (error) {
-        const retryableLoopError = isRetryableDecisionError(error);
+        if (activeMessageSettled && activeMessageId) {
+            pendingMessageIds.delete(activeMessageId);
+        }
         if (messageInbox && pendingMessageIds.size > 0) {
-            if (retryableLoopError) {
-                messageInbox.requeueBatch([...pendingMessageIds]);
-            } else {
-                // Settle any in-flight user messages on permanent loop failures to avoid
-                // indefinitely cycling the same batch until TTL expiry.
-                messageInbox.ackBatch([...pendingMessageIds]);
-            }
+            // Only rescue messages that never reached per-message settlement in this loop.
+            messageInbox.requeueBatch([...pendingMessageIds]);
         }
         console.error('[agent] loop error', error);
     }
