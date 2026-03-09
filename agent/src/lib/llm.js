@@ -1,5 +1,17 @@
 import { parseToolArguments } from './utils.js';
 
+function createHttpError(prefix, statusCode, bodyText) {
+    const error = new Error(`${prefix}: ${statusCode} ${bodyText}`);
+    error.statusCode = statusCode;
+    error.responseBody = bodyText;
+    if (statusCode === 429) {
+        error.name = 'RateLimitError';
+    } else if (statusCode >= 500) {
+        error.name = 'HttpRequestError';
+    }
+    return error;
+}
+
 function extractFirstText(responseJson) {
     const outputs = responseJson?.output;
     if (!Array.isArray(outputs)) return '';
@@ -139,7 +151,7 @@ async function callAgent({
 
     if (!res.ok) {
         const text = await res.text();
-        throw new Error(`OpenAI API error: ${res.status} ${text}`);
+        throw createHttpError('OpenAI API error', res.status, text);
     }
 
     const json = await res.json();
@@ -191,7 +203,7 @@ async function explainToolCalls({ config, previousResponseId, toolOutputs }) {
 
     if (!res.ok) {
         const text = await res.text();
-        throw new Error(`OpenAI API error: ${res.status} ${text}`);
+        throw createHttpError('OpenAI API error', res.status, text);
     }
 
     const json = await res.json();

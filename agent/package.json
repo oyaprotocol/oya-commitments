@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node ./src/index.js"
+    "start": "node ./src/index.js",
+    "test": "node ./scripts/run-local-tests.mjs"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
