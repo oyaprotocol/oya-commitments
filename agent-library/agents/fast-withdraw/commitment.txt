@@ -1,0 +1,15 @@
+Fast Withdrawal Commitment
+
+Users may request withdrawals from this Safe by sending signed messages authenticated with sender.authType = "eip191".
+
+A valid withdrawal request must specify the asset, the amount, and the recipient address. The recipient address must match the authenticated signer.
+
+When the agent receives a valid withdrawal request, the agent may immediately fulfill that withdrawal directly from the agent's own wallet to the requesting user.
+
+After the direct fill is completed, the agent may propose exactly one reimbursement transfer from this Safe to the agent's own address for the same asset and amount that the agent delivered to the user.
+
+The agent must not propose reimbursement before the direct fill is completed, must not reimburse more than it filled, and must not reimburse any address other than the agent's own address.
+
+If this Safe does not hold enough of the requested asset to reimburse the agent in full, the agent should not fill the withdrawal and should not propose reimbursement.
+
+No other withdrawals or reimbursement transfers are permitted.
