@@ -343,6 +343,18 @@ You can validate a module quickly:
 node agent/scripts/validate-agent.mjs --module=default
 ```
 
+Run the local agent script suite:
+
+```bash
+npm --prefix agent test
+```
+
+Optionally narrow the local suite to specific scripts:
+
+```bash
+node agent/scripts/run-local-tests.mjs --include=message-loop --exclude=message-api
+```
+
 Execute a specific OG proposal by proposal submission transaction hash (uses the configured signer from `agent/.env`):
 
 ```bash
