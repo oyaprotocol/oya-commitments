@@ -14,6 +14,7 @@ import {
     signClobOrder,
 } from './polymarket.js';
 import { parseToolArguments } from './utils.js';
+import { annotateToolExecutionError, hasCommittedToolSideEffects } from './tool-execution-error.js';
 
 function safeStringify(value) {
     return JSON.stringify(value, (_, item) => (typeof item === 'bigint' ? item.toString() : item));
@@ -26,6 +27,42 @@ function isReceiptWaitTimeoutError(error) {
     }
     const message = String(error?.shortMessage ?? error?.message ?? '').toLowerCase();
     return message.includes('timed out while waiting for transaction');
+}
+
+function isRetryableToolError(error) {
+    const code = String(error?.code ?? '').toUpperCase();
+    if (
+        code === 'ETIMEDOUT' ||
+        code === 'ECONNRESET' ||
+        code === 'ECONNREFUSED' ||
+        code === 'ENOTFOUND' ||
+        code === 'EAI_AGAIN' ||
+        code === 'UND_ERR_CONNECT_TIMEOUT' ||
+        code === 'UND_ERR_HEADERS_TIMEOUT' ||
+        code === 'UND_ERR_SOCKET'
+    ) {
+        return true;
+    }
+
+    const name = String(error?.name ?? '');
+    if (/(Timeout|Network|HttpRequest|Fetch|Socket|Connection|RateLimit)/i.test(name)) {
+        return true;
+    }
+
+    const message = String(error?.shortMessage ?? error?.message ?? '').toLowerCase();
+    return (
+        message.includes('timed out') ||
+        message.includes('timeout') ||
+        message.includes('network error') ||
+        message.includes('failed to fetch') ||
+        message.includes('connection refused') ||
+        message.includes('connection reset') ||
+        message.includes('temporarily unavailable') ||
+        message.includes('service unavailable') ||
+        message.includes('gateway timeout') ||
+        message.includes('too many requests') ||
+        message.includes('429')
+    );
 }
 
 function normalizeOrderSide(value) {
@@ -589,197 +626,199 @@ async function executeToolCalls({
     const onchainToolsEnabled = config.proposeEnabled || config.disputeEnabled;
     const hasPostProposal = toolCalls.some((call) => call.name === 'post_bond_and_propose');
     let builtTransactions;
+    let sideEffectsLikelyCommitted = false;
 
-    for (const call of toolCalls) {
-        const args = parseToolArguments(call.arguments);
-        if (!args) {
-            console.warn('[agent] Skipping tool call with invalid args:', call);
-            continue;
-        }
-
-        if (call.name === 'build_og_transactions') {
-            try {
-                const transactions = buildOgTransactions(args.actions ?? [], { config });
-                builtTransactions = transactions;
-                outputs.push({
-                    callId: call.callId,
-                    name: call.name,
-                    output: safeStringify({ status: 'ok', transactions }),
-                });
-            } catch (error) {
-                outputs.push({
-                    callId: call.callId,
-                    name: call.name,
-                    output: safeStringify({
-                        status: 'error',
-                        message: error?.message ?? String(error),
-                    }),
-                });
-            }
-            continue;
-        }
-
-        if (call.name === 'polymarket_clob_place_order') {
-            if (!config.polymarketClobEnabled) {
-                outputs.push({
-                    callId: call.callId,
-                    name: call.name,
-                    output: safeStringify({
-                        status: 'skipped',
-                        reason: 'polymarket CLOB disabled',
-                    }),
-                });
+    try {
+        for (const call of toolCalls) {
+            const args = parseToolArguments(call.arguments);
+            if (!args) {
+                console.warn('[agent] Skipping tool call with invalid args:', call);
                 continue;
             }
 
-            try {
-                const runtimeSignerAddress = getAddress(account.address);
-                const clobAuthAddress = config.polymarketClobAddress
-                    ? getAddress(config.polymarketClobAddress)
-                    : runtimeSignerAddress;
-                const normalizedSignedOrder = normalizeSignedOrderPayload(args.signedOrder);
-                if (!normalizedSignedOrder) {
-                    throw new Error('signedOrder is required and must be an object.');
+            if (call.name === 'build_og_transactions') {
+                try {
+                    const transactions = buildOgTransactions(args.actions ?? [], { config });
+                    builtTransactions = transactions;
+                    outputs.push({
+                        callId: call.callId,
+                        name: call.name,
+                        output: safeStringify({ status: 'ok', transactions }),
+                    });
+                } catch (error) {
+                    outputs.push({
+                        callId: call.callId,
+                        name: call.name,
+                        output: safeStringify({
+                            status: 'error',
+                            message: error?.message ?? String(error),
+                        }),
+                    });
                 }
-                const declaredSide = normalizeOrderSide(args.side);
-                if (!declaredSide) {
-                    throw new Error('side must be BUY or SELL');
-                }
-                if (!args.tokenId) {
-                    throw new Error('tokenId is required');
-                }
-                const declaredTokenId = String(args.tokenId).trim();
-                const orderType = normalizeOrderType(args.orderType);
-                if (!orderType) {
-                    throw new Error('orderType must be one of GTC, GTD, FOK, FAK');
-                }
-                const { side: signedOrderSide, tokenId: signedOrderTokenId } =
-                    extractSignedOrderSideAndTokenId(normalizedSignedOrder);
-                if (!signedOrderSide || !signedOrderTokenId) {
-                    throw new Error(
-                        'signedOrder must include embedded side and token id (side + tokenId/asset_id).'
-                    );
-                }
-                if (signedOrderSide !== declaredSide) {
-                    throw new Error(
-                        `signedOrder side mismatch: declared ${declaredSide}, signed order has ${signedOrderSide}.`
-                    );
-                }
-                if (signedOrderTokenId !== declaredTokenId) {
-                    throw new Error(
-                        `signedOrder token mismatch: declared ${declaredTokenId}, signed order has ${signedOrderTokenId}.`
-                    );
-                }
-                const identityAddresses =
-                    extractSignedOrderIdentityAddresses(normalizedSignedOrder);
-                if (identityAddresses.length === 0) {
-                    throw new Error(
-                        'signedOrder must include an identity field (maker/signer/funder/user).'
-                    );
-                }
-                const allowedIdentityAddresses = new Set([
-                    clobAuthAddress,
-                    runtimeSignerAddress,
-                ]);
-                const unauthorizedIdentities = identityAddresses.filter(
-                    (address) => !allowedIdentityAddresses.has(address)
-                );
-                if (unauthorizedIdentities.length > 0) {
-                    throw new Error(
-                        `signedOrder identity mismatch: expected only ${Array.from(allowedIdentityAddresses).join(', ')}, signed order contains unauthorized ${unauthorizedIdentities.join(', ')}.`
-                    );
-                }
-                const configuredOwnerApiKey = config.polymarketClobApiKey;
-                if (!configuredOwnerApiKey) {
-                    throw new Error('Missing POLYMARKET_CLOB_API_KEY in runtime config.');
-                }
-                const requestedOwner =
-                    typeof args.owner === 'string' && args.owner.trim()
-                        ? args.owner.trim()
-                        : undefined;
-                if (requestedOwner && requestedOwner !== configuredOwnerApiKey) {
-                    throw new Error(
-                        'owner mismatch: provided owner does not match configured POLYMARKET_CLOB_API_KEY.'
-                    );
-                }
-                const result = await placeClobOrder({
-                    config,
-                    signingAddress: clobAuthAddress,
-                    signedOrder: normalizedSignedOrder,
-                    ownerApiKey: configuredOwnerApiKey,
-                    orderType,
-                });
-                outputs.push({
-                    callId: call.callId,
-                    name: call.name,
-                    output: safeStringify({
-                        status: 'submitted',
-                        result,
-                    }),
-                });
-            } catch (error) {
-                outputs.push({
-                    callId: call.callId,
-                    name: call.name,
-                    output: safeStringify({
-                        status: 'error',
-                        message: error?.message ?? String(error),
-                    }),
-                });
-            }
-            continue;
-        }
-
-        if (call.name === 'polymarket_clob_cancel_orders') {
-            if (!config.polymarketClobEnabled) {
-                outputs.push({
-                    callId: call.callId,
-                    name: call.name,
-                    output: safeStringify({
-                        status: 'skipped',
-                        reason: 'polymarket CLOB disabled',
-                    }),
-                });
                 continue;
             }
 
-            try {
-                const runtimeSignerAddress = getAddress(account.address);
-                const clobAuthAddress = config.polymarketClobAddress
-                    ? getAddress(config.polymarketClobAddress)
-                    : runtimeSignerAddress;
-                const mode = normalizeCancelMode(args.mode);
-                if (!mode) {
-                    throw new Error('mode must be one of ids, market, all');
+            if (call.name === 'polymarket_clob_place_order') {
+                if (!config.polymarketClobEnabled) {
+                    outputs.push({
+                        callId: call.callId,
+                        name: call.name,
+                        output: safeStringify({
+                            status: 'skipped',
+                            reason: 'polymarket CLOB disabled',
+                        }),
+                    });
+                    continue;
                 }
-                const result = await cancelClobOrders({
-                    config,
-                    signingAddress: clobAuthAddress,
-                    mode,
-                    orderIds: args.orderIds,
-                    market: args.market,
-                    assetId: args.assetId,
-                });
-                outputs.push({
-                    callId: call.callId,
-                    name: call.name,
-                    output: safeStringify({
-                        status: 'submitted',
-                        result,
-                    }),
-                });
-            } catch (error) {
-                outputs.push({
-                    callId: call.callId,
-                    name: call.name,
-                    output: safeStringify({
-                        status: 'error',
-                        message: error?.message ?? String(error),
-                    }),
-                });
+
+                try {
+                    const runtimeSignerAddress = getAddress(account.address);
+                    const clobAuthAddress = config.polymarketClobAddress
+                        ? getAddress(config.polymarketClobAddress)
+                        : runtimeSignerAddress;
+                    const normalizedSignedOrder = normalizeSignedOrderPayload(args.signedOrder);
+                    if (!normalizedSignedOrder) {
+                        throw new Error('signedOrder is required and must be an object.');
+                    }
+                    const declaredSide = normalizeOrderSide(args.side);
+                    if (!declaredSide) {
+                        throw new Error('side must be BUY or SELL');
+                    }
+                    if (!args.tokenId) {
+                        throw new Error('tokenId is required');
+                    }
+                    const declaredTokenId = String(args.tokenId).trim();
+                    const orderType = normalizeOrderType(args.orderType);
+                    if (!orderType) {
+                        throw new Error('orderType must be one of GTC, GTD, FOK, FAK');
+                    }
+                    const { side: signedOrderSide, tokenId: signedOrderTokenId } =
+                        extractSignedOrderSideAndTokenId(normalizedSignedOrder);
+                    if (!signedOrderSide || !signedOrderTokenId) {
+                        throw new Error(
+                            'signedOrder must include embedded side and token id (side + tokenId/asset_id).'
+                        );
+                    }
+                    if (signedOrderSide !== declaredSide) {
+                        throw new Error(
+                            `signedOrder side mismatch: declared ${declaredSide}, signed order has ${signedOrderSide}.`
+                        );
+                    }
+                    if (signedOrderTokenId !== declaredTokenId) {
+                        throw new Error(
+                            `signedOrder token mismatch: declared ${declaredTokenId}, signed order has ${signedOrderTokenId}.`
+                        );
+                    }
+                    const identityAddresses =
+                        extractSignedOrderIdentityAddresses(normalizedSignedOrder);
+                    if (identityAddresses.length === 0) {
+                        throw new Error(
+                            'signedOrder must include an identity field (maker/signer/funder/user).'
+                        );
+                    }
+                    const allowedIdentityAddresses = new Set([
+                        clobAuthAddress,
+                        runtimeSignerAddress,
+                    ]);
+                    const unauthorizedIdentities = identityAddresses.filter(
+                        (address) => !allowedIdentityAddresses.has(address)
+                    );
+                    if (unauthorizedIdentities.length > 0) {
+                        throw new Error(
+                            `signedOrder identity mismatch: expected only ${Array.from(allowedIdentityAddresses).join(', ')}, signed order contains unauthorized ${unauthorizedIdentities.join(', ')}.`
+                        );
+                    }
+                    const configuredOwnerApiKey = config.polymarketClobApiKey;
+                    if (!configuredOwnerApiKey) {
+                        throw new Error('Missing POLYMARKET_CLOB_API_KEY in runtime config.');
+                    }
+                    const requestedOwner =
+                        typeof args.owner === 'string' && args.owner.trim()
+                            ? args.owner.trim()
+                            : undefined;
+                    if (requestedOwner && requestedOwner !== configuredOwnerApiKey) {
+                        throw new Error(
+                            'owner mismatch: provided owner does not match configured POLYMARKET_CLOB_API_KEY.'
+                        );
+                    }
+                    const result = await placeClobOrder({
+                        config,
+                        signingAddress: clobAuthAddress,
+                        signedOrder: normalizedSignedOrder,
+                        ownerApiKey: configuredOwnerApiKey,
+                        orderType,
+                    });
+                    outputs.push({
+                        callId: call.callId,
+                        name: call.name,
+                        output: safeStringify({
+                            status: 'submitted',
+                            result,
+                        }),
+                    });
+                } catch (error) {
+                    outputs.push({
+                        callId: call.callId,
+                        name: call.name,
+                        output: safeStringify({
+                            status: 'error',
+                            message: error?.message ?? String(error),
+                        }),
+                    });
+                }
+                continue;
             }
-            continue;
-        }
+
+            if (call.name === 'polymarket_clob_cancel_orders') {
+                if (!config.polymarketClobEnabled) {
+                    outputs.push({
+                        callId: call.callId,
+                        name: call.name,
+                        output: safeStringify({
+                            status: 'skipped',
+                            reason: 'polymarket CLOB disabled',
+                        }),
+                    });
+                    continue;
+                }
+
+                try {
+                    const runtimeSignerAddress = getAddress(account.address);
+                    const clobAuthAddress = config.polymarketClobAddress
+                        ? getAddress(config.polymarketClobAddress)
+                        : runtimeSignerAddress;
+                    const mode = normalizeCancelMode(args.mode);
+                    if (!mode) {
+                        throw new Error('mode must be one of ids, market, all');
+                    }
+                    const result = await cancelClobOrders({
+                        config,
+                        signingAddress: clobAuthAddress,
+                        mode,
+                        orderIds: args.orderIds,
+                        market: args.market,
+                        assetId: args.assetId,
+                    });
+                    outputs.push({
+                        callId: call.callId,
+                        name: call.name,
+                        output: safeStringify({
+                            status: 'submitted',
+                            result,
+                        }),
+                    });
+                } catch (error) {
+                    outputs.push({
+                        callId: call.callId,
+                        name: call.name,
+                        output: safeStringify({
+                            status: 'error',
+                            message: error?.message ?? String(error),
+                        }),
+                    });
+                }
+                continue;
+            }
 
         if (call.name === 'polymarket_clob_build_sign_and_place_order') {
             if (!config.polymarketClobEnabled) {
@@ -975,6 +1014,8 @@ async function executeToolCalls({
                 asset: args.asset,
                 amountWei: BigInt(args.amountWei),
             });
+            // A transaction hash indicates submission crossed a side-effect boundary.
+            sideEffectsLikelyCommitted = true;
             try {
                 await publicClient.waitForTransactionReceipt({ hash: txHash });
                 outputs.push({
@@ -986,9 +1027,7 @@ async function executeToolCalls({
                     }),
                 });
             } catch (error) {
-                if (!isReceiptWaitTimeoutError(error)) {
-                    throw error;
-                }
+                const timeout = isReceiptWaitTimeoutError(error);
                 outputs.push({
                     callId: call.callId,
                     name: call.name,
@@ -996,8 +1035,11 @@ async function executeToolCalls({
                         status: 'submitted',
                         transactionHash: String(txHash),
                         pendingConfirmation: true,
+                        receiptCheckError: timeout ? undefined : error?.message ?? String(error),
                         warning:
-                            'Timed out waiting for deposit receipt; transaction may still be pending or mined.',
+                            timeout
+                                ? 'Timed out waiting for deposit receipt; transaction may still be pending or mined.'
+                                : 'Failed to verify deposit receipt after submission; transaction may still be pending or mined.',
                     }),
                 });
             }
@@ -1026,6 +1068,8 @@ async function executeToolCalls({
                 amount: args.amount,
                 data: args.data,
             });
+            // A transaction hash indicates submission crossed a side-effect boundary.
+            sideEffectsLikelyCommitted = true;
             try {
                 await publicClient.waitForTransactionReceipt({ hash: txHash });
                 outputs.push({
@@ -1037,9 +1081,7 @@ async function executeToolCalls({
                     }),
                 });
             } catch (error) {
-                if (!isReceiptWaitTimeoutError(error)) {
-                    throw error;
-                }
+                const timeout = isReceiptWaitTimeoutError(error);
                 outputs.push({
                     callId: call.callId,
                     name: call.name,
@@ -1047,8 +1089,11 @@ async function executeToolCalls({
                         status: 'submitted',
                         transactionHash: String(txHash),
                         pendingConfirmation: true,
+                        receiptCheckError: timeout ? undefined : error?.message ?? String(error),
                         warning:
-                            'Timed out waiting for ERC1155 deposit receipt; transaction may still be pending or mined.',
+                            timeout
+                                ? 'Timed out waiting for ERC1155 deposit receipt; transaction may still be pending or mined.'
+                                : 'Failed to verify ERC1155 deposit receipt after submission; transaction may still be pending or mined.',
                     }),
                 });
             }
@@ -1083,23 +1128,56 @@ async function executeToolCalls({
                     ogModule: config.ogModule,
                     transactions,
                 });
-                outputs.push({
-                    callId: call.callId,
-                    name: call.name,
-                    output: safeStringify({
-                        status: result?.skipped ? 'skipped' : 'submitted',
-                        ...result,
-                    }),
-                });
+                const proposalTxHash =
+                    typeof result?.transactionHash === 'string' && result.transactionHash
+                        ? result.transactionHash
+                        : undefined;
+                const committedSideEffects = Boolean(
+                    result?.sideEffectsLikelyCommitted || proposalTxHash
+                );
+                if (committedSideEffects) {
+                    sideEffectsLikelyCommitted = true;
+                }
+
+                const submissionError = result?.submissionError ?? null;
+                if (!result?.skipped && !proposalTxHash && submissionError) {
+                    outputs.push({
+                        callId: call.callId,
+                        name: call.name,
+                        output: safeStringify({
+                            status: 'error',
+                            message:
+                                submissionError?.message ??
+                                'Proposal submission failed before transaction broadcast.',
+                            retryable: !committedSideEffects && isRetryableToolError(submissionError),
+                            sideEffectsLikelyCommitted: committedSideEffects,
+                            submissionError,
+                        }),
+                    });
+                } else {
+                    outputs.push({
+                        callId: call.callId,
+                        name: call.name,
+                        output: safeStringify({
+                            status: result?.skipped ? 'skipped' : 'submitted',
+                            ...result,
+                        }),
+                    });
+                }
             } catch (error) {
                 const timeout = isReceiptWaitTimeoutError(error);
+                const committedSideEffects = hasCommittedToolSideEffects(error);
+                if (committedSideEffects) {
+                    sideEffectsLikelyCommitted = true;
+                }
                 outputs.push({
                     callId: call.callId,
                     name: call.name,
                     output: safeStringify({
                         status: timeout ? 'pending' : 'error',
                         message: error?.message ?? String(error),
-                        retryable: timeout,
+                        retryable: !committedSideEffects && (timeout || isRetryableToolError(error)),
+                        sideEffectsLikelyCommitted: committedSideEffects,
                     }),
                 });
             }
@@ -1129,6 +1207,9 @@ async function executeToolCalls({
                     assertionId: args.assertionId,
                     explanation: args.explanation,
                 });
+                if (result?.disputeHash) {
+                    sideEffectsLikelyCommitted = true;
+                }
                 outputs.push({
                     callId: call.callId,
                     name: call.name,
@@ -1138,12 +1219,18 @@ async function executeToolCalls({
                     }),
                 });
             } catch (error) {
+                const committedSideEffects = hasCommittedToolSideEffects(error);
+                if (committedSideEffects) {
+                    sideEffectsLikelyCommitted = true;
+                }
                 outputs.push({
                     callId: call.callId,
                     name: call.name,
                     output: safeStringify({
                         status: 'error',
                         message: error?.message ?? String(error),
+                        retryable: !committedSideEffects && isRetryableToolError(error),
+                        sideEffectsLikelyCommitted: committedSideEffects,
                     }),
                 });
             }
@@ -1156,45 +1243,82 @@ async function executeToolCalls({
             name: call.name,
             output: safeStringify({ status: 'skipped', reason: 'unknown tool' }),
         });
-    }
+        }
 
-    if (builtTransactions && !hasPostProposal) {
-        if (!config.proposeEnabled) {
-            console.log('[agent] Built transactions but proposals are disabled; skipping propose.');
-        } else {
-            try {
-                const result = await postBondAndPropose({
-                    publicClient,
-                    walletClient,
-                    account,
-                    config,
-                    ogModule: config.ogModule,
-                    transactions: builtTransactions,
-                });
-                outputs.push({
-                    callId: 'auto_post_bond_and_propose',
-                    name: 'post_bond_and_propose',
-                    output: safeStringify({
-                        status: result?.skipped ? 'skipped' : 'submitted',
-                        ...result,
-                    }),
-                });
-            } catch (error) {
-                const timeout = isReceiptWaitTimeoutError(error);
-                outputs.push({
-                    callId: 'auto_post_bond_and_propose',
-                    name: 'post_bond_and_propose',
-                    output: safeStringify({
-                        status: timeout ? 'pending' : 'error',
-                        message: error?.message ?? String(error),
-                        retryable: timeout,
-                    }),
-                });
+        if (builtTransactions && !hasPostProposal) {
+            if (!config.proposeEnabled) {
+                console.log('[agent] Built transactions but proposals are disabled; skipping propose.');
+            } else {
+                try {
+                    const result = await postBondAndPropose({
+                        publicClient,
+                        walletClient,
+                        account,
+                        config,
+                        ogModule: config.ogModule,
+                        transactions: builtTransactions,
+                    });
+                    const proposalTxHash =
+                        typeof result?.transactionHash === 'string' && result.transactionHash
+                            ? result.transactionHash
+                            : undefined;
+                    const committedSideEffects = Boolean(
+                        result?.sideEffectsLikelyCommitted || proposalTxHash
+                    );
+                    if (committedSideEffects) {
+                        sideEffectsLikelyCommitted = true;
+                    }
+
+                    const submissionError = result?.submissionError ?? null;
+                    if (!result?.skipped && !proposalTxHash && submissionError) {
+                        outputs.push({
+                            callId: 'auto_post_bond_and_propose',
+                            name: 'post_bond_and_propose',
+                            output: safeStringify({
+                                status: 'error',
+                                message:
+                                    submissionError?.message ??
+                                    'Proposal submission failed before transaction broadcast.',
+                                retryable:
+                                    !committedSideEffects && isRetryableToolError(submissionError),
+                                sideEffectsLikelyCommitted: committedSideEffects,
+                                submissionError,
+                            }),
+                        });
+                    } else {
+                        outputs.push({
+                            callId: 'auto_post_bond_and_propose',
+                            name: 'post_bond_and_propose',
+                            output: safeStringify({
+                                status: result?.skipped ? 'skipped' : 'submitted',
+                                ...result,
+                            }),
+                        });
+                    }
+                } catch (error) {
+                    const timeout = isReceiptWaitTimeoutError(error);
+                    const committedSideEffects = hasCommittedToolSideEffects(error);
+                    if (committedSideEffects) {
+                        sideEffectsLikelyCommitted = true;
+                    }
+                    outputs.push({
+                        callId: 'auto_post_bond_and_propose',
+                        name: 'post_bond_and_propose',
+                        output: safeStringify({
+                            status: timeout ? 'pending' : 'error',
+                            message: error?.message ?? String(error),
+                            retryable: !committedSideEffects && (timeout || isRetryableToolError(error)),
+                            sideEffectsLikelyCommitted: committedSideEffects,
+                        }),
+                    });
+                }
             }
         }
-    }
 
-    return outputs.filter((item) => item.callId);
+        return outputs.filter((item) => item.callId);
+    } catch (error) {
+        throw annotateToolExecutionError(error, { sideEffectsLikelyCommitted });
+    }
 }
 
-export { executeToolCalls, toolDefinitions };
+export { executeToolCalls, hasCommittedToolSideEffects, toolDefinitions };
