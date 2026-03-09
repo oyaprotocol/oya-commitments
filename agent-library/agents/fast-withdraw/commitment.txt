@@ -1,5 +1,3 @@
-Fast Withdrawal Rule
-
 If a withdrawal request is otherwise valid under this commitment, an agent may satisfy that withdrawal immediately by sending the requested asset directly to the approved recipient from the agent's own wallet.
 
 After completing the direct fill, the agent may propose exactly one reimbursement transfer from this Safe to the agent's own address for the same asset and amount that the agent delivered.
