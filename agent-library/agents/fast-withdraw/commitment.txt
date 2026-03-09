@@ -1,17 +1,11 @@
 Only the following agent address is authorized to serve this commitment under this fast-withdraw rule: <AUTHORIZED_AGENT_ADDRESS>.
 
-If a withdrawal request is otherwise valid under this commitment, only that authorized agent may satisfy that withdrawal immediately by sending the requested asset directly to the approved recipient from the authorized agent's own wallet.
+If a signed withdrawal request from the user is otherwise valid under this commitment, only that authorized agent may satisfy that withdrawal immediately by sending the requested asset directly to the approved recipient from the authorized agent's own wallet.
 
-After completing the direct fill, the authorized agent may propose exactly one reimbursement transfer from this Safe to the authorized agent address above for the same asset and amount that the authorized agent delivered.
+After completing the direct fill, the authorized agent may propose exactly one reimbursement transfer from this Safe to the authorized agent address above for the same asset and amount that the authorized agent delivered. The reimbursement proposal should include the user's signed withdrawal request as its explanation.
 
 A fast-withdraw reimbursement is valid only if:
 - the direct fill was completed by the authorized agent before the reimbursement proposal;
 - the reimbursement asset matches the filled asset;
 - the reimbursement amount exactly matches the filled amount; and
 - the reimbursement recipient is the authorized agent address above.
-
-The authorized agent must not perform a fast withdrawal unless this Safe holds enough of the relevant asset to reimburse the authorized agent in full.
-
-No other address may perform fast withdrawals or receive fast-withdraw reimbursement under this rule.
-
-This rule does not authorize any reimbursement that is not backed by a completed direct fill by the authorized agent.
