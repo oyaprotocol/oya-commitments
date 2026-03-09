@@ -25,10 +25,32 @@ function hasLlmDecisionEngine(config) {
     return Boolean(config?.openAiApiKey);
 }
 
+function parseHttpStatusCode(value) {
+    const normalized = Number(value);
+    return Number.isInteger(normalized) ? normalized : undefined;
+}
+
+function getDecisionErrorStatusCode(error) {
+    return (
+        parseHttpStatusCode(error?.statusCode) ??
+        parseHttpStatusCode(error?.status) ??
+        parseHttpStatusCode(error?.response?.status)
+    );
+}
+
+function isRetryableHttpStatusCode(statusCode) {
+    return statusCode === 408 || statusCode === 429 || statusCode >= 500;
+}
+
 function isRetryableDecisionError(error) {
     const code = String(error?.code ?? '').toUpperCase();
     if (RETRYABLE_DECISION_ERROR_CODES.has(code)) {
         return true;
+    }
+
+    const statusCode = getDecisionErrorStatusCode(error);
+    if (statusCode !== undefined) {
+        return isRetryableHttpStatusCode(statusCode);
     }
 
     const name = String(error?.name ?? '');
@@ -37,6 +59,13 @@ function isRetryableDecisionError(error) {
     }
 
     const message = String(error?.shortMessage ?? error?.message ?? '').toLowerCase();
+    const messageStatusCode = message.match(
+        /\b(?:api error|http(?: request)? error|status(?: code)?|response)\D+([45]\d{2})\b/
+    );
+    if (messageStatusCode) {
+        return isRetryableHttpStatusCode(Number(messageStatusCode[1]));
+    }
+
     return (
         message.includes('timed out') ||
         message.includes('timeout') ||

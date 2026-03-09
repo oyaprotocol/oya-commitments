@@ -326,8 +326,11 @@ async function decideOnSignals(signals, { onchainPendingProposal = false } = {})
             }
             return DECISION_STATUS.NO_ACTION;
         } catch (error) {
+            const retryableDeterministicError = isRetryableDecisionError(error);
             console.error('[agent] Deterministic tool-call generation failed', error);
-            return DECISION_STATUS.FAILED_RETRYABLE;
+            return retryableDeterministicError
+                ? DECISION_STATUS.FAILED_RETRYABLE
+                : DECISION_STATUS.FAILED_NON_RETRYABLE;
         }
     }
 
@@ -391,8 +394,11 @@ async function decideOnSignals(signals, { onchainPendingProposal = false } = {})
             return DECISION_STATUS.HANDLED;
         }
     } catch (error) {
+        const retryableAgentError = isRetryableDecisionError(error);
         console.error('[agent] Agent call failed', error);
-        return DECISION_STATUS.FAILED_RETRYABLE;
+        return retryableAgentError
+            ? DECISION_STATUS.FAILED_RETRYABLE
+            : DECISION_STATUS.FAILED_NON_RETRYABLE;
     }
 
     return DECISION_STATUS.NO_ACTION;
@@ -537,18 +543,6 @@ async function agentLoop() {
             poolMetaCache,
             resolvedPoolCache,
         });
-        const queuedMessages = [];
-        if (messageInbox) {
-            const batch = messageInbox.takeBatch({
-                maxItems: config.messageApiBatchSize,
-                nowMs: Date.now(),
-            });
-            for (const message of batch) {
-                queuedMessages.push(message);
-                pendingMessageIds.add(message.messageId);
-            }
-        }
-
         const baseSignals = deposits.concat(
             balanceSnapshots,
             newProposals.map((proposal) => ({
@@ -595,6 +589,17 @@ async function agentLoop() {
 
         // Process operator messages one-by-one so each message ID is settled from its own
         // decision status. This prevents dropping unprocessed messages in mixed batches.
+        const queuedMessages = [];
+        if (messageInbox) {
+            const batch = messageInbox.takeBatch({
+                maxItems: config.messageApiBatchSize,
+                nowMs: Date.now(),
+            });
+            for (const message of batch) {
+                queuedMessages.push(message);
+                pendingMessageIds.add(message.messageId);
+            }
+        }
         if (messageInbox && queuedMessages.length > 0) {
             for (const message of queuedMessages) {
                 let messageDecisionStatus = DECISION_STATUS.NO_ACTION;
@@ -615,8 +620,11 @@ async function agentLoop() {
                         });
                     }
                 } catch (error) {
+                    const retryableMessageError = isRetryableDecisionError(error);
                     console.error('[agent] Failed to process user message:', error);
-                    messageDecisionStatus = DECISION_STATUS.FAILED_RETRYABLE;
+                    messageDecisionStatus = retryableMessageError
+                        ? DECISION_STATUS.FAILED_RETRYABLE
+                        : DECISION_STATUS.FAILED_NON_RETRYABLE;
                 }
 
                 if (shouldRequeueMessagesForDecisionStatus(messageDecisionStatus)) {
@@ -628,8 +636,15 @@ async function agentLoop() {
             }
         }
     } catch (error) {
+        const retryableLoopError = isRetryableDecisionError(error);
         if (messageInbox && pendingMessageIds.size > 0) {
-            messageInbox.requeueBatch([...pendingMessageIds]);
+            if (retryableLoopError) {
+                messageInbox.requeueBatch([...pendingMessageIds]);
+            } else {
+                // Settle any in-flight user messages on permanent loop failures to avoid
+                // indefinitely cycling the same batch until TTL expiry.
+                messageInbox.ackBatch([...pendingMessageIds]);
+            }
         }
         console.error('[agent] loop error', error);
     }
