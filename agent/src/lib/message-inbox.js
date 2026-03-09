@@ -23,6 +23,11 @@ function createMessageInbox(options = {}) {
     const defaultTtlSeconds = normalizeInteger(options.defaultTtlSeconds, 3600, { min: 1 });
     const minTtlSeconds = normalizeInteger(options.minTtlSeconds, 30, { min: 1 });
     const maxTtlSeconds = normalizeInteger(options.maxTtlSeconds, 86400, { min: minTtlSeconds });
+    if (defaultTtlSeconds < minTtlSeconds || defaultTtlSeconds > maxTtlSeconds) {
+        throw new Error(
+            `defaultTtlSeconds must be between minTtlSeconds (${minTtlSeconds}) and maxTtlSeconds (${maxTtlSeconds}); received ${defaultTtlSeconds}`
+        );
+    }
     const idempotencyTtlSeconds = normalizeInteger(options.idempotencyTtlSeconds, 86400, {
         min: 1,
     });
