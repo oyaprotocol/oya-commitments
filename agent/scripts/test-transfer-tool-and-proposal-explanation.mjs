@@ -76,8 +76,10 @@ async function run() {
         'recipient',
         'tokenId',
         'amount',
+        'data',
     ]);
-    assert.equal(proposeDef.parameters.properties.explanation.type, 'string');
+    assert.deepEqual(proposeDef.parameters.required, ['transactions', 'explanation']);
+    assert.equal(proposeDef.parameters.properties.explanation.type[0], 'string');
 
     let recordedErc20Transfer;
     const erc20TransferOutputs = await executeToolCalls({

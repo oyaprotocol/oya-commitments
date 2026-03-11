@@ -58,6 +58,13 @@ async function run() {
     assert.ok(ipfsToolDef);
     assert.equal(ipfsToolDef.parameters.properties.pin.type[0], 'boolean');
     assert.equal(ipfsToolDef.parameters.properties.json.type[0], 'string');
+    assert.deepEqual(ipfsToolDef.parameters.required, [
+        'content',
+        'json',
+        'filename',
+        'mediaType',
+        'pin',
+    ]);
 
     const disabledOutputs = await executeToolCalls({
         toolCalls: [
