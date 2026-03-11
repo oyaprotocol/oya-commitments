@@ -108,6 +108,65 @@ function parseStringMap(raw, envName) {
     return out;
 }
 
+function parseErc1155AssetList(raw, envName) {
+    if (!raw) return [];
+
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    } catch (error) {
+        throw new Error(`${envName} must be valid JSON array`);
+    }
+    if (!Array.isArray(parsed)) {
+        throw new Error(`${envName} must be a JSON array`);
+    }
+
+    return parsed.map((item, index) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) {
+            throw new Error(`${envName}[${index}] must be an object`);
+        }
+        const tokenRaw = typeof item.token === 'string' ? item.token.trim() : '';
+        if (!tokenRaw) {
+            throw new Error(`${envName}[${index}].token must be a non-empty address string`);
+        }
+
+        const tokenIdRaw =
+            typeof item.tokenId === 'string' || typeof item.tokenId === 'number'
+                ? String(item.tokenId).trim()
+                : '';
+        if (!tokenIdRaw) {
+            throw new Error(`${envName}[${index}].tokenId must be a non-empty integer string`);
+        }
+
+        let normalizedTokenId;
+        try {
+            normalizedTokenId = BigInt(tokenIdRaw);
+        } catch (error) {
+            throw new Error(`${envName}[${index}].tokenId must be a non-negative integer`);
+        }
+        if (normalizedTokenId < 0n) {
+            throw new Error(`${envName}[${index}].tokenId must be a non-negative integer`);
+        }
+
+        let symbol;
+        if (item.symbol !== undefined && item.symbol !== null) {
+            if (typeof item.symbol !== 'string') {
+                throw new Error(`${envName}[${index}].symbol must be a string`);
+            }
+            const trimmedSymbol = item.symbol.trim();
+            if (trimmedSymbol) {
+                symbol = trimmedSymbol;
+            }
+        }
+
+        return {
+            token: getAddress(tokenRaw),
+            tokenId: normalizedTokenId.toString(),
+            symbol,
+        };
+    });
+}
+
 function buildConfig() {
     const rpcUrl = mustGetEnv('RPC_URL');
     const commitmentSafe = getAddress(mustGetEnv('COMMITMENT_SAFE'));
@@ -254,6 +313,10 @@ function buildConfig() {
         logChunkSize: parsePositiveBigInt(process.env.LOG_CHUNK_SIZE, 'LOG_CHUNK_SIZE'),
         startBlock: process.env.START_BLOCK ? BigInt(process.env.START_BLOCK) : undefined,
         watchAssets: parseAddressList(process.env.WATCH_ASSETS),
+        watchErc1155Assets: parseErc1155AssetList(
+            process.env.WATCH_ERC1155_ASSETS_JSON,
+            'WATCH_ERC1155_ASSETS_JSON'
+        ),
         watchNativeBalance:
             process.env.WATCH_NATIVE_BALANCE === undefined
                 ? true
