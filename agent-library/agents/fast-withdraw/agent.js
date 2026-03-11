@@ -95,9 +95,9 @@ function buildArtifactFilename(requestId) {
     return `${FILENAME_PREFIX}${encodeRequestIdForFilename(requestId)}${FILENAME_SUFFIX}`;
 }
 
-function buildWithdrawalRequestArtifact({ message, commitmentSafe, agentAddress }) {
+function buildSignedRequestArchiveArtifact({ message, commitmentSafe, agentAddress }) {
     if (!isSignedUserMessage(message)) {
-        throw new Error('buildWithdrawalRequestArtifact requires a signed userMessage signal.');
+        throw new Error('buildSignedRequestArchiveArtifact requires a signed userMessage signal.');
     }
 
     const canonicalSignedMessage = buildSignedMessagePayload({
@@ -139,7 +139,7 @@ function buildWithdrawalRequestArtifact({ message, commitmentSafe, agentAddress 
     };
 }
 
-function buildArchivedRequestRecord({ message, commitmentSafe, agentAddress }) {
+function buildSignedRequestArchiveRecord({ message, commitmentSafe, agentAddress }) {
     return {
         requestId: message.requestId,
         messageId: message.messageId ?? null,
@@ -205,14 +205,14 @@ async function getDeterministicToolCalls({
         if (requestArchiveState.requests?.[requestId]?.artifactCid) continue;
 
         const filename = buildArtifactFilename(requestId);
-        const artifact = buildWithdrawalRequestArtifact({
+        const artifact = buildSignedRequestArchiveArtifact({
             message,
             commitmentSafe,
             agentAddress,
         });
         pendingArtifactPublishes.set(
             filename,
-            buildArchivedRequestRecord({
+            buildSignedRequestArchiveRecord({
                 message,
                 commitmentSafe,
                 agentAddress,
@@ -287,7 +287,7 @@ function setRequestArchiveStatePathForTest(nextPath) {
 
 export {
     buildArtifactFilename,
-    buildWithdrawalRequestArtifact,
+    buildSignedRequestArchiveArtifact,
     decodeRequestIdFromFilename,
     getDeterministicToolCalls,
     getRequestArchiveState,

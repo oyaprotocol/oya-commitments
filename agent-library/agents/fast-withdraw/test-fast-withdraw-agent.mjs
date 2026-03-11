@@ -4,7 +4,7 @@ import path from 'node:path';
 import { mkdtemp } from 'node:fs/promises';
 import { buildSignedMessagePayload } from '../../../agent/src/lib/message-signing.js';
 import {
-    buildWithdrawalRequestArtifact,
+    buildSignedRequestArchiveArtifact,
     decodeRequestIdFromFilename,
     getDeterministicToolCalls,
     getRequestArchiveState,
@@ -67,7 +67,7 @@ async function run() {
         assert.ok(prompt.includes('ipfs_publish'));
 
         const signal = buildSignedMessageSignal();
-        const artifact = buildWithdrawalRequestArtifact({
+        const artifact = buildSignedRequestArchiveArtifact({
             message: signal,
             commitmentSafe: TEST_SAFE,
             agentAddress: TEST_AGENT,
