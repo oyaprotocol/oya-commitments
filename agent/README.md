@@ -18,8 +18,8 @@ This is beta software provided “as is.” Use at your own risk. No guarantees 
    - `RPC_URL`: RPC the agent should use
    - `COMMITMENT_SAFE`: Safe address holding assets
    - `OG_MODULE`: Optimistic Governor module address
-   - `WATCH_ASSETS`: Comma-separated ERC20s to monitor (the OG collateral is auto-added)
-   - `WATCH_ERC1155_ASSETS_JSON`: Optional JSON array of tracked ERC1155 assets, for example `[{"token":"0x...","tokenId":"42","symbol":"TEST-42"}]`
+   - `WATCH_ASSETS`: Comma-separated ERC20s to monitor when the selected agent does not override watchlists in `config.json` (the OG collateral is auto-added)
+   - `WATCH_ERC1155_ASSETS_JSON`: Optional JSON array of tracked ERC1155 assets used as fallback when the selected agent does not override ERC1155 watchlists in `config.json`
    - Signer selection: `SIGNER_TYPE` (default `env`)
      - `env`: `PRIVATE_KEY`
      - `keystore`: `KEYSTORE_PATH`, `KEYSTORE_PASSWORD`
@@ -397,6 +397,37 @@ Set `PROPOSE_ENABLED` and `DISPUTE_ENABLED` to control behavior:
 
 Use `AGENT_MODULE` to point to an agent implementation name (e.g., `default`, `timelock-withdraw`). The runner will load `agent-library/agents/<name>/agent.js`.
 Each agent directory must include a `commitment.txt` with the plain language commitment the agent is designed to serve.
+An agent directory may also include an optional `config.json` for repo-tracked, non-secret configuration.
+
+`config.json` is loaded from `agent-library/agents/<name>/config.json` and merged like this:
+- top-level keys apply on every chain
+- `byChain.<chainId>` overrides top-level keys for the active RPC chain
+- `watchAssets` and `watchErc1155Assets` from the file override env watchlists when present
+- if the file is missing, or those keys are absent, the runner falls back to `WATCH_ASSETS` and `WATCH_ERC1155_ASSETS_JSON`
+
+Example:
+
+```json
+{
+  "policyName": "fast-withdraw",
+  "byChain": {
+    "11155111": {
+      "watchAssets": [
+        "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
+      ],
+      "watchErc1155Assets": [
+        {
+          "token": "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
+          "tokenId": "123456789",
+          "symbol": "YES-123456789"
+        }
+      ]
+    }
+  }
+}
+```
+
+The merged result is exposed to agent modules as `config.agentConfig`, while the resolved active-chain watchlists still appear at `config.watchAssets` and `config.watchErc1155Assets`.
 
 You can validate a module quickly:
 
