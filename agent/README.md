@@ -25,7 +25,7 @@ This is beta software provided “as is.” Use at your own risk. No guarantees 
      - `keychain`: `KEYCHAIN_SERVICE`, `KEYCHAIN_ACCOUNT` (macOS Keychain or Linux Secret Service)
      - `vault`: `VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_SECRET_PATH`, optional `VAULT_SECRET_KEY` (default `private_key`)
      - `kms`/`vault-signer`/`rpc`: `SIGNER_RPC_URL`, `SIGNER_ADDRESS` (JSON-RPC signer that accepts `eth_sendTransaction`)
-   - Optional tuning: `POLL_INTERVAL_MS`, `LOG_CHUNK_SIZE`, `PROPOSAL_HASH_RESOLVE_TIMEOUT_MS`, `PROPOSAL_HASH_RESOLVE_POLL_INTERVAL_MS`, `START_BLOCK`, `WATCH_NATIVE_BALANCE`, `DEFAULT_DEPOSIT_*`, `AGENT_MODULE`, `UNISWAP_V3_FACTORY`, `UNISWAP_V3_QUOTER`, `UNISWAP_V3_FEE_TIERS`, `POLYMARKET_*`, `MESSAGE_API_*`
+   - Optional tuning: `POLL_INTERVAL_MS`, `LOG_CHUNK_SIZE`, `PROPOSAL_HASH_RESOLVE_TIMEOUT_MS`, `PROPOSAL_HASH_RESOLVE_POLL_INTERVAL_MS`, `START_BLOCK`, `WATCH_NATIVE_BALANCE`, `DEFAULT_DEPOSIT_*`, `AGENT_MODULE`, `UNISWAP_V3_FACTORY`, `UNISWAP_V3_QUOTER`, `UNISWAP_V3_FEE_TIERS`, `POLYMARKET_*`, `MESSAGE_API_*`, `IPFS_*`
    - Optional proposals: `PROPOSE_ENABLED` (default true), `ALLOW_PROPOSE_ON_SIMULATION_FAIL` (default false)
    - Optional disputes: `DISPUTE_ENABLED` (default true), `DISPUTE_RETRY_MS` (default 60000)
    - Optional LLM: `OPENAI_API_KEY`, `OPENAI_MODEL` (default `gpt-4.1-mini`), `OPENAI_BASE_URL`
@@ -69,6 +69,7 @@ For interactions, swap the env var (e.g., `PROPOSER_PK`, `EXECUTOR_PK`). For sig
 - **Timelock triggers**: Parses plain language timelocks in rules (absolute dates or “X minutes after deposit”) and emits `timelock` signals when due.
 - **Price triggers**: If a module exports `getPriceTriggers({ commitmentText, config })`, the runner evaluates those parsed/inferred Uniswap V3 thresholds and emits `priceTrigger` signals.
 - **Optional message API**: When enabled, accepts authenticated user messages over HTTP and injects them as `userMessage` signals for the next decision cycle.
+- **Optional IPFS publishing**: When enabled, agents can publish text/JSON artifacts to a Kubo-compatible IPFS API and pin the resulting CID.
 
 All other behavior is intentionally left out. Implement your own agent in `agent-library/agents/<name>/agent.js` to add commitment-specific logic and tool use.
 
@@ -164,6 +165,21 @@ node agent/scripts/send-signed-message.mjs \
   --request-id="pause-2h"
 ```
 
+### IPFS Publishing (Optional)
+
+Enable IPFS artifact publishing when agents need to store signed requests, explanations, or other artifacts offchain and refer to them by CID.
+
+- `IPFS_ENABLED`: Enable the `ipfs_publish` tool (`true`/`false`, default `false`).
+- `IPFS_API_URL`: Base URL for a Kubo-compatible IPFS API (default `http://127.0.0.1:5001`).
+- `IPFS_HEADERS_JSON`: Optional JSON object of extra HTTP headers for the IPFS API, for example `{"Authorization":"Bearer <token>"}`.
+- `IPFS_REQUEST_TIMEOUT_MS`: Optional request timeout (default `15000`).
+- `IPFS_MAX_RETRIES`: Optional retry count for transient IPFS failures (default `1`).
+- `IPFS_RETRY_DELAY_MS`: Optional retry delay in milliseconds (default `250`).
+
+Tool:
+
+- `ipfs_publish`: Publish either raw string content or structured JSON content to IPFS. It pins the returned CID by default and returns `cid`, `uri`, `pinned`, `publishResult`, and `pinResult`.
+
 ### Uniswap Swap Action in `build_og_transactions`
 
 `build_og_transactions` supports action kind `uniswap_v3_exact_input_single`, which expands to:
@@ -209,7 +225,8 @@ Set these when using Polymarket functionality:
 - `PROPOSE_ENABLED=true` and/or `DISPUTE_ENABLED=true`: onchain tools are enabled (`build_og_transactions`, `make_deposit`, `make_transfer`, `make_erc1155_deposit`, propose/dispute tools).
 - `PROPOSE_ENABLED=false` and `DISPUTE_ENABLED=false`: onchain tools are disabled.
 - `POLYMARKET_CLOB_ENABLED=true`: CLOB tools can still run in this mode (`polymarket_clob_place_order`, `polymarket_clob_build_sign_and_place_order`, `polymarket_clob_cancel_orders`).
-- All three disabled (`PROPOSE_ENABLED=false`, `DISPUTE_ENABLED=false`, `POLYMARKET_CLOB_ENABLED=false`): monitor/opinion only.
+- `IPFS_ENABLED=true`: IPFS publishing tools can run in this mode (`ipfs_publish`), even if onchain/CLOB tools are disabled.
+- All four disabled (`PROPOSE_ENABLED=false`, `DISPUTE_ENABLED=false`, `POLYMARKET_CLOB_ENABLED=false`, `IPFS_ENABLED=false`): monitor/opinion only.
 
 #### CTF Actions (`build_og_transactions`)
 
