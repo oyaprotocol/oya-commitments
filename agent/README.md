@@ -204,7 +204,7 @@ Set these when using Polymarket functionality:
 
 #### Execution Modes
 
-- `PROPOSE_ENABLED=true` and/or `DISPUTE_ENABLED=true`: onchain tools are enabled (`build_og_transactions`, `make_deposit`, `make_erc1155_deposit`, propose/dispute tools).
+- `PROPOSE_ENABLED=true` and/or `DISPUTE_ENABLED=true`: onchain tools are enabled (`build_og_transactions`, `make_deposit`, `make_transfer`, `make_erc1155_deposit`, propose/dispute tools).
 - `PROPOSE_ENABLED=false` and `DISPUTE_ENABLED=false`: onchain tools are disabled.
 - `POLYMARKET_CLOB_ENABLED=true`: CLOB tools can still run in this mode (`polymarket_clob_place_order`, `polymarket_clob_build_sign_and_place_order`, `polymarket_clob_cancel_orders`).
 - All three disabled (`PROPOSE_ENABLED=false`, `DISPUTE_ENABLED=false`, `POLYMARKET_CLOB_ENABLED=false`): monitor/opinion only.
