@@ -5,23 +5,19 @@ import { mkdtemp } from 'node:fs/promises';
 import { buildSignedMessagePayload } from '../../../agent/src/lib/message-signing.js';
 import {
     buildSignedRequestArchiveArtifact,
+    enrichSignals,
     decodeRequestIdFromFilename,
-    getDeterministicToolCalls,
     getRequestArchiveState,
     getSystemPrompt,
     onToolOutput,
     resetRequestArchiveState,
     setRequestArchiveStatePathForTest,
+    validateToolCalls,
 } from './agent.js';
-
 const TEST_SIGNER = '0x1111111111111111111111111111111111111111';
 const TEST_SAFE = '0x2222222222222222222222222222222222222222';
 const TEST_AGENT = '0x3333333333333333333333333333333333333333';
 const TEST_SIGNATURE = `0x${'1a'.repeat(65)}`;
-
-function parseToolArguments(toolCall) {
-    return JSON.parse(toolCall.arguments);
-}
 
 function buildSignedMessageSignal() {
     return {
@@ -65,6 +61,7 @@ async function run() {
         assert.ok(prompt.includes('archive each signed request to IPFS'));
         assert.ok(prompt.includes('canonical signed message'));
         assert.ok(prompt.includes('ipfs_publish'));
+        assert.ok(prompt.includes('Do not treat args as authoritative'));
 
         const signal = buildSignedMessageSignal();
         const artifact = buildSignedRequestArchiveArtifact({
@@ -89,23 +86,94 @@ async function run() {
             })
         );
 
-        const toolCalls = await getDeterministicToolCalls({
-            signals: [signal],
-            commitmentSafe: TEST_SAFE,
-            agentAddress: TEST_AGENT,
+        const enrichedSignals = await enrichSignals([signal], {
+            config: {
+                commitmentSafe: TEST_SAFE,
+            },
+            account: {
+                address: TEST_AGENT,
+            },
+        });
+        assert.equal(enrichedSignals.length, 2);
+        const archiveSignal = enrichedSignals.find((entry) => entry.kind === 'signedRequestArchive');
+        assert.ok(archiveSignal);
+        assert.equal(archiveSignal.requestId, signal.requestId);
+        assert.equal(archiveSignal.archived, false);
+        assert.equal(archiveSignal.archiveArtifact.signedRequest.signature, TEST_SIGNATURE);
+        assert.equal(
+            decodeRequestIdFromFilename(archiveSignal.archiveFilename),
+            signal.requestId
+        );
+
+        const validatedToolCalls = await validateToolCalls({
+            toolCalls: [
+                {
+                    callId: 'archive-1',
+                    name: 'ipfs_publish',
+                    arguments: JSON.stringify({
+                        json: archiveSignal.archiveArtifact,
+                        filename: archiveSignal.archiveFilename,
+                        pin: false,
+                    }),
+                },
+            ],
+            signals: enrichedSignals,
             config: {
                 ipfsEnabled: true,
             },
         });
-        assert.equal(toolCalls.length, 1);
-        assert.equal(toolCalls[0].name, 'ipfs_publish');
-        const toolArgs = parseToolArguments(toolCalls[0]);
+        assert.equal(validatedToolCalls.length, 1);
+        assert.equal(validatedToolCalls[0].name, 'ipfs_publish');
+        const toolArgs = validatedToolCalls[0].parsedArguments;
         assert.equal(toolArgs.pin, true);
         assert.equal(toolArgs.json.requestId, signal.requestId);
         assert.equal(toolArgs.json.signedRequest.signature, TEST_SIGNATURE);
-        assert.equal(
-            decodeRequestIdFromFilename(toolArgs.filename),
-            signal.requestId
+
+        await assert.rejects(
+            () =>
+                validateToolCalls({
+                    toolCalls: [
+                        {
+                            callId: 'archive-bad',
+                            name: 'ipfs_publish',
+                            arguments: JSON.stringify({
+                                json: {
+                                    ...archiveSignal.archiveArtifact,
+                                    requestId: 'tampered-request-id',
+                                },
+                                filename: archiveSignal.archiveFilename,
+                                pin: true,
+                            }),
+                        },
+                    ],
+                    signals: enrichedSignals,
+                    config: {
+                        ipfsEnabled: true,
+                    },
+                }),
+            /exactly match/
+        );
+
+        await assert.rejects(
+            () =>
+                validateToolCalls({
+                    toolCalls: [
+                        {
+                            callId: 'archive-disabled',
+                            name: 'ipfs_publish',
+                            arguments: JSON.stringify({
+                                json: archiveSignal.archiveArtifact,
+                                filename: archiveSignal.archiveFilename,
+                                pin: true,
+                            }),
+                        },
+                    ],
+                    signals: enrichedSignals,
+                    config: {
+                        ipfsEnabled: false,
+                    },
+                }),
+            /IPFS_ENABLED=true/
         );
 
         await onToolOutput({
@@ -127,47 +195,39 @@ async function run() {
         assert.equal(state.requests[signal.requestId].signer, TEST_SIGNER);
         assert.equal(state.requests[signal.requestId].signature, TEST_SIGNATURE);
 
-        const duplicateToolCalls = await getDeterministicToolCalls({
-            signals: [signal],
-            commitmentSafe: TEST_SAFE,
-            agentAddress: TEST_AGENT,
+        const enrichedSignalsAfterArchive = await enrichSignals([signal], {
             config: {
-                ipfsEnabled: true,
+                commitmentSafe: TEST_SAFE,
+            },
+            account: {
+                address: TEST_AGENT,
             },
         });
-        assert.equal(duplicateToolCalls.length, 0);
-
-        const unsignedCalls = await getDeterministicToolCalls({
-            signals: [
-                {
-                    ...signal,
-                    requestId: 'unsigned-test',
-                    sender: {
-                        authType: 'apiKey',
-                        keyId: 'test',
-                    },
-                },
-            ],
-            commitmentSafe: TEST_SAFE,
-            agentAddress: TEST_AGENT,
-            config: {
-                ipfsEnabled: true,
-            },
-        });
-        assert.equal(unsignedCalls.length, 0);
-
-        await assert.rejects(
-            () =>
-                getDeterministicToolCalls({
-                    signals: [buildSignedMessageSignal()],
-                    commitmentSafe: TEST_SAFE,
-                    agentAddress: TEST_AGENT,
-                    config: {
-                        ipfsEnabled: false,
-                    },
-                }),
-            /IPFS_ENABLED=true/
+        const archivedSignal = enrichedSignalsAfterArchive.find(
+            (entry) => entry.kind === 'signedRequestArchive'
         );
+        assert.ok(archivedSignal);
+        assert.equal(archivedSignal.archived, true);
+        assert.equal(archivedSignal.artifactCid, 'bafyfastwithdrawcid');
+
+        const unsignedSignals = await enrichSignals([
+            {
+                ...signal,
+                requestId: 'unsigned-test',
+                sender: {
+                    authType: 'apiKey',
+                    keyId: 'test',
+                },
+            },
+        ], {
+            config: {
+                commitmentSafe: TEST_SAFE,
+            },
+            account: {
+                address: TEST_AGENT,
+            },
+        });
+        assert.equal(unsignedSignals.length, 1);
 
         console.log('[test] fast-withdraw agent OK');
     } finally {
