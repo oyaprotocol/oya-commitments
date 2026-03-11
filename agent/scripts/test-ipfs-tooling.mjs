@@ -57,6 +57,7 @@ async function run() {
     const ipfsToolDef = enabledDefs.find((tool) => tool.name === 'ipfs_publish');
     assert.ok(ipfsToolDef);
     assert.equal(ipfsToolDef.parameters.properties.pin.type[0], 'boolean');
+    assert.equal(ipfsToolDef.parameters.properties.json.type[0], 'string');
 
     const disabledOutputs = await executeToolCalls({
         toolCalls: [
@@ -117,10 +118,10 @@ async function run() {
                     callId: 'ipfs-publish',
                     name: 'ipfs_publish',
                     arguments: {
-                        json: {
+                        json: JSON.stringify({
                             z: 2,
                             a: 1,
-                        },
+                        }),
                         filename: 'artifact.json',
                         pin: true,
                     },

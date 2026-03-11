@@ -664,6 +664,27 @@ function parseCallArgs(call) {
     return null;
 }
 
+function parseIpfsPublishJsonArg(value) {
+    if (value === undefined || value === null) {
+        return null;
+    }
+    if (typeof value === 'string') {
+        try {
+            const parsed = JSON.parse(value);
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                throw new Error('ipfs_publish json must decode to a JSON object.');
+            }
+            return parsed;
+        } catch (error) {
+            throw new Error(`ipfs_publish json must be valid JSON object text: ${error?.message ?? error}`);
+        }
+    }
+    if (typeof value === 'object' && !Array.isArray(value)) {
+        return value;
+    }
+    throw new Error('ipfs_publish json must be a JSON object or JSON object string.');
+}
+
 function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
     const mode = proposeEnabled && disputeEnabled
         ? 'You may use proposal and dispute tools when the fast-withdraw lifecycle requires them.'
@@ -875,7 +896,8 @@ async function validateToolCalls({
             if (args.content !== undefined && args.content !== null) {
                 throw new Error('fast-withdraw archival only allows JSON artifacts, not raw content.');
             }
-            if (canonicalJson(args.json) !== canonicalJson(archiveSignal.archiveArtifact)) {
+            const archiveJson = parseIpfsPublishJsonArg(args.json);
+            if (canonicalJson(archiveJson) !== canonicalJson(archiveSignal.archiveArtifact)) {
                 throw new Error(
                     'ipfs_publish json must exactly match the prepared signed request archive artifact.'
                 );

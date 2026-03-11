@@ -179,7 +179,7 @@ Enable IPFS artifact publishing when agents need to store signed requests, expla
 
 Tool:
 
-- `ipfs_publish`: Publish either raw string content or structured JSON content to IPFS. It pins the returned CID by default and returns `cid`, `uri`, `pinned`, `publishResult`, and `pinResult`.
+- `ipfs_publish`: Publish either raw string content or structured JSON content to IPFS. For tool calls, JSON content is passed as JSON text and canonicalized before upload. It pins the returned CID by default and returns `cid`, `uri`, `pinned`, `publishResult`, and `pinResult`.
 
 ### ERC1155 Tracking (Optional)
 

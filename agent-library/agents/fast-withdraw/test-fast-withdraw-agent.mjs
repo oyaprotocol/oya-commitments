@@ -195,7 +195,7 @@ async function run() {
                     callId: 'archive-request',
                     name: 'ipfs_publish',
                     arguments: JSON.stringify({
-                        json: archiveSignal.archiveArtifact,
+                        json: JSON.stringify(archiveSignal.archiveArtifact),
                         filename: archiveSignal.archiveFilename,
                         pin: false,
                     }),
@@ -455,7 +455,7 @@ async function run() {
                     callId: 'archive-erc1155-request',
                     name: 'ipfs_publish',
                     arguments: JSON.stringify({
-                        json: erc1155ArchiveSignal.archiveArtifact,
+                        json: JSON.stringify(erc1155ArchiveSignal.archiveArtifact),
                         filename: erc1155ArchiveSignal.archiveFilename,
                     }),
                 },
