@@ -1,7 +1,7 @@
 {
   "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
   "name": "Oya Fast Withdraw Agent",
-  "description": "Fast-withdraw commitment agent that archives signed user withdrawal requests to IPFS as the first step toward direct fills and reimbursement proposals.",
+  "description": "Fast-withdraw commitment agent that archives signed user withdrawal requests, performs direct fills from the agent wallet, and submits matching reimbursement proposals after fill confirmations.",
   "image": "https://raw.githubusercontent.com/oya-commitments/oya-commitments/main/agent-library/agents/default/agent.png",
   "endpoints": [],
   "registrations": []
