@@ -57,11 +57,11 @@ async function authenticateSignedRequest({
     if (!Number.isInteger(auth.timestampMs)) {
         return { ok: false, statusCode: 400, message: 'auth.timestampMs must be an integer.' };
     }
-    if (typeof body.idempotencyKey !== 'string' || !body.idempotencyKey.trim()) {
+    if (typeof body.requestId !== 'string' || !body.requestId.trim()) {
         return {
             ok: false,
             statusCode: 400,
-            message: 'idempotencyKey is required when using signed auth.',
+            message: 'requestId is required when using signed auth.',
         };
     }
 
@@ -94,8 +94,8 @@ async function authenticateSignedRequest({
         command: body.command,
         args: body.args,
         metadata: body.metadata,
-        idempotencyKey: body.idempotencyKey,
-        ttlSeconds: body.ttlSeconds,
+        requestId: body.requestId,
+        deadline: body.deadline,
     });
 
     let recoveredAddress;
@@ -121,6 +121,7 @@ async function authenticateSignedRequest({
             authType: 'eip191',
             address: declaredAddress,
             signedAtMs: auth.timestampMs,
+            signature: auth.signature,
         },
     };
 }
@@ -163,8 +164,8 @@ function validateMessageBody(body) {
         'command',
         'args',
         'metadata',
-        'idempotencyKey',
-        'ttlSeconds',
+        'requestId',
+        'deadline',
         'auth',
     ]);
     for (const field of Object.keys(body)) {
@@ -185,11 +186,14 @@ function validateMessageBody(body) {
     if (body.metadata !== undefined && !isPlainObject(body.metadata)) {
         return { ok: false, message: 'metadata must be an object when provided.' };
     }
-    if (body.idempotencyKey !== undefined && typeof body.idempotencyKey !== 'string') {
-        return { ok: false, message: 'idempotencyKey must be a string when provided.' };
+    if (body.requestId !== undefined && typeof body.requestId !== 'string') {
+        return { ok: false, message: 'requestId must be a string when provided.' };
     }
-    if (body.ttlSeconds !== undefined && !Number.isInteger(body.ttlSeconds)) {
-        return { ok: false, message: 'ttlSeconds must be an integer when provided.' };
+    if (body.deadline !== undefined && !Number.isInteger(body.deadline)) {
+        return {
+            ok: false,
+            message: 'deadline must be an integer Unix timestamp in milliseconds when provided.',
+        };
     }
     if (body.auth !== undefined && !isPlainObject(body.auth)) {
         return { ok: false, message: 'auth must be an object when provided.' };
@@ -327,8 +331,8 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
                 command: body.command,
                 args: body.args,
                 metadata: body.metadata,
-                idempotencyKey: body.idempotencyKey,
-                ttlSeconds: body.ttlSeconds,
+                requestId: body.requestId,
+                deadline: body.deadline,
                 senderKeyId,
                 sender,
                 nowMs,
@@ -358,7 +362,7 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
                     });
                     return;
                 }
-                if (result.code === 'idempotency_replay_blocked') {
+                if (result.code === 'request_replay_blocked') {
                     sendJson(res, 409, {
                         error: result.message,
                         code: result.code,

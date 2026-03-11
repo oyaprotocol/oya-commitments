@@ -93,10 +93,10 @@ Enable inbound user messages with one or both auth modes:
 - `MESSAGE_API_MAX_TEXT_LENGTH`: Max `text` length (default `2000`).
 - `MESSAGE_API_QUEUE_LIMIT`: Max queued/in-flight messages (default `500`).
 - `MESSAGE_API_BATCH_SIZE`: Max messages consumed per agent loop (default `25`).
-- `MESSAGE_API_DEFAULT_TTL_SECONDS`: Default TTL when omitted (default `3600`).
-- `MESSAGE_API_MIN_TTL_SECONDS`: Minimum allowed TTL (default `30`).
-- `MESSAGE_API_MAX_TTL_SECONDS`: Maximum allowed TTL (default `86400`).
-- `MESSAGE_API_IDEMPOTENCY_TTL_SECONDS`: Idempotency cache window (default `86400`).
+- `MESSAGE_API_DEFAULT_TTL_SECONDS`: Default message lifetime applied when `deadline` is omitted (default `3600`).
+- `MESSAGE_API_MIN_TTL_SECONDS`: Minimum allowed remaining lifetime for `deadline` (default `30`).
+- `MESSAGE_API_MAX_TTL_SECONDS`: Maximum allowed remaining lifetime for `deadline` (default `86400`).
+- `MESSAGE_API_IDEMPOTENCY_TTL_SECONDS`: Request replay/dedup cache window (default `86400`).
 - `MESSAGE_API_RATE_LIMIT_PER_MINUTE`: Per-key refill rate (default `30`).
 - `MESSAGE_API_RATE_LIMIT_BURST`: Per-key burst capacity (default `10`).
 
@@ -117,8 +117,8 @@ Endpoints:
   "command": "pause_proposals",
   "args": { "hours": 2 },
   "metadata": { "ticket": "INC-42" },
-  "idempotencyKey": "inc-42-pause",
-  "ttlSeconds": 7200,
+  "requestId": "inc-42-pause",
+  "deadline": 1735696800000,
   "auth": {
     "type": "eip191",
     "address": "0x1111111111111111111111111111111111111111",
@@ -130,10 +130,11 @@ Endpoints:
 
 `auth` is optional for Bearer-token requests. For signed auth:
 - `auth.type` must be `eip191`
-- `idempotencyKey` is required
+- `requestId` is required
+- `deadline` is optional and, when present, must be a Unix timestamp in milliseconds
 - signature is verified against a canonical payload that includes
-  `address`, `timestampMs`, `text`, `command`, `args`, `metadata`, `idempotencyKey`, and `ttlSeconds`
-- signed requests keep idempotency replay-locked for at least `MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS`; replays during that window return `409` with code `idempotency_replay_blocked`
+  `address`, `timestampMs`, `text`, `command`, `args`, `metadata`, `requestId`, and `deadline`
+- signed requests keep `requestId` replay-locked for at least `MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS`; replays during that window return `409` with code `request_replay_blocked`
 
 Example request:
 
@@ -142,7 +143,7 @@ curl -sS \
   -X POST "http://127.0.0.1:8787/v1/messages" \
   -H "Authorization: Bearer k_live_replace_me" \
   -H "Content-Type: application/json" \
-  -d '{"text":"Pause proposals for 2 hours","command":"pause_proposals","args":{"hours":2},"idempotencyKey":"pause-2h"}'
+  -d '{"text":"Pause proposals for 2 hours","command":"pause_proposals","args":{"hours":2},"requestId":"pause-2h"}'
 ```
 
 Signed-auth test script:
@@ -159,7 +160,8 @@ node agent/scripts/send-signed-message.mjs \
   --private-key="0x<signer-private-key>" \
   --url="http://127.0.0.1:8787" \
   --command="pause_proposals" \
-  --args-json='{"hours":2}'
+  --args-json='{"hours":2}' \
+  --request-id="pause-2h"
 ```
 
 ### Uniswap Swap Action in `build_og_transactions`
