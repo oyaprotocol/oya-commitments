@@ -49,6 +49,15 @@ async function run() {
                 },
             },
             {
+                callId: 'transfer',
+                name: 'make_transfer',
+                arguments: {
+                    asset: '0x6666666666666666666666666666666666666666',
+                    recipient: '0x7777777777777777777777777777777777777777',
+                    amountWei: '2',
+                },
+            },
+            {
                 callId: 'erc1155',
                 name: 'make_erc1155_deposit',
                 arguments: {
@@ -65,7 +74,7 @@ async function run() {
         ogContext: null,
     });
 
-    assert.equal(results.length, 2);
+    assert.equal(results.length, 3);
 
     const depositOut = parseOutput(results[0]);
     assert.equal(depositOut.status, 'submitted');
@@ -73,7 +82,13 @@ async function run() {
     assert.match(depositOut.receiptCheckError, /receipt RPC unavailable/i);
     assert.ok(depositOut.transactionHash);
 
-    const erc1155Out = parseOutput(results[1]);
+    const transferOut = parseOutput(results[1]);
+    assert.equal(transferOut.status, 'submitted');
+    assert.equal(transferOut.pendingConfirmation, true);
+    assert.match(transferOut.receiptCheckError, /receipt RPC unavailable/i);
+    assert.ok(transferOut.transactionHash);
+
+    const erc1155Out = parseOutput(results[2]);
     assert.equal(erc1155Out.status, 'submitted');
     assert.equal(erc1155Out.pendingConfirmation, true);
     assert.match(erc1155Out.receiptCheckError, /receipt RPC unavailable/i);

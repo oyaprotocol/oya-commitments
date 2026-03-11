@@ -3,6 +3,7 @@ import {
     buildOgTransactions,
     makeDeposit,
     makeErc1155Deposit,
+    makeTransfer,
     postBondAndDispute,
     postBondAndPropose,
 } from './tx.js';
@@ -361,6 +362,33 @@ function toolDefinitions({
         },
         {
             type: 'function',
+            name: 'make_transfer',
+            description:
+                'Transfer funds directly from the agent wallet to any recipient. Use asset=0x000...000 for native ETH. amountWei must be a string of the integer wei amount.',
+            strict: true,
+            parameters: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                    asset: {
+                        type: 'string',
+                        description:
+                            'Asset address (ERC20) or 0x0000000000000000000000000000000000000000 for native.',
+                    },
+                    recipient: {
+                        type: 'string',
+                        description: 'Recipient address for the transfer.',
+                    },
+                    amountWei: {
+                        type: 'string',
+                        description: 'Amount in wei as a string.',
+                    },
+                },
+                required: ['asset', 'recipient', 'amountWei'],
+            },
+        },
+        {
+            type: 'function',
             name: 'make_erc1155_deposit',
             description:
                 'Deposit ERC1155 tokens into the commitment Safe using safeTransferFrom from the agent wallet.',
@@ -420,6 +448,11 @@ function toolDefinitions({
                             },
                             required: ['to', 'value', 'data', 'operation'],
                         },
+                    },
+                    explanation: {
+                        type: 'string',
+                        description:
+                            'Optional human-readable explanation bytes to attach to the proposal.',
                     },
                 },
                 required: ['transactions'],
@@ -1046,6 +1079,56 @@ async function executeToolCalls({
             continue;
         }
 
+        if (call.name === 'make_transfer') {
+            if (!onchainToolsEnabled) {
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'skipped',
+                        reason: 'onchain tools disabled',
+                    }),
+                });
+                continue;
+            }
+            const txHash = await makeTransfer({
+                walletClient,
+                account,
+                asset: args.asset,
+                recipient: args.recipient,
+                amountWei: BigInt(args.amountWei),
+            });
+            sideEffectsLikelyCommitted = true;
+            try {
+                await publicClient.waitForTransactionReceipt({ hash: txHash });
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'confirmed',
+                        transactionHash: String(txHash),
+                    }),
+                });
+            } catch (error) {
+                const timeout = isReceiptWaitTimeoutError(error);
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'submitted',
+                        transactionHash: String(txHash),
+                        pendingConfirmation: true,
+                        receiptCheckError: timeout ? undefined : error?.message ?? String(error),
+                        warning:
+                            timeout
+                                ? 'Timed out waiting for transfer receipt; transaction may still be pending or mined.'
+                                : 'Failed to verify transfer receipt after submission; transaction may still be pending or mined.',
+                    }),
+                });
+            }
+            continue;
+        }
+
         if (call.name === 'make_erc1155_deposit') {
             if (!onchainToolsEnabled) {
                 outputs.push({
@@ -1127,6 +1210,7 @@ async function executeToolCalls({
                     config,
                     ogModule: config.ogModule,
                     transactions,
+                    explanation: args.explanation,
                 });
                 const proposalTxHash =
                     typeof result?.transactionHash === 'string' && result.transactionHash
