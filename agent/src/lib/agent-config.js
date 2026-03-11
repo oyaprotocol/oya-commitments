@@ -5,6 +5,17 @@ function hasOwn(object, key) {
     return Object.prototype.hasOwnProperty.call(object, key);
 }
 
+function parseOptionalAddress(value, label) {
+    if (value === undefined || value === null) {
+        return undefined;
+    }
+    const candidate = typeof value === 'string' ? value.trim() : '';
+    if (!candidate) {
+        throw new Error(`${label} must be a non-empty address string`);
+    }
+    return getAddress(candidate);
+}
+
 function parseAddressArray(values, label) {
     if (!Array.isArray(values)) {
         throw new Error(`${label} must be an array of address strings`);
@@ -103,6 +114,8 @@ function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
     if (!rawAgentConfig) {
         return {
             agentConfig: {},
+            commitmentSafe: baseConfig.commitmentSafe,
+            ogModule: baseConfig.ogModule,
             watchAssets: baseConfig.watchAssets,
             watchErc1155Assets: baseConfig.watchErc1155Assets,
         };
@@ -127,6 +140,19 @@ function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
         ...(chainOverrides ?? {}),
     };
 
+    const commitmentSafe = hasOwn(resolvedAgentConfig, 'commitmentSafe')
+        ? (parseOptionalAddress(
+              resolvedAgentConfig.commitmentSafe,
+              `${agentConfigFile.path} field "commitmentSafe"`
+          ) ?? baseConfig.commitmentSafe)
+        : baseConfig.commitmentSafe;
+    const ogModule = hasOwn(resolvedAgentConfig, 'ogModule')
+        ? (parseOptionalAddress(
+              resolvedAgentConfig.ogModule,
+              `${agentConfigFile.path} field "ogModule"`
+          ) ?? baseConfig.ogModule)
+        : baseConfig.ogModule;
+
     const watchAssets = hasOwn(resolvedAgentConfig, 'watchAssets')
         ? parseAddressArray(
               resolvedAgentConfig.watchAssets,
@@ -146,9 +172,17 @@ function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
     if (hasOwn(resolvedAgentConfig, 'watchErc1155Assets')) {
         resolvedAgentConfig.watchErc1155Assets = watchErc1155Assets;
     }
+    if (hasOwn(resolvedAgentConfig, 'commitmentSafe')) {
+        resolvedAgentConfig.commitmentSafe = commitmentSafe;
+    }
+    if (hasOwn(resolvedAgentConfig, 'ogModule')) {
+        resolvedAgentConfig.ogModule = ogModule;
+    }
 
     return {
         agentConfig: resolvedAgentConfig,
+        commitmentSafe,
+        ogModule,
         watchAssets,
         watchErc1155Assets,
     };

@@ -16,8 +16,8 @@ This is beta software provided “as is.” Use at your own risk. No guarantees 
 
 1. Copy `.env.example` to `.env` and fill in:
    - `RPC_URL`: RPC the agent should use
-   - `COMMITMENT_SAFE`: Safe address holding assets
-   - `OG_MODULE`: Optimistic Governor module address
+   - `COMMITMENT_SAFE`: Safe address holding assets, unless the selected agent overrides it in `config.json`
+   - `OG_MODULE`: Optimistic Governor module address, unless the selected agent overrides it in `config.json`
    - `WATCH_ASSETS`: Comma-separated ERC20s to monitor when the selected agent does not override watchlists in `config.json` (the OG collateral is auto-added)
    - `WATCH_ERC1155_ASSETS_JSON`: Optional JSON array of tracked ERC1155 assets used as fallback when the selected agent does not override ERC1155 watchlists in `config.json`
    - Signer selection: `SIGNER_TYPE` (default `env`)
@@ -402,8 +402,8 @@ An agent directory may also include an optional `config.json` for repo-tracked, 
 `config.json` is loaded from `agent-library/agents/<name>/config.json` and merged like this:
 - top-level keys apply on every chain
 - `byChain.<chainId>` overrides top-level keys for the active RPC chain
-- `watchAssets` and `watchErc1155Assets` from the file override env watchlists when present
-- if the file is missing, or those keys are absent, the runner falls back to `WATCH_ASSETS` and `WATCH_ERC1155_ASSETS_JSON`
+- `commitmentSafe`, `ogModule`, `watchAssets`, and `watchErc1155Assets` from the file override env values when present
+- if the file is missing, or those keys are absent or `null`, the runner falls back to `COMMITMENT_SAFE`, `OG_MODULE`, `WATCH_ASSETS`, and `WATCH_ERC1155_ASSETS_JSON`
 
 Example:
 
@@ -412,6 +412,8 @@ Example:
   "policyName": "fast-withdraw",
   "byChain": {
     "11155111": {
+      "commitmentSafe": "0x1111111111111111111111111111111111111111",
+      "ogModule": "0x2222222222222222222222222222222222222222",
       "watchAssets": [
         "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
       ],
@@ -427,7 +429,7 @@ Example:
 }
 ```
 
-The merged result is exposed to agent modules as `config.agentConfig`, while the resolved active-chain watchlists still appear at `config.watchAssets` and `config.watchErc1155Assets`.
+The merged result is exposed to agent modules as `config.agentConfig`, while the resolved active-chain addresses and watchlists still appear at `config.commitmentSafe`, `config.ogModule`, `config.watchAssets`, and `config.watchErc1155Assets`.
 
 You can validate a module quickly:
 

@@ -167,10 +167,23 @@ function parseErc1155AssetList(raw, envName) {
     });
 }
 
+function parseOptionalAddressEnv(raw, envName) {
+    if (raw === undefined || raw === null) return undefined;
+    const trimmed = String(raw).trim();
+    if (!trimmed) {
+        return undefined;
+    }
+    try {
+        return getAddress(trimmed);
+    } catch (error) {
+        throw new Error(`${envName} must be a valid address`);
+    }
+}
+
 function buildConfig() {
     const rpcUrl = mustGetEnv('RPC_URL');
-    const commitmentSafe = getAddress(mustGetEnv('COMMITMENT_SAFE'));
-    const ogModule = getAddress(mustGetEnv('OG_MODULE'));
+    const commitmentSafe = parseOptionalAddressEnv(process.env.COMMITMENT_SAFE, 'COMMITMENT_SAFE');
+    const ogModule = parseOptionalAddressEnv(process.env.OG_MODULE, 'OG_MODULE');
 
     const messageApiEnabled = parseBoolean(process.env.MESSAGE_API_ENABLED, false);
     // Keep optional ingress isolated: malformed keys should only fail when the feature is enabled.
