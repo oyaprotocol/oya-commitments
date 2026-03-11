@@ -23,6 +23,31 @@ function safeStringify(value) {
     return JSON.stringify(value, (_, item) => (typeof item === 'bigint' ? item.toString() : item));
 }
 
+function normalizeIpfsPublishJsonArgument(jsonArg) {
+    if (jsonArg === undefined || jsonArg === null) {
+        return undefined;
+    }
+    if (typeof jsonArg === 'string') {
+        const trimmed = jsonArg.trim();
+        if (!trimmed) {
+            return undefined;
+        }
+        try {
+            const parsed = JSON.parse(trimmed);
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                throw new Error('ipfs_publish json must decode to a JSON object.');
+            }
+            return parsed;
+        } catch (error) {
+            throw new Error(`ipfs_publish json must be valid JSON object text: ${error?.message ?? error}`);
+        }
+    }
+    if (typeof jsonArg === 'object' && !Array.isArray(jsonArg)) {
+        return jsonArg;
+    }
+    throw new Error('ipfs_publish json must be a JSON object or JSON object string.');
+}
+
 function isReceiptWaitTimeoutError(error) {
     const name = String(error?.name ?? '');
     if (name.includes('WaitForTransactionReceiptTimeoutError')) {
@@ -477,9 +502,9 @@ function toolDefinitions({
                             'Raw string content to publish. Provide exactly one of content or json.',
                     },
                     json: {
-                        type: ['object', 'null'],
+                        type: ['string', 'null'],
                         description:
-                            'Structured JSON content to publish with canonical key ordering. Provide exactly one of content or json.',
+                            'Structured JSON object to publish, encoded as a JSON string. Provide exactly one of content or json.',
                     },
                     filename: {
                         type: ['string', 'null'],
@@ -781,10 +806,11 @@ async function executeToolCalls({
                 }
 
                 try {
+                    const normalizedJson = normalizeIpfsPublishJsonArgument(args.json);
                     const result = await publishIpfsContent({
                         config,
                         content: args.content,
-                        json: args.json,
+                        json: normalizedJson,
                         filename: args.filename,
                         mediaType: args.mediaType,
                         pin: args.pin,
