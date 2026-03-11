@@ -7,22 +7,22 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const STATE_VERSION = 1;
-const ARTIFACT_VERSION = 'oya-fast-withdraw-request-artifact-v1';
-const FILENAME_PREFIX = 'fast-withdraw-request-';
+const ARTIFACT_VERSION = 'oya-signed-request-archive-v1';
+const FILENAME_PREFIX = 'signed-request-';
 const FILENAME_SUFFIX = '.json';
 
-const fastWithdrawState = {
+const requestArchiveState = {
     requests: {},
 };
-let fastWithdrawStateHydrated = false;
+let requestArchiveStateHydrated = false;
 const pendingArtifactPublishes = new Map();
+let statePathOverride = null;
 
 function getStatePath() {
-    const fromEnv = process.env.FAST_WITHDRAW_STATE_FILE;
-    if (fromEnv && String(fromEnv).trim()) {
-        return path.resolve(String(fromEnv).trim());
+    if (typeof statePathOverride === 'string' && statePathOverride.trim()) {
+        return path.resolve(statePathOverride.trim());
     }
-    return path.join(__dirname, '.fast-withdraw-state.json');
+    return path.join(__dirname, '.request-archive-state.json');
 }
 
 function cloneJson(value) {
@@ -30,28 +30,28 @@ function cloneJson(value) {
     return JSON.parse(JSON.stringify(value));
 }
 
-async function hydrateFastWithdrawState() {
-    if (fastWithdrawStateHydrated) return;
-    fastWithdrawStateHydrated = true;
+async function hydrateRequestArchiveState() {
+    if (requestArchiveStateHydrated) return;
+    requestArchiveStateHydrated = true;
     try {
         const raw = await readFile(getStatePath(), 'utf8');
         const parsed = JSON.parse(raw);
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-            fastWithdrawState.requests =
+            requestArchiveState.requests =
                 parsed.requests && typeof parsed.requests === 'object' && !Array.isArray(parsed.requests)
                     ? parsed.requests
                     : {};
         }
     } catch (error) {
-        fastWithdrawState.requests = {};
+        requestArchiveState.requests = {};
     }
 }
 
-async function persistFastWithdrawState() {
+async function persistRequestArchiveState() {
     const payload = JSON.stringify(
         {
             version: STATE_VERSION,
-            requests: fastWithdrawState.requests,
+            requests: requestArchiveState.requests,
         },
         null,
         2
@@ -185,7 +185,7 @@ async function getDeterministicToolCalls({
     agentAddress,
     config,
 }) {
-    await hydrateFastWithdrawState();
+    await hydrateRequestArchiveState();
     const signedMessages = Array.isArray(signals) ? signals.filter(isSignedUserMessage) : [];
     if (signedMessages.length === 0) {
         return [];
@@ -202,7 +202,7 @@ async function getDeterministicToolCalls({
         const requestId = message.requestId.trim();
         if (!requestId) continue;
         if (scheduledRequestIds.has(requestId)) continue;
-        if (fastWithdrawState.requests?.[requestId]?.artifactCid) continue;
+        if (requestArchiveState.requests?.[requestId]?.artifactCid) continue;
 
         const filename = buildArtifactFilename(requestId);
         const artifact = buildWithdrawalRequestArtifact({
@@ -244,10 +244,10 @@ async function onToolOutput({ name, parsedOutput }) {
     const requestId = decodeRequestIdFromFilename(filename);
     if (!requestId) return;
 
-    await hydrateFastWithdrawState();
+    await hydrateRequestArchiveState();
     const pending = pendingArtifactPublishes.get(filename) ?? {};
-    const previous = fastWithdrawState.requests?.[requestId] ?? {};
-    fastWithdrawState.requests[requestId] = {
+    const previous = requestArchiveState.requests?.[requestId] ?? {};
+    requestArchiveState.requests[requestId] = {
         ...previous,
         ...pending,
         requestId,
@@ -260,22 +260,29 @@ async function onToolOutput({ name, parsedOutput }) {
         artifactPublishedAtMs: Date.now(),
     };
     pendingArtifactPublishes.delete(filename);
-    await persistFastWithdrawState();
+    await persistRequestArchiveState();
 }
 
-async function getFastWithdrawState() {
-    await hydrateFastWithdrawState();
+async function getRequestArchiveState() {
+    await hydrateRequestArchiveState();
     return cloneJson({
         version: STATE_VERSION,
-        requests: fastWithdrawState.requests,
+        requests: requestArchiveState.requests,
     });
 }
 
-async function resetFastWithdrawState() {
-    fastWithdrawState.requests = {};
-    fastWithdrawStateHydrated = true;
+async function resetRequestArchiveState() {
+    requestArchiveState.requests = {};
+    requestArchiveStateHydrated = true;
     pendingArtifactPublishes.clear();
     await unlink(getStatePath()).catch(() => {});
+}
+
+function setRequestArchiveStatePathForTest(nextPath) {
+    statePathOverride = typeof nextPath === 'string' && nextPath.trim() ? nextPath : null;
+    requestArchiveState.requests = {};
+    requestArchiveStateHydrated = false;
+    pendingArtifactPublishes.clear();
 }
 
 export {
@@ -283,8 +290,9 @@ export {
     buildWithdrawalRequestArtifact,
     decodeRequestIdFromFilename,
     getDeterministicToolCalls,
-    getFastWithdrawState,
+    getRequestArchiveState,
     getSystemPrompt,
     onToolOutput,
-    resetFastWithdrawState,
+    resetRequestArchiveState,
+    setRequestArchiveStatePathForTest,
 };
