@@ -2,7 +2,7 @@ Only the following agent address is authorized to serve this commitment under th
 
 If a signed withdrawal request from the user is otherwise valid under this commitment, only that authorized agent may satisfy that withdrawal immediately by sending the requested asset directly to the approved recipient from the authorized agent's own wallet.
 
-After completing the direct fill, the authorized agent may propose exactly one reimbursement transfer from this Safe to the authorized agent address above for the same asset and amount that the authorized agent delivered. The reimbursement proposal should include the user's signed withdrawal request as its explanation.
+After completing the direct fill, the authorized agent may propose exactly one reimbursement transfer from this Safe to the authorized agent address above for the same asset and amount that the authorized agent delivered. The reimbursement proposal should include a compact explanation containing a CID for the signed withdrawal request and the hash of the direct fill transaction.
 
 A fast-withdraw reimbursement is valid only if:
 - the direct fill was completed by the authorized agent before the reimbursement proposal;
