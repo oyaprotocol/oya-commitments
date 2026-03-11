@@ -7,10 +7,11 @@ import {
     buildWithdrawalRequestArtifact,
     decodeRequestIdFromFilename,
     getDeterministicToolCalls,
-    getFastWithdrawState,
+    getRequestArchiveState,
     getSystemPrompt,
     onToolOutput,
-    resetFastWithdrawState,
+    resetRequestArchiveState,
+    setRequestArchiveStatePathForTest,
 } from './agent.js';
 
 const TEST_SIGNER = '0x1111111111111111111111111111111111111111';
@@ -51,11 +52,10 @@ function buildSignedMessageSignal() {
 
 async function run() {
     const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'fast-withdraw-agent-'));
-    const previousStatePath = process.env.FAST_WITHDRAW_STATE_FILE;
-    process.env.FAST_WITHDRAW_STATE_FILE = path.join(tmpDir, '.fast-withdraw-state.json');
+    setRequestArchiveStatePathForTest(path.join(tmpDir, '.request-archive-state.json'));
 
     try {
-        await resetFastWithdrawState();
+        await resetRequestArchiveState();
         const prompt = getSystemPrompt({
             proposeEnabled: true,
             disputeEnabled: true,
@@ -121,7 +121,7 @@ async function run() {
             },
         });
 
-        const state = await getFastWithdrawState();
+        const state = await getRequestArchiveState();
         assert.equal(state.requests[signal.requestId].artifactCid, 'bafyfastwithdrawcid');
         assert.equal(state.requests[signal.requestId].artifactUri, 'ipfs://bafyfastwithdrawcid');
         assert.equal(state.requests[signal.requestId].signer, TEST_SIGNER);
@@ -171,12 +171,8 @@ async function run() {
 
         console.log('[test] fast-withdraw agent OK');
     } finally {
-        if (previousStatePath === undefined) {
-            delete process.env.FAST_WITHDRAW_STATE_FILE;
-        } else {
-            process.env.FAST_WITHDRAW_STATE_FILE = previousStatePath;
-        }
-        await resetFastWithdrawState();
+        await resetRequestArchiveState();
+        setRequestArchiveStatePathForTest(null);
     }
 }
 
