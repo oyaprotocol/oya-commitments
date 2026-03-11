@@ -3,6 +3,7 @@ import {
     buildOgTransactions,
     makeDeposit,
     makeErc1155Deposit,
+    makeErc1155Transfer,
     makeTransfer,
     postBondAndDispute,
     postBondAndPropose,
@@ -417,6 +418,40 @@ function toolDefinitions({
                     },
                 },
                 required: ['token', 'tokenId', 'amount'],
+            },
+        },
+        {
+            type: 'function',
+            name: 'make_erc1155_transfer',
+            description:
+                'Transfer ERC1155 tokens directly from the agent wallet to any recipient using safeTransferFrom.',
+            strict: true,
+            parameters: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                    token: {
+                        type: 'string',
+                        description: 'ERC1155 token contract address.',
+                    },
+                    recipient: {
+                        type: 'string',
+                        description: 'Recipient address for the ERC1155 transfer.',
+                    },
+                    tokenId: {
+                        type: 'string',
+                        description: 'ERC1155 token id as a base-10 string.',
+                    },
+                    amount: {
+                        type: 'string',
+                        description: 'ERC1155 amount as a base-10 string.',
+                    },
+                    data: {
+                        type: ['string', 'null'],
+                        description: 'Optional calldata bytes for safeTransferFrom, defaults to 0x.',
+                    },
+                },
+                required: ['token', 'recipient', 'tokenId', 'amount'],
             },
         },
     ];
@@ -1263,6 +1298,60 @@ async function executeToolCalls({
                             timeout
                                 ? 'Timed out waiting for ERC1155 deposit receipt; transaction may still be pending or mined.'
                                 : 'Failed to verify ERC1155 deposit receipt after submission; transaction may still be pending or mined.',
+                    }),
+                });
+            }
+            continue;
+        }
+
+        if (call.name === 'make_erc1155_transfer') {
+            if (!onchainToolsEnabled) {
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'skipped',
+                        reason: 'onchain tools disabled',
+                    }),
+                });
+                continue;
+            }
+            const txHash = await makeErc1155Transfer({
+                publicClient,
+                walletClient,
+                account,
+                config,
+                token: args.token,
+                recipient: args.recipient,
+                tokenId: args.tokenId,
+                amount: args.amount,
+                data: args.data,
+            });
+            sideEffectsLikelyCommitted = true;
+            try {
+                await publicClient.waitForTransactionReceipt({ hash: txHash });
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'confirmed',
+                        transactionHash: String(txHash),
+                    }),
+                });
+            } catch (error) {
+                const timeout = isReceiptWaitTimeoutError(error);
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'submitted',
+                        transactionHash: String(txHash),
+                        pendingConfirmation: true,
+                        receiptCheckError: timeout ? undefined : error?.message ?? String(error),
+                        warning:
+                            timeout
+                                ? 'Timed out waiting for ERC1155 transfer receipt; transaction may still be pending or mined.'
+                                : 'Failed to verify ERC1155 transfer receipt after submission; transaction may still be pending or mined.',
                     }),
                 });
             }

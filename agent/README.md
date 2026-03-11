@@ -222,7 +222,7 @@ Set these when using Polymarket functionality:
 
 #### Execution Modes
 
-- `PROPOSE_ENABLED=true` and/or `DISPUTE_ENABLED=true`: onchain tools are enabled (`build_og_transactions`, `make_deposit`, `make_transfer`, `make_erc1155_deposit`, propose/dispute tools).
+- `PROPOSE_ENABLED=true` and/or `DISPUTE_ENABLED=true`: onchain tools are enabled (`build_og_transactions`, `make_deposit`, `make_transfer`, `make_erc1155_deposit`, `make_erc1155_transfer`, propose/dispute tools).
 - `PROPOSE_ENABLED=false` and `DISPUTE_ENABLED=false`: onchain tools are disabled.
 - `POLYMARKET_CLOB_ENABLED=true`: CLOB tools can still run in this mode (`polymarket_clob_place_order`, `polymarket_clob_build_sign_and_place_order`, `polymarket_clob_cancel_orders`).
 - `IPFS_ENABLED=true`: IPFS publishing tools can run in this mode (`ipfs_publish`), even if onchain/CLOB tools are disabled.
@@ -273,6 +273,25 @@ Use `make_erc1155_deposit` after receiving YES/NO position tokens:
 ```
 
 When `POLYMARKET_RELAYER_ENABLED=true`, this tool submits via Polymarket relayer (SAFE/PROXY) instead of direct onchain `writeContract`. If `POLYMARKET_RELAYER_FROM_ADDRESS` is not set, the runtime resolves the proxy wallet from the signer and relayer metadata. For SAFE mode, any explicitly configured proxy wallet must match the relayer-derived SAFE address for that signer.
+
+#### ERC1155 Direct Transfer
+
+Use `make_erc1155_transfer` to send ERC1155 tokens directly from the agent wallet to any recipient:
+
+```json
+{
+  "name": "make_erc1155_transfer",
+  "arguments": {
+    "token": "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
+    "recipient": "0x1234567890123456789012345678901234567890",
+    "tokenId": "123456789",
+    "amount": "1",
+    "data": "0x"
+  }
+}
+```
+
+When `POLYMARKET_RELAYER_ENABLED=true`, this tool also submits via the relayer and uses the resolved proxy wallet as the `from` address in `safeTransferFrom`.
 
 #### CLOB Place/Cancel Tools
 

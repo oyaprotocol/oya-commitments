@@ -66,6 +66,16 @@ async function run() {
                     amount: '3',
                 },
             },
+            {
+                callId: 'erc1155-transfer',
+                name: 'make_erc1155_transfer',
+                arguments: {
+                    token: '0x8888888888888888888888888888888888888888',
+                    recipient: '0x9999999999999999999999999999999999999999',
+                    tokenId: '8',
+                    amount: '4',
+                },
+            },
         ],
         publicClient,
         walletClient,
@@ -74,7 +84,7 @@ async function run() {
         ogContext: null,
     });
 
-    assert.equal(results.length, 3);
+    assert.equal(results.length, 4);
 
     const depositOut = parseOutput(results[0]);
     assert.equal(depositOut.status, 'submitted');
@@ -93,6 +103,12 @@ async function run() {
     assert.equal(erc1155Out.pendingConfirmation, true);
     assert.match(erc1155Out.receiptCheckError, /receipt RPC unavailable/i);
     assert.ok(erc1155Out.transactionHash);
+
+    const erc1155TransferOut = parseOutput(results[3]);
+    assert.equal(erc1155TransferOut.status, 'submitted');
+    assert.equal(erc1155TransferOut.pendingConfirmation, true);
+    assert.match(erc1155TransferOut.receiptCheckError, /receipt RPC unavailable/i);
+    assert.ok(erc1155TransferOut.transactionHash);
 
     console.log('[test] tool receipt-error handling OK');
 }

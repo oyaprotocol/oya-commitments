@@ -812,11 +812,42 @@ async function makeErc1155Deposit({
         throw new Error('ERC1155 deposit requires token, tokenId, and amount.');
     }
 
+    return makeErc1155Transfer({
+        publicClient,
+        walletClient,
+        account,
+        config,
+        token,
+        recipient: config.commitmentSafe,
+        tokenId,
+        amount,
+        data,
+        metadataTool: 'make_erc1155_deposit',
+    });
+}
+
+async function makeErc1155Transfer({
+    publicClient,
+    walletClient,
+    account,
+    config,
+    token,
+    recipient,
+    tokenId,
+    amount,
+    data,
+    metadataTool = 'make_erc1155_transfer',
+}) {
+    if (!token || !recipient || tokenId === undefined || amount === undefined) {
+        throw new Error('ERC1155 transfer requires token, recipient, tokenId, and amount.');
+    }
+
     const normalizedToken = getAddress(token);
+    const normalizedRecipient = getAddress(recipient);
     const normalizedTokenId = BigInt(tokenId);
     const normalizedAmount = BigInt(amount);
     if (normalizedAmount <= 0n) {
-        throw new Error('ERC1155 deposit amount must be > 0.');
+        throw new Error('ERC1155 transfer amount must be > 0.');
     }
 
     const transferData = data ?? '0x';
@@ -835,7 +866,7 @@ async function makeErc1155Deposit({
             functionName: 'safeTransferFrom',
             args: [
                 getAddress(relayerFromAddress),
-                config.commitmentSafe,
+                normalizedRecipient,
                 normalizedTokenId,
                 normalizedAmount,
                 transferData,
@@ -852,8 +883,9 @@ async function makeErc1155Deposit({
             value: 0n,
             operation: 0,
             metadata: {
-                tool: 'make_erc1155_deposit',
+                tool: metadataTool,
                 token: normalizedToken,
+                recipient: normalizedRecipient,
                 tokenId: normalizedTokenId.toString(),
                 amount: normalizedAmount.toString(),
             },
@@ -867,7 +899,7 @@ async function makeErc1155Deposit({
         functionName: 'safeTransferFrom',
         args: [
             account.address,
-            config.commitmentSafe,
+            normalizedRecipient,
             normalizedTokenId,
             normalizedAmount,
             transferData,
@@ -878,6 +910,7 @@ async function makeErc1155Deposit({
 export {
     buildOgTransactions,
     makeErc1155Deposit,
+    makeErc1155Transfer,
     makeDeposit,
     makeTransfer,
     normalizeOgTransactions,

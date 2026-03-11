@@ -65,10 +65,18 @@ async function run() {
         clobEnabled: false,
     });
     const makeTransferDef = defs.find((tool) => tool.name === 'make_transfer');
+    const makeErc1155TransferDef = defs.find((tool) => tool.name === 'make_erc1155_transfer');
     const proposeDef = defs.find((tool) => tool.name === 'post_bond_and_propose');
 
     assert.ok(makeTransferDef);
+    assert.ok(makeErc1155TransferDef);
     assert.deepEqual(makeTransferDef.parameters.required, ['asset', 'recipient', 'amountWei']);
+    assert.deepEqual(makeErc1155TransferDef.parameters.required, [
+        'token',
+        'recipient',
+        'tokenId',
+        'amount',
+    ]);
     assert.equal(proposeDef.parameters.properties.explanation.type, 'string');
 
     let recordedErc20Transfer;
@@ -138,6 +146,45 @@ async function run() {
     assert.equal(parseOutput(nativeTransferOutputs[0]).status, 'confirmed');
     assert.equal(recordedNativeTransfer.to.toLowerCase(), TEST_RECIPIENT.toLowerCase());
     assert.equal(recordedNativeTransfer.value, 9n);
+
+    let recordedErc1155Transfer;
+    const erc1155TransferOutputs = await executeToolCalls({
+        toolCalls: [
+            {
+                callId: 'erc1155-transfer',
+                name: 'make_erc1155_transfer',
+                arguments: {
+                    token: TEST_TOKEN,
+                    recipient: TEST_RECIPIENT,
+                    tokenId: '11',
+                    amount: '5',
+                },
+            },
+        ],
+        publicClient: {
+            async waitForTransactionReceipt() {
+                return {};
+            },
+        },
+        walletClient: {
+            async writeContract(args) {
+                recordedErc1155Transfer = args;
+                return `0x${'e'.repeat(64)}`;
+            },
+        },
+        account: TEST_ACCOUNT,
+        config: buildConfig(),
+        ogContext: null,
+    });
+    assert.equal(erc1155TransferOutputs.length, 1);
+    assert.equal(parseOutput(erc1155TransferOutputs[0]).status, 'confirmed');
+    assert.equal(recordedErc1155Transfer.address, TEST_TOKEN);
+    assert.equal(recordedErc1155Transfer.functionName, 'safeTransferFrom');
+    assert.equal(recordedErc1155Transfer.args[0].toLowerCase(), TEST_ACCOUNT.address.toLowerCase());
+    assert.equal(recordedErc1155Transfer.args[1].toLowerCase(), TEST_RECIPIENT.toLowerCase());
+    assert.equal(recordedErc1155Transfer.args[2], 11n);
+    assert.equal(recordedErc1155Transfer.args[3], 5n);
+    assert.equal(recordedErc1155Transfer.args[4], '0x');
 
     let recordedProposalArgs;
     const customExplanation = 'signed withdrawal request\nfill tx hash: 0xabc';
