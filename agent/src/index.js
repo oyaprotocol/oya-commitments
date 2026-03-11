@@ -107,6 +107,12 @@ Object.assign(
         chainId: runtimeChainId,
     })
 );
+if (!config.commitmentSafe) {
+    throw new Error('Missing COMMITMENT_SAFE env or agent config.json commitmentSafe for the active chain.');
+}
+if (!config.ogModule) {
+    throw new Error('Missing OG_MODULE env or agent config.json ogModule for the active chain.');
+}
 for (const asset of config.watchAssets) {
     trackedAssets.add(String(asset).toLowerCase());
 }
