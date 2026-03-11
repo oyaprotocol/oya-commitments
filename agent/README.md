@@ -19,6 +19,7 @@ This is beta software provided “as is.” Use at your own risk. No guarantees 
    - `COMMITMENT_SAFE`: Safe address holding assets
    - `OG_MODULE`: Optimistic Governor module address
    - `WATCH_ASSETS`: Comma-separated ERC20s to monitor (the OG collateral is auto-added)
+   - `WATCH_ERC1155_ASSETS_JSON`: Optional JSON array of tracked ERC1155 assets, for example `[{"token":"0x...","tokenId":"42","symbol":"TEST-42"}]`
    - Signer selection: `SIGNER_TYPE` (default `env`)
      - `env`: `PRIVATE_KEY`
      - `keystore`: `KEYSTORE_PATH`, `KEYSTORE_PASSWORD`
@@ -179,6 +180,28 @@ Enable IPFS artifact publishing when agents need to store signed requests, expla
 Tool:
 
 - `ipfs_publish`: Publish either raw string content or structured JSON content to IPFS. It pins the returned CID by default and returns `cid`, `uri`, `pinned`, `publishResult`, and `pinResult`.
+
+### ERC1155 Tracking (Optional)
+
+Some agent modules need tracked ERC1155 balances in addition to ERC20/native monitoring.
+
+- `WATCH_ERC1155_ASSETS_JSON`: JSON array of tracked ERC1155 assets.
+- Each entry must include:
+  - `token`: ERC1155 contract address
+  - `tokenId`: non-negative integer string
+  - `symbol`: optional display label used by the agent prompt/context
+
+Example:
+
+```json
+[
+  {
+    "token": "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
+    "tokenId": "123456789",
+    "symbol": "YES-123456789"
+  }
+]
+```
 
 ### Uniswap Swap Action in `build_og_transactions`
 
