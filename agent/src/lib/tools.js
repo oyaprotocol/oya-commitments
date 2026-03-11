@@ -442,7 +442,7 @@ function toolDefinitions({
                         description: 'Optional calldata bytes for safeTransferFrom, defaults to 0x.',
                     },
                 },
-                required: ['token', 'tokenId', 'amount'],
+                required: ['token', 'tokenId', 'amount', 'data'],
             },
         },
         {
@@ -476,7 +476,7 @@ function toolDefinitions({
                         description: 'Optional calldata bytes for safeTransferFrom, defaults to 0x.',
                     },
                 },
-                required: ['token', 'recipient', 'tokenId', 'amount'],
+                required: ['token', 'recipient', 'tokenId', 'amount', 'data'],
             },
         },
     ];
@@ -520,6 +520,7 @@ function toolDefinitions({
                         description: 'Whether to pin the published CID. Defaults to true.',
                     },
                 },
+                required: ['content', 'json', 'filename', 'mediaType', 'pin'],
             },
         });
     }
@@ -551,12 +552,12 @@ function toolDefinitions({
                         },
                     },
                     explanation: {
-                        type: 'string',
+                        type: ['string', 'null'],
                         description:
                             'Optional human-readable explanation bytes to attach to the proposal.',
                     },
                 },
-                required: ['transactions'],
+                required: ['transactions', 'explanation'],
             },
         });
     }
