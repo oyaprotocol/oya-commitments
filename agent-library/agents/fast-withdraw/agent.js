@@ -1,7 +1,14 @@
 import { readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { erc20Abi, getAddress, isAddressEqual, zeroAddress } from 'viem';
+import {
+    encodeFunctionData,
+    erc20Abi,
+    erc1155Abi,
+    getAddress,
+    isAddressEqual,
+    zeroAddress,
+} from 'viem';
 import { buildSignedMessagePayload } from '../../../agent/src/lib/message-signing.js';
 import { getAlwaysEmitBalanceSnapshotPollingOptions } from '../../../agent/src/lib/polling.js';
 import { buildOgTransactions } from '../../../agent/src/lib/tx.js';
@@ -68,6 +75,18 @@ function normalizeAssetAddress(value) {
     return isAddressEqual(normalized, zeroAddress) ? zeroAddress : normalized;
 }
 
+function normalizeTokenId(value) {
+    try {
+        const normalized = BigInt(String(value));
+        if (normalized < 0n) {
+            throw new Error('tokenId must be non-negative.');
+        }
+        return normalized.toString();
+    } catch (error) {
+        throw new Error('tokenId must be a non-negative integer string.');
+    }
+}
+
 function parsePositiveAmountWei(value, fieldName = 'amountWei') {
     try {
         const normalized = BigInt(String(value));
@@ -98,26 +117,86 @@ function isRequestExpired(record, nowMs = Date.now()) {
     return Number.isInteger(deadline) && deadline > 0 && nowMs > deadline;
 }
 
-function getTrackedAssets(config = {}) {
-    const assets = new Set();
-    for (const asset of Array.isArray(config.watchAssets) ? config.watchAssets : []) {
-        assets.add(normalizeAssetAddress(String(asset)));
+function buildTrackedAssetKey({ assetKind, asset, tokenId }) {
+    const normalizedAsset = normalizeAssetAddress(asset);
+    if (assetKind === 'erc1155') {
+        return `erc1155:${normalizedAsset.toLowerCase()}:${normalizeTokenId(tokenId)}`;
     }
-    if (config.watchNativeBalance) {
-        assets.add(zeroAddress);
-    }
-    return Array.from(assets);
+    return `fungible:${normalizedAsset.toLowerCase()}`;
 }
 
-async function getAssetMetadata(publicClient, asset) {
-    const normalizedAsset = normalizeAssetAddress(asset);
-    const cacheKey = normalizedAsset.toLowerCase();
+function getTrackedAssetDescriptors(config = {}) {
+    const descriptors = [];
+    const seen = new Set();
+    for (const asset of Array.isArray(config.watchAssets) ? config.watchAssets : []) {
+        const normalizedAsset = normalizeAssetAddress(String(asset));
+        const descriptor = {
+            asset: normalizedAsset,
+            assetKind: isAddressEqual(normalizedAsset, zeroAddress) ? 'native' : 'erc20',
+            tokenId: null,
+            symbol: null,
+        };
+        const key = buildTrackedAssetKey(descriptor);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        descriptors.push(descriptor);
+    }
+    if (config.watchNativeBalance) {
+        const descriptor = {
+            asset: zeroAddress,
+            assetKind: 'native',
+            tokenId: null,
+            symbol: null,
+        };
+        const key = buildTrackedAssetKey(descriptor);
+        if (!seen.has(key)) {
+            seen.add(key);
+            descriptors.push(descriptor);
+        }
+    }
+    for (const item of Array.isArray(config.watchErc1155Assets) ? config.watchErc1155Assets : []) {
+        if (!item || typeof item !== 'object') {
+            throw new Error('watchErc1155Assets entries must be objects.');
+        }
+        const descriptor = {
+            asset: normalizeAddress(item.token),
+            assetKind: 'erc1155',
+            tokenId: normalizeTokenId(item.tokenId),
+            symbol:
+                typeof item.symbol === 'string' && item.symbol.trim() ? item.symbol.trim() : null,
+        };
+        const key = buildTrackedAssetKey(descriptor);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        descriptors.push(descriptor);
+    }
+    return descriptors;
+}
+
+async function getAssetMetadata(publicClient, descriptor) {
+    const normalizedAsset = normalizeAssetAddress(descriptor.asset);
+    const cacheKey = buildTrackedAssetKey({
+        assetKind: descriptor.assetKind,
+        asset: normalizedAsset,
+        tokenId: descriptor.tokenId,
+    });
     if (assetMetadataCache.has(cacheKey)) {
         return assetMetadataCache.get(cacheKey);
     }
 
     let metadata;
-    if (isAddressEqual(normalizedAsset, zeroAddress)) {
+    if (descriptor.assetKind === 'erc1155') {
+        metadata = {
+            asset: normalizedAsset,
+            assetKind: 'erc1155',
+            token: normalizedAsset,
+            tokenId: normalizeTokenId(descriptor.tokenId),
+            symbol:
+                descriptor.symbol ??
+                `${normalizedAsset}:${normalizeTokenId(descriptor.tokenId)}`,
+            decimals: 0,
+        };
+    } else if (isAddressEqual(normalizedAsset, zeroAddress)) {
         metadata = {
             asset: zeroAddress,
             assetKind: 'native',
@@ -159,8 +238,38 @@ async function getAssetMetadata(publicClient, asset) {
     return metadata;
 }
 
-async function getAssetBalances({ publicClient, asset, commitmentSafe, agentAddress, blockNumber }) {
-    const normalizedAsset = normalizeAssetAddress(asset);
+async function getAssetBalances({
+    publicClient,
+    descriptor,
+    commitmentSafe,
+    agentAddress,
+    blockNumber,
+}) {
+    const normalizedAsset = normalizeAssetAddress(descriptor.asset);
+    if (descriptor.assetKind === 'erc1155') {
+        const normalizedTokenId = BigInt(normalizeTokenId(descriptor.tokenId));
+        const [safeBalance, agentBalance] = await Promise.all([
+            publicClient.readContract({
+                address: normalizedAsset,
+                abi: erc1155Abi,
+                functionName: 'balanceOf',
+                args: [commitmentSafe, normalizedTokenId],
+                blockNumber,
+            }),
+            publicClient.readContract({
+                address: normalizedAsset,
+                abi: erc1155Abi,
+                functionName: 'balanceOf',
+                args: [agentAddress, normalizedTokenId],
+                blockNumber,
+            }),
+        ]);
+        return {
+            safeBalance,
+            agentBalance,
+        };
+    }
+
     if (isAddressEqual(normalizedAsset, zeroAddress)) {
         const [safeBalance, agentBalance] = await Promise.all([
             publicClient.getBalance({ address: commitmentSafe, blockNumber }),
@@ -207,10 +316,41 @@ function buildReimbursementExplanation(record) {
 }
 
 function buildExpectedReimbursementTransactions({ record, agentAddress, config }) {
-    if (!record?.directFillAsset || !record?.directFillAmountWei || !agentAddress) {
+    if (!agentAddress) {
         return null;
     }
     const normalizedAgent = normalizeAddress(agentAddress);
+    if (record?.directFillAssetKind === 'erc1155') {
+        if (
+            !record?.directFillToken ||
+            record?.directFillTokenId === undefined ||
+            record?.directFillAmount === undefined ||
+            !config?.commitmentSafe
+        ) {
+            return null;
+        }
+        return [
+            {
+                to: normalizeAddress(record.directFillToken),
+                value: '0',
+                data: encodeFunctionData({
+                    abi: erc1155Abi,
+                    functionName: 'safeTransferFrom',
+                    args: [
+                        normalizeAddress(config.commitmentSafe),
+                        normalizedAgent,
+                        BigInt(normalizeTokenId(record.directFillTokenId)),
+                        BigInt(String(record.directFillAmount)),
+                        '0x',
+                    ],
+                }),
+                operation: 0,
+            },
+        ];
+    }
+    if (!record?.directFillAsset || !record?.directFillAmountWei) {
+        return null;
+    }
     const actions = [
         isAddressEqual(record.directFillAsset, zeroAddress)
             ? {
@@ -436,8 +576,12 @@ function buildFastWithdrawRequestSignal({
         archived: Boolean(record.artifactCid),
         artifactCid: record.artifactCid ?? null,
         artifactUri: record.artifactUri ?? null,
+        directFillAssetKind: record.directFillAssetKind ?? null,
         directFillAsset: record.directFillAsset ?? null,
+        directFillToken: record.directFillToken ?? null,
+        directFillTokenId: record.directFillTokenId ?? null,
         directFillRecipient: record.directFillRecipient ?? null,
+        directFillAmount: record.directFillAmount ?? null,
         directFillAmountWei: record.directFillAmountWei ?? null,
         directFillTxHash: record.directFillTxHash ?? null,
         directFillConfirmations: fillConfirmations,
@@ -534,9 +678,9 @@ function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
         'Focus on signed userMessage signals that represent user withdrawal requests.',
         'The first required step is to archive each signed request to IPFS before any direct fill or reimbursement logic.',
         'Use the signed human-readable message text as the source of withdrawal intent. Do not treat args as authoritative execution instructions.',
-        'Only use assets that appear in fastWithdrawAsset signals. Use their symbol, decimals, and balances to map the signed human request to a concrete asset address and onchain amount.',
-        'When a signedRequestArchive signal is present and archived is false, use ipfs_publish with exactly that signal’s archiveArtifact and archiveFilename. You may then call make_transfer for that same request in the same response, but only after ipfs_publish.',
-        'Use make_transfer for the direct fill from the agent wallet to the recipient inferred from the signed text.',
+        'Only use assets that appear in fastWithdrawAsset signals. Use their assetKind, symbol, tokenId, decimals, and balances to map the signed human request to a concrete tracked asset and onchain amount.',
+        'When a signedRequestArchive signal is present and archived is false, use ipfs_publish with exactly that signal’s archiveArtifact and archiveFilename. You may then call a direct fill tool for that same request in the same response, but only after ipfs_publish.',
+        'Use make_transfer for native or ERC20 direct fills from the agent wallet. Use make_erc1155_transfer for ERC1155 direct fills.',
         'A direct fill is only complete once its transaction has enough confirmations. Wait until fastWithdrawRequest.directFillConfirmations is at least fastWithdrawRequest.fillConfirmationThreshold before reimbursement.',
         'Once fastWithdrawRequest.eligibleForReimbursement is true, use post_bond_and_propose directly with the exact expectedReimbursementTransactions and expectedReimbursementExplanation from that signal. Do not rely on auto-posting from build_og_transactions.',
         'Do not reimburse or dispute unless later logic proves the direct fill and reimbursement satisfy the commitment.',
@@ -562,11 +706,11 @@ async function enrichSignals(signals, {
     const out = Array.isArray(signals) ? [...signals] : [];
 
     if (publicClient && commitmentSafe && agentAddress) {
-        for (const asset of getTrackedAssets(config)) {
-            const metadata = await getAssetMetadata(publicClient, asset);
+        for (const descriptor of getTrackedAssetDescriptors(config)) {
+            const metadata = await getAssetMetadata(publicClient, descriptor);
             const balances = await getAssetBalances({
                 publicClient,
-                asset,
+                descriptor,
                 commitmentSafe,
                 agentAddress,
                 blockNumber: latestBlock,
@@ -575,6 +719,8 @@ async function enrichSignals(signals, {
                 kind: 'fastWithdrawAsset',
                 asset: metadata.asset,
                 assetKind: metadata.assetKind,
+                token: metadata.token ?? null,
+                tokenId: metadata.tokenId ?? null,
                 symbol: metadata.symbol,
                 decimals: metadata.decimals,
                 safeBalance: balances.safeBalance,
@@ -609,6 +755,17 @@ async function enrichSignals(signals, {
     return out;
 }
 
+function getAssetSignalKey(signal) {
+    if (!signal || typeof signal !== 'object') {
+        throw new Error('Asset signal must be an object.');
+    }
+    return buildTrackedAssetKey({
+        assetKind: signal.assetKind === 'erc1155' ? 'erc1155' : signal.assetKind ?? 'erc20',
+        asset: signal.token ?? signal.asset,
+        tokenId: signal.tokenId ?? null,
+    });
+}
+
 async function validateToolCalls({
     toolCalls,
     signals,
@@ -631,7 +788,7 @@ async function validateToolCalls({
         }
         if (signal?.kind === 'fastWithdrawAsset') {
             try {
-                assetSignalsByAsset.set(normalizeAssetAddress(signal.asset), signal);
+                assetSignalsByAsset.set(getAssetSignalKey(signal), signal);
             } catch (error) {
                 // Ignore malformed asset context signals.
             }
@@ -663,7 +820,7 @@ async function validateToolCalls({
         }
         if (eligible.length > 1) {
             throw new Error(
-                'Multiple archived fast-withdraw requests are eligible for direct fill; refusing ambiguous make_transfer.'
+                'Multiple archived fast-withdraw requests are eligible for direct fill; refusing ambiguous direct fill.'
             );
         }
         throw new Error('No fast-withdraw request is eligible for direct fill.');
@@ -780,7 +937,13 @@ async function validateToolCalls({
             const asset = normalizeAssetAddress(args.asset);
             const recipient = normalizeAddress(args.recipient);
             const amountWei = parsePositiveAmountWei(args.amountWei);
-            const assetSignal = assetSignalsByAsset.get(asset);
+            const assetSignal = assetSignalsByAsset.get(
+                buildTrackedAssetKey({
+                    assetKind: isAddressEqual(asset, zeroAddress) ? 'native' : 'erc20',
+                    asset,
+                    tokenId: null,
+                })
+            );
             if (!assetSignal) {
                 throw new Error(
                     `make_transfer asset ${asset} is not present in fastWithdrawAsset signals.`
@@ -792,6 +955,7 @@ async function validateToolCalls({
 
             pendingDirectFill = {
                 requestId,
+                assetKind: assetSignal.assetKind ?? (isAddressEqual(asset, zeroAddress) ? 'native' : 'erc20'),
                 asset,
                 recipient,
                 amountWei: amountWei.toString(),
@@ -803,6 +967,62 @@ async function validateToolCalls({
                     asset,
                     recipient,
                     amountWei: amountWei.toString(),
+                },
+            });
+            continue;
+        }
+
+        if (call?.name === 'make_erc1155_transfer') {
+            if (fillApprovedRequestId) {
+                throw new Error('Only one fast-withdraw direct fill is allowed per response.');
+            }
+            const requestId = resolveDirectFillRequestId();
+            const record = requestArchiveState.requests?.[requestId] ?? null;
+            if (record && isRequestExpired(record)) {
+                throw new Error(`Request ${requestId} is expired and cannot be filled.`);
+            }
+
+            const args = parseCallArgs(call);
+            if (!args || typeof args !== 'object') {
+                throw new Error('make_erc1155_transfer requires valid arguments.');
+            }
+            const token = normalizeAddress(args.token);
+            const recipient = normalizeAddress(args.recipient);
+            const tokenId = normalizeTokenId(args.tokenId);
+            const amount = parsePositiveAmountWei(args.amount, 'amount');
+            const assetSignal = assetSignalsByAsset.get(
+                buildTrackedAssetKey({
+                    assetKind: 'erc1155',
+                    asset: token,
+                    tokenId,
+                })
+            );
+            if (!assetSignal) {
+                throw new Error(
+                    `make_erc1155_transfer token ${token} tokenId ${tokenId} is not present in fastWithdrawAsset signals.`
+                );
+            }
+            if (parseMaybeBigInt(assetSignal.agentBalance) < amount) {
+                throw new Error('Agent ERC1155 balance is insufficient for the requested fast-withdraw fill.');
+            }
+
+            pendingDirectFill = {
+                requestId,
+                assetKind: 'erc1155',
+                token,
+                tokenId,
+                recipient,
+                amount: amount.toString(),
+            };
+            fillApprovedRequestId = requestId;
+            validatedFillCalls.push({
+                ...call,
+                parsedArguments: {
+                    token,
+                    recipient,
+                    tokenId,
+                    amount: amount.toString(),
+                    data: '0x',
                 },
             });
             continue;
@@ -897,7 +1117,7 @@ async function onToolOutput({ name, parsedOutput }) {
         return;
     }
 
-    if (name === 'make_transfer') {
+    if (name === 'make_transfer' || name === 'make_erc1155_transfer') {
         const pending = pendingDirectFill;
         pendingDirectFill = null;
         if (!pending) return;
@@ -908,9 +1128,28 @@ async function onToolOutput({ name, parsedOutput }) {
         requestArchiveState.requests[pending.requestId] = {
             ...previous,
             requestId: pending.requestId,
-            directFillAsset: pending.asset,
+            directFillAssetKind: pending.assetKind ?? previous.directFillAssetKind ?? null,
+            directFillAsset:
+                pending.assetKind === 'erc1155'
+                    ? pending.token ?? previous.directFillAsset ?? null
+                    : pending.asset ?? previous.directFillAsset ?? null,
+            directFillToken:
+                pending.assetKind === 'erc1155'
+                    ? pending.token ?? previous.directFillToken ?? null
+                    : null,
+            directFillTokenId:
+                pending.assetKind === 'erc1155'
+                    ? pending.tokenId ?? previous.directFillTokenId ?? null
+                    : null,
             directFillRecipient: pending.recipient,
-            directFillAmountWei: pending.amountWei,
+            directFillAmount:
+                pending.assetKind === 'erc1155'
+                    ? pending.amount ?? previous.directFillAmount ?? null
+                    : previous.directFillAmount ?? null,
+            directFillAmountWei:
+                pending.assetKind === 'erc1155'
+                    ? null
+                    : pending.amountWei ?? previous.directFillAmountWei ?? null,
             directFillTxHash: parsedOutput.transactionHash ?? previous.directFillTxHash ?? null,
             directFillSubmittedAtMs: Date.now(),
             directFillConfirmations:
