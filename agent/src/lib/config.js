@@ -82,6 +82,32 @@ function parseMessageApiKeys(raw) {
     return out;
 }
 
+function parseStringMap(raw, envName) {
+    if (!raw) return {};
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    } catch (error) {
+        throw new Error(`${envName} must be valid JSON object`);
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error(`${envName} must be a JSON object`);
+    }
+
+    const out = {};
+    for (const [keyRaw, valueRaw] of Object.entries(parsed)) {
+        const key = String(keyRaw).trim();
+        if (!key) {
+            throw new Error(`${envName} includes empty key`);
+        }
+        if (typeof valueRaw !== 'string') {
+            throw new Error(`${envName} value for "${key}" must be a string`);
+        }
+        out[key] = valueRaw;
+    }
+    return out;
+}
+
 function buildConfig() {
     const rpcUrl = mustGetEnv('RPC_URL');
     const commitmentSafe = getAddress(mustGetEnv('COMMITMENT_SAFE'));
@@ -188,6 +214,36 @@ function buildConfig() {
               messageApiRateLimitBurst: 10,
               messageApiSignerAllowlist: [],
               messageApiSignatureMaxAgeSeconds: 300,
+          };
+    const ipfsEnabled = parseBoolean(process.env.IPFS_ENABLED, false);
+    const ipfsConfig = ipfsEnabled
+        ? {
+              ipfsApiUrl: parseHost(process.env.IPFS_API_URL, 'http://127.0.0.1:5001'),
+              ipfsHeaders: parseStringMap(process.env.IPFS_HEADERS_JSON, 'IPFS_HEADERS_JSON'),
+              ipfsRequestTimeoutMs: parsePositiveInteger(
+                  process.env.IPFS_REQUEST_TIMEOUT_MS,
+                  'IPFS_REQUEST_TIMEOUT_MS',
+                  15_000
+              ),
+              ipfsMaxRetries: parsePositiveInteger(
+                  process.env.IPFS_MAX_RETRIES,
+                  'IPFS_MAX_RETRIES',
+                  1,
+                  { min: 0 }
+              ),
+              ipfsRetryDelayMs: parsePositiveInteger(
+                  process.env.IPFS_RETRY_DELAY_MS,
+                  'IPFS_RETRY_DELAY_MS',
+                  250,
+                  { min: 0 }
+              ),
+          }
+        : {
+              ipfsApiUrl: 'http://127.0.0.1:5001',
+              ipfsHeaders: {},
+              ipfsRequestTimeoutMs: 15_000,
+              ipfsMaxRetries: 1,
+              ipfsRetryDelayMs: 250,
           };
 
     return {
@@ -318,6 +374,8 @@ function buildConfig() {
         messageApiEnabled,
         messageApiKeys,
         ...messageApiConfig,
+        ipfsEnabled,
+        ...ipfsConfig,
     };
 }
 

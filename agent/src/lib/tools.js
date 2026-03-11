@@ -7,6 +7,7 @@ import {
     postBondAndDispute,
     postBondAndPropose,
 } from './tx.js';
+import { publishIpfsContent } from './ipfs.js';
 import {
     buildClobOrderFromRaw,
     cancelClobOrders,
@@ -183,6 +184,7 @@ function toolDefinitions({
     proposeEnabled,
     disputeEnabled,
     clobEnabled,
+    ipfsEnabled,
     onchainToolsEnabled = proposeEnabled || disputeEnabled,
 }) {
     const tools = [
@@ -421,6 +423,45 @@ function toolDefinitions({
 
     if (!onchainToolsEnabled) {
         tools.length = 0;
+    }
+
+    if (ipfsEnabled) {
+        tools.push({
+            type: 'function',
+            name: 'ipfs_publish',
+            description:
+                'Publish text or JSON content to IPFS through the configured Kubo-compatible API, and pin the resulting CID by default.',
+            strict: true,
+            parameters: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                    content: {
+                        type: ['string', 'null'],
+                        description:
+                            'Raw string content to publish. Provide exactly one of content or json.',
+                    },
+                    json: {
+                        type: ['object', 'null'],
+                        description:
+                            'Structured JSON content to publish with canonical key ordering. Provide exactly one of content or json.',
+                    },
+                    filename: {
+                        type: ['string', 'null'],
+                        description: 'Optional filename for the uploaded artifact.',
+                    },
+                    mediaType: {
+                        type: ['string', 'null'],
+                        description:
+                            'Optional media type, e.g. application/json or text/plain.',
+                    },
+                    pin: {
+                        type: ['boolean', 'null'],
+                        description: 'Whether to pin the published CID. Defaults to true.',
+                    },
+                },
+            },
+        });
     }
 
     if (onchainToolsEnabled && proposeEnabled) {
@@ -685,6 +726,51 @@ async function executeToolCalls({
                         output: safeStringify({
                             status: 'error',
                             message: error?.message ?? String(error),
+                        }),
+                    });
+                }
+                continue;
+            }
+
+            if (call.name === 'ipfs_publish') {
+                if (!config.ipfsEnabled) {
+                    outputs.push({
+                        callId: call.callId,
+                        name: call.name,
+                        output: safeStringify({
+                            status: 'skipped',
+                            reason: 'ipfs disabled',
+                        }),
+                    });
+                    continue;
+                }
+
+                try {
+                    const result = await publishIpfsContent({
+                        config,
+                        content: args.content,
+                        json: args.json,
+                        filename: args.filename,
+                        mediaType: args.mediaType,
+                        pin: args.pin,
+                    });
+                    outputs.push({
+                        callId: call.callId,
+                        name: call.name,
+                        output: safeStringify({
+                            status: 'published',
+                            ...result,
+                        }),
+                    });
+                } catch (error) {
+                    outputs.push({
+                        callId: call.callId,
+                        name: call.name,
+                        output: safeStringify({
+                            status: 'error',
+                            message: error?.message ?? String(error),
+                            retryable: isRetryableToolError(error),
+                            sideEffectsLikelyCommitted: false,
                         }),
                     });
                 }

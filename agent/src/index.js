@@ -355,11 +355,15 @@ async function decideOnSignals(signals, { onchainPendingProposal = false } = {})
             'You are an agent monitoring an onchain commitment (Safe + Optimistic Governor).';
 
         const executableToolsEnabled =
-            config.proposeEnabled || config.disputeEnabled || config.polymarketClobEnabled;
+            config.proposeEnabled ||
+            config.disputeEnabled ||
+            config.polymarketClobEnabled ||
+            config.ipfsEnabled;
         const tools = toolDefinitions({
             proposeEnabled: config.proposeEnabled,
             disputeEnabled: config.disputeEnabled,
             clobEnabled: config.polymarketClobEnabled,
+            ipfsEnabled: config.ipfsEnabled,
             onchainToolsEnabled: config.proposeEnabled || config.disputeEnabled,
         });
         const allowTools = executableToolsEnabled;
