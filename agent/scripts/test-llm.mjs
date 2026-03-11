@@ -69,6 +69,54 @@ async function run() {
     });
     assert.equal(isRetryableDecisionError(serverError), true);
 
+    let capturedRequestBody;
+    await withMockFetch(
+        async (_url, options = {}) => {
+            capturedRequestBody = JSON.parse(options.body);
+            return {
+                ok: true,
+                status: 200,
+                async json() {
+                    return {
+                        id: 'resp_test',
+                        output: [
+                            {
+                                type: 'message',
+                                content: [
+                                    {
+                                        type: 'output_text',
+                                        text: '{"decision":"ignore"}',
+                                    },
+                                ],
+                            },
+                        ],
+                    };
+                },
+            };
+        },
+        async () => {
+            const result = await callAgent({
+                config: {
+                    openAiBaseUrl: 'https://api.openai.test/v1',
+                    openAiApiKey: 'k_test',
+                    openAiModel: 'gpt-test',
+                    commitmentSafe: '0x0000000000000000000000000000000000000001',
+                    ogModule: '0x0000000000000000000000000000000000000002',
+                },
+                systemPrompt: 'Decide what to do next.',
+                signals: [],
+                ogContext: {},
+                commitmentText: 'commitment',
+                agentAddress: '0x0000000000000000000000000000000000000003',
+                tools: [],
+                allowTools: false,
+            });
+            assert.deepEqual(result.textDecision, { decision: 'ignore' });
+        }
+    );
+    assert.equal(capturedRequestBody.text.format.type, 'json_object');
+    assert.match(capturedRequestBody.input[0].content, /json/i);
+
     console.log('[test] llm retry classification OK');
 }
 
