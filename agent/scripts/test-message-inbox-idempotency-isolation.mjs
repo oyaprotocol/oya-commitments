@@ -16,7 +16,7 @@ async function run() {
     // This pair would collide in a naive `${sender}:${key}` namespace.
     const first = inbox.submitMessage({
         text: 'from sender a',
-        idempotencyKey: 'b:c',
+        requestId: 'b:c',
         senderKeyId: 'a',
         nowMs: 1_000,
     });
@@ -25,7 +25,7 @@ async function run() {
 
     const second = inbox.submitMessage({
         text: 'from sender a:b',
-        idempotencyKey: 'c',
+        requestId: 'c',
         senderKeyId: 'a:b',
         nowMs: 1_001,
     });
@@ -36,7 +36,7 @@ async function run() {
     // Same sender+key still dedupes.
     const duplicate = inbox.submitMessage({
         text: 'from sender a duplicate',
-        idempotencyKey: 'b:c',
+        requestId: 'b:c',
         senderKeyId: 'a',
         nowMs: 1_002,
     });

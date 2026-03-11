@@ -41,8 +41,8 @@ function createMessageInbox(options = {}) {
 
     const queue = [];
     const inFlight = new Map();
-    // senderKeyId -> (idempotencyKey -> cached message metadata)
-    const idempotencyCache = new Map();
+    // senderKeyId -> (requestId -> cached message metadata)
+    const requestCache = new Map();
     const rateLimitState = new Map();
 
     function pruneExpired(nowMs) {
@@ -65,15 +65,15 @@ function createMessageInbox(options = {}) {
             }
         }
 
-        if (idempotencyCache.size > 0) {
-            for (const [senderKeyId, senderCache] of idempotencyCache.entries()) {
-                for (const [idempotencyKey, value] of senderCache.entries()) {
+        if (requestCache.size > 0) {
+            for (const [senderKeyId, senderCache] of requestCache.entries()) {
+                for (const [requestId, value] of senderCache.entries()) {
                     if (value.expiresAtMs <= nowMs) {
-                        senderCache.delete(idempotencyKey);
+                        senderCache.delete(requestId);
                     }
                 }
                 if (senderCache.size === 0) {
-                    idempotencyCache.delete(senderKeyId);
+                    requestCache.delete(senderKeyId);
                 }
             }
         }
@@ -124,8 +124,8 @@ function createMessageInbox(options = {}) {
         command,
         args,
         metadata,
-        ttlSeconds,
-        idempotencyKey,
+        deadline,
+        requestId,
         senderKeyId,
         sender,
         nowMs,
@@ -176,57 +176,67 @@ function createMessageInbox(options = {}) {
             };
         }
 
-        const normalizedTtl = ttlSeconds === undefined ? defaultTtlSeconds : Number(ttlSeconds);
-        if (!Number.isInteger(normalizedTtl)) {
-            return {
-                ok: false,
-                code: 'invalid_request',
-                message: 'ttlSeconds must be an integer.',
-            };
-        }
-        if (normalizedTtl < minTtlSeconds || normalizedTtl > maxTtlSeconds) {
-            return {
-                ok: false,
-                code: 'invalid_request',
-                message: `ttlSeconds must be between ${minTtlSeconds} and ${maxTtlSeconds}.`,
-            };
+        let normalizedDeadline;
+        if (deadline !== undefined) {
+            normalizedDeadline = Number(deadline);
+            if (!Number.isInteger(normalizedDeadline)) {
+                return {
+                    ok: false,
+                    code: 'invalid_request',
+                    message: 'deadline must be an integer Unix timestamp in milliseconds.',
+                };
+            }
+            const minLifetimeMs = minTtlSeconds * 1000;
+            const maxLifetimeMs = maxTtlSeconds * 1000;
+            const remainingLifetimeMs = normalizedDeadline - nowMs;
+            if (remainingLifetimeMs < minLifetimeMs || remainingLifetimeMs > maxLifetimeMs) {
+                return {
+                    ok: false,
+                    code: 'invalid_request',
+                    message: `deadline must be between ${minTtlSeconds} and ${maxTtlSeconds} seconds in the future.`,
+                };
+            }
         }
 
-        let normalizedIdempotencyKey;
-        if (idempotencyKey !== undefined) {
-            if (typeof idempotencyKey !== 'string') {
+        let normalizedRequestId;
+        if (requestId !== undefined) {
+            if (typeof requestId !== 'string') {
                 return {
                     ok: false,
                     code: 'invalid_request',
-                    message: 'idempotencyKey must be a string when provided.',
+                    message: 'requestId must be a string when provided.',
                 };
             }
-            normalizedIdempotencyKey = idempotencyKey.trim();
-            if (!normalizedIdempotencyKey) {
+            normalizedRequestId = requestId.trim();
+            if (!normalizedRequestId) {
                 return {
                     ok: false,
                     code: 'invalid_request',
-                    message: 'idempotencyKey cannot be blank.',
+                    message: 'requestId cannot be blank.',
                 };
             }
-            if (normalizedIdempotencyKey.length > 64) {
+            if (normalizedRequestId.length > 64) {
                 return {
                     ok: false,
                     code: 'invalid_request',
-                    message: 'idempotencyKey must be <= 64 characters.',
+                    message: 'requestId must be <= 64 characters.',
                 };
             }
         }
 
         const messageId = `msg_${randomUUID()}`;
         const receivedAtMs = nowMs;
-        const expiresAtMs = nowMs + normalizedTtl * 1000;
+        const expiresAtMs =
+            normalizedDeadline === undefined
+                ? nowMs + defaultTtlSeconds * 1000
+                : normalizedDeadline;
 
         return {
             ok: true,
             message: {
                 kind: 'userMessage',
                 messageId,
+                requestId: normalizedRequestId,
                 text: normalizedText,
                 command: command === undefined ? undefined : command.trim(),
                 args: args === undefined ? undefined : args,
@@ -237,10 +247,11 @@ function createMessageInbox(options = {}) {
                         authType: 'apiKey',
                         keyId: senderKeyId,
                     },
+                deadline: normalizedDeadline,
                 receivedAtMs,
                 expiresAtMs,
             },
-            idempotencyKey: normalizedIdempotencyKey,
+            requestId: normalizedRequestId,
         };
     }
 
@@ -249,21 +260,43 @@ function createMessageInbox(options = {}) {
         command,
         args,
         metadata,
-        ttlSeconds,
-        idempotencyKey,
+        deadline,
+        requestId,
         senderKeyId,
         sender,
         nowMs = Date.now(),
     }) {
         pruneExpired(nowMs);
 
+        const precheckedRequestId =
+            typeof requestId === 'string' && requestId.trim() ? requestId.trim() : undefined;
+        if (precheckedRequestId && sender?.authType === 'eip191') {
+            const senderCache = requestCache.get(senderKeyId);
+            const cached = senderCache?.get(precheckedRequestId);
+            if (
+                cached &&
+                cached.expiresAtMs > nowMs &&
+                cached.lockReplayAfterMessageExpiry &&
+                !(cached.message?.expiresAtMs > nowMs)
+            ) {
+                return {
+                    ok: false,
+                    code: 'request_replay_blocked',
+                    message: 'requestId already used for a signed message and is still replay-locked.',
+                    messageId: cached.message?.messageId,
+                    replayLockedUntilMs: cached.expiresAtMs,
+                    queueDepth: queue.length,
+                };
+            }
+        }
+
         const normalized = normalizePayload({
             text,
             command,
             args,
             metadata,
-            ttlSeconds,
-            idempotencyKey,
+            deadline,
+            requestId,
             senderKeyId,
             sender,
             nowMs,
@@ -285,9 +318,9 @@ function createMessageInbox(options = {}) {
 
         // Duplicate replays should still consume per-key rate-limit budget so repeated
         // retries cannot bypass MESSAGE_API_RATE_LIMIT_* controls.
-        if (normalized.idempotencyKey) {
-            const senderCache = idempotencyCache.get(senderKeyId);
-            const cached = senderCache?.get(normalized.idempotencyKey);
+        if (normalized.requestId) {
+            const senderCache = requestCache.get(senderKeyId);
+            const cached = senderCache?.get(normalized.requestId);
             if (cached && cached.expiresAtMs > nowMs) {
                 if (cached.message?.expiresAtMs > nowMs) {
                     return {
@@ -299,23 +332,23 @@ function createMessageInbox(options = {}) {
                 }
 
                 if (cached.lockReplayAfterMessageExpiry) {
-                    // Signed requests must keep idempotency replay-protected for the full
-                    // replay window, even after the original queued message TTL expires.
+                    // Signed requests must keep requestId replay-protected for the full
+                    // replay window, even after the original queued message expires.
                     return {
                         ok: false,
-                        code: 'idempotency_replay_blocked',
+                        code: 'request_replay_blocked',
                         message:
-                            'idempotencyKey already used for a signed message and is still replay-locked.',
+                            'requestId already used for a signed message and is still replay-locked.',
                         messageId: cached.message?.messageId,
                         replayLockedUntilMs: cached.expiresAtMs,
                         queueDepth: queue.length,
                     };
                 }
 
-                // API-key messages may reuse idempotency keys once the original TTL elapses.
-                senderCache.delete(normalized.idempotencyKey);
+                // API-key messages may reuse requestIds once the original message expires.
+                senderCache.delete(normalized.requestId);
                 if (senderCache.size === 0) {
-                    idempotencyCache.delete(senderKeyId);
+                    requestCache.delete(senderKeyId);
                 }
             }
         }
@@ -330,11 +363,11 @@ function createMessageInbox(options = {}) {
         }
 
         queue.push(normalized.message);
-        if (normalized.idempotencyKey) {
-            let senderCache = idempotencyCache.get(senderKeyId);
+        if (normalized.requestId) {
+            let senderCache = requestCache.get(senderKeyId);
             if (!senderCache) {
                 senderCache = new Map();
-                idempotencyCache.set(senderKeyId, senderCache);
+                requestCache.set(senderKeyId, senderCache);
             }
             const lockReplayAfterMessageExpiry = normalized.message?.sender?.authType === 'eip191';
             const cacheTtlMs = idempotencyTtlSeconds * 1000;
@@ -351,12 +384,12 @@ function createMessageInbox(options = {}) {
                 Number.isInteger(signedAtMs) && signedAtMs > nowMs ? signedAtMs : nowMs;
             const signedReplayLockMs =
                 signedReplayAnchorMs - nowMs + replayWindowMs;
-            // Keep idempotency entries alive at least as long as the queued message itself
+            // Keep request-id entries alive at least as long as the queued message itself
             // so duplicate requests cannot enqueue a second live copy.
             const retentionMs = lockReplayAfterMessageExpiry
                 ? Math.max(cacheTtlMs, messageLifetimeMs, signedReplayLockMs)
                 : Math.max(cacheTtlMs, messageLifetimeMs);
-            senderCache.set(normalized.idempotencyKey, {
+            senderCache.set(normalized.requestId, {
                 message: normalized.message,
                 expiresAtMs: nowMs + retentionMs,
                 lockReplayAfterMessageExpiry,
