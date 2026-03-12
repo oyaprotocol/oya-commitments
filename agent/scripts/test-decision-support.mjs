@@ -19,6 +19,8 @@ async function run() {
 
     assert.equal(isRetryableDecisionError(new Error('network error while calling RPC')), true);
     assert.equal(isRetryableDecisionError({ code: 'ECONNRESET' }), true);
+    assert.equal(isRetryableDecisionError({ name: 'AbortError', message: 'The operation was aborted.' }), true);
+    assert.equal(isRetryableDecisionError({ name: 'TimeoutError', message: 'The operation was aborted due to timeout.' }), true);
     assert.equal(isRetryableDecisionError(new Error('Cannot read properties of undefined')), false);
 
     assert.equal(evaluateToolOutputsDecisionStatus([]), DECISION_STATUS.HANDLED);

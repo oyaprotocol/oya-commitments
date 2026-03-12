@@ -7,11 +7,13 @@ const DECISION_STATUS = Object.freeze({
 
 const SIDE_EFFECT_STATUSES = new Set(['submitted', 'confirmed', 'pending']);
 const RETRYABLE_DECISION_ERROR_CODES = new Set([
+    'ABORT_ERR',
     'ETIMEDOUT',
     'ECONNRESET',
     'ECONNREFUSED',
     'ENOTFOUND',
     'EAI_AGAIN',
+    'UND_ERR_ABORTED',
     'UND_ERR_CONNECT_TIMEOUT',
     'UND_ERR_HEADERS_TIMEOUT',
     'UND_ERR_SOCKET',
@@ -54,7 +56,7 @@ function isRetryableDecisionError(error) {
     }
 
     const name = String(error?.name ?? '');
-    if (/(Timeout|Network|HttpRequest|Fetch|Socket|Connection|RateLimit|Rpc)/i.test(name)) {
+    if (/(Abort|Timeout|Network|HttpRequest|Fetch|Socket|Connection|RateLimit|Rpc)/i.test(name)) {
         return true;
     }
 
@@ -69,6 +71,7 @@ function isRetryableDecisionError(error) {
     return (
         message.includes('timed out') ||
         message.includes('timeout') ||
+        message.includes('aborted') ||
         message.includes('network error') ||
         message.includes('failed to fetch') ||
         message.includes('connection refused') ||

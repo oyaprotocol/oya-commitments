@@ -50,6 +50,15 @@ async function expectCallAgentHttpError({ statusCode, responseText }) {
     return thrown;
 }
 
+function createTimeoutError() {
+    if (typeof DOMException === 'function') {
+        return new DOMException('The operation was aborted due to timeout.', 'TimeoutError');
+    }
+    const error = new Error('The operation was aborted due to timeout.');
+    error.name = 'TimeoutError';
+    return error;
+}
+
 async function run() {
     const unauthorizedError = await expectCallAgentHttpError({
         statusCode: 401,
@@ -68,6 +77,48 @@ async function run() {
         responseText: 'service unavailable',
     });
     assert.equal(isRetryableDecisionError(serverError), true);
+
+    let timeoutThrown;
+    await withMockFetch(
+        async (_url, options) => {
+            assert.ok(options?.signal);
+            return new Promise((_resolve, reject) => {
+                options.signal.addEventListener(
+                    'abort',
+                    () => {
+                        reject(createTimeoutError());
+                    },
+                    { once: true }
+                );
+            });
+        },
+        async () => {
+            try {
+                await callAgent({
+                    config: {
+                        openAiBaseUrl: 'https://api.openai.test/v1',
+                        openAiApiKey: 'k_test',
+                        openAiModel: 'gpt-test',
+                        openAiRequestTimeoutMs: 10,
+                        commitmentSafe: '0x0000000000000000000000000000000000000001',
+                        ogModule: '0x0000000000000000000000000000000000000002',
+                    },
+                    systemPrompt: 'prompt',
+                    signals: [],
+                    ogContext: {},
+                    commitmentText: 'commitment',
+                    agentAddress: '0x0000000000000000000000000000000000000003',
+                    tools: [],
+                    allowTools: false,
+                });
+            } catch (error) {
+                timeoutThrown = error;
+            }
+        }
+    );
+    assert.ok(timeoutThrown instanceof Error);
+    assert.equal(timeoutThrown.name, 'TimeoutError');
+    assert.equal(isRetryableDecisionError(timeoutThrown), true);
 
     console.log('[test] llm retry classification OK');
 }

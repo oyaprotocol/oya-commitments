@@ -8,6 +8,14 @@ import { mustGetEnv, normalizePrivateKey } from './utils.js';
 
 const execFileAsync = promisify(execFile);
 
+function parsePositiveInteger(raw, envName, fallback) {
+    const parsed = raw === undefined || raw === null || raw === '' ? fallback : Number(raw);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+        throw new Error(`${envName} must be a positive integer`);
+    }
+    return parsed;
+}
+
 async function loadPrivateKeyFromKeystore() {
     const keystorePath = mustGetEnv('KEYSTORE_PATH');
     const keystorePassword = mustGetEnv('KEYSTORE_PASSWORD');
@@ -52,12 +60,18 @@ async function loadPrivateKeyFromVault() {
     const vaultPath = mustGetEnv('VAULT_SECRET_PATH').replace(/^\/+/, '');
     const vaultNamespace = process.env.VAULT_NAMESPACE;
     const vaultKeyField = process.env.VAULT_SECRET_KEY ?? 'private_key';
+    const vaultRequestTimeoutMs = parsePositiveInteger(
+        process.env.VAULT_REQUEST_TIMEOUT_MS,
+        'VAULT_REQUEST_TIMEOUT_MS',
+        15_000
+    );
 
     const response = await fetch(`${vaultAddr}/v1/${vaultPath}`, {
         headers: {
             'X-Vault-Token': vaultToken,
             ...(vaultNamespace ? { 'X-Vault-Namespace': vaultNamespace } : {}),
         },
+        signal: AbortSignal.timeout(vaultRequestTimeoutMs),
     });
 
     if (!response.ok) {
