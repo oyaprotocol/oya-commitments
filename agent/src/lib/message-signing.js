@@ -25,8 +25,8 @@ function buildSignedMessagePayload({
     command,
     args,
     metadata,
-    idempotencyKey,
-    ttlSeconds,
+    requestId,
+    deadline,
 }) {
     const normalizedAddress = getAddress(address).toLowerCase();
     const normalizedTimestamp = Number(timestampMs);
@@ -38,12 +38,12 @@ function buildSignedMessagePayload({
         version: 'oya-agent-message-v1',
         address: normalizedAddress,
         timestampMs: normalizedTimestamp,
-        idempotencyKey: idempotencyKey ?? null,
+        requestId: requestId ?? null,
         text: text ?? null,
         command: command ?? null,
         args: args ?? null,
         metadata: metadata ?? null,
-        ttlSeconds: ttlSeconds ?? null,
+        deadline: deadline ?? null,
     });
 
     return JSON.stringify(canonical);

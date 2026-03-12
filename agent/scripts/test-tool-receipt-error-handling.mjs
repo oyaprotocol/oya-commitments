@@ -49,12 +49,31 @@ async function run() {
                 },
             },
             {
+                callId: 'transfer',
+                name: 'make_transfer',
+                arguments: {
+                    asset: '0x6666666666666666666666666666666666666666',
+                    recipient: '0x7777777777777777777777777777777777777777',
+                    amountWei: '2',
+                },
+            },
+            {
                 callId: 'erc1155',
                 name: 'make_erc1155_deposit',
                 arguments: {
                     token: '0x5555555555555555555555555555555555555555',
                     tokenId: '7',
                     amount: '3',
+                },
+            },
+            {
+                callId: 'erc1155-transfer',
+                name: 'make_erc1155_transfer',
+                arguments: {
+                    token: '0x8888888888888888888888888888888888888888',
+                    recipient: '0x9999999999999999999999999999999999999999',
+                    tokenId: '8',
+                    amount: '4',
                 },
             },
         ],
@@ -65,7 +84,7 @@ async function run() {
         ogContext: null,
     });
 
-    assert.equal(results.length, 2);
+    assert.equal(results.length, 4);
 
     const depositOut = parseOutput(results[0]);
     assert.equal(depositOut.status, 'submitted');
@@ -73,11 +92,23 @@ async function run() {
     assert.match(depositOut.receiptCheckError, /receipt RPC unavailable/i);
     assert.ok(depositOut.transactionHash);
 
-    const erc1155Out = parseOutput(results[1]);
+    const transferOut = parseOutput(results[1]);
+    assert.equal(transferOut.status, 'submitted');
+    assert.equal(transferOut.pendingConfirmation, true);
+    assert.match(transferOut.receiptCheckError, /receipt RPC unavailable/i);
+    assert.ok(transferOut.transactionHash);
+
+    const erc1155Out = parseOutput(results[2]);
     assert.equal(erc1155Out.status, 'submitted');
     assert.equal(erc1155Out.pendingConfirmation, true);
     assert.match(erc1155Out.receiptCheckError, /receipt RPC unavailable/i);
     assert.ok(erc1155Out.transactionHash);
+
+    const erc1155TransferOut = parseOutput(results[3]);
+    assert.equal(erc1155TransferOut.status, 'submitted');
+    assert.equal(erc1155TransferOut.pendingConfirmation, true);
+    assert.match(erc1155TransferOut.receiptCheckError, /receipt RPC unavailable/i);
+    assert.ok(erc1155TransferOut.transactionHash);
 
     console.log('[test] tool receipt-error handling OK');
 }
