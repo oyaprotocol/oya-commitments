@@ -16,16 +16,17 @@ This is beta software provided “as is.” Use at your own risk. No guarantees 
 
 1. Copy `.env.example` to `.env` and fill in:
    - `RPC_URL`: RPC the agent should use
-   - `COMMITMENT_SAFE`: Safe address holding assets
-   - `OG_MODULE`: Optimistic Governor module address
-   - `WATCH_ASSETS`: Comma-separated ERC20s to monitor (the OG collateral is auto-added)
+   - `COMMITMENT_SAFE`: Safe address holding assets, unless the selected agent overrides it in `config.json`
+   - `OG_MODULE`: Optimistic Governor module address, unless the selected agent overrides it in `config.json`
+   - `WATCH_ASSETS`: Comma-separated ERC20s to monitor when the selected agent does not override watchlists in `config.json` (the OG collateral is auto-added)
+   - `WATCH_ERC1155_ASSETS_JSON`: Optional JSON array of tracked ERC1155 assets used as fallback when the selected agent does not override ERC1155 watchlists in `config.json`
    - Signer selection: `SIGNER_TYPE` (default `env`)
      - `env`: `PRIVATE_KEY`
      - `keystore`: `KEYSTORE_PATH`, `KEYSTORE_PASSWORD`
      - `keychain`: `KEYCHAIN_SERVICE`, `KEYCHAIN_ACCOUNT` (macOS Keychain or Linux Secret Service)
      - `vault`: `VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_SECRET_PATH`, optional `VAULT_SECRET_KEY` (default `private_key`)
      - `kms`/`vault-signer`/`rpc`: `SIGNER_RPC_URL`, `SIGNER_ADDRESS` (JSON-RPC signer that accepts `eth_sendTransaction`)
-   - Optional tuning: `POLL_INTERVAL_MS`, `LOG_CHUNK_SIZE`, `PROPOSAL_HASH_RESOLVE_TIMEOUT_MS`, `PROPOSAL_HASH_RESOLVE_POLL_INTERVAL_MS`, `START_BLOCK`, `WATCH_NATIVE_BALANCE`, `DEFAULT_DEPOSIT_*`, `AGENT_MODULE`, `UNISWAP_V3_FACTORY`, `UNISWAP_V3_QUOTER`, `UNISWAP_V3_FEE_TIERS`, `POLYMARKET_*`, `MESSAGE_API_*`
+   - Optional tuning: `POLL_INTERVAL_MS`, `LOG_CHUNK_SIZE`, `PROPOSAL_HASH_RESOLVE_TIMEOUT_MS`, `PROPOSAL_HASH_RESOLVE_POLL_INTERVAL_MS`, `START_BLOCK`, `WATCH_NATIVE_BALANCE`, `DEFAULT_DEPOSIT_*`, `AGENT_MODULE`, `UNISWAP_V3_FACTORY`, `UNISWAP_V3_QUOTER`, `UNISWAP_V3_FEE_TIERS`, `POLYMARKET_*`, `MESSAGE_API_*`, `IPFS_*`
    - Optional proposals: `PROPOSE_ENABLED` (default true), `ALLOW_PROPOSE_ON_SIMULATION_FAIL` (default false)
    - Optional disputes: `DISPUTE_ENABLED` (default true), `DISPUTE_RETRY_MS` (default 60000)
    - Optional LLM: `OPENAI_API_KEY`, `OPENAI_MODEL` (default `gpt-4.1-mini`), `OPENAI_BASE_URL`
@@ -69,6 +70,7 @@ For interactions, swap the env var (e.g., `PROPOSER_PK`, `EXECUTOR_PK`). For sig
 - **Timelock triggers**: Parses plain language timelocks in rules (absolute dates or “X minutes after deposit”) and emits `timelock` signals when due.
 - **Price triggers**: If a module exports `getPriceTriggers({ commitmentText, config })`, the runner evaluates those parsed/inferred Uniswap V3 thresholds and emits `priceTrigger` signals.
 - **Optional message API**: When enabled, accepts authenticated user messages over HTTP and injects them as `userMessage` signals for the next decision cycle.
+- **Optional IPFS publishing**: When enabled, agents can publish text/JSON artifacts to a Kubo-compatible IPFS API and pin the resulting CID.
 
 All other behavior is intentionally left out. Implement your own agent in `agent-library/agents/<name>/agent.js` to add commitment-specific logic and tool use.
 
@@ -93,10 +95,10 @@ Enable inbound user messages with one or both auth modes:
 - `MESSAGE_API_MAX_TEXT_LENGTH`: Max `text` length (default `2000`).
 - `MESSAGE_API_QUEUE_LIMIT`: Max queued/in-flight messages (default `500`).
 - `MESSAGE_API_BATCH_SIZE`: Max messages consumed per agent loop (default `25`).
-- `MESSAGE_API_DEFAULT_TTL_SECONDS`: Default TTL when omitted (default `3600`).
-- `MESSAGE_API_MIN_TTL_SECONDS`: Minimum allowed TTL (default `30`).
-- `MESSAGE_API_MAX_TTL_SECONDS`: Maximum allowed TTL (default `86400`).
-- `MESSAGE_API_IDEMPOTENCY_TTL_SECONDS`: Idempotency cache window (default `86400`).
+- `MESSAGE_API_DEFAULT_TTL_SECONDS`: Default message lifetime applied when `deadline` is omitted (default `3600`).
+- `MESSAGE_API_MIN_TTL_SECONDS`: Minimum allowed remaining lifetime for `deadline` (default `30`).
+- `MESSAGE_API_MAX_TTL_SECONDS`: Maximum allowed remaining lifetime for `deadline` (default `86400`).
+- `MESSAGE_API_IDEMPOTENCY_TTL_SECONDS`: Request replay/dedup cache window (default `86400`).
 - `MESSAGE_API_RATE_LIMIT_PER_MINUTE`: Per-key refill rate (default `30`).
 - `MESSAGE_API_RATE_LIMIT_BURST`: Per-key burst capacity (default `10`).
 
@@ -117,8 +119,8 @@ Endpoints:
   "command": "pause_proposals",
   "args": { "hours": 2 },
   "metadata": { "ticket": "INC-42" },
-  "idempotencyKey": "inc-42-pause",
-  "ttlSeconds": 7200,
+  "requestId": "inc-42-pause",
+  "deadline": 1735696800000,
   "auth": {
     "type": "eip191",
     "address": "0x1111111111111111111111111111111111111111",
@@ -130,10 +132,11 @@ Endpoints:
 
 `auth` is optional for Bearer-token requests. For signed auth:
 - `auth.type` must be `eip191`
-- `idempotencyKey` is required
+- `requestId` is required
+- `deadline` is optional and, when present, must be a Unix timestamp in milliseconds
 - signature is verified against a canonical payload that includes
-  `address`, `timestampMs`, `text`, `command`, `args`, `metadata`, `idempotencyKey`, and `ttlSeconds`
-- signed requests keep idempotency replay-locked for at least `MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS`; replays during that window return `409` with code `idempotency_replay_blocked`
+  `address`, `timestampMs`, `text`, `command`, `args`, `metadata`, `requestId`, and `deadline`
+- signed requests keep `requestId` replay-locked for at least `MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS`; replays during that window return `409` with code `request_replay_blocked`
 
 Example request:
 
@@ -142,7 +145,7 @@ curl -sS \
   -X POST "http://127.0.0.1:8787/v1/messages" \
   -H "Authorization: Bearer k_live_replace_me" \
   -H "Content-Type: application/json" \
-  -d '{"text":"Pause proposals for 2 hours","command":"pause_proposals","args":{"hours":2},"idempotencyKey":"pause-2h"}'
+  -d '{"text":"Pause proposals for 2 hours","command":"pause_proposals","args":{"hours":2},"requestId":"pause-2h"}'
 ```
 
 Signed-auth test script:
@@ -159,7 +162,45 @@ node agent/scripts/send-signed-message.mjs \
   --private-key="0x<signer-private-key>" \
   --url="http://127.0.0.1:8787" \
   --command="pause_proposals" \
-  --args-json='{"hours":2}'
+  --args-json='{"hours":2}' \
+  --request-id="pause-2h"
+```
+
+### IPFS Publishing (Optional)
+
+Enable IPFS artifact publishing when agents need to store signed requests, explanations, or other artifacts offchain and refer to them by CID.
+
+- `IPFS_ENABLED`: Enable the `ipfs_publish` tool (`true`/`false`, default `false`).
+- `IPFS_API_URL`: Base URL for a Kubo-compatible IPFS API (default `http://127.0.0.1:5001`).
+- `IPFS_HEADERS_JSON`: Optional JSON object of extra HTTP headers for the IPFS API, for example `{"Authorization":"Bearer <token>"}`.
+- `IPFS_REQUEST_TIMEOUT_MS`: Optional request timeout (default `15000`).
+- `IPFS_MAX_RETRIES`: Optional retry count for transient IPFS failures (default `1`).
+- `IPFS_RETRY_DELAY_MS`: Optional retry delay in milliseconds (default `250`).
+
+Tool:
+
+- `ipfs_publish`: Publish either raw string content or structured JSON content to IPFS. For tool calls, JSON content is passed as JSON text and canonicalized before upload. It pins the returned CID by default and returns `cid`, `uri`, `pinned`, `publishResult`, and `pinResult`.
+
+### ERC1155 Tracking (Optional)
+
+Some agent modules need tracked ERC1155 balances in addition to ERC20/native monitoring.
+
+- `WATCH_ERC1155_ASSETS_JSON`: JSON array of tracked ERC1155 assets.
+- Each entry must include:
+  - `token`: ERC1155 contract address
+  - `tokenId`: non-negative integer string
+  - `symbol`: optional display label used by the agent prompt/context
+
+Example:
+
+```json
+[
+  {
+    "token": "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
+    "tokenId": "123456789",
+    "symbol": "YES-123456789"
+  }
+]
 ```
 
 ### Uniswap Swap Action in `build_og_transactions`
@@ -204,10 +245,11 @@ Set these when using Polymarket functionality:
 
 #### Execution Modes
 
-- `PROPOSE_ENABLED=true` and/or `DISPUTE_ENABLED=true`: onchain tools are enabled (`build_og_transactions`, `make_deposit`, `make_erc1155_deposit`, propose/dispute tools).
+- `PROPOSE_ENABLED=true` and/or `DISPUTE_ENABLED=true`: onchain tools are enabled (`build_og_transactions`, `make_deposit`, `make_transfer`, `make_erc1155_deposit`, `make_erc1155_transfer`, propose/dispute tools).
 - `PROPOSE_ENABLED=false` and `DISPUTE_ENABLED=false`: onchain tools are disabled.
 - `POLYMARKET_CLOB_ENABLED=true`: CLOB tools can still run in this mode (`polymarket_clob_place_order`, `polymarket_clob_build_sign_and_place_order`, `polymarket_clob_cancel_orders`).
-- All three disabled (`PROPOSE_ENABLED=false`, `DISPUTE_ENABLED=false`, `POLYMARKET_CLOB_ENABLED=false`): monitor/opinion only.
+- `IPFS_ENABLED=true`: IPFS publishing tools can run in this mode (`ipfs_publish`), even if onchain/CLOB tools are disabled.
+- All four disabled (`PROPOSE_ENABLED=false`, `DISPUTE_ENABLED=false`, `POLYMARKET_CLOB_ENABLED=false`, `IPFS_ENABLED=false`): monitor/opinion only.
 
 #### CTF Actions (`build_og_transactions`)
 
@@ -254,6 +296,25 @@ Use `make_erc1155_deposit` after receiving YES/NO position tokens:
 ```
 
 When `POLYMARKET_RELAYER_ENABLED=true`, this tool submits via Polymarket relayer (SAFE/PROXY) instead of direct onchain `writeContract`. If `POLYMARKET_RELAYER_FROM_ADDRESS` is not set, the runtime resolves the proxy wallet from the signer and relayer metadata. For SAFE mode, any explicitly configured proxy wallet must match the relayer-derived SAFE address for that signer.
+
+#### ERC1155 Direct Transfer
+
+Use `make_erc1155_transfer` to send ERC1155 tokens directly from the agent wallet to any recipient:
+
+```json
+{
+  "name": "make_erc1155_transfer",
+  "arguments": {
+    "token": "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
+    "recipient": "0x1234567890123456789012345678901234567890",
+    "tokenId": "123456789",
+    "amount": "1",
+    "data": "0x"
+  }
+}
+```
+
+When `POLYMARKET_RELAYER_ENABLED=true`, this tool also submits via the relayer and uses the resolved proxy wallet as the `from` address in `safeTransferFrom`.
 
 #### CLOB Place/Cancel Tools
 
@@ -336,6 +397,39 @@ Set `PROPOSE_ENABLED` and `DISPUTE_ENABLED` to control behavior:
 
 Use `AGENT_MODULE` to point to an agent implementation name (e.g., `default`, `timelock-withdraw`). The runner will load `agent-library/agents/<name>/agent.js`.
 Each agent directory must include a `commitment.txt` with the plain language commitment the agent is designed to serve.
+An agent directory may also include an optional `config.json` for repo-tracked, non-secret configuration.
+
+`config.json` is loaded from `agent-library/agents/<name>/config.json` and merged like this:
+- top-level keys apply on every chain
+- `byChain.<chainId>` overrides top-level keys for the active RPC chain
+- `commitmentSafe`, `ogModule`, `watchAssets`, and `watchErc1155Assets` from the file override env values when present
+- if the file is missing, or those keys are absent or `null`, the runner falls back to `COMMITMENT_SAFE`, `OG_MODULE`, `WATCH_ASSETS`, and `WATCH_ERC1155_ASSETS_JSON`
+
+Example:
+
+```json
+{
+  "policyName": "fast-withdraw",
+  "byChain": {
+    "11155111": {
+      "commitmentSafe": "0x1111111111111111111111111111111111111111",
+      "ogModule": "0x2222222222222222222222222222222222222222",
+      "watchAssets": [
+        "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
+      ],
+      "watchErc1155Assets": [
+        {
+          "token": "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
+          "tokenId": "123456789",
+          "symbol": "YES-123456789"
+        }
+      ]
+    }
+  }
+}
+```
+
+The merged result is exposed to agent modules as `config.agentConfig`, while the resolved active-chain addresses and watchlists still appear at `config.commitmentSafe`, `config.ogModule`, `config.watchAssets`, and `config.watchErc1155Assets`.
 
 You can validate a module quickly:
 

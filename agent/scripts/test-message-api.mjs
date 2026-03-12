@@ -65,7 +65,7 @@ async function main() {
                 text: 'Pause proposals for 2 hours',
                 command: 'pause_proposals',
                 args: { hours: 2 },
-                idempotencyKey: 'pause-2h',
+                requestId: 'pause-2h',
             }),
         });
         assert.equal(accepted.status, 202);
@@ -73,7 +73,7 @@ async function main() {
         assert.equal(acceptedJson.status, 'queued');
         assert.ok(acceptedJson.messageId);
 
-        // Same idempotency key should return existing message id, not enqueue again.
+        // Same requestId should return existing message id, not enqueue again.
         const duplicate = await fetch(`${baseUrl}/v1/messages`, {
             method: 'POST',
             headers: {
@@ -84,7 +84,7 @@ async function main() {
                 text: 'Pause proposals for 2 hours',
                 command: 'pause_proposals',
                 args: { hours: 2 },
-                idempotencyKey: 'pause-2h',
+                requestId: 'pause-2h',
             }),
         });
         assert.equal(duplicate.status, 200);

@@ -17,7 +17,7 @@ async function run() {
     const startMs = 1_000;
     const first = inbox.submitMessage({
         text: 'pause for 2h',
-        idempotencyKey: 'pause-2h',
+        requestId: 'pause-2h',
         senderKeyId: 'ops',
         nowMs: startMs,
     });
@@ -27,7 +27,7 @@ async function run() {
     // Duplicate replays should still be subject to rate limiting.
     const immediateDuplicate = inbox.submitMessage({
         text: 'pause for 2h',
-        idempotencyKey: 'pause-2h',
+        requestId: 'pause-2h',
         senderKeyId: 'ops',
         nowMs: startMs,
     });
@@ -37,7 +37,7 @@ async function run() {
     // After refill, the same idempotency key should dedupe to the original message id.
     const delayedDuplicate = inbox.submitMessage({
         text: 'pause for 2h',
-        idempotencyKey: 'pause-2h',
+        requestId: 'pause-2h',
         senderKeyId: 'ops',
         nowMs: startMs + 1_000,
     });
