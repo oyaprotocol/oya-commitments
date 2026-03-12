@@ -46,8 +46,8 @@ async function main() {
             command: 'pause_proposals',
             args: { hours: 2 },
             metadata: { source: 'ops' },
-            idempotencyKey: 'sig-pause-2h',
-            ttlSeconds: 60,
+            requestId: 'sig-pause-2h',
+            deadline: timestampMs + 60_000,
         };
         const payload = buildSignedMessagePayload({
             address: account.address,
@@ -79,14 +79,17 @@ async function main() {
         assert.equal(queued[0].sender.authType, 'eip191');
         assert.equal(queued[0].sender.address, account.address);
         assert.equal(queued[0].sender.signedAtMs, timestampMs);
+        assert.equal(queued[0].sender.signature, signature);
+        assert.equal(queued[0].requestId, signedBody.requestId);
+        assert.equal(queued[0].deadline, signedBody.deadline);
         inbox.ackBatch(queued.map((message) => message.messageId));
 
-        // Signed idempotency keys remain replay-locked beyond message TTL.
+        // Signed request IDs remain replay-locked beyond message expiry.
         const shortTtlTimestampMs = Date.now();
         const shortTtlBody = {
             text: 'Short TTL signed command',
-            idempotencyKey: 'sig-short-ttl',
-            ttlSeconds: 1,
+            requestId: 'sig-short-ttl',
+            deadline: shortTtlTimestampMs + 2_000,
         };
         const shortTtlPayload = buildSignedMessagePayload({
             address: account.address,
@@ -108,7 +111,7 @@ async function main() {
             }),
         });
         assert.equal(shortTtlAccepted.status, 202);
-        await new Promise((resolve) => setTimeout(resolve, 1_100));
+        await new Promise((resolve) => setTimeout(resolve, 2_100));
 
         const shortTtlReplay = await fetch(`${baseUrl}/v1/messages`, {
             method: 'POST',
@@ -125,7 +128,7 @@ async function main() {
         });
         assert.equal(shortTtlReplay.status, 409);
         const shortTtlReplayJson = await shortTtlReplay.json();
-        assert.equal(shortTtlReplayJson.code, 'idempotency_replay_blocked');
+        assert.equal(shortTtlReplayJson.code, 'request_replay_blocked');
 
         // Tampered request body with old signature must fail authentication.
         const tampered = await fetch(`${baseUrl}/v1/messages`, {
@@ -144,8 +147,8 @@ async function main() {
         });
         assert.equal(tampered.status, 401);
 
-        // Signed auth requires an idempotency key to harden replay behavior.
-        const missingIdempotency = await fetch(`${baseUrl}/v1/messages`, {
+        // Signed auth requires a requestId to harden replay behavior.
+        const missingRequestId = await fetch(`${baseUrl}/v1/messages`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -153,7 +156,7 @@ async function main() {
                 command: signedBody.command,
                 args: signedBody.args,
                 metadata: signedBody.metadata,
-                ttlSeconds: signedBody.ttlSeconds,
+                deadline: signedBody.deadline,
                 auth: {
                     type: 'eip191',
                     address: account.address,
@@ -162,7 +165,7 @@ async function main() {
                 },
             }),
         });
-        assert.equal(missingIdempotency.status, 400);
+        assert.equal(missingRequestId.status, 400);
 
         // Expired signatures should be rejected.
         const expiredTimestampMs = timestampMs - 10 * 60 * 1000;
@@ -177,7 +180,7 @@ async function main() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 ...signedBody,
-                idempotencyKey: 'sig-pause-2h-expired',
+                requestId: 'sig-pause-2h-expired',
                 auth: {
                     type: 'eip191',
                     address: account.address,

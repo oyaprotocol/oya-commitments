@@ -8,11 +8,13 @@ function toUserMessageSignal(message) {
     return {
         kind: 'userMessage',
         messageId: message.messageId,
+        requestId: message.requestId,
         text: message.text,
         command: message.command,
         args: message.args,
         metadata: message.metadata,
         sender: message.sender,
+        deadline: message.deadline,
         receivedAtMs: message.receivedAtMs,
         expiresAtMs: message.expiresAtMs,
     };

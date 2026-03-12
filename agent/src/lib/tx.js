@@ -34,6 +34,7 @@ const erc1155TransferAbi = parseAbi([
 const ZERO_BYTES32 = '0x0000000000000000000000000000000000000000000000000000000000000000';
 const DEFAULT_PROPOSAL_HASH_RESOLVE_TIMEOUT_MS = 15_000;
 const DEFAULT_PROPOSAL_HASH_RESOLVE_POLL_INTERVAL_MS = 1_500;
+const DEFAULT_PROPOSAL_EXPLANATION = 'Agent serving Oya commitment.';
 
 function extractProposalHashFromReceipt({ receipt, ogModule }) {
     if (!receipt?.logs || !Array.isArray(receipt.logs)) return null;
@@ -150,6 +151,7 @@ async function postBondAndPropose({
     config,
     ogModule,
     transactions,
+    explanation,
 }) {
     if (!config.proposeEnabled) {
         throw new Error('Proposals disabled via PROPOSE_ENABLED.');
@@ -241,8 +243,11 @@ async function postBondAndPropose({
 
         let proposalTxHash;
         let proposalHash;
-        const explanation = 'Agent serving Oya commitment.';
-        const explanationBytes = stringToHex(explanation);
+        const normalizedExplanation =
+            typeof explanation === 'string' && explanation.trim()
+                ? explanation.trim()
+                : DEFAULT_PROPOSAL_EXPLANATION;
+        const explanationBytes = stringToHex(normalizedExplanation);
         const proposalData = encodeFunctionData({
             abi: optimisticGovernorAbi,
             functionName: 'proposeTransactions',
@@ -747,26 +752,49 @@ async function makeDeposit({
     amountWei,
 }) {
     const depositAsset = asset ? getAddress(asset) : config.defaultDepositAsset;
-    const depositAmount =
-        amountWei !== undefined ? amountWei : config.defaultDepositAmountWei;
+    const depositAmount = amountWei !== undefined ? amountWei : config.defaultDepositAmountWei;
 
     if (!depositAsset || depositAmount === undefined) {
         throw new Error('Deposit requires asset and amount (wei).');
     }
 
-    if (depositAsset === zeroAddress) {
+    return makeTransfer({
+        walletClient,
+        account,
+        asset: depositAsset,
+        amountWei: depositAmount,
+        recipient: config.commitmentSafe,
+    });
+}
+
+async function makeTransfer({
+    walletClient,
+    account,
+    asset,
+    amountWei,
+    recipient,
+}) {
+    const transferAsset = asset ? getAddress(asset) : undefined;
+    const transferRecipient = recipient ? getAddress(recipient) : undefined;
+    const transferAmount = amountWei;
+
+    if (!transferAsset || transferRecipient === undefined || transferAmount === undefined) {
+        throw new Error('Transfer requires asset, recipient, and amount (wei).');
+    }
+
+    if (transferAsset === zeroAddress) {
         return walletClient.sendTransaction({
             account,
-            to: config.commitmentSafe,
-            value: BigInt(depositAmount),
+            to: transferRecipient,
+            value: BigInt(transferAmount),
         });
     }
 
     return walletClient.writeContract({
-        address: depositAsset,
+        address: transferAsset,
         abi: erc20Abi,
         functionName: 'transfer',
-        args: [config.commitmentSafe, BigInt(depositAmount)],
+        args: [transferRecipient, BigInt(transferAmount)],
     });
 }
 
@@ -784,11 +812,42 @@ async function makeErc1155Deposit({
         throw new Error('ERC1155 deposit requires token, tokenId, and amount.');
     }
 
+    return makeErc1155Transfer({
+        publicClient,
+        walletClient,
+        account,
+        config,
+        token,
+        recipient: config.commitmentSafe,
+        tokenId,
+        amount,
+        data,
+        metadataTool: 'make_erc1155_deposit',
+    });
+}
+
+async function makeErc1155Transfer({
+    publicClient,
+    walletClient,
+    account,
+    config,
+    token,
+    recipient,
+    tokenId,
+    amount,
+    data,
+    metadataTool = 'make_erc1155_transfer',
+}) {
+    if (!token || !recipient || tokenId === undefined || amount === undefined) {
+        throw new Error('ERC1155 transfer requires token, recipient, tokenId, and amount.');
+    }
+
     const normalizedToken = getAddress(token);
+    const normalizedRecipient = getAddress(recipient);
     const normalizedTokenId = BigInt(tokenId);
     const normalizedAmount = BigInt(amount);
     if (normalizedAmount <= 0n) {
-        throw new Error('ERC1155 deposit amount must be > 0.');
+        throw new Error('ERC1155 transfer amount must be > 0.');
     }
 
     const transferData = data ?? '0x';
@@ -807,7 +866,7 @@ async function makeErc1155Deposit({
             functionName: 'safeTransferFrom',
             args: [
                 getAddress(relayerFromAddress),
-                config.commitmentSafe,
+                normalizedRecipient,
                 normalizedTokenId,
                 normalizedAmount,
                 transferData,
@@ -824,8 +883,9 @@ async function makeErc1155Deposit({
             value: 0n,
             operation: 0,
             metadata: {
-                tool: 'make_erc1155_deposit',
+                tool: metadataTool,
                 token: normalizedToken,
+                recipient: normalizedRecipient,
                 tokenId: normalizedTokenId.toString(),
                 amount: normalizedAmount.toString(),
             },
@@ -839,7 +899,7 @@ async function makeErc1155Deposit({
         functionName: 'safeTransferFrom',
         args: [
             account.address,
-            config.commitmentSafe,
+            normalizedRecipient,
             normalizedTokenId,
             normalizedAmount,
             transferData,
@@ -850,7 +910,9 @@ async function makeErc1155Deposit({
 export {
     buildOgTransactions,
     makeErc1155Deposit,
+    makeErc1155Transfer,
     makeDeposit,
+    makeTransfer,
     normalizeOgTransactions,
     postBondAndDispute,
     postBondAndPropose,

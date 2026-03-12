@@ -17,7 +17,7 @@ async function run() {
     // while the original message is still alive in queue/in-flight.
     const longLived = shortIdempotencyInbox.submitMessage({
         text: 'long lived command',
-        idempotencyKey: 'cmd-live',
+        requestId: 'cmd-live',
         senderKeyId: 'ops',
         nowMs: 1_000,
     });
@@ -26,7 +26,7 @@ async function run() {
 
     const duplicateWhileStillLive = shortIdempotencyInbox.submitMessage({
         text: 'long lived command duplicate',
-        idempotencyKey: 'cmd-live',
+        requestId: 'cmd-live',
         senderKeyId: 'ops',
         nowMs: 4_500,
     });
@@ -37,7 +37,7 @@ async function run() {
     // API-key callers may still reuse keys after the original message expires.
     const acceptedAfterLongLivedExpiry = shortIdempotencyInbox.submitMessage({
         text: 'long lived command replay after expiry',
-        idempotencyKey: 'cmd-live',
+        requestId: 'cmd-live',
         senderKeyId: 'ops',
         nowMs: 11_100,
     });
@@ -59,7 +59,7 @@ async function run() {
     const startMs = 1_000;
     const first = inbox.submitMessage({
         text: 'first command',
-        idempotencyKey: 'cmd-1',
+        requestId: 'cmd-1',
         senderKeyId: 'ops',
         nowMs: startMs,
     });
@@ -69,7 +69,7 @@ async function run() {
     // API-key callers may reuse keys after message TTL if replay-lock mode is not enabled.
     const retryAfterMessageExpiry = inbox.submitMessage({
         text: 'first command retry',
-        idempotencyKey: 'cmd-1',
+        requestId: 'cmd-1',
         senderKeyId: 'ops',
         nowMs: startMs + 2_000,
     });

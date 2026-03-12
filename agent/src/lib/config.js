@@ -82,10 +82,108 @@ function parseMessageApiKeys(raw) {
     return out;
 }
 
+function parseStringMap(raw, envName) {
+    if (!raw) return {};
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    } catch (error) {
+        throw new Error(`${envName} must be valid JSON object`);
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error(`${envName} must be a JSON object`);
+    }
+
+    const out = {};
+    for (const [keyRaw, valueRaw] of Object.entries(parsed)) {
+        const key = String(keyRaw).trim();
+        if (!key) {
+            throw new Error(`${envName} includes empty key`);
+        }
+        if (typeof valueRaw !== 'string') {
+            throw new Error(`${envName} value for "${key}" must be a string`);
+        }
+        out[key] = valueRaw;
+    }
+    return out;
+}
+
+function parseErc1155AssetList(raw, envName) {
+    if (!raw) return [];
+
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    } catch (error) {
+        throw new Error(`${envName} must be valid JSON array`);
+    }
+    if (!Array.isArray(parsed)) {
+        throw new Error(`${envName} must be a JSON array`);
+    }
+
+    return parsed.map((item, index) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) {
+            throw new Error(`${envName}[${index}] must be an object`);
+        }
+        const tokenRaw = typeof item.token === 'string' ? item.token.trim() : '';
+        if (!tokenRaw) {
+            throw new Error(`${envName}[${index}].token must be a non-empty address string`);
+        }
+
+        const tokenIdRaw =
+            typeof item.tokenId === 'string' || typeof item.tokenId === 'number'
+                ? String(item.tokenId).trim()
+                : '';
+        if (!tokenIdRaw) {
+            throw new Error(`${envName}[${index}].tokenId must be a non-empty integer string`);
+        }
+
+        let normalizedTokenId;
+        try {
+            normalizedTokenId = BigInt(tokenIdRaw);
+        } catch (error) {
+            throw new Error(`${envName}[${index}].tokenId must be a non-negative integer`);
+        }
+        if (normalizedTokenId < 0n) {
+            throw new Error(`${envName}[${index}].tokenId must be a non-negative integer`);
+        }
+
+        let symbol;
+        if (item.symbol !== undefined && item.symbol !== null) {
+            if (typeof item.symbol !== 'string') {
+                throw new Error(`${envName}[${index}].symbol must be a string`);
+            }
+            const trimmedSymbol = item.symbol.trim();
+            if (trimmedSymbol) {
+                symbol = trimmedSymbol;
+            }
+        }
+
+        return {
+            token: getAddress(tokenRaw),
+            tokenId: normalizedTokenId.toString(),
+            symbol,
+        };
+    });
+}
+
+function parseOptionalAddressEnv(raw, envName) {
+    if (raw === undefined || raw === null) return undefined;
+    const trimmed = String(raw).trim();
+    if (!trimmed) {
+        return undefined;
+    }
+    try {
+        return getAddress(trimmed);
+    } catch (error) {
+        throw new Error(`${envName} must be a valid address`);
+    }
+}
+
 function buildConfig() {
     const rpcUrl = mustGetEnv('RPC_URL');
-    const commitmentSafe = getAddress(mustGetEnv('COMMITMENT_SAFE'));
-    const ogModule = getAddress(mustGetEnv('OG_MODULE'));
+    const commitmentSafe = parseOptionalAddressEnv(process.env.COMMITMENT_SAFE, 'COMMITMENT_SAFE');
+    const ogModule = parseOptionalAddressEnv(process.env.OG_MODULE, 'OG_MODULE');
 
     const messageApiEnabled = parseBoolean(process.env.MESSAGE_API_ENABLED, false);
     // Keep optional ingress isolated: malformed keys should only fail when the feature is enabled.
@@ -189,6 +287,36 @@ function buildConfig() {
               messageApiSignerAllowlist: [],
               messageApiSignatureMaxAgeSeconds: 300,
           };
+    const ipfsEnabled = parseBoolean(process.env.IPFS_ENABLED, false);
+    const ipfsConfig = ipfsEnabled
+        ? {
+              ipfsApiUrl: parseHost(process.env.IPFS_API_URL, 'http://127.0.0.1:5001'),
+              ipfsHeaders: parseStringMap(process.env.IPFS_HEADERS_JSON, 'IPFS_HEADERS_JSON'),
+              ipfsRequestTimeoutMs: parsePositiveInteger(
+                  process.env.IPFS_REQUEST_TIMEOUT_MS,
+                  'IPFS_REQUEST_TIMEOUT_MS',
+                  15_000
+              ),
+              ipfsMaxRetries: parsePositiveInteger(
+                  process.env.IPFS_MAX_RETRIES,
+                  'IPFS_MAX_RETRIES',
+                  1,
+                  { min: 0 }
+              ),
+              ipfsRetryDelayMs: parsePositiveInteger(
+                  process.env.IPFS_RETRY_DELAY_MS,
+                  'IPFS_RETRY_DELAY_MS',
+                  250,
+                  { min: 0 }
+              ),
+          }
+        : {
+              ipfsApiUrl: 'http://127.0.0.1:5001',
+              ipfsHeaders: {},
+              ipfsRequestTimeoutMs: 15_000,
+              ipfsMaxRetries: 1,
+              ipfsRetryDelayMs: 250,
+          };
 
     return {
         rpcUrl,
@@ -198,6 +326,10 @@ function buildConfig() {
         logChunkSize: parsePositiveBigInt(process.env.LOG_CHUNK_SIZE, 'LOG_CHUNK_SIZE'),
         startBlock: process.env.START_BLOCK ? BigInt(process.env.START_BLOCK) : undefined,
         watchAssets: parseAddressList(process.env.WATCH_ASSETS),
+        watchErc1155Assets: parseErc1155AssetList(
+            process.env.WATCH_ERC1155_ASSETS_JSON,
+            'WATCH_ERC1155_ASSETS_JSON'
+        ),
         watchNativeBalance:
             process.env.WATCH_NATIVE_BALANCE === undefined
                 ? true
@@ -318,6 +450,8 @@ function buildConfig() {
         messageApiEnabled,
         messageApiKeys,
         ...messageApiConfig,
+        ipfsEnabled,
+        ...ipfsConfig,
     };
 }
 
