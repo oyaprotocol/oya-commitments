@@ -512,6 +512,7 @@ async function agentLoop() {
             ogModule: config.ogModule,
             proposalsByHash,
             executeRetryMs: config.executeRetryMs,
+            executePendingTxTimeoutMs: config.executePendingTxTimeoutMs,
         });
 
         const rulesText = ogContext?.rules ?? commitmentText ?? '';
