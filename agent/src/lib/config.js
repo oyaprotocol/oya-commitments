@@ -42,6 +42,17 @@ function parsePositiveInteger(raw, envName, fallback, { min = 1, max = undefined
     return parsed;
 }
 
+function parseNonNegativeInteger(raw, envName, fallback, { max = undefined } = {}) {
+    return parsePositiveInteger(raw, envName, fallback, { min: 0, max });
+}
+
+function parseOptionalPositiveInteger(raw, envName, { min = 1, max = undefined } = {}) {
+    if (raw === undefined || raw === null || raw === '') {
+        return undefined;
+    }
+    return parsePositiveInteger(raw, envName, undefined, { min, max });
+}
+
 function parseBoolean(raw, fallback) {
     if (raw === undefined || raw === null) return fallback;
     const normalized = String(raw).trim().toLowerCase();
@@ -194,7 +205,11 @@ function buildConfig() {
         rpcUrl,
         commitmentSafe,
         ogModule,
-        pollIntervalMs: Number(process.env.POLL_INTERVAL_MS ?? 10_000),
+        pollIntervalMs: parsePositiveInteger(
+            process.env.POLL_INTERVAL_MS,
+            'POLL_INTERVAL_MS',
+            10_000
+        ),
         logChunkSize: parsePositiveBigInt(process.env.LOG_CHUNK_SIZE, 'LOG_CHUNK_SIZE'),
         startBlock: process.env.START_BLOCK ? BigInt(process.env.START_BLOCK) : undefined,
         watchAssets: parseAddressList(process.env.WATCH_ASSETS),
@@ -242,12 +257,20 @@ function buildConfig() {
             process.env.DISPUTE_ENABLED === undefined
                 ? true
                 : process.env.DISPUTE_ENABLED.toLowerCase() !== 'false',
-        disputeRetryMs: Number(process.env.DISPUTE_RETRY_MS ?? 60_000),
-        proposalHashResolveTimeoutMs: Number(
-            process.env.PROPOSAL_HASH_RESOLVE_TIMEOUT_MS ?? 15_000
+        disputeRetryMs: parsePositiveInteger(
+            process.env.DISPUTE_RETRY_MS,
+            'DISPUTE_RETRY_MS',
+            60_000
         ),
-        proposalHashResolvePollIntervalMs: Number(
-            process.env.PROPOSAL_HASH_RESOLVE_POLL_INTERVAL_MS ?? 1_500
+        proposalHashResolveTimeoutMs: parseNonNegativeInteger(
+            process.env.PROPOSAL_HASH_RESOLVE_TIMEOUT_MS,
+            'PROPOSAL_HASH_RESOLVE_TIMEOUT_MS',
+            15_000
+        ),
+        proposalHashResolvePollIntervalMs: parsePositiveInteger(
+            process.env.PROPOSAL_HASH_RESOLVE_POLL_INTERVAL_MS,
+            'PROPOSAL_HASH_RESOLVE_POLL_INTERVAL_MS',
+            1_500
         ),
         agentModule: process.env.AGENT_MODULE,
         chainlinkPriceFeed: process.env.CHAINLINK_PRICE_FEED
@@ -271,11 +294,21 @@ function buildConfig() {
         polymarketClobApiKey: process.env.POLYMARKET_CLOB_API_KEY,
         polymarketClobApiSecret: process.env.POLYMARKET_CLOB_API_SECRET,
         polymarketClobApiPassphrase: process.env.POLYMARKET_CLOB_API_PASSPHRASE,
-        polymarketClobRequestTimeoutMs: Number(
-            process.env.POLYMARKET_CLOB_REQUEST_TIMEOUT_MS ?? 15_000
+        polymarketClobRequestTimeoutMs: parseNonNegativeInteger(
+            process.env.POLYMARKET_CLOB_REQUEST_TIMEOUT_MS,
+            'POLYMARKET_CLOB_REQUEST_TIMEOUT_MS',
+            15_000
         ),
-        polymarketClobMaxRetries: Number(process.env.POLYMARKET_CLOB_MAX_RETRIES ?? 1),
-        polymarketClobRetryDelayMs: Number(process.env.POLYMARKET_CLOB_RETRY_DELAY_MS ?? 250),
+        polymarketClobMaxRetries: parseNonNegativeInteger(
+            process.env.POLYMARKET_CLOB_MAX_RETRIES,
+            'POLYMARKET_CLOB_MAX_RETRIES',
+            1
+        ),
+        polymarketClobRetryDelayMs: parseNonNegativeInteger(
+            process.env.POLYMARKET_CLOB_RETRY_DELAY_MS,
+            'POLYMARKET_CLOB_RETRY_DELAY_MS',
+            250
+        ),
         polymarketRelayerEnabled:
             process.env.POLYMARKET_RELAYER_ENABLED === undefined
                 ? false
@@ -301,17 +334,24 @@ function buildConfig() {
             process.env.POLYMARKET_RELAYER_AUTO_DEPLOY_PROXY === undefined
                 ? false
                 : process.env.POLYMARKET_RELAYER_AUTO_DEPLOY_PROXY.toLowerCase() === 'true',
-        polymarketRelayerChainId: process.env.POLYMARKET_RELAYER_CHAIN_ID
-            ? Number(process.env.POLYMARKET_RELAYER_CHAIN_ID)
-            : undefined,
-        polymarketRelayerRequestTimeoutMs: Number(
-            process.env.POLYMARKET_RELAYER_REQUEST_TIMEOUT_MS ?? 15_000
+        polymarketRelayerChainId: parseOptionalPositiveInteger(
+            process.env.POLYMARKET_RELAYER_CHAIN_ID,
+            'POLYMARKET_RELAYER_CHAIN_ID'
         ),
-        polymarketRelayerPollIntervalMs: Number(
-            process.env.POLYMARKET_RELAYER_POLL_INTERVAL_MS ?? 2_000
+        polymarketRelayerRequestTimeoutMs: parseNonNegativeInteger(
+            process.env.POLYMARKET_RELAYER_REQUEST_TIMEOUT_MS,
+            'POLYMARKET_RELAYER_REQUEST_TIMEOUT_MS',
+            15_000
         ),
-        polymarketRelayerPollTimeoutMs: Number(
-            process.env.POLYMARKET_RELAYER_POLL_TIMEOUT_MS ?? 120_000
+        polymarketRelayerPollIntervalMs: parsePositiveInteger(
+            process.env.POLYMARKET_RELAYER_POLL_INTERVAL_MS,
+            'POLYMARKET_RELAYER_POLL_INTERVAL_MS',
+            2_000
+        ),
+        polymarketRelayerPollTimeoutMs: parseNonNegativeInteger(
+            process.env.POLYMARKET_RELAYER_POLL_TIMEOUT_MS,
+            'POLYMARKET_RELAYER_POLL_TIMEOUT_MS',
+            120_000
         ),
         polymarketApiKey: process.env.POLYMARKET_API_KEY,
         polymarketApiSecret: process.env.POLYMARKET_API_SECRET,
