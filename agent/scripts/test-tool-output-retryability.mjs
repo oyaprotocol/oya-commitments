@@ -22,6 +22,8 @@ function buildConfig() {
 
 async function run() {
     const account = { address: '0x1111111111111111111111111111111111111111' };
+    const abortError = new Error('The operation was aborted due to timeout.');
+    abortError.name = 'TimeoutError';
 
     // Pre-submit transient failure should be classified as retryable.
     const transientOutputs = await executeToolCalls({
@@ -56,6 +58,39 @@ async function run() {
     assert.equal(transientOut.status, 'error');
     assert.equal(transientOut.retryable, true);
     assert.equal(transientOut.sideEffectsLikelyCommitted, false);
+
+    const abortOutputs = await executeToolCalls({
+        toolCalls: [
+            {
+                callId: 'propose-abort',
+                name: 'post_bond_and_propose',
+                arguments: {
+                    transactions: [
+                        {
+                            to: '0x4444444444444444444444444444444444444444',
+                            value: '0',
+                            data: '0x',
+                            operation: 0,
+                        },
+                    ],
+                },
+            },
+        ],
+        publicClient: {
+            async getBalance() {
+                throw abortError;
+            },
+        },
+        walletClient: {},
+        account,
+        config: buildConfig(),
+        ogContext: null,
+    });
+    assert.equal(abortOutputs.length, 1);
+    const abortOut = parseOutput(abortOutputs[0]);
+    assert.equal(abortOut.status, 'error');
+    assert.equal(abortOut.retryable, true);
+    assert.equal(abortOut.sideEffectsLikelyCommitted, false);
 
     const transientDisputeOutputs = await executeToolCalls({
         toolCalls: [
@@ -125,6 +160,9 @@ async function run() {
                 }
                 if (functionName === 'balanceOf') {
                     return 1n;
+                }
+                if (functionName === 'allowance') {
+                    return 0n;
                 }
                 throw new Error(`unexpected readContract function: ${functionName}`);
             },

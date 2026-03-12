@@ -101,6 +101,62 @@ function isReceiptUnavailableError(error) {
     return message.includes('transaction receipt') && message.includes('not found');
 }
 
+async function ensureErc20Allowance({
+    publicClient,
+    walletClient,
+    token,
+    owner,
+    spender,
+    requiredAmount,
+    onSideEffectCommitted = undefined,
+}) {
+    if (requiredAmount <= 0n) {
+        return;
+    }
+
+    const currentAllowance = await publicClient.readContract({
+        address: token,
+        abi: erc20Abi,
+        functionName: 'allowance',
+        args: [owner, spender],
+    });
+    if (currentAllowance >= requiredAmount) {
+        return;
+    }
+
+    if (currentAllowance > 0n) {
+        const resetHash = await walletClient.writeContract({
+            address: token,
+            abi: erc20Abi,
+            functionName: 'approve',
+            args: [spender, 0n],
+        });
+        onSideEffectCommitted?.(resetHash);
+        await publicClient.waitForTransactionReceipt({ hash: resetHash });
+    }
+
+    const approveHash = await walletClient.writeContract({
+        address: token,
+        abi: erc20Abi,
+        functionName: 'approve',
+        args: [spender, requiredAmount],
+    });
+    onSideEffectCommitted?.(approveHash);
+    await publicClient.waitForTransactionReceipt({ hash: approveHash });
+
+    const allowance = await publicClient.readContract({
+        address: token,
+        abi: erc20Abi,
+        functionName: 'allowance',
+        args: [owner, spender],
+    });
+    if (allowance < requiredAmount) {
+        throw new Error(
+            `Insufficient token allowance: need ${requiredAmount.toString()} wei, have ${allowance.toString()} for spender ${spender}.`
+        );
+    }
+}
+
 async function resolveProposalHashFromReceipt({
     publicClient,
     proposalTxHash,
@@ -213,25 +269,17 @@ async function postBondAndPropose({
             }
 
             for (const spender of spenders) {
-                const approveHash = await walletClient.writeContract({
-                    address: collateral,
-                    abi: erc20Abi,
-                    functionName: 'approve',
-                    args: [spender, requiredBond],
+                await ensureErc20Allowance({
+                    publicClient,
+                    walletClient,
+                    token: collateral,
+                    owner: account.address,
+                    spender,
+                    requiredAmount: requiredBond,
+                    onSideEffectCommitted: () => {
+                        sideEffectsLikelyCommitted = true;
+                    },
                 });
-                sideEffectsLikelyCommitted = true;
-                await publicClient.waitForTransactionReceipt({ hash: approveHash });
-                const allowance = await publicClient.readContract({
-                    address: collateral,
-                    abi: erc20Abi,
-                    functionName: 'allowance',
-                    args: [account.address, spender],
-                });
-                if (allowance < requiredBond) {
-                    throw new Error(
-                        `Insufficient bond allowance: need ${requiredBond.toString()} wei, have ${allowance.toString()} for spender ${spender}.`
-                    );
-                }
             }
         }
 
@@ -434,14 +482,17 @@ async function postBondAndDispute({
                 );
             }
 
-            const approveHash = await walletClient.writeContract({
-                address: currency,
-                abi: erc20Abi,
-                functionName: 'approve',
-                args: [optimisticOracle, bond],
+            await ensureErc20Allowance({
+                publicClient,
+                walletClient,
+                token: currency,
+                owner: account.address,
+                spender: optimisticOracle,
+                requiredAmount: bond,
+                onSideEffectCommitted: () => {
+                    sideEffectsLikelyCommitted = true;
+                },
             });
-            sideEffectsLikelyCommitted = true;
-            await publicClient.waitForTransactionReceipt({ hash: approveHash });
         }
 
         let disputeHash;

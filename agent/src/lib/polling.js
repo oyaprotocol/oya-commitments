@@ -6,12 +6,27 @@ import {
     transactionsProposedEvent,
     transferEvent,
 } from './og.js';
-import { findContractDeploymentBlock } from './chain-history.js';
+import { findContractDeploymentBlock, getLogsChunked } from './chain-history.js';
 
 function getAlwaysEmitBalanceSnapshotPollingOptions() {
     return {
         emitBalanceSnapshotsEveryPoll: true,
     };
+}
+
+function isReceiptUnavailableError(error) {
+    const name = String(error?.name ?? '');
+    if (name.includes('TransactionReceiptNotFoundError') || name.includes('TransactionNotFoundError')) {
+        return true;
+    }
+
+    const message = String(error?.shortMessage ?? error?.message ?? '').toLowerCase();
+    return message.includes('transaction receipt') && message.includes('not found');
+}
+
+function isReceiptReverted(receipt) {
+    const status = receipt?.status;
+    return status === 0n || status === 0 || status === 'reverted';
 }
 
 async function primeBalances({ publicClient, commitmentSafe, watchNativeBalance, blockNumber }) {
@@ -112,6 +127,7 @@ async function pollCommitmentChanges({
     lastCheckedBlock,
     lastNativeBalance,
     lastAssetBalances,
+    logChunkSize,
     emitBalanceSnapshotsEveryPoll = false,
 }) {
     const latestBlock = await publicClient.getBlockNumber();
@@ -124,10 +140,10 @@ async function pollCommitmentChanges({
         });
         const { signals: initialAssetSignals, balanceMap: initialAssetBalanceMap } =
             await primeAssetBalanceSignals({
-            publicClient,
-            trackedAssets,
-            commitmentSafe,
-            blockNumber: latestBlock,
+                publicClient,
+                trackedAssets,
+                commitmentSafe,
+                blockNumber: latestBlock,
             });
         if (initialAssetSignals.length > 0) {
             console.log(
@@ -141,8 +157,7 @@ async function pollCommitmentChanges({
             balanceSnapshots: initialAssetSignals,
             lastCheckedBlock: latestBlock,
             lastNativeBalance: nextNativeBalance,
-            lastAssetBalances:
-                lastAssetBalances ?? initialAssetBalanceMap,
+            lastAssetBalances: lastAssetBalances ?? initialAssetBalanceMap,
         };
     }
 
@@ -160,41 +175,34 @@ async function pollCommitmentChanges({
     const toBlock = latestBlock;
     const deposits = [];
 
-    const maxRange = 10n;
-    let currentFrom = fromBlock;
-    while (currentFrom <= toBlock) {
-        const currentTo =
-            currentFrom + maxRange - 1n > toBlock ? toBlock : currentFrom + maxRange - 1n;
-
     for (const asset of trackedAssets) {
         if (isAddressEqual(asset, zeroAddress)) {
             continue;
         }
-        const logs = await publicClient.getLogs({
+        const logs = await getLogsChunked({
+            publicClient,
             address: asset,
             event: transferEvent,
-                args: { to: commitmentSafe },
-                fromBlock: currentFrom,
-                toBlock: currentTo,
+            args: { to: commitmentSafe },
+            fromBlock,
+            toBlock,
+            chunkSize: logChunkSize,
+        });
+
+        for (const log of logs) {
+            deposits.push({
+                kind: 'erc20Deposit',
+                asset,
+                from: log.args.from,
+                amount: log.args.value,
+                blockNumber: log.blockNumber,
+                transactionHash: log.transactionHash,
+                logIndex: log.logIndex,
+                id: log.transactionHash
+                    ? `${log.transactionHash}:${log.logIndex ?? '0'}`
+                    : `${log.blockNumber.toString()}:${log.logIndex ?? '0'}`,
             });
-
-            for (const log of logs) {
-                deposits.push({
-                    kind: 'erc20Deposit',
-                    asset,
-                    from: log.args.from,
-                    amount: log.args.value,
-                    blockNumber: log.blockNumber,
-                    transactionHash: log.transactionHash,
-                    logIndex: log.logIndex,
-                    id: log.transactionHash
-                        ? `${log.transactionHash}:${log.logIndex ?? '0'}`
-                        : `${log.blockNumber.toString()}:${log.logIndex ?? '0'}`,
-                });
-            }
         }
-
-        currentFrom = currentTo + 1n;
     }
 
     let nextNativeBalance = lastNativeBalance;
@@ -276,6 +284,7 @@ async function pollProposalChanges({
     lastProposalCheckedBlock,
     proposalsByHash,
     startBlock,
+    logChunkSize,
 }) {
     const latestBlock = await publicClient.getBlockNumber();
     let fromBlock;
@@ -306,42 +315,32 @@ async function pollProposalChanges({
     }
     const toBlock = latestBlock;
 
-    const maxRange = 10n;
-    const proposedLogs = [];
-    const executedLogs = [];
-    const deletedLogs = [];
-    let currentFrom = fromBlock;
-    while (currentFrom <= toBlock) {
-        const currentTo =
-            currentFrom + maxRange - 1n > toBlock ? toBlock : currentFrom + maxRange - 1n;
-
-        const [chunkProposed, chunkExecuted, chunkDeleted] = await Promise.all([
-            publicClient.getLogs({
-                address: ogModule,
-                event: transactionsProposedEvent,
-                fromBlock: currentFrom,
-                toBlock: currentTo,
-            }),
-            publicClient.getLogs({
-                address: ogModule,
-                event: proposalExecutedEvent,
-                fromBlock: currentFrom,
-                toBlock: currentTo,
-            }),
-            publicClient.getLogs({
-                address: ogModule,
-                event: proposalDeletedEvent,
-                fromBlock: currentFrom,
-                toBlock: currentTo,
-            }),
-        ]);
-
-        proposedLogs.push(...chunkProposed);
-        executedLogs.push(...chunkExecuted);
-        deletedLogs.push(...chunkDeleted);
-
-        currentFrom = currentTo + 1n;
-    }
+    const [proposedLogs, executedLogs, deletedLogs] = await Promise.all([
+        getLogsChunked({
+            publicClient,
+            address: ogModule,
+            event: transactionsProposedEvent,
+            fromBlock,
+            toBlock,
+            chunkSize: logChunkSize,
+        }),
+        getLogsChunked({
+            publicClient,
+            address: ogModule,
+            event: proposalExecutedEvent,
+            fromBlock,
+            toBlock,
+            chunkSize: logChunkSize,
+        }),
+        getLogsChunked({
+            publicClient,
+            address: ogModule,
+            event: proposalDeletedEvent,
+            fromBlock,
+            toBlock,
+            chunkSize: logChunkSize,
+        }),
+    ]);
 
     // Process proposal lifecycle events in strict chain order so startup backfills
     // do not emit stale proposals that are finalized later in the same scan range.
@@ -404,6 +403,8 @@ async function pollProposalChanges({
                 challengeWindowEnds: BigInt(challengeWindowEnds ?? 0),
                 transactions,
                 lastAttemptMs: 0,
+                executionTxHash: null,
+                executionSubmittedMs: null,
                 disputeAttemptMs: 0,
                 rules,
                 explanation,
@@ -440,6 +441,7 @@ async function executeReadyProposals({
     ogModule,
     proposalsByHash,
     executeRetryMs,
+    executePendingTxTimeoutMs,
 }) {
     if (proposalsByHash.size === 0) return;
 
@@ -447,11 +449,58 @@ async function executeReadyProposals({
     const block = await publicClient.getBlock({ blockNumber: latestBlock });
     const now = BigInt(block.timestamp);
     const nowMs = Date.now();
+    const pendingTxTimeoutMs =
+        Number.isFinite(executePendingTxTimeoutMs) && executePendingTxTimeoutMs > 0
+            ? executePendingTxTimeoutMs
+            : 900_000;
 
     for (const proposal of proposalsByHash.values()) {
         if (!proposal?.transactions?.length) continue;
         if (proposal.challengeWindowEnds === undefined) continue;
         if (now < proposal.challengeWindowEnds) continue;
+
+        if (proposal.executionTxHash) {
+            try {
+                const receipt = await publicClient.getTransactionReceipt({
+                    hash: proposal.executionTxHash,
+                });
+                if (isReceiptReverted(receipt)) {
+                    console.warn(
+                        `[agent] Proposal execution tx reverted for ${proposal.proposalHash}; retrying after backoff.`
+                    );
+                    proposal.executionTxHash = null;
+                    proposal.executionSubmittedMs = null;
+                } else {
+                    continue;
+                }
+            } catch (error) {
+                if (!isReceiptUnavailableError(error)) {
+                    console.warn(
+                        `[agent] Failed to read proposal execution receipt for ${proposal.proposalHash}: ${error?.shortMessage ?? error?.message ?? error}`
+                    );
+                    continue;
+                }
+
+                const executionSubmittedMs = Number(
+                    proposal.executionSubmittedMs ?? proposal.lastAttemptMs ?? 0
+                );
+                const pendingForMs = Math.max(0, nowMs - executionSubmittedMs);
+                if (
+                    Number.isFinite(executionSubmittedMs) &&
+                    executionSubmittedMs > 0 &&
+                    pendingForMs < pendingTxTimeoutMs
+                ) {
+                    continue;
+                }
+
+                console.warn(
+                    `[agent] Proposal execution tx ${proposal.executionTxHash} for ${proposal.proposalHash} has no receipt after ${pendingTxTimeoutMs}ms; allowing retry.`
+                );
+                proposal.executionTxHash = null;
+                proposal.executionSubmittedMs = null;
+            }
+        }
+
         if (proposal.lastAttemptMs && nowMs - proposal.lastAttemptMs < executeRetryMs) {
             continue;
         }
@@ -499,6 +548,8 @@ async function executeReadyProposals({
                 functionName: 'executeProposal',
                 args: [proposal.transactions],
             });
+            proposal.executionTxHash = txHash;
+            proposal.executionSubmittedMs = nowMs;
             console.log('[agent] Proposal execution submitted:', txHash);
         } catch (error) {
             console.warn('[agent] Proposal execution failed:', error?.shortMessage ?? error?.message ?? error);
