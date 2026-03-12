@@ -14,6 +14,21 @@ function getAlwaysEmitBalanceSnapshotPollingOptions() {
     };
 }
 
+function isReceiptUnavailableError(error) {
+    const name = String(error?.name ?? '');
+    if (name.includes('TransactionReceiptNotFoundError') || name.includes('TransactionNotFoundError')) {
+        return true;
+    }
+
+    const message = String(error?.shortMessage ?? error?.message ?? '').toLowerCase();
+    return message.includes('transaction receipt') && message.includes('not found');
+}
+
+function isReceiptReverted(receipt) {
+    const status = receipt?.status;
+    return status === 0n || status === 0 || status === 'reverted';
+}
+
 async function primeBalances({ publicClient, commitmentSafe, watchNativeBalance, blockNumber }) {
     if (!watchNativeBalance) return undefined;
 
@@ -404,6 +419,8 @@ async function pollProposalChanges({
                 challengeWindowEnds: BigInt(challengeWindowEnds ?? 0),
                 transactions,
                 lastAttemptMs: 0,
+                executionTxHash: null,
+                executionSubmittedMs: null,
                 disputeAttemptMs: 0,
                 rules,
                 explanation,
@@ -440,6 +457,7 @@ async function executeReadyProposals({
     ogModule,
     proposalsByHash,
     executeRetryMs,
+    executePendingTxTimeoutMs,
 }) {
     if (proposalsByHash.size === 0) return;
 
@@ -447,11 +465,58 @@ async function executeReadyProposals({
     const block = await publicClient.getBlock({ blockNumber: latestBlock });
     const now = BigInt(block.timestamp);
     const nowMs = Date.now();
+    const pendingTxTimeoutMs =
+        Number.isFinite(executePendingTxTimeoutMs) && executePendingTxTimeoutMs > 0
+            ? executePendingTxTimeoutMs
+            : 900_000;
 
     for (const proposal of proposalsByHash.values()) {
         if (!proposal?.transactions?.length) continue;
         if (proposal.challengeWindowEnds === undefined) continue;
         if (now < proposal.challengeWindowEnds) continue;
+
+        if (proposal.executionTxHash) {
+            try {
+                const receipt = await publicClient.getTransactionReceipt({
+                    hash: proposal.executionTxHash,
+                });
+                if (isReceiptReverted(receipt)) {
+                    console.warn(
+                        `[agent] Proposal execution tx reverted for ${proposal.proposalHash}; retrying after backoff.`
+                    );
+                    proposal.executionTxHash = null;
+                    proposal.executionSubmittedMs = null;
+                } else {
+                    continue;
+                }
+            } catch (error) {
+                if (!isReceiptUnavailableError(error)) {
+                    console.warn(
+                        `[agent] Failed to read proposal execution receipt for ${proposal.proposalHash}: ${error?.shortMessage ?? error?.message ?? error}`
+                    );
+                    continue;
+                }
+
+                const executionSubmittedMs = Number(
+                    proposal.executionSubmittedMs ?? proposal.lastAttemptMs ?? 0
+                );
+                const pendingForMs = Math.max(0, nowMs - executionSubmittedMs);
+                if (
+                    Number.isFinite(executionSubmittedMs) &&
+                    executionSubmittedMs > 0 &&
+                    pendingForMs < pendingTxTimeoutMs
+                ) {
+                    continue;
+                }
+
+                console.warn(
+                    `[agent] Proposal execution tx ${proposal.executionTxHash} for ${proposal.proposalHash} has no receipt after ${pendingTxTimeoutMs}ms; allowing retry.`
+                );
+                proposal.executionTxHash = null;
+                proposal.executionSubmittedMs = null;
+            }
+        }
+
         if (proposal.lastAttemptMs && nowMs - proposal.lastAttemptMs < executeRetryMs) {
             continue;
         }
@@ -499,6 +564,8 @@ async function executeReadyProposals({
                 functionName: 'executeProposal',
                 args: [proposal.transactions],
             });
+            proposal.executionTxHash = txHash;
+            proposal.executionSubmittedMs = nowMs;
             console.log('[agent] Proposal execution submitted:', txHash);
         } catch (error) {
             console.warn('[agent] Proposal execution failed:', error?.shortMessage ?? error?.message ?? error);

@@ -219,7 +219,16 @@ function buildConfig() {
         proposeGasLimit: process.env.PROPOSE_GAS_LIMIT
             ? BigInt(process.env.PROPOSE_GAS_LIMIT)
             : 2_000_000n,
-        executeRetryMs: Number(process.env.EXECUTE_RETRY_MS ?? 60_000),
+        executeRetryMs: parsePositiveInteger(
+            process.env.EXECUTE_RETRY_MS,
+            'EXECUTE_RETRY_MS',
+            60_000
+        ),
+        executePendingTxTimeoutMs: parsePositiveInteger(
+            process.env.EXECUTE_PENDING_TX_TIMEOUT_MS,
+            'EXECUTE_PENDING_TX_TIMEOUT_MS',
+            900_000
+        ),
         proposeEnabled:
             process.env.PROPOSE_ENABLED === undefined
                 ? true
