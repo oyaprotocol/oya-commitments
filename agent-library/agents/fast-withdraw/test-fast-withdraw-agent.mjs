@@ -341,8 +341,6 @@ async function run() {
         assert.equal(
             requestSignal.expectedReimbursementExplanation,
             JSON.stringify({
-                version: 'oya-fast-withdraw-reimbursement-v1',
-                requestId: signal.requestId,
                 signedRequestCid: 'ipfs://bafyfastwithdrawcid',
                 fillTxHash: TEST_FILL_TX_HASH,
             })
