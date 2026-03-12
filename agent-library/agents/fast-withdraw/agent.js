@@ -18,7 +18,6 @@ const __dirname = path.dirname(__filename);
 
 const STATE_VERSION = 1;
 const ARTIFACT_VERSION = 'oya-signed-request-archive-v1';
-const REIMBURSEMENT_EXPLANATION_VERSION = 'oya-fast-withdraw-reimbursement-v1';
 const FILENAME_PREFIX = 'signed-request-';
 const FILENAME_SUFFIX = '.json';
 const DIRECT_FILL_CONFIRMATION_THRESHOLD = 3n;
@@ -308,8 +307,6 @@ function buildReimbursementExplanation(record) {
         return null;
     }
     return JSON.stringify({
-        version: REIMBURSEMENT_EXPLANATION_VERSION,
-        requestId: record.requestId,
         signedRequestCid: record.artifactUri,
         fillTxHash: record.directFillTxHash,
     });
