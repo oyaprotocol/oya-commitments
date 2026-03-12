@@ -6,7 +6,7 @@ import {
     transactionsProposedEvent,
     transferEvent,
 } from './og.js';
-import { findContractDeploymentBlock } from './chain-history.js';
+import { findContractDeploymentBlock, getLogsChunked } from './chain-history.js';
 
 function getAlwaysEmitBalanceSnapshotPollingOptions() {
     return {
@@ -127,6 +127,7 @@ async function pollCommitmentChanges({
     lastCheckedBlock,
     lastNativeBalance,
     lastAssetBalances,
+    logChunkSize,
     emitBalanceSnapshotsEveryPoll = false,
 }) {
     const latestBlock = await publicClient.getBlockNumber();
@@ -139,10 +140,10 @@ async function pollCommitmentChanges({
         });
         const { signals: initialAssetSignals, balanceMap: initialAssetBalanceMap } =
             await primeAssetBalanceSignals({
-            publicClient,
-            trackedAssets,
-            commitmentSafe,
-            blockNumber: latestBlock,
+                publicClient,
+                trackedAssets,
+                commitmentSafe,
+                blockNumber: latestBlock,
             });
         if (initialAssetSignals.length > 0) {
             console.log(
@@ -156,8 +157,7 @@ async function pollCommitmentChanges({
             balanceSnapshots: initialAssetSignals,
             lastCheckedBlock: latestBlock,
             lastNativeBalance: nextNativeBalance,
-            lastAssetBalances:
-                lastAssetBalances ?? initialAssetBalanceMap,
+            lastAssetBalances: lastAssetBalances ?? initialAssetBalanceMap,
         };
     }
 
@@ -175,41 +175,34 @@ async function pollCommitmentChanges({
     const toBlock = latestBlock;
     const deposits = [];
 
-    const maxRange = 10n;
-    let currentFrom = fromBlock;
-    while (currentFrom <= toBlock) {
-        const currentTo =
-            currentFrom + maxRange - 1n > toBlock ? toBlock : currentFrom + maxRange - 1n;
-
     for (const asset of trackedAssets) {
         if (isAddressEqual(asset, zeroAddress)) {
             continue;
         }
-        const logs = await publicClient.getLogs({
+        const logs = await getLogsChunked({
+            publicClient,
             address: asset,
             event: transferEvent,
-                args: { to: commitmentSafe },
-                fromBlock: currentFrom,
-                toBlock: currentTo,
+            args: { to: commitmentSafe },
+            fromBlock,
+            toBlock,
+            chunkSize: logChunkSize,
+        });
+
+        for (const log of logs) {
+            deposits.push({
+                kind: 'erc20Deposit',
+                asset,
+                from: log.args.from,
+                amount: log.args.value,
+                blockNumber: log.blockNumber,
+                transactionHash: log.transactionHash,
+                logIndex: log.logIndex,
+                id: log.transactionHash
+                    ? `${log.transactionHash}:${log.logIndex ?? '0'}`
+                    : `${log.blockNumber.toString()}:${log.logIndex ?? '0'}`,
             });
-
-            for (const log of logs) {
-                deposits.push({
-                    kind: 'erc20Deposit',
-                    asset,
-                    from: log.args.from,
-                    amount: log.args.value,
-                    blockNumber: log.blockNumber,
-                    transactionHash: log.transactionHash,
-                    logIndex: log.logIndex,
-                    id: log.transactionHash
-                        ? `${log.transactionHash}:${log.logIndex ?? '0'}`
-                        : `${log.blockNumber.toString()}:${log.logIndex ?? '0'}`,
-                });
-            }
         }
-
-        currentFrom = currentTo + 1n;
     }
 
     let nextNativeBalance = lastNativeBalance;
@@ -291,6 +284,7 @@ async function pollProposalChanges({
     lastProposalCheckedBlock,
     proposalsByHash,
     startBlock,
+    logChunkSize,
 }) {
     const latestBlock = await publicClient.getBlockNumber();
     let fromBlock;
@@ -321,42 +315,32 @@ async function pollProposalChanges({
     }
     const toBlock = latestBlock;
 
-    const maxRange = 10n;
-    const proposedLogs = [];
-    const executedLogs = [];
-    const deletedLogs = [];
-    let currentFrom = fromBlock;
-    while (currentFrom <= toBlock) {
-        const currentTo =
-            currentFrom + maxRange - 1n > toBlock ? toBlock : currentFrom + maxRange - 1n;
-
-        const [chunkProposed, chunkExecuted, chunkDeleted] = await Promise.all([
-            publicClient.getLogs({
-                address: ogModule,
-                event: transactionsProposedEvent,
-                fromBlock: currentFrom,
-                toBlock: currentTo,
-            }),
-            publicClient.getLogs({
-                address: ogModule,
-                event: proposalExecutedEvent,
-                fromBlock: currentFrom,
-                toBlock: currentTo,
-            }),
-            publicClient.getLogs({
-                address: ogModule,
-                event: proposalDeletedEvent,
-                fromBlock: currentFrom,
-                toBlock: currentTo,
-            }),
-        ]);
-
-        proposedLogs.push(...chunkProposed);
-        executedLogs.push(...chunkExecuted);
-        deletedLogs.push(...chunkDeleted);
-
-        currentFrom = currentTo + 1n;
-    }
+    const [proposedLogs, executedLogs, deletedLogs] = await Promise.all([
+        getLogsChunked({
+            publicClient,
+            address: ogModule,
+            event: transactionsProposedEvent,
+            fromBlock,
+            toBlock,
+            chunkSize: logChunkSize,
+        }),
+        getLogsChunked({
+            publicClient,
+            address: ogModule,
+            event: proposalExecutedEvent,
+            fromBlock,
+            toBlock,
+            chunkSize: logChunkSize,
+        }),
+        getLogsChunked({
+            publicClient,
+            address: ogModule,
+            event: proposalDeletedEvent,
+            fromBlock,
+            toBlock,
+            chunkSize: logChunkSize,
+        }),
+    ]);
 
     // Process proposal lifecycle events in strict chain order so startup backfills
     // do not emit stale proposals that are finalized later in the same scan range.
