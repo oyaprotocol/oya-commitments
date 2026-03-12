@@ -61,7 +61,7 @@ For interactions, swap the env var (e.g., `PROPOSER_PK`, `EXECUTOR_PK`). For sig
 
 ## What the Agent Does
 
-- **Polls for deposits**: Checks ERC20 `Transfer` logs into the commitment and (optionally) native balance increases. If nothing changed, no LLM/decision code runs.
+- **Polls for deposits**: Checks ERC20 `Transfer` logs, tracked ERC1155 `TransferSingle`/`TransferBatch` logs into the commitment, and (optionally) native balance increases. If nothing changed, no LLM/decision code runs.
 - **Bonds + proposes**: `postBondAndPropose` approves the OG collateral bond and calls `proposeTransactions` on the module.
 - **Monitors proposals**: Watches for Optimistic Governor proposals and routes them to the LLM for rule checks.
 - **Disputes assertions**: When the LLM flags a proposal as violating the rules, the agent posts the Oracle V3 bond and disputes the associated assertion. A human-readable rationale is logged locally.
@@ -183,7 +183,7 @@ Tool:
 
 ### ERC1155 Tracking (Optional)
 
-Some agent modules need tracked ERC1155 balances in addition to ERC20/native monitoring.
+The shared runner can monitor configured ERC1155 token IDs in addition to ERC20/native monitoring.
 
 - `WATCH_ERC1155_ASSETS_JSON`: JSON array of tracked ERC1155 assets.
 - Each entry must include:
@@ -202,6 +202,11 @@ Example:
   }
 ]
 ```
+
+When configured, the runner emits:
+
+- `erc1155Deposit` signals when a watched token ID is transferred into the commitment Safe.
+- `erc1155BalanceSnapshot` signals when a watched token ID balance changes, or on every poll when the agent enables always-on balance snapshots.
 
 ### Uniswap Swap Action in `build_og_transactions`
 

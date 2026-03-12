@@ -481,6 +481,7 @@ async function agentLoop() {
             await pollCommitmentChanges({
                 publicClient,
                 trackedAssets,
+                trackedErc1155Assets: config.watchErc1155Assets,
                 commitmentSafe: config.commitmentSafe,
                 watchNativeBalance: config.watchNativeBalance,
                 lastCheckedBlock,
