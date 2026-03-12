@@ -14,11 +14,14 @@ async function run() {
         shouldRequeueMessagesForDecisionStatus(DECISION_STATUS.FAILED_NON_RETRYABLE),
         false
     );
+    assert.equal(shouldRequeueMessagesForDecisionStatus(DECISION_STATUS.INVALID_TOOL_ARGS), true);
     assert.equal(shouldRequeueMessagesForDecisionStatus(DECISION_STATUS.HANDLED), false);
     assert.equal(shouldRequeueMessagesForDecisionStatus(DECISION_STATUS.NO_ACTION), false);
 
     assert.equal(isRetryableDecisionError(new Error('network error while calling RPC')), true);
     assert.equal(isRetryableDecisionError({ code: 'ECONNRESET' }), true);
+    assert.equal(isRetryableDecisionError({ name: 'AbortError', message: 'The operation was aborted.' }), true);
+    assert.equal(isRetryableDecisionError({ name: 'TimeoutError', message: 'The operation was aborted due to timeout.' }), true);
     assert.equal(isRetryableDecisionError(new Error('Cannot read properties of undefined')), false);
 
     assert.equal(evaluateToolOutputsDecisionStatus([]), DECISION_STATUS.HANDLED);
@@ -53,6 +56,20 @@ async function run() {
             },
         ]),
         DECISION_STATUS.HANDLED
+    );
+    assert.equal(
+        evaluateToolOutputsDecisionStatus([
+            {
+                output: JSON.stringify({
+                    status: 'error',
+                    message: 'Invalid tool arguments.',
+                    code: 'invalid_tool_arguments',
+                    invalidArguments: true,
+                    retryable: false,
+                }),
+            },
+        ]),
+        DECISION_STATUS.INVALID_TOOL_ARGS
     );
     assert.equal(
         evaluateToolOutputsDecisionStatus([

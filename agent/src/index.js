@@ -486,6 +486,7 @@ async function agentLoop() {
                 lastCheckedBlock,
                 lastNativeBalance,
                 lastAssetBalances,
+                logChunkSize: config.logChunkSize,
                 emitBalanceSnapshotsEveryPoll: Boolean(pollingOptions.emitBalanceSnapshotsEveryPoll),
             });
         lastCheckedBlock = nextCheckedBlock;
@@ -506,12 +507,13 @@ async function agentLoop() {
             deletedProposals,
             lastProposalCheckedBlock: nextProposalBlock,
         } = await pollProposalChanges({
-                publicClient,
-                ogModule: config.ogModule,
-                lastProposalCheckedBlock,
-                proposalsByHash,
-                startBlock: config.startBlock,
-            });
+            publicClient,
+            ogModule: config.ogModule,
+            lastProposalCheckedBlock,
+            proposalsByHash,
+            startBlock: config.startBlock,
+            logChunkSize: config.logChunkSize,
+        });
         lastProposalCheckedBlock = nextProposalBlock;
         const executedProposalCount = executedProposals?.length ?? 0;
         const deletedProposalCount = deletedProposals?.length ?? 0;
@@ -538,6 +540,7 @@ async function agentLoop() {
             ogModule: config.ogModule,
             proposalsByHash,
             executeRetryMs: config.executeRetryMs,
+            executePendingTxTimeoutMs: config.executePendingTxTimeoutMs,
         });
 
         const rulesText = ogContext?.rules ?? commitmentText ?? '';
