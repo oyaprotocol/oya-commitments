@@ -1,0 +1,11 @@
+Only the following agent address is authorized to serve this commitment: <AUTHORIZED_AGENT_ADDRESS>.
+
+Only the authorized agent may satisfy authorized withdrawal requests. The agent does so by sending the requested asset directly to the approved recipient from the agent's own wallet.
+
+After completing the direct fill, the agent may propose a reimbursement transfer from this Safe to their own address for the same asset and amount that was filled. The reimbursement proposal should include a compact explanation containing a CID for the signed withdrawal request and the hash of the direct fill transaction.
+
+A fast-withdraw reimbursement is valid only if:
+- the direct fill was completed by the authorized agent before the reimbursement proposal;
+- the reimbursement asset matches the filled asset;
+- the reimbursement amount exactly matches the filled amount; and
+- the reimbursement recipient is the authorized agent address above.

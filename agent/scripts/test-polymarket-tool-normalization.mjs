@@ -20,13 +20,17 @@ async function run() {
     );
     const cancelOrdersDef = defs.find((tool) => tool.name === 'polymarket_clob_cancel_orders');
     const makeDepositDef = defs.find((tool) => tool.name === 'make_deposit');
+    const makeTransferDef = defs.find((tool) => tool.name === 'make_transfer');
     const makeErc1155DepositDef = defs.find((tool) => tool.name === 'make_erc1155_deposit');
+    const makeErc1155TransferDef = defs.find((tool) => tool.name === 'make_erc1155_transfer');
 
     assert.ok(placeOrderDef);
     assert.ok(buildSignAndPlaceOrderDef);
     assert.ok(cancelOrdersDef);
     assert.equal(makeDepositDef, undefined);
+    assert.equal(makeTransferDef, undefined);
     assert.equal(makeErc1155DepositDef, undefined);
+    assert.equal(makeErc1155TransferDef, undefined);
     assert.deepEqual(placeOrderDef.parameters.properties.orderType.enum, ['GTC', 'GTD', 'FOK', 'FAK']);
     assert.deepEqual(buildSignAndPlaceOrderDef.parameters.properties.orderType.enum, [
         'GTC',

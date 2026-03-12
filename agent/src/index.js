@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createPublicClient, http } from 'viem';
+import { loadAgentConfigFile, resolveAgentRuntimeConfig } from './lib/agent-config.js';
 import { buildConfig } from './lib/config.js';
 import { createSignerClient } from './lib/signer.js';
 import {
@@ -44,7 +45,7 @@ const publicClient = createPublicClient({ transport: http(config.rpcUrl) });
 const { account, walletClient } = await createSignerClient({ rpcUrl: config.rpcUrl });
 const agentAddress = account.address;
 
-const trackedAssets = new Set(config.watchAssets.map((asset) => String(asset).toLowerCase()));
+const trackedAssets = new Set();
 let lastCheckedBlock = config.startBlock;
 let lastProposalCheckedBlock = config.startBlock;
 let lastNativeBalance;
@@ -90,10 +91,31 @@ async function loadAgentModule() {
         console.warn('[agent] Missing commitment.txt next to agent module:', commitmentPath);
     }
 
-    return { agentModule, commitmentText };
+    const agentConfigPath = path.join(path.dirname(resolvedPath), 'config.json');
+    const agentConfigFile = await loadAgentConfigFile(agentConfigPath);
+
+    return { agentModule, commitmentText, agentConfigFile };
 }
 
-const { agentModule, commitmentText } = await loadAgentModule();
+const { agentModule, commitmentText, agentConfigFile } = await loadAgentModule();
+const runtimeChainId = await publicClient.getChainId();
+Object.assign(
+    config,
+    resolveAgentRuntimeConfig({
+        baseConfig: config,
+        agentConfigFile,
+        chainId: runtimeChainId,
+    })
+);
+if (!config.commitmentSafe) {
+    throw new Error('Missing COMMITMENT_SAFE env or agent config.json commitmentSafe for the active chain.');
+}
+if (!config.ogModule) {
+    throw new Error('Missing OG_MODULE env or agent config.json ogModule for the active chain.');
+}
+for (const asset of config.watchAssets) {
+    trackedAssets.add(String(asset).toLowerCase());
+}
 validateMessageApiDecisionEngine({ config, agentModule });
 const pollingOptions = (() => {
     if (typeof agentModule?.getPollingOptions !== 'function') {
@@ -355,11 +377,15 @@ async function decideOnSignals(signals, { onchainPendingProposal = false } = {})
             'You are an agent monitoring an onchain commitment (Safe + Optimistic Governor).';
 
         const executableToolsEnabled =
-            config.proposeEnabled || config.disputeEnabled || config.polymarketClobEnabled;
+            config.proposeEnabled ||
+            config.disputeEnabled ||
+            config.polymarketClobEnabled ||
+            config.ipfsEnabled;
         const tools = toolDefinitions({
             proposeEnabled: config.proposeEnabled,
             disputeEnabled: config.disputeEnabled,
             clobEnabled: config.polymarketClobEnabled,
+            ipfsEnabled: config.ipfsEnabled,
             onchainToolsEnabled: config.proposeEnabled || config.disputeEnabled,
         });
         const allowTools = executableToolsEnabled;

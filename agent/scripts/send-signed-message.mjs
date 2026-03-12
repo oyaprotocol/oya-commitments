@@ -80,8 +80,8 @@ Optional:
   --command=<string>                   Optional command field
   --args-json='<json-object>'          Optional args object
   --metadata-json='<json-object>'      Optional metadata object
-  --idempotency-key=<string>           Optional (auto-generated when omitted)
-  --ttl-seconds=<int>                  Optional message TTL
+  --request-id=<string>                Optional (auto-generated when omitted)
+  --deadline-ms=<int>                  Optional absolute deadline (Unix ms)
   --timestamp-ms=<int>                 Optional signature timestamp (default now)
   --timeout-ms=<int>                   HTTP timeout (default 10000)
   --dry-run                            Print signed payload and request body without sending
@@ -109,14 +109,14 @@ async function main() {
     const command = getArgValue('--command=') ?? undefined;
     const args = parseOptionalObject(getArgValue('--args-json='), '--args-json');
     const metadata = parseOptionalObject(getArgValue('--metadata-json='), '--metadata-json');
-    const idempotencyKey =
-        getArgValue('--idempotency-key=') ?? `sig-${Date.now()}-${randomUUID().slice(0, 8)}`;
-    if (!idempotencyKey.trim()) {
-        throw new Error('--idempotency-key cannot be blank.');
+    const requestId =
+        getArgValue('--request-id=') ?? `sig-${Date.now()}-${randomUUID().slice(0, 8)}`;
+    if (!requestId.trim()) {
+        throw new Error('--request-id cannot be blank.');
     }
 
-    const ttlRaw = getArgValue('--ttl-seconds=');
-    const ttlSeconds = ttlRaw === null ? undefined : parseInteger(ttlRaw, '--ttl-seconds');
+    const deadlineRaw = getArgValue('--deadline-ms=');
+    const deadline = deadlineRaw === null ? undefined : parseInteger(deadlineRaw, '--deadline-ms');
     const timestampRaw = getArgValue('--timestamp-ms=');
     const timestampMs =
         timestampRaw === null ? Date.now() : parseInteger(timestampRaw, '--timestamp-ms');
@@ -130,14 +130,14 @@ async function main() {
         command,
         args,
         metadata,
-        idempotencyKey,
-        ttlSeconds,
+        requestId,
+        deadline,
     });
     const signature = await account.signMessage({ message: payload });
 
     const body = {
         text,
-        idempotencyKey,
+        requestId,
         auth: {
             type: 'eip191',
             address: account.address,
@@ -148,7 +148,7 @@ async function main() {
     if (command !== undefined) body.command = command;
     if (args !== undefined) body.args = args;
     if (metadata !== undefined) body.metadata = metadata;
-    if (ttlSeconds !== undefined) body.ttlSeconds = ttlSeconds;
+    if (deadline !== undefined) body.deadline = deadline;
 
     if (hasFlag('--dry-run')) {
         console.log(
@@ -191,7 +191,7 @@ async function main() {
     const output = {
         endpoint,
         signer: account.address,
-        idempotencyKey,
+        requestId,
         status: response.status,
         ok: response.ok,
         response: responseJson,

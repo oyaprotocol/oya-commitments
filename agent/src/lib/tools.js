@@ -3,9 +3,12 @@ import {
     buildOgTransactions,
     makeDeposit,
     makeErc1155Deposit,
+    makeErc1155Transfer,
+    makeTransfer,
     postBondAndDispute,
     postBondAndPropose,
 } from './tx.js';
+import { publishIpfsContent } from './ipfs.js';
 import {
     buildClobOrderFromRaw,
     cancelClobOrders,
@@ -18,6 +21,31 @@ import { annotateToolExecutionError, hasCommittedToolSideEffects } from './tool-
 
 function safeStringify(value) {
     return JSON.stringify(value, (_, item) => (typeof item === 'bigint' ? item.toString() : item));
+}
+
+function normalizeIpfsPublishJsonArgument(jsonArg) {
+    if (jsonArg === undefined || jsonArg === null) {
+        return undefined;
+    }
+    if (typeof jsonArg === 'string') {
+        const trimmed = jsonArg.trim();
+        if (!trimmed) {
+            return undefined;
+        }
+        try {
+            const parsed = JSON.parse(trimmed);
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                throw new Error('ipfs_publish json must decode to a JSON object.');
+            }
+            return parsed;
+        } catch (error) {
+            throw new Error(`ipfs_publish json must be valid JSON object text: ${error?.message ?? error}`);
+        }
+    }
+    if (typeof jsonArg === 'object' && !Array.isArray(jsonArg)) {
+        return jsonArg;
+    }
+    throw new Error('ipfs_publish json must be a JSON object or JSON object string.');
 }
 
 function isReceiptWaitTimeoutError(error) {
@@ -185,6 +213,7 @@ function toolDefinitions({
     proposeEnabled,
     disputeEnabled,
     clobEnabled,
+    ipfsEnabled,
     onchainToolsEnabled = proposeEnabled || disputeEnabled,
 }) {
     const tools = [
@@ -364,6 +393,33 @@ function toolDefinitions({
         },
         {
             type: 'function',
+            name: 'make_transfer',
+            description:
+                'Transfer funds directly from the agent wallet to any recipient. Use asset=0x000...000 for native ETH. amountWei must be a string of the integer wei amount.',
+            strict: true,
+            parameters: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                    asset: {
+                        type: 'string',
+                        description:
+                            'Asset address (ERC20) or 0x0000000000000000000000000000000000000000 for native.',
+                    },
+                    recipient: {
+                        type: 'string',
+                        description: 'Recipient address for the transfer.',
+                    },
+                    amountWei: {
+                        type: 'string',
+                        description: 'Amount in wei as a string.',
+                    },
+                },
+                required: ['asset', 'recipient', 'amountWei'],
+            },
+        },
+        {
+            type: 'function',
             name: 'make_erc1155_deposit',
             description:
                 'Deposit ERC1155 tokens into the commitment Safe using safeTransferFrom from the agent wallet.',
@@ -389,13 +445,87 @@ function toolDefinitions({
                         description: 'Optional calldata bytes for safeTransferFrom, defaults to 0x.',
                     },
                 },
-                required: ['token', 'tokenId', 'amount'],
+                required: ['token', 'tokenId', 'amount', 'data'],
+            },
+        },
+        {
+            type: 'function',
+            name: 'make_erc1155_transfer',
+            description:
+                'Transfer ERC1155 tokens directly from the agent wallet to any recipient using safeTransferFrom.',
+            strict: true,
+            parameters: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                    token: {
+                        type: 'string',
+                        description: 'ERC1155 token contract address.',
+                    },
+                    recipient: {
+                        type: 'string',
+                        description: 'Recipient address for the ERC1155 transfer.',
+                    },
+                    tokenId: {
+                        type: 'string',
+                        description: 'ERC1155 token id as a base-10 string.',
+                    },
+                    amount: {
+                        type: 'string',
+                        description: 'ERC1155 amount as a base-10 string.',
+                    },
+                    data: {
+                        type: ['string', 'null'],
+                        description: 'Optional calldata bytes for safeTransferFrom, defaults to 0x.',
+                    },
+                },
+                required: ['token', 'recipient', 'tokenId', 'amount', 'data'],
             },
         },
     ];
 
     if (!onchainToolsEnabled) {
         tools.length = 0;
+    }
+
+    if (ipfsEnabled) {
+        tools.push({
+            type: 'function',
+            name: 'ipfs_publish',
+            description:
+                'Publish text or JSON content to IPFS through the configured Kubo-compatible API, and pin the resulting CID by default.',
+            strict: true,
+            parameters: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                    content: {
+                        type: ['string', 'null'],
+                        description:
+                            'Raw string content to publish. Provide exactly one of content or json.',
+                    },
+                    json: {
+                        type: ['string', 'null'],
+                        description:
+                            'Structured JSON object to publish, encoded as a JSON string. Provide exactly one of content or json.',
+                    },
+                    filename: {
+                        type: ['string', 'null'],
+                        description: 'Optional filename for the uploaded artifact.',
+                    },
+                    mediaType: {
+                        type: ['string', 'null'],
+                        description:
+                            'Optional media type, e.g. application/json or text/plain.',
+                    },
+                    pin: {
+                        type: ['boolean', 'null'],
+                        description: 'Whether to pin the published CID. Defaults to true.',
+                    },
+                },
+                required: ['content', 'json', 'filename', 'mediaType', 'pin'],
+            },
+        });
     }
 
     if (onchainToolsEnabled && proposeEnabled) {
@@ -424,8 +554,13 @@ function toolDefinitions({
                             required: ['to', 'value', 'data', 'operation'],
                         },
                     },
+                    explanation: {
+                        type: ['string', 'null'],
+                        description:
+                            'Optional human-readable explanation bytes to attach to the proposal.',
+                    },
                 },
-                required: ['transactions'],
+                required: ['transactions', 'explanation'],
             },
         });
     }
@@ -666,6 +801,52 @@ async function executeToolCalls({
                         output: safeStringify({
                             status: 'error',
                             message: error?.message ?? String(error),
+                        }),
+                    });
+                }
+                continue;
+            }
+
+            if (call.name === 'ipfs_publish') {
+                if (!config.ipfsEnabled) {
+                    outputs.push({
+                        callId: call.callId,
+                        name: call.name,
+                        output: safeStringify({
+                            status: 'skipped',
+                            reason: 'ipfs disabled',
+                        }),
+                    });
+                    continue;
+                }
+
+                try {
+                    const normalizedJson = normalizeIpfsPublishJsonArgument(args.json);
+                    const result = await publishIpfsContent({
+                        config,
+                        content: args.content,
+                        json: normalizedJson,
+                        filename: args.filename,
+                        mediaType: args.mediaType,
+                        pin: args.pin,
+                    });
+                    outputs.push({
+                        callId: call.callId,
+                        name: call.name,
+                        output: safeStringify({
+                            status: 'published',
+                            ...result,
+                        }),
+                    });
+                } catch (error) {
+                    outputs.push({
+                        callId: call.callId,
+                        name: call.name,
+                        output: safeStringify({
+                            status: 'error',
+                            message: error?.message ?? String(error),
+                            retryable: isRetryableToolError(error),
+                            sideEffectsLikelyCommitted: false,
                         }),
                     });
                 }
@@ -1060,6 +1241,56 @@ async function executeToolCalls({
             continue;
         }
 
+        if (call.name === 'make_transfer') {
+            if (!onchainToolsEnabled) {
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'skipped',
+                        reason: 'onchain tools disabled',
+                    }),
+                });
+                continue;
+            }
+            const txHash = await makeTransfer({
+                walletClient,
+                account,
+                asset: args.asset,
+                recipient: args.recipient,
+                amountWei: BigInt(args.amountWei),
+            });
+            sideEffectsLikelyCommitted = true;
+            try {
+                await publicClient.waitForTransactionReceipt({ hash: txHash });
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'confirmed',
+                        transactionHash: String(txHash),
+                    }),
+                });
+            } catch (error) {
+                const timeout = isReceiptWaitTimeoutError(error);
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'submitted',
+                        transactionHash: String(txHash),
+                        pendingConfirmation: true,
+                        receiptCheckError: timeout ? undefined : error?.message ?? String(error),
+                        warning:
+                            timeout
+                                ? 'Timed out waiting for transfer receipt; transaction may still be pending or mined.'
+                                : 'Failed to verify transfer receipt after submission; transaction may still be pending or mined.',
+                    }),
+                });
+            }
+            continue;
+        }
+
         if (call.name === 'make_erc1155_deposit') {
             if (!onchainToolsEnabled) {
                 outputs.push({
@@ -1114,6 +1345,60 @@ async function executeToolCalls({
             continue;
         }
 
+        if (call.name === 'make_erc1155_transfer') {
+            if (!onchainToolsEnabled) {
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'skipped',
+                        reason: 'onchain tools disabled',
+                    }),
+                });
+                continue;
+            }
+            const txHash = await makeErc1155Transfer({
+                publicClient,
+                walletClient,
+                account,
+                config,
+                token: args.token,
+                recipient: args.recipient,
+                tokenId: args.tokenId,
+                amount: args.amount,
+                data: args.data,
+            });
+            sideEffectsLikelyCommitted = true;
+            try {
+                await publicClient.waitForTransactionReceipt({ hash: txHash });
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'confirmed',
+                        transactionHash: String(txHash),
+                    }),
+                });
+            } catch (error) {
+                const timeout = isReceiptWaitTimeoutError(error);
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'submitted',
+                        transactionHash: String(txHash),
+                        pendingConfirmation: true,
+                        receiptCheckError: timeout ? undefined : error?.message ?? String(error),
+                        warning:
+                            timeout
+                                ? 'Timed out waiting for ERC1155 transfer receipt; transaction may still be pending or mined.'
+                                : 'Failed to verify ERC1155 transfer receipt after submission; transaction may still be pending or mined.',
+                    }),
+                });
+            }
+            continue;
+        }
+
         if (call.name === 'post_bond_and_propose') {
             if (!config.proposeEnabled) {
                 outputs.push({
@@ -1141,6 +1426,7 @@ async function executeToolCalls({
                     config,
                     ogModule: config.ogModule,
                     transactions,
+                    explanation: args.explanation,
                 });
                 const proposalTxHash =
                     typeof result?.transactionHash === 'string' && result.transactionHash

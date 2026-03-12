@@ -22,7 +22,7 @@ async function run() {
 
     const first = inbox.submitMessage({
         text: 'pause proposals',
-        idempotencyKey: 'sig-1',
+        requestId: 'sig-1',
         senderKeyId: 'addr:0x1111111111111111111111111111111111111111',
         sender,
         nowMs: 1_000,
@@ -33,20 +33,20 @@ async function run() {
     // Message TTL has elapsed, but signed replay lock must still block key reuse.
     const blockedReplay = inbox.submitMessage({
         text: 'pause proposals replay',
-        idempotencyKey: 'sig-1',
+        requestId: 'sig-1',
         senderKeyId: 'addr:0x1111111111111111111111111111111111111111',
         sender,
         nowMs: 2_500,
     });
     assert.equal(blockedReplay.ok, false);
-    assert.equal(blockedReplay.code, 'idempotency_replay_blocked');
+    assert.equal(blockedReplay.code, 'request_replay_blocked');
     assert.equal(blockedReplay.messageId, first.message.messageId);
     assert.equal(blockedReplay.replayLockedUntilMs, 6_000);
 
     // Once replay window expires, the same key can be accepted as a fresh message again.
     const acceptedAfterWindow = inbox.submitMessage({
         text: 'pause proposals replay after lock expiry',
-        idempotencyKey: 'sig-1',
+        requestId: 'sig-1',
         senderKeyId: 'addr:0x1111111111111111111111111111111111111111',
         sender,
         nowMs: 6_100,
@@ -62,7 +62,7 @@ async function run() {
     };
     const skewed = inbox.submitMessage({
         text: 'future-skewed signed command',
-        idempotencyKey: 'sig-future-skew',
+        requestId: 'sig-future-skew',
         senderKeyId: 'addr:0x1111111111111111111111111111111111111111',
         sender: futureSkewSender,
         nowMs: 10_000,
@@ -74,18 +74,18 @@ async function run() {
     // but should stay blocked until signedAt + replay window (18_000).
     const blockedBeforeSignedWindowEnd = inbox.submitMessage({
         text: 'future-skewed replay',
-        idempotencyKey: 'sig-future-skew',
+        requestId: 'sig-future-skew',
         senderKeyId: 'addr:0x1111111111111111111111111111111111111111',
         sender: futureSkewSender,
         nowMs: 16_000,
     });
     assert.equal(blockedBeforeSignedWindowEnd.ok, false);
-    assert.equal(blockedBeforeSignedWindowEnd.code, 'idempotency_replay_blocked');
+    assert.equal(blockedBeforeSignedWindowEnd.code, 'request_replay_blocked');
     assert.equal(blockedBeforeSignedWindowEnd.replayLockedUntilMs, 18_000);
 
     const acceptedAfterSignedWindowEnd = inbox.submitMessage({
         text: 'future-skewed replay after signed window',
-        idempotencyKey: 'sig-future-skew',
+        requestId: 'sig-future-skew',
         senderKeyId: 'addr:0x1111111111111111111111111111111111111111',
         sender: futureSkewSender,
         nowMs: 18_100,

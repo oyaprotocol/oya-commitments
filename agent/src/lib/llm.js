@@ -84,6 +84,7 @@ async function callAgent({
     tools,
     allowTools,
 }) {
+    const jsonSystemPrompt = `${systemPrompt}\n\nRespond with a JSON object only.`;
     const safeSignals = signals.map((signal) => {
         if (signal?.kind === 'proposal') {
             return {
@@ -134,7 +135,7 @@ async function callAgent({
         input: [
             {
                 role: 'system',
-                content: systemPrompt,
+                content: jsonSystemPrompt,
             },
             {
                 role: 'user',
