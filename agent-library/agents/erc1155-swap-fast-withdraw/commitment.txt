@@ -1,0 +1,27 @@
+This commitment accepts deposits from multiple users.
+
+Only the following agent address is authorized to serve this commitment: <AUTHORIZED_AGENT_ADDRESS>.
+
+For this commitment, "USDC" means the ERC20 token at <USDC_TOKEN_ADDRESS>.
+For this commitment, "test ERC1155 token" means exactly 1 unit of token id <TEST_ERC1155_TOKEN_ID> from collection <TEST_ERC1155_TOKEN_ADDRESS>.
+
+The fixed price of 1 test ERC1155 token is exactly 1 USDC, meaning exactly 1000000 base units of the USDC token above.
+No other sale price is allowed.
+
+Only the authorized agent may satisfy a signed fast-withdraw request for the test ERC1155 token.
+The agent does so by sending exactly 1 unit of the test ERC1155 token directly from the agent's own wallet to the recipient named in the signed request.
+
+After completing the direct fill, the agent may propose one reimbursement transfer from this Safe to their own address of exactly 1 USDC for that filled request.
+The reimbursement proposal should include a compact explanation containing a CID for the signed request and the hash of the direct fill transaction.
+
+A fast-withdraw reimbursement is valid only if:
+- the direct fill was completed by the authorized agent before the reimbursement proposal;
+- the direct fill transferred exactly 1 unit of token id <TEST_ERC1155_TOKEN_ID> from collection <TEST_ERC1155_TOKEN_ADDRESS>;
+- the direct fill recipient exactly matches the recipient named in the signed request;
+- the Safe received exactly 1 USDC for that request before reimbursement;
+- the reimbursement amount exactly matches 1 USDC;
+- the reimbursement recipient is the authorized agent address above; and
+- each signed request is used at most once.
+
+No transfer of any other ERC1155 collection, token id, or amount is allowed under this commitment.
+No reimbursement above 1 USDC per filled request is allowed.
