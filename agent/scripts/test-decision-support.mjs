@@ -14,6 +14,7 @@ async function run() {
         shouldRequeueMessagesForDecisionStatus(DECISION_STATUS.FAILED_NON_RETRYABLE),
         false
     );
+    assert.equal(shouldRequeueMessagesForDecisionStatus(DECISION_STATUS.INVALID_TOOL_ARGS), true);
     assert.equal(shouldRequeueMessagesForDecisionStatus(DECISION_STATUS.HANDLED), false);
     assert.equal(shouldRequeueMessagesForDecisionStatus(DECISION_STATUS.NO_ACTION), false);
 
@@ -55,6 +56,20 @@ async function run() {
             },
         ]),
         DECISION_STATUS.HANDLED
+    );
+    assert.equal(
+        evaluateToolOutputsDecisionStatus([
+            {
+                output: JSON.stringify({
+                    status: 'error',
+                    message: 'Invalid tool arguments.',
+                    code: 'invalid_tool_arguments',
+                    invalidArguments: true,
+                    retryable: false,
+                }),
+            },
+        ]),
+        DECISION_STATUS.INVALID_TOOL_ARGS
     );
     assert.equal(
         evaluateToolOutputsDecisionStatus([

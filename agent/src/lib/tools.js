@@ -635,7 +635,18 @@ async function executeToolCalls({
         for (const call of toolCalls) {
             const args = parseToolArguments(call.arguments);
             if (!args) {
-                console.warn('[agent] Skipping tool call with invalid args:', call);
+                console.warn('[agent] Tool call has invalid args:', call);
+                outputs.push({
+                    callId: call.callId,
+                    name: call.name,
+                    output: safeStringify({
+                        status: 'error',
+                        message: 'Invalid tool arguments.',
+                        code: 'invalid_tool_arguments',
+                        invalidArguments: true,
+                        retryable: false,
+                    }),
+                });
                 continue;
             }
 

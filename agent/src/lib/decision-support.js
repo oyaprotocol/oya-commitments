@@ -3,6 +3,7 @@ const DECISION_STATUS = Object.freeze({
     NO_ACTION: 'no_action',
     FAILED_RETRYABLE: 'failed_retryable',
     FAILED_NON_RETRYABLE: 'failed_non_retryable',
+    INVALID_TOOL_ARGS: 'invalid_tool_args',
 });
 
 const SIDE_EFFECT_STATUSES = new Set(['submitted', 'confirmed', 'pending']);
@@ -113,6 +114,7 @@ function evaluateToolOutputsDecisionStatus(toolOutputs = []) {
 
     let hasReplaySafeRetryableError = false;
     let hasLikelySideEffects = false;
+    let hasInvalidToolArguments = false;
 
     for (const output of toolOutputs) {
         const payload = parseToolOutputPayload(output);
@@ -133,9 +135,17 @@ function evaluateToolOutputsDecisionStatus(toolOutputs = []) {
             continue;
         }
 
+        if (payload.invalidArguments === true && !explicitSideEffects) {
+            hasInvalidToolArguments = true;
+        }
+
         if (payload.retryable === true && !explicitSideEffects) {
             hasReplaySafeRetryableError = true;
         }
+    }
+
+    if (hasInvalidToolArguments && !hasLikelySideEffects) {
+        return DECISION_STATUS.INVALID_TOOL_ARGS;
     }
 
     if (hasReplaySafeRetryableError && !hasLikelySideEffects) {
@@ -147,8 +157,12 @@ function evaluateToolOutputsDecisionStatus(toolOutputs = []) {
 }
 
 function shouldRequeueMessagesForDecisionStatus(decisionStatus) {
-    // Only retry failures that occurred before tool execution side effects.
-    return decisionStatus === DECISION_STATUS.FAILED_RETRYABLE;
+    // Requeue pre-side-effect transient failures and malformed tool-call outcomes so
+    // message-driven requests are not acked before the intended action is executed.
+    return (
+        decisionStatus === DECISION_STATUS.FAILED_RETRYABLE ||
+        decisionStatus === DECISION_STATUS.INVALID_TOOL_ARGS
+    );
 }
 
 export {
