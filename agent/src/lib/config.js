@@ -212,6 +212,11 @@ function buildConfig() {
         openAiApiKey: process.env.OPENAI_API_KEY,
         openAiModel: process.env.OPENAI_MODEL ?? 'gpt-4.1-mini',
         openAiBaseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
+        openAiRequestTimeoutMs: parsePositiveInteger(
+            process.env.OPENAI_REQUEST_TIMEOUT_MS,
+            'OPENAI_REQUEST_TIMEOUT_MS',
+            60_000
+        ),
         allowProposeOnSimulationFail:
             process.env.ALLOW_PROPOSE_ON_SIMULATION_FAIL === undefined
                 ? false

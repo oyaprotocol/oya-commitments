@@ -57,6 +57,23 @@ function extractToolCalls(responseJson) {
     return toolCalls.filter((call) => call.name);
 }
 
+function getOpenAiRequestTimeoutMs(config) {
+    const timeoutMs = Number(config?.openAiRequestTimeoutMs);
+    return Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 60_000;
+}
+
+async function fetchResponses({ config, body }) {
+    return fetch(`${config.openAiBaseUrl}/responses`, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${config.openAiApiKey}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(getOpenAiRequestTimeoutMs(config)),
+    });
+}
+
 async function callAgent({
     config,
     systemPrompt,
@@ -140,13 +157,9 @@ async function callAgent({
         text: { format: { type: 'json_object' } },
     };
 
-    const res = await fetch(`${config.openAiBaseUrl}/responses`, {
-        method: 'POST',
-        headers: {
-            Authorization: `Bearer ${config.openAiApiKey}`,
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
+    const res = await fetchResponses({
+        config,
+        body: payload,
     });
 
     if (!res.ok) {
@@ -188,17 +201,13 @@ async function explainToolCalls({ config, previousResponseId, toolOutputs }) {
         },
     ];
 
-    const res = await fetch(`${config.openAiBaseUrl}/responses`, {
-        method: 'POST',
-        headers: {
-            Authorization: `Bearer ${config.openAiApiKey}`,
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+    const res = await fetchResponses({
+        config,
+        body: {
             model: config.openAiModel,
             previous_response_id: previousResponseId,
             input,
-        }),
+        },
     });
 
     if (!res.ok) {

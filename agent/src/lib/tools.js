@@ -32,11 +32,13 @@ function isReceiptWaitTimeoutError(error) {
 function isRetryableToolError(error) {
     const code = String(error?.code ?? '').toUpperCase();
     if (
+        code === 'ABORT_ERR' ||
         code === 'ETIMEDOUT' ||
         code === 'ECONNRESET' ||
         code === 'ECONNREFUSED' ||
         code === 'ENOTFOUND' ||
         code === 'EAI_AGAIN' ||
+        code === 'UND_ERR_ABORTED' ||
         code === 'UND_ERR_CONNECT_TIMEOUT' ||
         code === 'UND_ERR_HEADERS_TIMEOUT' ||
         code === 'UND_ERR_SOCKET'
@@ -45,7 +47,7 @@ function isRetryableToolError(error) {
     }
 
     const name = String(error?.name ?? '');
-    if (/(Timeout|Network|HttpRequest|Fetch|Socket|Connection|RateLimit)/i.test(name)) {
+    if (/(Abort|Timeout|Network|HttpRequest|Fetch|Socket|Connection|RateLimit)/i.test(name)) {
         return true;
     }
 
@@ -53,6 +55,7 @@ function isRetryableToolError(error) {
     return (
         message.includes('timed out') ||
         message.includes('timeout') ||
+        message.includes('aborted') ||
         message.includes('network error') ||
         message.includes('failed to fetch') ||
         message.includes('connection refused') ||
