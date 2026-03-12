@@ -126,6 +126,9 @@ async function run() {
                 if (functionName === 'balanceOf') {
                     return 1n;
                 }
+                if (functionName === 'allowance') {
+                    return 0n;
+                }
                 throw new Error(`unexpected readContract function: ${functionName}`);
             },
             async waitForTransactionReceipt() {
