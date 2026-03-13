@@ -8,9 +8,5 @@ The price is 1 USDC per 1 Test ERC1155 token.
 The authorized agent may send Test ERC1155 tokens from the agent wallet to a recipient.
 After doing so, the agent may transfer USDC from this Safe to the agent address at the same 1:1 ratio.
 
-This is allowed only if either:
-- the recipient paid USDC into this Safe for those tokens; or
-- the recipient was named in a signed message requesting fast withdrawal of those tokens.
-
-Each payment or signed message may be used at most once.
-No other transfers are allowed.
+This is allowed only if the signer of a signed message requesting fast withdrawal of those tokens
+deposited the corresponding USDC into this Safe, and the recipient is named in that signed message.
