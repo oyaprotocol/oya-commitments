@@ -3,6 +3,20 @@
   "paymentTokenSymbol": "USDC",
   "usdcUnitAmountWei": "1000000",
   "fillConfirmationThreshold": 1,
+  "byChain": {
+    "11155111": {
+      "watchAssets": [
+        "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
+      ],
+      "watchErc1155Assets": [
+        {
+          "token": "0xa1B6d741CF7EF18D4C2C6f76DaF981E4f5FCbe4E",
+          "tokenId": "1001",
+          "symbol": "OYAT1155-1001"
+        }
+      ]
+    }
+  },
   "signedCommands": [
     "fast_withdraw",
     "fast_withdraw_erc1155"
