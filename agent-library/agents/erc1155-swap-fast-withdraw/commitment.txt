@@ -1,12 +1,10 @@
-Only 0x2967C076182F0303037072670e744e26Ed4A830f may serve this commitment.
+Only the authorized agent with address 0x2967C076182F0303037072670e744e26Ed4A830f may serve this commitment.
+
+When the agent receives a signed swap request message from the user, the agent may optimistically fill the swap by sending Test ERC1155 tokens to the designated recipient from the agent's own wallet and be reimbursed by the USDC in the Safe at a 1:1 ratio.
+
+The swap request must be signed by the original depositor of the USDC, and the user must have enough USDC available to cover reimbursement for the agent.
 
 "USDC" means the ERC20 token at 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238.
-"Test ERC1155 token" means token id 1001 from 0xa1B6d741CF7EF18D4C2C6f76DaF981E4f5FCbe4E.
+"Test ERC1155 token" means the token with ID 1001 at 0xa1B6d741CF7EF18D4C2C6f76DaF981E4f5FCbe4E.
 
-The price is 1 USDC per 1 Test ERC1155 token.
-
-The authorized agent may send Test ERC1155 tokens from the agent wallet to a recipient.
-After doing so, the agent may transfer USDC from this Safe to the agent address at the same 1:1 ratio.
-
-This is allowed only if the signer of a signed message requesting fast withdrawal of those tokens
-deposited the corresponding USDC into this Safe, and the recipient is named in that signed message.
+The exchange rate is 1 USDC per 1 Test ERC1155 token.
