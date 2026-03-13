@@ -204,13 +204,9 @@ function buildConfig() {
     const messageApiSignerAllowlist = messageApiEnabled
         ? parseAddressList(process.env.MESSAGE_API_SIGNER_ALLOWLIST)
         : [];
-    if (
-        messageApiEnabled &&
-        Object.keys(messageApiKeys).length === 0 &&
-        messageApiSignerAllowlist.length === 0
-    ) {
+    if (messageApiEnabled && messageApiSignerAllowlist.length === 0) {
         throw new Error(
-            'MESSAGE_API_ENABLED=true requires MESSAGE_API_KEYS_JSON or MESSAGE_API_SIGNER_ALLOWLIST.'
+            'MESSAGE_API_ENABLED=true requires MESSAGE_API_SIGNER_ALLOWLIST. MESSAGE_API_KEYS_JSON is optional additional bearer gating.'
         );
     }
     // Keep disabled ingress fully inert: optional MESSAGE_API_* parsing/validation
