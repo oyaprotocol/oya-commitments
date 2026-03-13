@@ -315,6 +315,10 @@ function parseSignedRequestAmount(args) {
     return normalizePositiveBigInt(raw, 'signed request amount');
 }
 
+function buildSignedRequestOrderId(signer, requestId) {
+    return `request:${normalizeAddress(signer)}:${String(requestId).trim()}`;
+}
+
 function createSignedRequestOrder(signal, policy) {
     if (!isSignedUserMessage(signal)) {
         return null;
@@ -349,14 +353,15 @@ function createSignedRequestOrder(signal, policy) {
 
     const tokenAmount = parseSignedRequestAmount(args);
     const reimbursementAmountWei = tokenAmount * policy.usdcUnitAmountWei;
+    const signer = normalizeAddress(signal.sender.address);
 
     return {
-        orderId: `request:${signal.requestId}`,
+        orderId: buildSignedRequestOrderId(signer, signal.requestId),
         sourceKind: 'signed_request',
         sourceId: signal.requestId,
         requestId: signal.requestId,
         messageId: signal.messageId ?? null,
-        signer: normalizeAddress(signal.sender.address),
+        signer,
         signature: signal.sender.signature,
         signedAtMs: signal.sender.signedAtMs,
         command: signal.command ?? null,
