@@ -8,7 +8,7 @@ import { buildOgTransactions } from '../../../agent/src/lib/tx.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const STATE_VERSION = 1;
+const STATE_VERSION = 2;
 const DEFAULT_USDC_UNIT_AMOUNT_WEI = 1_000_000n;
 const DEFAULT_FILL_CONFIRMATION_THRESHOLD = 1n;
 const DEFAULT_SIGNED_COMMANDS = ['fast_withdraw', 'fast_withdraw_erc1155'];
@@ -17,6 +17,7 @@ const DEFAULT_PENDING_TX_TIMEOUT_MS = 900_000;
 const swapState = {
     nextSequence: 1,
     orders: {},
+    deposits: {},
 };
 
 let swapStateHydrated = false;
@@ -119,6 +120,16 @@ function getSignedRequestCommands(config) {
 
 function resolvePolicy(config) {
     const agentConfig = config?.agentConfig ?? {};
+    const authorizedAgent =
+        typeof agentConfig.authorizedAgent === 'string' && agentConfig.authorizedAgent.trim()
+            ? normalizeAddress(agentConfig.authorizedAgent)
+            : null;
+    if (!authorizedAgent) {
+        throw new Error(
+            'erc1155-swap-fast-withdraw requires agentConfig.authorizedAgent.'
+        );
+    }
+
     const paymentToken =
         typeof agentConfig.paymentToken === 'string' && agentConfig.paymentToken.trim()
             ? normalizeAddress(agentConfig.paymentToken)
@@ -157,6 +168,7 @@ function resolvePolicy(config) {
             : DEFAULT_FILL_CONFIRMATION_THRESHOLD;
 
     return {
+        authorizedAgent,
         paymentToken,
         paymentTokenSymbol:
             typeof agentConfig.paymentTokenSymbol === 'string' && agentConfig.paymentTokenSymbol.trim()
@@ -195,7 +207,12 @@ function sortOrders(records) {
 function getOpenOrders() {
     return sortOrders(
         Object.values(swapState.orders).filter(
-            (order) => !order?.reimbursedAtMs && !order?.closedAtMs
+            (order) =>
+                order?.sourceKind === 'signed_request' &&
+                typeof order?.reservedCreditAmountWei === 'string' &&
+                !order?.reimbursedAtMs &&
+                !order?.closedAtMs &&
+                !order?.creditReleasedAtMs
         )
     );
 }
@@ -222,10 +239,15 @@ async function hydrateSwapState() {
                 parsed.orders && typeof parsed.orders === 'object' && !Array.isArray(parsed.orders)
                     ? parsed.orders
                     : {};
+            swapState.deposits =
+                parsed.deposits && typeof parsed.deposits === 'object' && !Array.isArray(parsed.deposits)
+                    ? parsed.deposits
+                    : {};
         }
     } catch (error) {
         swapState.nextSequence = 1;
         swapState.orders = {};
+        swapState.deposits = {};
     }
     swapStateDirty = false;
 }
@@ -236,6 +258,7 @@ async function persistSwapState() {
             version: STATE_VERSION,
             nextSequence: swapState.nextSequence,
             orders: swapState.orders,
+            deposits: swapState.deposits,
         },
         null,
         2
@@ -249,7 +272,7 @@ async function maybePersistSwapState() {
     await persistSwapState();
 }
 
-function createPaymentOrder(signal, policy) {
+function createDepositRecord(signal, policy) {
     if (signal?.kind !== 'erc20Deposit') {
         return null;
     }
@@ -260,26 +283,25 @@ function createPaymentOrder(signal, policy) {
         return null;
     }
 
-    const reimbursementAmountWei = normalizePositiveBigInt(signal.amount, 'payment amount');
-    if (reimbursementAmountWei % policy.usdcUnitAmountWei !== 0n) {
-        return null;
-    }
-
-    const tokenAmount = reimbursementAmountWei / policy.usdcUnitAmountWei;
-    if (tokenAmount <= 0n) {
+    const amountWei = normalizePositiveBigInt(signal.amount, 'payment amount');
+    const transactionHash = normalizeHashOrNull(signal.transactionHash);
+    const logIndex =
+        signal.logIndex === undefined || signal.logIndex === null ? null : String(signal.logIndex);
+    const signalId =
+        typeof signal.id === 'string' && signal.id.trim() ? signal.id.trim() : null;
+    const depositKey =
+        transactionHash && logIndex !== null ? `tx:${transactionHash}:${logIndex}` : signalId ? `signal:${signalId}` : null;
+    if (!depositKey) {
         return null;
     }
 
     return {
-        orderId: `payment:${signal.id}`,
-        sourceKind: 'payment',
-        sourceId: signal.id,
-        paymentTransactionHash: signal.transactionHash ?? null,
-        paymentLogIndex: signal.logIndex ?? null,
-        payer: normalizeAddress(signal.from),
-        recipient: normalizeAddress(signal.from),
-        tokenAmount: tokenAmount.toString(),
-        reimbursementAmountWei: reimbursementAmountWei.toString(),
+        depositKey,
+        depositId: signalId,
+        depositor: normalizeAddress(signal.from),
+        amountWei: amountWei.toString(),
+        transactionHash,
+        logIndex,
         createdAtMs: Date.now(),
     };
 }
@@ -346,22 +368,93 @@ function createSignedRequestOrder(signal, policy) {
     };
 }
 
+function getDepositedCreditWeiForAddress(address) {
+    let total = 0n;
+    for (const deposit of Object.values(swapState.deposits)) {
+        if (!deposit?.depositor || !isAddressEqual(deposit.depositor, address)) {
+            continue;
+        }
+        total += BigInt(deposit.amountWei ?? 0);
+    }
+    return total;
+}
+
+function getReservedCreditWeiForAddress(address) {
+    let total = 0n;
+    for (const order of Object.values(swapState.orders)) {
+        if (!order?.signer || !isAddressEqual(order.signer, address) || order?.creditReleasedAtMs) {
+            continue;
+        }
+        total += BigInt(order.reservedCreditAmountWei ?? 0);
+    }
+    return total;
+}
+
+function getAvailableCreditWeiForAddress(address) {
+    const available = getDepositedCreditWeiForAddress(address) - getReservedCreditWeiForAddress(address);
+    return available > 0n ? available : 0n;
+}
+
+function buildCreditSnapshot() {
+    const addresses = new Set();
+    for (const deposit of Object.values(swapState.deposits)) {
+        if (typeof deposit?.depositor === 'string' && deposit.depositor.trim()) {
+            addresses.add(normalizeAddress(deposit.depositor));
+        }
+    }
+    for (const order of Object.values(swapState.orders)) {
+        if (typeof order?.signer === 'string' && order.signer.trim()) {
+            addresses.add(normalizeAddress(order.signer));
+        }
+    }
+
+    const snapshot = {};
+    for (const address of addresses) {
+        const depositedWei = getDepositedCreditWeiForAddress(address);
+        const reservedWei = getReservedCreditWeiForAddress(address);
+        const availableWei = depositedWei - reservedWei;
+        snapshot[address] = {
+            depositedWei: depositedWei.toString(),
+            reservedWei: reservedWei.toString(),
+            availableWei: (availableWei > 0n ? availableWei : 0n).toString(),
+        };
+    }
+    return snapshot;
+}
+
 function ingestSignals(signals, policy) {
     let changed = false;
 
     for (const signal of Array.isArray(signals) ? signals : []) {
+        try {
+            const deposit = createDepositRecord(signal, policy);
+            if (deposit && !swapState.deposits[deposit.depositKey]) {
+                swapState.deposits[deposit.depositKey] = deposit;
+                changed = true;
+            }
+        } catch (error) {
+            continue;
+        }
+    }
+
+    for (const signal of Array.isArray(signals) ? signals : []) {
         let order = null;
         try {
-            order = createPaymentOrder(signal, policy) ?? createSignedRequestOrder(signal, policy);
+            order = createSignedRequestOrder(signal, policy);
         } catch (error) {
             continue;
         }
         if (!order || swapState.orders[order.orderId]) {
             continue;
         }
+        if (getAvailableCreditWeiForAddress(order.signer) < BigInt(order.reimbursementAmountWei)) {
+            continue;
+        }
 
         swapState.orders[order.orderId] = {
             ...order,
+            reservedCreditAmountWei: order.reimbursementAmountWei,
+            creditReservedAtMs: Date.now(),
             sequence: allocateSequence(),
             lastUpdatedAtMs: Date.now(),
         };
@@ -530,9 +623,12 @@ function buildReimbursementExplanation(order, policy) {
     return [
         'erc1155-swap-fast-withdraw reimbursement',
         `order=${order.orderId}`,
+        `requestId=${order.requestId ?? 'n/a'}`,
+        `signer=${order.signer ?? 'unknown'}`,
         `token=${policy.erc1155Token}`,
         `tokenId=${policy.erc1155TokenId}`,
         `amount=${order.tokenAmount}`,
+        `reservedCreditWei=${order.reservedCreditAmountWei ?? order.reimbursementAmountWei}`,
         `recipient=${order.recipient}`,
         `directFillTx=${order.directFillTxHash ?? 'pending'}`,
     ].join(' | ');
@@ -677,6 +773,11 @@ async function getDeterministicToolCalls({
     const policy = resolvePolicy(config);
     const normalizedSafeAddress = normalizeAddress(commitmentSafe);
     const normalizedAgentAddress = normalizeAddress(agentAddress);
+    if (!isAddressEqual(normalizedAgentAddress, policy.authorizedAgent)) {
+        throw new Error(
+            `erc1155-swap-fast-withdraw may only be served by authorized agent ${policy.authorizedAgent}.`
+        );
+    }
     const latestBlock = await publicClient.getBlockNumber();
 
     while (queuedProposalEventUpdates.length > 0) {
@@ -827,12 +928,15 @@ async function getSwapState() {
         version: STATE_VERSION,
         nextSequence: swapState.nextSequence,
         orders: swapState.orders,
+        deposits: swapState.deposits,
+        credits: buildCreditSnapshot(),
     });
 }
 
 async function resetSwapState() {
     swapState.nextSequence = 1;
     swapState.orders = {};
+    swapState.deposits = {};
     swapStateHydrated = true;
     swapStateDirty = false;
     pendingDirectFill = null;
@@ -845,6 +949,7 @@ function setSwapStatePathForTest(nextPath) {
     statePathOverride = typeof nextPath === 'string' && nextPath.trim() ? nextPath : null;
     swapState.nextSequence = 1;
     swapState.orders = {};
+    swapState.deposits = {};
     swapStateHydrated = false;
     swapStateDirty = false;
     pendingDirectFill = null;
