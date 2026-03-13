@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { encodeFunctionData, erc20Abi } from 'viem';
+import { encodeFunctionData, erc20Abi, getAddress } from 'viem';
 import {
     getDeterministicToolCalls,
     getSwapState,
@@ -156,6 +156,10 @@ function parseToolArgs(call) {
     return JSON.parse(call.arguments);
 }
 
+function buildRequestOrderId(signer, requestId) {
+    return `request:${getAddress(signer)}:${String(requestId).trim()}`;
+}
+
 function getCreditFor(state, address) {
     const key = Object.keys(state.credits ?? {}).find(
         (candidate) => candidate.toLowerCase() === address.toLowerCase()
@@ -295,7 +299,10 @@ async function testSignedFastWithdrawLifecycleUsesDepositorCredit() {
         const reimbursementArgs = parseToolArgs(reimbursementCalls[0]);
         assert.equal(reimbursementArgs.transactions.length, 1);
         assert.equal(reimbursementArgs.transactions[0].to.toLowerCase(), USDC.toLowerCase());
-        assert.match(reimbursementArgs.explanation, /order=request:req-1/);
+        assert.match(
+            reimbursementArgs.explanation,
+            new RegExp(`order=${buildRequestOrderId(SIGNER, 'req-1')}`)
+        );
         assert.match(reimbursementArgs.explanation, new RegExp(`signer=${SIGNER}`, 'i'));
 
         await onToolOutput({
@@ -308,7 +315,7 @@ async function testSignedFastWithdrawLifecycleUsesDepositorCredit() {
         });
 
         const state = await getSwapState();
-        const order = state.orders['request:req-1'];
+        const order = state.orders[buildRequestOrderId(SIGNER, 'req-1')];
         assert.ok(order);
         assert.equal(order.signer.toLowerCase(), SIGNER.toLowerCase());
         assert.equal(order.recipient.toLowerCase(), RECIPIENT.toLowerCase());
@@ -381,7 +388,7 @@ async function testSignerMustMatchDepositor() {
 
         assert.equal(toolCalls.length, 0);
         const state = await getSwapState();
-        assert.equal(state.orders['request:req-mismatch'], undefined);
+        assert.equal(state.orders[buildRequestOrderId(SIGNER, 'req-mismatch')], undefined);
         assert.deepEqual(getCreditFor(state, BUYER), {
             depositedWei: '1000000',
             reservedWei: '0',
@@ -449,13 +456,65 @@ async function testReservedCreditPreventsOvercommitment() {
         assert.equal(secondOrderCalls.length, 0);
 
         const state = await getSwapState();
-        assert.ok(state.orders['request:req-credit-1']);
-        assert.equal(state.orders['request:req-credit-2'], undefined);
+        assert.ok(state.orders[buildRequestOrderId(SIGNER, 'req-credit-1')]);
+        assert.equal(state.orders[buildRequestOrderId(SIGNER, 'req-credit-2')], undefined);
         assert.deepEqual(getCreditFor(state, SIGNER), {
             depositedWei: '3000000',
             reservedWei: '2000000',
             availableWei: '1000000',
         });
+    });
+}
+
+async function testSameRequestIdAllowedForDifferentSigners() {
+    await withTempStatePath(async () => {
+        const config = buildConfig();
+        const toolCalls = await getDeterministicToolCalls({
+            signals: [
+                buildDepositSignal({
+                    id: 'deposit-same-request-a',
+                    from: SIGNER,
+                    amountWei: 1_000_000n,
+                }),
+                buildSignedRequestSignal({
+                    requestId: 'shared-request-id',
+                    signer: SIGNER,
+                    recipient: BUYER,
+                    amount: '1',
+                }),
+                buildDepositSignal({
+                    id: 'deposit-same-request-b',
+                    from: OTHER_SIGNER,
+                    amountWei: 1_000_000n,
+                    transactionHash: `0x${'7'.repeat(64)}`,
+                }),
+                buildSignedRequestSignal({
+                    requestId: 'shared-request-id',
+                    signer: OTHER_SIGNER,
+                    recipient: RECIPIENT,
+                    amount: '1',
+                }),
+            ],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                safeUsdcBalance: 2_000_000n,
+                agentErc1155Balance: 5n,
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+
+        assert.equal(toolCalls.length, 1);
+        assert.equal(toolCalls[0].name, 'make_erc1155_transfer');
+
+        const state = await getSwapState();
+        const firstOrderId = buildRequestOrderId(SIGNER, 'shared-request-id');
+        const secondOrderId = buildRequestOrderId(OTHER_SIGNER, 'shared-request-id');
+        assert.ok(state.orders[firstOrderId]);
+        assert.ok(state.orders[secondOrderId]);
+        assert.notEqual(firstOrderId, secondOrderId);
     });
 }
 
@@ -619,15 +678,15 @@ async function testProposalHashRecoveryRequiresMatchingExplanation() {
 
         const state = await getSwapState();
         assert.equal(
-            state.orders['request:req-a'].reimbursementProposalHash,
+            state.orders[buildRequestOrderId(SIGNER, 'req-a')].reimbursementProposalHash,
             RECOVERED_PROPOSAL_HASH
         );
         assert.equal(
-            state.orders['request:req-b'].reimbursementProposalHash,
+            state.orders[buildRequestOrderId(OTHER_SIGNER, 'req-b')].reimbursementProposalHash,
             null
         );
         assert.equal(
-            state.orders['request:req-b'].reimbursementSubmissionTxHash,
+            state.orders[buildRequestOrderId(OTHER_SIGNER, 'req-b')].reimbursementSubmissionTxHash,
             PROPOSAL_TX_HASH_2
         );
     });
@@ -708,7 +767,10 @@ async function testStaleDirectFillSubmissionRetries() {
         });
 
         const state = await getSwapState();
-        assert.equal(state.orders['request:req-stale-fill'].directFillTxHash, undefined);
+        assert.equal(
+            state.orders[buildRequestOrderId(SIGNER, 'req-stale-fill')].directFillTxHash,
+            undefined
+        );
     });
 }
 
@@ -755,11 +817,14 @@ async function testStaleProposalSubmissionRetries() {
         assert.equal(retryCalls[0].name, 'post_bond_and_propose');
         const retryArgs = parseToolArgs(retryCalls[0]);
         assert.equal(retryArgs.transactions.length, 1);
-        assert.match(retryArgs.explanation, /order=request:req-stale-proposal/);
+        assert.match(
+            retryArgs.explanation,
+            new RegExp(`order=${buildRequestOrderId(SIGNER, 'req-stale-proposal')}`)
+        );
 
         const state = await getSwapState();
         assert.equal(
-            state.orders['request:req-stale-proposal'].reimbursementSubmissionTxHash,
+            state.orders[buildRequestOrderId(SIGNER, 'req-stale-proposal')].reimbursementSubmissionTxHash,
             undefined
         );
     });
@@ -771,6 +836,7 @@ async function run() {
     await testSignedRequestWithoutDepositorCreditDoesNothing();
     await testSignerMustMatchDepositor();
     await testReservedCreditPreventsOvercommitment();
+    await testSameRequestIdAllowedForDifferentSigners();
     await testAuthorizedAgentRequired();
     await testProposalHashRecoveryRequiresMatchingExplanation();
     await testStaleDirectFillSubmissionRetries();
