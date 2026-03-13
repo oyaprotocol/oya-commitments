@@ -27,6 +27,7 @@ const OG_PROPOSAL_HASH = `0x${'c'.repeat(64)}`;
 const DIRECT_FILL_TX_HASH_2 = `0x${'d'.repeat(64)}`;
 const PROPOSAL_TX_HASH_2 = `0x${'e'.repeat(64)}`;
 const RECOVERED_PROPOSAL_HASH = `0x${'f'.repeat(64)}`;
+const SEPOLIA_CHAIN_ID = 11155111;
 
 function buildConfig(overrides = {}) {
     const { agentConfig: agentConfigOverrides = {}, ...topLevelOverrides } = overrides;
@@ -108,22 +109,67 @@ function buildReceiptNotFoundError(hash) {
     return error;
 }
 
+function buildErc20TransferLog({
+    from,
+    to = SAFE,
+    value,
+    blockNumber,
+    transactionHash,
+    logIndex = 0,
+}) {
+    return {
+        args: { from, to, value },
+        blockNumber,
+        transactionHash,
+        logIndex,
+    };
+}
+
 function buildPublicClient({
+    chainId = SEPOLIA_CHAIN_ID,
+    commitmentSafe = SAFE,
     latestBlock = 100n,
     safeUsdcBalance = 0n,
     agentErc1155Balance = 0n,
     directFillReceipt = null,
     receiptsByHash = null,
     receiptErrorsByHash = null,
+    safeDeploymentBlock = 0n,
+    erc20TransferLogs = [],
 } = {}) {
     return {
+        async getChainId() {
+            return chainId;
+        },
         async getBlockNumber() {
             return latestBlock;
+        },
+        async getCode({ address, blockNumber }) {
+            const normalizedAddress = String(address).toLowerCase();
+            if (normalizedAddress !== String(commitmentSafe).toLowerCase()) {
+                return '0x';
+            }
+            return BigInt(blockNumber) >= BigInt(safeDeploymentBlock) ? '0x1234' : '0x';
+        },
+        async getLogs({ address, args, fromBlock, toBlock }) {
+            const normalizedAddress = String(address).toLowerCase();
+            if (normalizedAddress !== USDC.toLowerCase()) {
+                return [];
+            }
+
+            return erc20TransferLogs.filter((log) => {
+                const logBlockNumber = BigInt(log.blockNumber ?? 0n);
+                const matchesRange = logBlockNumber >= BigInt(fromBlock) && logBlockNumber <= BigInt(toBlock);
+                const matchesRecipient =
+                    !args?.to ||
+                    String(log.args?.to ?? '').toLowerCase() === String(args.to).toLowerCase();
+                return matchesRange && matchesRecipient;
+            });
         },
         async readContract({ address, functionName, args }) {
             const normalizedAddress = String(address).toLowerCase();
             if (normalizedAddress === USDC.toLowerCase() && functionName === 'balanceOf') {
-                assert.equal(String(args[0]).toLowerCase(), SAFE.toLowerCase());
+                assert.equal(String(args[0]).toLowerCase(), String(commitmentSafe).toLowerCase());
                 return safeUsdcBalance;
             }
             if (normalizedAddress === ERC1155.toLowerCase() && functionName === 'balanceOf') {
@@ -177,6 +223,18 @@ async function withMockedNow(nowMs, fn) {
     }
 }
 
+async function withTempStateDir(fn) {
+    const dir = await mkdtemp(path.join(tmpdir(), 'erc1155-swap-fast-withdraw-dir-'));
+    setSwapStatePathForTest(null);
+    await resetSwapState();
+    try {
+        await fn(dir);
+    } finally {
+        setSwapStatePathForTest(null);
+        await rm(dir, { recursive: true, force: true });
+    }
+}
+
 async function withTempStatePath(fn) {
     const dir = await mkdtemp(path.join(tmpdir(), 'erc1155-swap-fast-withdraw-'));
     const statePath = path.join(dir, 'swap-state.json');
@@ -204,6 +262,7 @@ async function testDepositCreatesCreditOnly() {
             commitmentSafe: SAFE,
             agentAddress: AGENT,
             publicClient: buildPublicClient({
+                commitmentSafe: SAFE,
                 safeUsdcBalance: 2_000_000n,
                 agentErc1155Balance: 5n,
             }),
@@ -220,6 +279,54 @@ async function testDepositCreatesCreditOnly() {
             depositedWei: '2000000',
             reservedWei: '0',
             availableWei: '2000000',
+        });
+    });
+}
+
+async function testStartupBackfillsDepositorCreditFromHistory() {
+    await withTempStatePath(async () => {
+        const config = buildConfig();
+        const toolCalls = await getDeterministicToolCalls({
+            signals: [
+                buildSignedRequestSignal({
+                    requestId: 'req-backfill',
+                    signer: SIGNER,
+                    recipient: RECIPIENT,
+                    amount: '2',
+                }),
+            ],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                latestBlock: 150n,
+                safeDeploymentBlock: 90n,
+                safeUsdcBalance: 2_000_000n,
+                agentErc1155Balance: 5n,
+                erc20TransferLogs: [
+                    buildErc20TransferLog({
+                        from: SIGNER,
+                        value: 2_000_000n,
+                        blockNumber: 120n,
+                        transactionHash: `0x${'1'.repeat(64)}`,
+                        logIndex: 0,
+                    }),
+                ],
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+
+        assert.equal(toolCalls.length, 1);
+        assert.equal(toolCalls[0].name, 'make_erc1155_transfer');
+
+        const state = await getSwapState();
+        assert.equal(Object.keys(state.deposits).length, 1);
+        assert.equal(state.backfilledDepositsThroughBlock, '150');
+        assert.deepEqual(getCreditFor(state, SIGNER), {
+            depositedWei: '2000000',
+            reservedWei: '2000000',
+            availableWei: '0',
         });
     });
 }
@@ -327,6 +434,99 @@ async function testSignedFastWithdrawLifecycleUsesDepositorCredit() {
             reservedWei: '3000000',
             availableWei: '0',
         });
+    });
+}
+
+async function testStatePersistsSeparatelyPerCommitment() {
+    await withTempStateDir(async (stateDir) => {
+        const safeA = SAFE;
+        const safeB = '0x9999999999999999999999999999999999999999';
+        const config = buildConfig({
+            agentConfig: {
+                stateDir,
+            },
+        });
+
+        await getDeterministicToolCalls({
+            signals: [
+                buildDepositSignal({
+                    id: 'deposit-safe-a',
+                    from: SIGNER,
+                    amountWei: 1_000_000n,
+                }),
+            ],
+            commitmentText: '',
+            commitmentSafe: safeA,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                commitmentSafe: safeA,
+                safeUsdcBalance: 1_000_000n,
+                agentErc1155Balance: 5n,
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+
+        const stateAfterSafeA = await getSwapState();
+        assert.deepEqual(getCreditFor(stateAfterSafeA, SIGNER), {
+            depositedWei: '1000000',
+            reservedWei: '0',
+            availableWei: '1000000',
+        });
+
+        await getDeterministicToolCalls({
+            signals: [
+                buildDepositSignal({
+                    id: 'deposit-safe-b',
+                    from: OTHER_SIGNER,
+                    amountWei: 2_000_000n,
+                    transactionHash: `0x${'9'.repeat(64)}`,
+                }),
+            ],
+            commitmentText: '',
+            commitmentSafe: safeB,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                commitmentSafe: safeB,
+                safeUsdcBalance: 2_000_000n,
+                agentErc1155Balance: 5n,
+            }),
+            config: {
+                ...config,
+                commitmentSafe: safeB,
+            },
+            onchainPendingProposal: false,
+        });
+
+        const stateAfterSafeB = await getSwapState();
+        assert.equal(getCreditFor(stateAfterSafeB, SIGNER), null);
+        assert.deepEqual(getCreditFor(stateAfterSafeB, OTHER_SIGNER), {
+            depositedWei: '2000000',
+            reservedWei: '0',
+            availableWei: '2000000',
+        });
+
+        await getDeterministicToolCalls({
+            signals: [],
+            commitmentText: '',
+            commitmentSafe: safeA,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                commitmentSafe: safeA,
+                safeUsdcBalance: 1_000_000n,
+                agentErc1155Balance: 5n,
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+
+        const restoredStateForSafeA = await getSwapState();
+        assert.deepEqual(getCreditFor(restoredStateForSafeA, SIGNER), {
+            depositedWei: '1000000',
+            reservedWei: '0',
+            availableWei: '1000000',
+        });
+        assert.equal(getCreditFor(restoredStateForSafeA, OTHER_SIGNER), null);
     });
 }
 
@@ -907,7 +1107,9 @@ async function testStaleProposalSubmissionRetries() {
 
 async function run() {
     await testDepositCreatesCreditOnly();
+    await testStartupBackfillsDepositorCreditFromHistory();
     await testSignedFastWithdrawLifecycleUsesDepositorCredit();
+    await testStatePersistsSeparatelyPerCommitment();
     await testSignedRequestWithoutDepositorCreditDoesNothing();
     await testSignerMustMatchDepositor();
     await testReservedCreditPreventsOvercommitment();
