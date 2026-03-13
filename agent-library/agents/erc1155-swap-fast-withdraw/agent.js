@@ -2,36 +2,107 @@ import { readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { decodeFunctionData, erc20Abi, erc1155Abi, getAddress, isAddressEqual } from 'viem';
+import { findContractDeploymentBlock, getLogsChunked } from '../../../agent/src/lib/chain-history.js';
+import { transferEvent } from '../../../agent/src/lib/og.js';
 import { getAlwaysEmitBalanceSnapshotPollingOptions } from '../../../agent/src/lib/polling.js';
 import { buildOgTransactions } from '../../../agent/src/lib/tx.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const STATE_VERSION = 2;
+const STATE_VERSION = 3;
 const DEFAULT_USDC_UNIT_AMOUNT_WEI = 1_000_000n;
 const DEFAULT_FILL_CONFIRMATION_THRESHOLD = 1n;
 const DEFAULT_SIGNED_COMMANDS = ['fast_withdraw', 'fast_withdraw_erc1155'];
 const DEFAULT_PENDING_TX_TIMEOUT_MS = 900_000;
+const DEFAULT_LOG_CHUNK_SIZE = 5_000n;
 
 const swapState = {
     nextSequence: 1,
     orders: {},
     deposits: {},
+    backfilledDepositsThroughBlock: null,
 };
 
 let swapStateHydrated = false;
 let swapStateDirty = false;
 let statePathOverride = null;
+let runtimeStatePath = null;
+let runtimeStateNamespaceKey = null;
 let pendingDirectFill = null;
 let pendingProposal = null;
 const queuedProposalEventUpdates = [];
+
+function resetInMemoryState({ hydrated = false } = {}) {
+    swapState.nextSequence = 1;
+    swapState.orders = {};
+    swapState.deposits = {};
+    swapState.backfilledDepositsThroughBlock = null;
+    swapStateHydrated = hydrated;
+    swapStateDirty = false;
+    pendingDirectFill = null;
+    pendingProposal = null;
+    queuedProposalEventUpdates.length = 0;
+}
+
+function sanitizeStatePathSegment(value) {
+    const sanitized = String(value)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    return sanitized || 'default';
+}
 
 function getStatePath() {
     if (typeof statePathOverride === 'string' && statePathOverride.trim()) {
         return path.resolve(statePathOverride.trim());
     }
+    if (typeof runtimeStatePath === 'string' && runtimeStatePath.trim()) {
+        return runtimeStatePath;
+    }
     return path.join(__dirname, '.swap-state.json');
+}
+
+async function configureRuntimeStateContext({ publicClient, commitmentSafe, config }) {
+    if (typeof statePathOverride === 'string' && statePathOverride.trim()) {
+        return;
+    }
+
+    const normalizedSafe = normalizeAddress(commitmentSafe);
+    let chainId = 'unknown';
+    if (typeof publicClient?.getChainId === 'function') {
+        try {
+            chainId = String(await publicClient.getChainId());
+        } catch (error) {
+            chainId = 'unknown';
+        }
+    }
+
+    const namespaceKey = `chain-${chainId}-safe-${normalizedSafe.toLowerCase()}`;
+    const agentConfig = config?.agentConfig ?? {};
+    const configuredStatePath =
+        typeof agentConfig.statePath === 'string' && agentConfig.statePath.trim()
+            ? path.resolve(agentConfig.statePath.trim())
+            : null;
+    const configuredStateDir =
+        typeof agentConfig.stateDir === 'string' && agentConfig.stateDir.trim()
+            ? path.resolve(agentConfig.stateDir.trim())
+            : __dirname;
+    const nextStatePath =
+        configuredStatePath ??
+        path.join(
+            configuredStateDir,
+            `.swap-state-${sanitizeStatePathSegment(namespaceKey)}.json`
+        );
+
+    if (runtimeStateNamespaceKey === namespaceKey && runtimeStatePath === nextStatePath) {
+        return;
+    }
+
+    runtimeStateNamespaceKey = namespaceKey;
+    runtimeStatePath = nextStatePath;
+    resetInMemoryState();
 }
 
 function cloneJson(value) {
@@ -190,6 +261,10 @@ function resolvePolicy(config) {
                       'agentConfig.pendingTxTimeoutMs'
                   )
                 : DEFAULT_PENDING_TX_TIMEOUT_MS,
+        logChunkSize:
+            config?.logChunkSize !== undefined && config?.logChunkSize !== null
+                ? BigInt(config.logChunkSize)
+                : DEFAULT_LOG_CHUNK_SIZE,
     };
 }
 
@@ -243,11 +318,15 @@ async function hydrateSwapState() {
                 parsed.deposits && typeof parsed.deposits === 'object' && !Array.isArray(parsed.deposits)
                     ? parsed.deposits
                     : {};
+            swapState.backfilledDepositsThroughBlock =
+                typeof parsed.backfilledDepositsThroughBlock === 'string' &&
+                parsed.backfilledDepositsThroughBlock.trim()
+                    ? parsed.backfilledDepositsThroughBlock.trim()
+                    : null;
         }
     } catch (error) {
-        swapState.nextSequence = 1;
-        swapState.orders = {};
-        swapState.deposits = {};
+        resetInMemoryState({ hydrated: true });
+        return;
     }
     swapStateDirty = false;
 }
@@ -259,6 +338,7 @@ async function persistSwapState() {
             nextSequence: swapState.nextSequence,
             orders: swapState.orders,
             deposits: swapState.deposits,
+            backfilledDepositsThroughBlock: swapState.backfilledDepositsThroughBlock,
         },
         null,
         2
@@ -302,6 +382,10 @@ function createDepositRecord(signal, policy) {
         amountWei: amountWei.toString(),
         transactionHash,
         logIndex,
+        blockNumber:
+            signal.blockNumber !== undefined && signal.blockNumber !== null
+                ? BigInt(signal.blockNumber).toString()
+                : null,
         createdAtMs: Date.now(),
     };
 }
@@ -425,6 +509,105 @@ function buildCreditSnapshot() {
         };
     }
     return snapshot;
+}
+
+async function resolveInitialDepositBackfillStartBlock({
+    publicClient,
+    commitmentSafe,
+    startBlock,
+    latestBlock,
+}) {
+    if (startBlock !== undefined && startBlock !== null) {
+        return BigInt(startBlock);
+    }
+
+    try {
+        const discovered = await findContractDeploymentBlock({
+            publicClient,
+            address: commitmentSafe,
+            latestBlock,
+        });
+        if (discovered !== null) {
+            console.log(
+                `[agent] Backfilling ERC20 deposit history from Safe deployment block ${discovered.toString()}.`
+            );
+            return discovered;
+        }
+    } catch (error) {
+        console.warn(
+            '[agent] Failed to auto-discover Safe deployment block for deposit backfill; scanning from genesis.',
+            error?.message ?? error
+        );
+    }
+
+    return 0n;
+}
+
+async function maybeBackfillDeposits({
+    publicClient,
+    commitmentSafe,
+    latestBlock,
+    policy,
+    config,
+}) {
+    if (swapState.backfilledDepositsThroughBlock !== null) {
+        return false;
+    }
+
+    const fromBlock = await resolveInitialDepositBackfillStartBlock({
+        publicClient,
+        commitmentSafe,
+        startBlock: config?.startBlock,
+        latestBlock,
+    });
+
+    const logs = await getLogsChunked({
+        publicClient,
+        address: policy.paymentToken,
+        event: transferEvent,
+        args: { to: commitmentSafe },
+        fromBlock,
+        toBlock: latestBlock,
+        chunkSize: policy.logChunkSize,
+    });
+
+    let changed = false;
+    for (const log of logs) {
+        let deposit = null;
+        try {
+            deposit = createDepositRecord(
+                {
+                    kind: 'erc20Deposit',
+                    asset: policy.paymentToken,
+                    from: log.args?.from,
+                    amount: log.args?.value,
+                    blockNumber: log.blockNumber,
+                    transactionHash: log.transactionHash,
+                    logIndex: log.logIndex,
+                    id: log.transactionHash
+                        ? `${log.transactionHash}:${log.logIndex ?? '0'}`
+                        : `${log.blockNumber?.toString?.() ?? '0'}:${log.logIndex ?? '0'}`,
+                },
+                policy
+            );
+        } catch (error) {
+            continue;
+        }
+        if (!deposit || swapState.deposits[deposit.depositKey]) {
+            continue;
+        }
+        swapState.deposits[deposit.depositKey] = deposit;
+        changed = true;
+    }
+
+    swapState.backfilledDepositsThroughBlock = latestBlock.toString();
+    swapStateDirty = true;
+    if (logs.length > 0) {
+        console.log(
+            `[agent] Rebuilt ${logs.length} historical ERC20 deposit credit records for ${commitmentSafe}.`
+        );
+    }
+    return changed;
 }
 
 function ingestSignals(signals, policy) {
@@ -789,6 +972,7 @@ async function getDeterministicToolCalls({
     config,
     onchainPendingProposal = false,
 }) {
+    await configureRuntimeStateContext({ publicClient, commitmentSafe, config });
     await hydrateSwapState();
 
     const policy = resolvePolicy(config);
@@ -804,6 +988,13 @@ async function getDeterministicToolCalls({
     while (queuedProposalEventUpdates.length > 0) {
         applyProposalEventUpdate(queuedProposalEventUpdates.shift());
     }
+    await maybeBackfillDeposits({
+        publicClient,
+        commitmentSafe: normalizedSafeAddress,
+        latestBlock,
+        policy,
+        config,
+    });
     ingestSignals(signals, policy);
     await refreshDirectFillStatus({
         publicClient,
@@ -955,32 +1146,27 @@ async function getSwapState() {
         nextSequence: swapState.nextSequence,
         orders: swapState.orders,
         deposits: swapState.deposits,
+        backfilledDepositsThroughBlock: swapState.backfilledDepositsThroughBlock,
         credits: buildCreditSnapshot(),
     });
 }
 
 async function resetSwapState() {
-    swapState.nextSequence = 1;
-    swapState.orders = {};
-    swapState.deposits = {};
-    swapStateHydrated = true;
-    swapStateDirty = false;
-    pendingDirectFill = null;
-    pendingProposal = null;
-    queuedProposalEventUpdates.length = 0;
-    await unlink(getStatePath()).catch(() => {});
+    const shouldDeleteStateFile =
+        (typeof statePathOverride === 'string' && statePathOverride.trim()) ||
+        (typeof runtimeStatePath === 'string' && runtimeStatePath.trim());
+    const statePath = shouldDeleteStateFile ? getStatePath() : null;
+    resetInMemoryState({ hydrated: true });
+    if (statePath) {
+        await unlink(statePath).catch(() => {});
+    }
 }
 
 function setSwapStatePathForTest(nextPath) {
     statePathOverride = typeof nextPath === 'string' && nextPath.trim() ? nextPath : null;
-    swapState.nextSequence = 1;
-    swapState.orders = {};
-    swapState.deposits = {};
-    swapStateHydrated = false;
-    swapStateDirty = false;
-    pendingDirectFill = null;
-    pendingProposal = null;
-    queuedProposalEventUpdates.length = 0;
+    runtimeStatePath = null;
+    runtimeStateNamespaceKey = null;
+    resetInMemoryState();
 }
 
 const getPollingOptions = getAlwaysEmitBalanceSnapshotPollingOptions;
