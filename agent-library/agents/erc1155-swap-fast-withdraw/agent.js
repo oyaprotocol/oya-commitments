@@ -720,6 +720,22 @@ function getInventoryCandidateOrders() {
     return getOpenOrders().filter((order) => !order.directFillTxHash);
 }
 
+function getPendingDirectFillReservedTokenAmount() {
+    let total = 0n;
+    for (const order of getOpenOrders()) {
+        if (!order?.directFillTxHash || order?.directFillConfirmed) {
+            continue;
+        }
+        // Once a receipt has anchored the transfer to a block, the on-chain balance already
+        // reflects the outgoing inventory. Reserve only fills that are still unanchored.
+        if (order.directFillBlockNumber !== undefined && order.directFillBlockNumber !== null) {
+            continue;
+        }
+        total += BigInt(order.tokenAmount ?? 0);
+    }
+    return total;
+}
+
 function getReimbursementCandidateOrders() {
     return getOpenOrders().filter(
         (order) =>
@@ -808,9 +824,14 @@ async function getDeterministicToolCalls({
         functionName: 'balanceOf',
         args: [normalizedAgentAddress, BigInt(policy.erc1155TokenId)],
     });
+    let availableAgentTokenBalance =
+        BigInt(agentTokenBalance) - getPendingDirectFillReservedTokenAmount();
+    if (availableAgentTokenBalance < 0n) {
+        availableAgentTokenBalance = 0n;
+    }
 
     for (const order of getInventoryCandidateOrders()) {
-        if (BigInt(agentTokenBalance) < BigInt(order.tokenAmount)) {
+        if (availableAgentTokenBalance < BigInt(order.tokenAmount)) {
             continue;
         }
 
