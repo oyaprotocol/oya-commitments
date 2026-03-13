@@ -25,14 +25,26 @@ CHAIN_VALUE="${CHAIN:-sepolia}"
 
 : "${RPC_URL_VALUE:?RPC_URL, SEPOLIA_RPC_URL, or MAINNET_RPC_URL is required}"
 : "${DEPLOYER_PK:?DEPLOYER_PK is required}"
-: "${ETHERSCAN_API_KEY:?ETHERSCAN_API_KEY is required to verify the deployment}"
 
 cd "$ROOT_DIR"
 
-forge script "$@" script/DeployOyaTestERC1155.s.sol:DeployOyaTestERC1155 \
-  --rpc-url "$RPC_URL_VALUE" \
-  --broadcast \
-  --verify \
-  --chain "$CHAIN_VALUE" \
-  --verifier etherscan \
-  --etherscan-api-key "$ETHERSCAN_API_KEY"
+FORGE_ARGS=(
+  script
+  "$@"
+  script/DeployOyaTestERC1155.s.sol:DeployOyaTestERC1155
+  --rpc-url "$RPC_URL_VALUE"
+  --broadcast
+)
+
+if [[ -n "${ETHERSCAN_API_KEY:-}" ]]; then
+  FORGE_ARGS+=(
+    --verify
+    --chain "$CHAIN_VALUE"
+    --verifier etherscan
+    --etherscan-api-key "$ETHERSCAN_API_KEY"
+  )
+else
+  echo "ETHERSCAN_API_KEY not set; deploying without verification." >&2
+fi
+
+forge "${FORGE_ARGS[@]}"

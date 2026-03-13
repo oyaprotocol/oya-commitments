@@ -74,7 +74,19 @@ forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimis
 
 Deploy a repo-owned mintable ERC1155 for Sepolia or Anvil.
 
-The recommended CLI path now uses the wrapper script below so the deployment is verified on Etherscan immediately after broadcast. The wrapper reads `RPC_URL` first, then falls back to `SEPOLIA_RPC_URL` or `MAINNET_RPC_URL`, and requires `DEPLOYER_PK` plus `ETHERSCAN_API_KEY`.
+The recommended CLI path now uses the wrapper script below. It reads `RPC_URL` first, then falls back to `SEPOLIA_RPC_URL` or `MAINNET_RPC_URL`, and always requires `DEPLOYER_PK`. If `ETHERSCAN_API_KEY` is set, it also verifies the deployment on Etherscan after broadcast; otherwise it deploys without verification.
+
+Deploy only:
+
+```shell
+ENV_FILE=agent/.env \
+TEST_ERC1155_NAME="Oya Test ERC1155" \
+TEST_ERC1155_SYMBOL="OYAT1155" \
+TEST_ERC1155_URI="https://example.invalid/oya-test-erc1155/{id}.json" \
+bash script/deploy-oya-test-erc1155.sh
+```
+
+Deploy and verify:
 
 ```shell
 ENV_FILE=agent/.env \
@@ -88,8 +100,8 @@ bash script/deploy-oya-test-erc1155.sh
 Optional deploy overrides:
 
 - `ENV_FILE`: Optional env file to source before deployment, for example `agent/.env`.
-- `ETHERSCAN_API_KEY`: Required for Etherscan verification.
-- `CHAIN`: Optional chain name or chain id passed to Forge verification. Defaults to `sepolia`.
+- `ETHERSCAN_API_KEY`: Optional. If set, the wrapper verifies on Etherscan after broadcast.
+- `CHAIN`: Optional chain name or chain id passed to Forge verification. Defaults to `sepolia` when verification is enabled.
 - `TEST_ERC1155_OWNER`: Owner address allowed to mint. Defaults to the deployer address derived from `DEPLOYER_PK`.
 - `TEST_ERC1155_NAME`: Display name. Defaults to `Oya Test ERC1155`.
 - `TEST_ERC1155_SYMBOL`: Display symbol. Defaults to `OYAT1155`.
