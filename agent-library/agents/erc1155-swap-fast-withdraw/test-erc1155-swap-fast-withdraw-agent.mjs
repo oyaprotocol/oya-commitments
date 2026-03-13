@@ -518,6 +518,81 @@ async function testSameRequestIdAllowedForDifferentSigners() {
     });
 }
 
+async function testPendingDirectFillReservesInventory() {
+    await withTempStatePath(async () => {
+        const config = buildConfig();
+        const firstFillCalls = await getDeterministicToolCalls({
+            signals: [
+                buildDepositSignal({
+                    id: 'deposit-pending-inventory-a',
+                    from: SIGNER,
+                    amountWei: 3_000_000n,
+                }),
+                buildSignedRequestSignal({
+                    requestId: 'req-pending-inventory-a',
+                    signer: SIGNER,
+                    recipient: BUYER,
+                    amount: '3',
+                }),
+            ],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                safeUsdcBalance: 5_000_000n,
+                agentErc1155Balance: 4n,
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+
+        assert.equal(firstFillCalls.length, 1);
+        assert.equal(firstFillCalls[0].name, 'make_erc1155_transfer');
+        await onToolOutput({
+            name: 'make_erc1155_transfer',
+            parsedOutput: {
+                status: 'submitted',
+                transactionHash: DIRECT_FILL_TX_HASH,
+            },
+        });
+
+        const secondFillCalls = await getDeterministicToolCalls({
+            signals: [
+                buildDepositSignal({
+                    id: 'deposit-pending-inventory-b',
+                    from: OTHER_SIGNER,
+                    amountWei: 2_000_000n,
+                    transactionHash: `0x${'8'.repeat(64)}`,
+                }),
+                buildSignedRequestSignal({
+                    requestId: 'req-pending-inventory-b',
+                    signer: OTHER_SIGNER,
+                    recipient: RECIPIENT,
+                    amount: '2',
+                }),
+            ],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                safeUsdcBalance: 5_000_000n,
+                agentErc1155Balance: 4n,
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+
+        assert.equal(secondFillCalls.length, 0);
+
+        const state = await getSwapState();
+        assert.equal(
+            state.orders[buildRequestOrderId(SIGNER, 'req-pending-inventory-a')].directFillTxHash,
+            DIRECT_FILL_TX_HASH
+        );
+        assert.ok(state.orders[buildRequestOrderId(OTHER_SIGNER, 'req-pending-inventory-b')]);
+    });
+}
+
 async function testAuthorizedAgentRequired() {
     await withTempStatePath(async () => {
         const config = buildConfig();
@@ -837,6 +912,7 @@ async function run() {
     await testSignerMustMatchDepositor();
     await testReservedCreditPreventsOvercommitment();
     await testSameRequestIdAllowedForDifferentSigners();
+    await testPendingDirectFillReservesInventory();
     await testAuthorizedAgentRequired();
     await testProposalHashRecoveryRequiresMatchingExplanation();
     await testStaleDirectFillSubmissionRetries();
