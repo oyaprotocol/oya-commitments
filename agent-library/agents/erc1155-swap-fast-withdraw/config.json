@@ -1,0 +1,10 @@
+{
+  "policyName": "erc1155-swap-fast-withdraw",
+  "paymentTokenSymbol": "USDC",
+  "usdcUnitAmountWei": "1000000",
+  "fillConfirmationThreshold": 1,
+  "signedCommands": [
+    "fast_withdraw",
+    "fast_withdraw_erc1155"
+  ]
+}
