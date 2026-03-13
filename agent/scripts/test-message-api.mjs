@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { privateKeyToAccount } from 'viem/accounts';
 import { createMessageInbox } from '../src/lib/message-inbox.js';
 import { createMessageApiServer } from '../src/lib/message-api.js';
+import { buildSignedMessagePayload } from '../src/lib/message-signing.js';
 
-function buildServerConfig() {
+function buildServerConfig(signerAddress) {
     return {
         // Bind to loopback for deterministic local tests.
         messageApiHost: '127.0.0.1',
@@ -10,6 +12,8 @@ function buildServerConfig() {
         messageApiKeys: {
             ops: 'k_test_ops_secret',
         },
+        messageApiSignerAllowlist: [signerAddress],
+        messageApiSignatureMaxAgeSeconds: 300,
         messageApiMaxBodyBytes: 2048,
     };
 }
@@ -28,8 +32,9 @@ function buildInbox() {
 }
 
 async function main() {
+    const account = privateKeyToAccount(`0x${'1'.repeat(64)}`);
     const inbox = buildInbox();
-    const config = buildServerConfig();
+    const config = buildServerConfig(account.address);
     const messageApi = createMessageApiServer({
         config,
         inbox,
@@ -54,7 +59,50 @@ async function main() {
         });
         assert.equal(unauthorized.status, 401);
 
-        // First authenticated request should enqueue.
+        const timestampMs = Date.now();
+        const signedBody = {
+            text: 'Pause proposals for 2 hours',
+            command: 'pause_proposals',
+            args: { hours: 2 },
+            requestId: 'pause-2h',
+        };
+        const payload = buildSignedMessagePayload({
+            address: account.address,
+            timestampMs,
+            ...signedBody,
+        });
+        const signature = await account.signMessage({ message: payload });
+
+        // Bearer auth alone must not enqueue unsigned messages.
+        const unsigned = await fetch(`${baseUrl}/v1/messages`, {
+            method: 'POST',
+            headers: {
+                Authorization: 'Bearer k_test_ops_secret',
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(signedBody),
+        });
+        assert.equal(unsigned.status, 401);
+
+        // Signed auth alone must not bypass bearer gating when keys are configured.
+        const missingBearer = await fetch(`${baseUrl}/v1/messages`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                ...signedBody,
+                auth: {
+                    type: 'eip191',
+                    address: account.address,
+                    timestampMs,
+                    signature,
+                },
+            }),
+        });
+        assert.equal(missingBearer.status, 401);
+
+        // First fully authenticated request should enqueue.
         const accepted = await fetch(`${baseUrl}/v1/messages`, {
             method: 'POST',
             headers: {
@@ -62,10 +110,13 @@ async function main() {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                text: 'Pause proposals for 2 hours',
-                command: 'pause_proposals',
-                args: { hours: 2 },
-                requestId: 'pause-2h',
+                ...signedBody,
+                auth: {
+                    type: 'eip191',
+                    address: account.address,
+                    timestampMs,
+                    signature,
+                },
             }),
         });
         assert.equal(accepted.status, 202);
@@ -81,10 +132,13 @@ async function main() {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                text: 'Pause proposals for 2 hours',
-                command: 'pause_proposals',
-                args: { hours: 2 },
-                requestId: 'pause-2h',
+                ...signedBody,
+                auth: {
+                    type: 'eip191',
+                    address: account.address,
+                    timestampMs,
+                    signature,
+                },
             }),
         });
         assert.equal(duplicate.status, 200);
@@ -107,6 +161,8 @@ async function main() {
         const batch = inbox.takeBatch({ maxItems: 2 });
         assert.equal(batch.length, 1);
         assert.equal(batch[0].kind, 'userMessage');
+        assert.equal(batch[0].sender.authType, 'eip191');
+        assert.equal(batch[0].sender.address, account.address);
         inbox.ackBatch(batch.map((message) => message.messageId));
         assert.equal(inbox.getQueueDepth(), 0);
     } finally {
@@ -116,7 +172,7 @@ async function main() {
     // If a bind fails (for example port already in use), start() should remain retryable.
     const blockerInbox = buildInbox();
     const blockerApi = createMessageApiServer({
-        config: buildServerConfig(),
+        config: buildServerConfig(account.address),
         inbox: blockerInbox,
         logger: { log() {} },
     });
@@ -131,7 +187,7 @@ async function main() {
     const retryInbox = buildInbox();
     const retryApi = createMessageApiServer({
         config: {
-            ...buildServerConfig(),
+            ...buildServerConfig(account.address),
             messageApiPort: blockerAddress.port,
         },
         inbox: retryInbox,
