@@ -487,12 +487,13 @@ function matchesReimbursementProposalSignal({ signal, order, agentAddress, polic
     if (signal.proposer && !isAddressEqual(signal.proposer, agentAddress)) {
         return false;
     }
-    if (
-        typeof signal.explanation === 'string' &&
-        order.reimbursementExplanation &&
-        signal.explanation.trim() === order.reimbursementExplanation
-    ) {
-        return true;
+    // Once we have recorded a submitted proposal explanation, require an exact match.
+    // Falling back to amount-only matching can alias same-sized reimbursements.
+    if (order.reimbursementExplanation) {
+        if (typeof signal.explanation !== 'string') {
+            return false;
+        }
+        return signal.explanation.trim() === order.reimbursementExplanation;
     }
 
     const [transaction] = signal.transactions;
@@ -747,6 +748,11 @@ async function onToolOutput({ name, parsedOutput }) {
 }
 
 function onProposalEvents({ executedProposals = [], deletedProposals = [] }) {
+    const hasExecuted = Array.isArray(executedProposals) && executedProposals.length > 0;
+    const hasDeleted = Array.isArray(deletedProposals) && deletedProposals.length > 0;
+    if (!hasExecuted && !hasDeleted) {
+        return;
+    }
     if (!swapStateHydrated) {
         queuedProposalEventUpdates.push({
             executedProposals: cloneJson(executedProposals),
