@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { encodeFunctionData, erc20Abi } from 'viem';
 import {
     getDeterministicToolCalls,
     getSwapState,
@@ -22,6 +23,9 @@ const ERC1155_TOKEN_ID = '42';
 const DIRECT_FILL_TX_HASH = `0x${'a'.repeat(64)}`;
 const PROPOSAL_TX_HASH = `0x${'b'.repeat(64)}`;
 const OG_PROPOSAL_HASH = `0x${'c'.repeat(64)}`;
+const DIRECT_FILL_TX_HASH_2 = `0x${'d'.repeat(64)}`;
+const PROPOSAL_TX_HASH_2 = `0x${'e'.repeat(64)}`;
+const RECOVERED_PROPOSAL_HASH = `0x${'f'.repeat(64)}`;
 
 function buildConfig() {
     return {
@@ -293,9 +297,154 @@ async function testSignedFastWithdrawLifecycle() {
     });
 }
 
+async function createSubmittedPaymentReimbursementOrder({
+    config,
+    payer,
+    paymentId,
+    paymentTransactionHash,
+    directFillTxHash,
+    proposalSubmissionTxHash,
+}) {
+    const directFillCalls = await getDeterministicToolCalls({
+        signals: [
+            {
+                kind: 'erc20Deposit',
+                asset: USDC,
+                from: payer,
+                amount: 1_000_000n,
+                transactionHash: paymentTransactionHash,
+                logIndex: 0,
+                id: paymentId,
+            },
+        ],
+        commitmentText: '',
+        commitmentSafe: SAFE,
+        agentAddress: AGENT,
+        publicClient: buildPublicClient({
+            safeUsdcBalance: 2_000_000n,
+            agentErc1155Balance: 5n,
+        }),
+        config,
+        onchainPendingProposal: false,
+    });
+    assert.equal(directFillCalls.length, 1);
+    assert.equal(directFillCalls[0].name, 'make_erc1155_transfer');
+
+    await onToolOutput({
+        name: 'make_erc1155_transfer',
+        parsedOutput: {
+            status: 'confirmed',
+            transactionHash: directFillTxHash,
+        },
+    });
+
+    const reimbursementCalls = await getDeterministicToolCalls({
+        signals: [
+            {
+                kind: 'erc20BalanceSnapshot',
+                asset: USDC,
+                amount: 2_000_000n,
+            },
+        ],
+        commitmentText: '',
+        commitmentSafe: SAFE,
+        agentAddress: AGENT,
+        publicClient: buildPublicClient({
+            safeUsdcBalance: 2_000_000n,
+            agentErc1155Balance: 4n,
+        }),
+        config,
+        onchainPendingProposal: false,
+    });
+    assert.equal(reimbursementCalls.length, 1);
+    assert.equal(reimbursementCalls[0].name, 'post_bond_and_propose');
+
+    await onToolOutput({
+        name: 'post_bond_and_propose',
+        parsedOutput: {
+            status: 'submitted',
+            transactionHash: proposalSubmissionTxHash,
+        },
+    });
+
+    return parseToolArgs(reimbursementCalls[0]).explanation;
+}
+
+async function testProposalHashRecoveryRequiresMatchingExplanation() {
+    await withTempStatePath(async () => {
+        const config = buildConfig();
+        const firstExplanation = await createSubmittedPaymentReimbursementOrder({
+            config,
+            payer: BUYER,
+            paymentId: 'payment-a',
+            paymentTransactionHash: `0x${'1'.repeat(64)}`,
+            directFillTxHash: DIRECT_FILL_TX_HASH,
+            proposalSubmissionTxHash: PROPOSAL_TX_HASH,
+        });
+        await createSubmittedPaymentReimbursementOrder({
+            config,
+            payer: RECIPIENT,
+            paymentId: 'payment-b',
+            paymentTransactionHash: `0x${'2'.repeat(64)}`,
+            directFillTxHash: DIRECT_FILL_TX_HASH_2,
+            proposalSubmissionTxHash: PROPOSAL_TX_HASH_2,
+        });
+
+        const recoverySignals = [
+            {
+                kind: 'proposal',
+                proposalHash: RECOVERED_PROPOSAL_HASH,
+                proposer: AGENT,
+                explanation: firstExplanation,
+                transactions: [
+                    {
+                        to: USDC,
+                        operation: 0,
+                        value: 0n,
+                        data: encodeFunctionData({
+                            abi: erc20Abi,
+                            functionName: 'transfer',
+                            args: [AGENT, 1_000_000n],
+                        }),
+                    },
+                ],
+            },
+        ];
+
+        const toolCalls = await getDeterministicToolCalls({
+            signals: recoverySignals,
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                safeUsdcBalance: 2_000_000n,
+                agentErc1155Balance: 4n,
+            }),
+            config,
+            onchainPendingProposal: true,
+        });
+        assert.equal(toolCalls.length, 0);
+
+        const state = await getSwapState();
+        assert.equal(
+            state.orders['payment:payment-a'].reimbursementProposalHash,
+            RECOVERED_PROPOSAL_HASH
+        );
+        assert.equal(
+            state.orders['payment:payment-b'].reimbursementProposalHash,
+            null
+        );
+        assert.equal(
+            state.orders['payment:payment-b'].reimbursementSubmissionTxHash,
+            PROPOSAL_TX_HASH_2
+        );
+    });
+}
+
 async function run() {
     await testPaymentDepositLifecycle();
     await testSignedFastWithdrawLifecycle();
+    await testProposalHashRecoveryRequiresMatchingExplanation();
     console.log('[test] erc1155 swap fast withdraw agent OK');
 }
 
