@@ -27,7 +27,8 @@ const DIRECT_FILL_TX_HASH_2 = `0x${'d'.repeat(64)}`;
 const PROPOSAL_TX_HASH_2 = `0x${'e'.repeat(64)}`;
 const RECOVERED_PROPOSAL_HASH = `0x${'f'.repeat(64)}`;
 
-function buildConfig() {
+function buildConfig(overrides = {}) {
+    const { agentConfig: agentConfigOverrides = {}, ...topLevelOverrides } = overrides;
     return {
         commitmentSafe: SAFE,
         watchAssets: [USDC],
@@ -43,8 +44,16 @@ function buildConfig() {
             usdcUnitAmountWei: '1000000',
             fillConfirmationThreshold: 1,
             signedCommands: ['fast_withdraw', 'fast_withdraw_erc1155'],
+            ...agentConfigOverrides,
         },
+        ...topLevelOverrides,
     };
+}
+
+function buildReceiptNotFoundError(hash) {
+    const error = new Error(`transaction receipt for ${hash} not found`);
+    error.name = 'TransactionReceiptNotFoundError';
+    return error;
 }
 
 function buildPublicClient({
@@ -52,6 +61,8 @@ function buildPublicClient({
     safeUsdcBalance = 0n,
     agentErc1155Balance = 0n,
     directFillReceipt = null,
+    receiptsByHash = null,
+    receiptErrorsByHash = null,
 } = {}) {
     return {
         async getBlockNumber() {
@@ -71,7 +82,17 @@ function buildPublicClient({
             throw new Error(`Unexpected readContract: ${functionName} on ${address}`);
         },
         async getTransactionReceipt({ hash }) {
-            if (!directFillReceipt || String(hash).toLowerCase() !== DIRECT_FILL_TX_HASH.toLowerCase()) {
+            const normalizedHash = String(hash).toLowerCase();
+            if (
+                receiptErrorsByHash &&
+                Object.prototype.hasOwnProperty.call(receiptErrorsByHash, normalizedHash)
+            ) {
+                throw receiptErrorsByHash[normalizedHash];
+            }
+            if (receiptsByHash && Object.prototype.hasOwnProperty.call(receiptsByHash, normalizedHash)) {
+                return receiptsByHash[normalizedHash];
+            }
+            if (!directFillReceipt || normalizedHash !== DIRECT_FILL_TX_HASH.toLowerCase()) {
                 throw new Error(`Unexpected transaction receipt request for ${hash}`);
             }
             return directFillReceipt;
@@ -81,6 +102,16 @@ function buildPublicClient({
 
 function parseToolArgs(call) {
     return JSON.parse(call.arguments);
+}
+
+async function withMockedNow(nowMs, fn) {
+    const originalNow = Date.now;
+    Date.now = () => nowMs;
+    try {
+        return await fn();
+    } finally {
+        Date.now = originalNow;
+    }
 }
 
 async function withTempStatePath(fn) {
@@ -441,10 +472,139 @@ async function testProposalHashRecoveryRequiresMatchingExplanation() {
     });
 }
 
+async function testStaleDirectFillSubmissionRetries() {
+    await withTempStatePath(async () => {
+        const config = buildConfig({
+            agentConfig: {
+                pendingTxTimeoutMs: 1_000,
+            },
+        });
+
+        await withMockedNow(1_000, async () => {
+            const directFillCalls = await getDeterministicToolCalls({
+                signals: [
+                    {
+                        kind: 'erc20Deposit',
+                        asset: USDC,
+                        from: BUYER,
+                        amount: 1_000_000n,
+                        transactionHash: `0x${'3'.repeat(64)}`,
+                        logIndex: 0,
+                        id: 'payment-stale-fill',
+                    },
+                ],
+                commitmentText: '',
+                commitmentSafe: SAFE,
+                agentAddress: AGENT,
+                publicClient: buildPublicClient({
+                    safeUsdcBalance: 1_000_000n,
+                    agentErc1155Balance: 5n,
+                }),
+                config,
+                onchainPendingProposal: false,
+            });
+            assert.equal(directFillCalls.length, 1);
+            await onToolOutput({
+                name: 'make_erc1155_transfer',
+                parsedOutput: {
+                    status: 'submitted',
+                    transactionHash: DIRECT_FILL_TX_HASH,
+                },
+            });
+        });
+
+        const retryCalls = await withMockedNow(2_500, async () =>
+            getDeterministicToolCalls({
+                signals: [],
+                commitmentText: '',
+                commitmentSafe: SAFE,
+                agentAddress: AGENT,
+                publicClient: buildPublicClient({
+                    safeUsdcBalance: 1_000_000n,
+                    agentErc1155Balance: 5n,
+                    receiptErrorsByHash: {
+                        [DIRECT_FILL_TX_HASH.toLowerCase()]: buildReceiptNotFoundError(
+                            DIRECT_FILL_TX_HASH
+                        ),
+                    },
+                }),
+                config,
+                onchainPendingProposal: false,
+            })
+        );
+
+        assert.equal(retryCalls.length, 1);
+        assert.equal(retryCalls[0].name, 'make_erc1155_transfer');
+        assert.deepEqual(parseToolArgs(retryCalls[0]), {
+            token: ERC1155,
+            recipient: BUYER,
+            tokenId: ERC1155_TOKEN_ID,
+            amount: '1',
+            data: '0x',
+        });
+
+        const state = await getSwapState();
+        assert.equal(state.orders['payment:payment-stale-fill'].directFillTxHash, undefined);
+    });
+}
+
+async function testStaleProposalSubmissionRetries() {
+    await withTempStatePath(async () => {
+        const config = buildConfig({
+            agentConfig: {
+                pendingTxTimeoutMs: 1_000,
+            },
+        });
+
+        await withMockedNow(1_000, async () => {
+            await createSubmittedPaymentReimbursementOrder({
+                config,
+                payer: BUYER,
+                paymentId: 'payment-stale-proposal',
+                paymentTransactionHash: `0x${'4'.repeat(64)}`,
+                directFillTxHash: DIRECT_FILL_TX_HASH,
+                proposalSubmissionTxHash: PROPOSAL_TX_HASH,
+            });
+        });
+
+        const retryCalls = await withMockedNow(2_500, async () =>
+            getDeterministicToolCalls({
+                signals: [],
+                commitmentText: '',
+                commitmentSafe: SAFE,
+                agentAddress: AGENT,
+                publicClient: buildPublicClient({
+                    safeUsdcBalance: 1_000_000n,
+                    agentErc1155Balance: 4n,
+                    receiptErrorsByHash: {
+                        [PROPOSAL_TX_HASH.toLowerCase()]: buildReceiptNotFoundError(PROPOSAL_TX_HASH),
+                    },
+                }),
+                config,
+                onchainPendingProposal: false,
+            })
+        );
+
+        assert.equal(retryCalls.length, 1);
+        assert.equal(retryCalls[0].name, 'post_bond_and_propose');
+        const retryArgs = parseToolArgs(retryCalls[0]);
+        assert.equal(retryArgs.transactions.length, 1);
+        assert.match(retryArgs.explanation, /order=payment:payment-stale-proposal/);
+
+        const state = await getSwapState();
+        assert.equal(
+            state.orders['payment:payment-stale-proposal'].reimbursementSubmissionTxHash,
+            undefined
+        );
+    });
+}
+
 async function run() {
     await testPaymentDepositLifecycle();
     await testSignedFastWithdrawLifecycle();
     await testProposalHashRecoveryRequiresMatchingExplanation();
+    await testStaleDirectFillSubmissionRetries();
+    await testStaleProposalSubmissionRetries();
     console.log('[test] erc1155 swap fast withdraw agent OK');
 }
 

@@ -12,6 +12,7 @@ const STATE_VERSION = 1;
 const DEFAULT_USDC_UNIT_AMOUNT_WEI = 1_000_000n;
 const DEFAULT_FILL_CONFIRMATION_THRESHOLD = 1n;
 const DEFAULT_SIGNED_COMMANDS = ['fast_withdraw', 'fast_withdraw_erc1155'];
+const DEFAULT_PENDING_TX_TIMEOUT_MS = 900_000;
 
 const swapState = {
     nextSequence: 1,
@@ -73,6 +74,24 @@ function normalizeNonNegativeBigInt(value, fieldName) {
     } catch (error) {
         throw new Error(`${fieldName} must be a non-negative integer string.`);
     }
+}
+
+function normalizePositiveInteger(value, fieldName) {
+    const normalized = Number(value);
+    if (!Number.isInteger(normalized) || normalized <= 0) {
+        throw new Error(`${fieldName} must be a positive integer.`);
+    }
+    return normalized;
+}
+
+function isReceiptUnavailableError(error) {
+    const name = String(error?.name ?? '');
+    if (name.includes('TransactionReceiptNotFoundError') || name.includes('TransactionNotFoundError')) {
+        return true;
+    }
+
+    const message = String(error?.shortMessage ?? error?.message ?? '').toLowerCase();
+    return message.includes('transaction receipt') && message.includes('not found');
 }
 
 function isSignedUserMessage(signal) {
@@ -152,6 +171,13 @@ function resolvePolicy(config) {
         usdcUnitAmountWei,
         fillConfirmationThreshold,
         signedCommands: getSignedRequestCommands(config),
+        pendingTxTimeoutMs:
+            agentConfig.pendingTxTimeoutMs !== undefined
+                ? normalizePositiveInteger(
+                      agentConfig.pendingTxTimeoutMs,
+                      'agentConfig.pendingTxTimeoutMs'
+                  )
+                : DEFAULT_PENDING_TX_TIMEOUT_MS,
     };
 }
 
@@ -392,6 +418,7 @@ function applyProposalEventUpdate({ executedProposals = [], deletedProposals = [
 
 async function refreshDirectFillStatus({ publicClient, latestBlock, policy }) {
     let changed = false;
+    const nowMs = Date.now();
 
     for (const order of Object.values(swapState.orders)) {
         if (!order?.directFillTxHash || order?.directFillConfirmed) {
@@ -421,10 +448,26 @@ async function refreshDirectFillStatus({ publicClient, latestBlock, policy }) {
             order.directFillBlockNumber = blockNumber.toString();
             order.directFillConfirmations = Number(confirmations);
             order.directFillConfirmed = confirmations >= policy.fillConfirmationThreshold;
-            order.lastUpdatedAtMs = Date.now();
+            order.lastUpdatedAtMs = nowMs;
             changed = true;
         } catch (error) {
-            // Leave pending until receipt is available.
+            if (!isReceiptUnavailableError(error)) {
+                continue;
+            }
+
+            const submittedAtMs = Number(order.directFillSubmittedAtMs ?? 0);
+            const pendingForMs = Math.max(0, nowMs - submittedAtMs);
+            if (!Number.isFinite(submittedAtMs) || submittedAtMs <= 0 || pendingForMs < policy.pendingTxTimeoutMs) {
+                continue;
+            }
+
+            delete order.directFillTxHash;
+            delete order.directFillSubmittedAtMs;
+            delete order.directFillBlockNumber;
+            order.directFillConfirmations = 0;
+            order.directFillConfirmed = false;
+            order.lastUpdatedAtMs = nowMs;
+            changed = true;
         }
     }
 
@@ -434,8 +477,9 @@ async function refreshDirectFillStatus({ publicClient, latestBlock, policy }) {
     return changed;
 }
 
-async function refreshProposalSubmissionStatus({ publicClient }) {
+async function refreshProposalSubmissionStatus({ publicClient, policy }) {
     let changed = false;
+    const nowMs = Date.now();
 
     for (const order of Object.values(swapState.orders)) {
         if (!order?.reimbursementSubmissionTxHash || order?.reimbursementProposalHash) {
@@ -455,10 +499,24 @@ async function refreshProposalSubmissionStatus({ publicClient }) {
             delete order.reimbursementSubmissionTxHash;
             delete order.reimbursementSubmittedAtMs;
             delete order.reimbursementExplanation;
-            order.lastUpdatedAtMs = Date.now();
+            order.lastUpdatedAtMs = nowMs;
             changed = true;
         } catch (error) {
-            // Leave pending until receipt is available.
+            if (!isReceiptUnavailableError(error)) {
+                continue;
+            }
+
+            const submittedAtMs = Number(order.reimbursementSubmittedAtMs ?? 0);
+            const pendingForMs = Math.max(0, nowMs - submittedAtMs);
+            if (!Number.isFinite(submittedAtMs) || submittedAtMs <= 0 || pendingForMs < policy.pendingTxTimeoutMs) {
+                continue;
+            }
+
+            delete order.reimbursementSubmissionTxHash;
+            delete order.reimbursementSubmittedAtMs;
+            delete order.reimbursementExplanation;
+            order.lastUpdatedAtMs = nowMs;
+            changed = true;
         }
     }
 
@@ -630,7 +688,7 @@ async function getDeterministicToolCalls({
         latestBlock,
         policy,
     });
-    await refreshProposalSubmissionStatus({ publicClient });
+    await refreshProposalSubmissionStatus({ publicClient, policy });
     recoverProposalHashesFromSignals({
         signals,
         agentAddress: normalizedAgentAddress,
