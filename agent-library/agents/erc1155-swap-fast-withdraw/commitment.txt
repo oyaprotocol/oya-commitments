@@ -1,7 +1,7 @@
-Only <AUTHORIZED_AGENT_ADDRESS> may serve this commitment.
+Only 0x2967C076182F0303037072670e744e26Ed4A830f may serve this commitment.
 
-"USDC" means the ERC20 token at <USDC_TOKEN_ADDRESS>.
-"Test ERC1155 token" means token id <TEST_ERC1155_TOKEN_ID> from <TEST_ERC1155_TOKEN_ADDRESS>.
+"USDC" means the ERC20 token at 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238.
+"Test ERC1155 token" means token id 1001 from 0xa1B6d741CF7EF18D4C2C6f76DaF981E4f5FCbe4E.
 
 The price is 1 USDC per 1 Test ERC1155 token.
 
