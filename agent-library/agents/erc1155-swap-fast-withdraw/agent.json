@@ -1,0 +1,8 @@
+{
+  "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+  "name": "Oya ERC1155 Swap Fast Withdraw Agent",
+  "description": "Deterministic agent for a 1:1 USDC-to-ERC1155 commitment with signed fast-withdraw fills and Safe reimbursements.",
+  "image": "https://raw.githubusercontent.com/oya-commitments/oya-commitments/main/agent-library/agents/default/agent.png",
+  "endpoints": [],
+  "registrations": []
+}

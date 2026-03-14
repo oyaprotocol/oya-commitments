@@ -39,7 +39,13 @@ async function authenticateSignedRequest({
     signatureMaxAgeSeconds,
     nowMs,
 }) {
-    if (!body?.auth) return null;
+    if (!body?.auth) {
+        return {
+            ok: false,
+            statusCode: 401,
+            message: 'Signed auth is required.',
+        };
+    }
     if (!isPlainObject(body.auth)) {
         return { ok: false, statusCode: 400, message: 'auth must be an object when provided.' };
     }
@@ -227,9 +233,9 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
         (config.messageApiSignerAllowlist ?? []).map((address) => getAddress(address).toLowerCase())
     );
     const signatureMaxAgeSeconds = Number(config.messageApiSignatureMaxAgeSeconds ?? 300);
-    if (keyEntries.length === 0 && signerAllowlist.size === 0) {
+    if (signerAllowlist.size === 0) {
         throw new Error(
-            'Message API requires at least one auth method: MESSAGE_API_KEYS_JSON or MESSAGE_API_SIGNER_ALLOWLIST.'
+            'Message API requires MESSAGE_API_SIGNER_ALLOWLIST. MESSAGE_API_KEYS_JSON is optional additional bearer gating.'
         );
     }
 
@@ -290,38 +296,41 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
             }
 
             const nowMs = Date.now();
-            let senderKeyId = authenticateRequest({
-                authorizationHeader: req.headers.authorization,
-                keyEntries,
-            });
-            let sender = senderKeyId
-                ? {
-                      authType: 'apiKey',
-                      keyId: senderKeyId,
-                  }
-                : undefined;
-            if (!senderKeyId && body.auth) {
-                const signedAuth = await authenticateSignedRequest({
-                    body,
-                    signerAllowlist,
-                    signatureMaxAgeSeconds,
-                    nowMs,
-                });
-                if (!signedAuth?.ok) {
-                    sendJson(res, signedAuth?.statusCode ?? 401, {
-                        error: signedAuth?.message ?? 'Unauthorized.',
-                    });
-                    return;
-                }
-                senderKeyId = signedAuth.senderKeyId;
-                sender = signedAuth.sender;
-            }
-            if (!senderKeyId) {
+            const bearerKeyId =
+                keyEntries.length > 0
+                    ? authenticateRequest({
+                          authorizationHeader: req.headers.authorization,
+                          keyEntries,
+                      })
+                    : null;
+            if (keyEntries.length > 0 && !bearerKeyId) {
                 sendJson(
                     res,
                     401,
-                    { error: 'Unauthorized.' },
+                    { error: 'Bearer token is required.' },
                     { 'WWW-Authenticate': 'Bearer realm="agent-message-api"' }
+                );
+                return;
+            }
+
+            const signedAuth = await authenticateSignedRequest({
+                body,
+                signerAllowlist,
+                signatureMaxAgeSeconds,
+                nowMs,
+            });
+            if (!signedAuth?.ok) {
+                const extraHeaders =
+                    keyEntries.length > 0
+                        ? { 'WWW-Authenticate': 'Bearer realm="agent-message-api"' }
+                        : {};
+                sendJson(
+                    res,
+                    signedAuth?.statusCode ?? 401,
+                    {
+                        error: signedAuth?.message ?? 'Unauthorized.',
+                    },
+                    extraHeaders
                 );
                 return;
             }
@@ -333,8 +342,8 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
                 metadata: body.metadata,
                 requestId: body.requestId,
                 deadline: body.deadline,
-                senderKeyId,
-                sender,
+                senderKeyId: signedAuth.senderKeyId,
+                sender: signedAuth.sender,
                 nowMs,
             });
 

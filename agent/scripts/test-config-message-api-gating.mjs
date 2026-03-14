@@ -99,15 +99,31 @@ async function run() {
         }
     );
 
-    // Enabled API should continue to enforce numeric validation.
+    // Enabled API should continue to enforce numeric validation once signer auth is configured.
     withManagedEnv(
         {
             MESSAGE_API_ENABLED: 'true',
+            MESSAGE_API_SIGNER_ALLOWLIST: '0x3333333333333333333333333333333333333333',
             MESSAGE_API_KEYS_JSON: '{"ops":"k_test"}',
             MESSAGE_API_PORT: 'abc',
         },
         () => {
             assert.throws(() => buildConfig(), /MESSAGE_API_PORT must be an integer/);
+        }
+    );
+
+    // Enabled API requires signer allowlist auth even when bearer keys are present.
+    withManagedEnv(
+        {
+            MESSAGE_API_ENABLED: 'true',
+            MESSAGE_API_KEYS_JSON: '{"ops":"k_test"}',
+            MESSAGE_API_SIGNER_ALLOWLIST: undefined,
+        },
+        () => {
+            assert.throws(
+                () => buildConfig(),
+                /MESSAGE_API_ENABLED=true requires MESSAGE_API_SIGNER_ALLOWLIST/
+            );
         }
     );
 
@@ -122,6 +138,20 @@ async function run() {
             const config = buildConfig();
             assert.equal(config.messageApiSignerAllowlist.length, 1);
             assert.equal(config.messageApiSignerAllowlist[0], '0x3333333333333333333333333333333333333333');
+        }
+    );
+
+    // Bearer gating remains optional once signer auth is configured.
+    withManagedEnv(
+        {
+            MESSAGE_API_ENABLED: 'true',
+            MESSAGE_API_KEYS_JSON: '{"ops":"k_test"}',
+            MESSAGE_API_SIGNER_ALLOWLIST: '0x3333333333333333333333333333333333333333',
+        },
+        () => {
+            const config = buildConfig();
+            assert.deepEqual(config.messageApiKeys, { ops: 'k_test' });
+            assert.equal(config.messageApiSignerAllowlist.length, 1);
         }
     );
 

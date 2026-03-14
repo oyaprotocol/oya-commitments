@@ -69,3 +69,80 @@ forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimis
   --broadcast \
   --private-key <your_private_key>
 ```
+
+## Deploy the Oya ERC1155 Test Token
+
+Deploy a repo-owned mintable ERC1155 for Sepolia or Anvil.
+
+The recommended CLI path now uses the wrapper script below. It reads `RPC_URL` first, then falls back to `SEPOLIA_RPC_URL` or `MAINNET_RPC_URL`, and always requires `DEPLOYER_PK`. If `ETHERSCAN_API_KEY` is set, it also verifies the deployment on Etherscan after broadcast; otherwise it deploys without verification.
+
+Deploy only:
+
+```shell
+ENV_FILE=agent/.env \
+TEST_ERC1155_NAME="Oya Test ERC1155" \
+TEST_ERC1155_SYMBOL="OYAT1155" \
+TEST_ERC1155_URI="https://example.invalid/oya-test-erc1155/{id}.json" \
+bash script/deploy-oya-test-erc1155.sh
+```
+
+Deploy and verify:
+
+```shell
+ENV_FILE=agent/.env \
+ETHERSCAN_API_KEY=your_etherscan_api_key \
+TEST_ERC1155_NAME="Oya Test ERC1155" \
+TEST_ERC1155_SYMBOL="OYAT1155" \
+TEST_ERC1155_URI="https://example.invalid/oya-test-erc1155/{id}.json" \
+bash script/deploy-oya-test-erc1155.sh
+```
+
+Optional deploy overrides:
+
+- `ENV_FILE`: Optional env file to source before deployment, for example `agent/.env`.
+- `ETHERSCAN_API_KEY`: Optional. If set, the wrapper verifies on Etherscan after broadcast.
+- `CHAIN`: Optional chain name or chain id passed to Forge verification. Defaults to `sepolia` when verification is enabled.
+- `TEST_ERC1155_OWNER`: Owner address allowed to mint. Defaults to the deployer address derived from `DEPLOYER_PK`.
+- `TEST_ERC1155_NAME`: Display name. Defaults to `Oya Test ERC1155`.
+- `TEST_ERC1155_SYMBOL`: Display symbol. Defaults to `OYAT1155`.
+- `TEST_ERC1155_URI`: Base ERC1155 metadata URI returned by `uri(id)`. Defaults to `https://example.invalid/oya-test-erc1155/{id}.json`.
+
+If you prefer to call Forge directly instead of the wrapper, include verification flags explicitly:
+
+```shell
+DEPLOYER_PK=0xabc123... \
+ETHERSCAN_API_KEY=your_etherscan_api_key \
+TEST_ERC1155_NAME="Oya Test ERC1155" \
+TEST_ERC1155_SYMBOL="OYAT1155" \
+TEST_ERC1155_URI="https://example.invalid/oya-test-erc1155/{id}.json" \
+forge script script/DeployOyaTestERC1155.s.sol:DeployOyaTestERC1155 \
+  --rpc-url <your_rpc_url> \
+  --broadcast \
+  --verify \
+  --chain sepolia \
+  --verifier etherscan \
+  --etherscan-api-key "$ETHERSCAN_API_KEY"
+```
+
+Mint a test balance after deployment:
+
+```shell
+MINTER_PK=0xabc123... \
+TEST_ERC1155_TOKEN=0xYourDeployedToken \
+TEST_ERC1155_TO=0xRecipientOrSafe \
+TEST_ERC1155_TOKEN_ID=1 \
+TEST_ERC1155_AMOUNT=10 \
+TEST_ERC1155_DATA=0x \
+forge script script/MintOyaTestERC1155.s.sol:MintOyaTestERC1155 \
+  --rpc-url <your_rpc_url> \
+  --broadcast
+```
+
+Mint script inputs:
+
+- `MINTER_PK`: Private key for the token owner. If omitted, the script falls back to `DEPLOYER_PK`.
+- `TEST_ERC1155_TOKEN`: Deployed `OyaTestERC1155` contract address.
+- `TEST_ERC1155_TO`: Recipient wallet or Safe address.
+- `TEST_ERC1155_TOKEN_ID`: ERC1155 token id to mint.
+- `TEST_ERC1155_AMOUNT`: Amount to mint for that token id.
+- `TEST_ERC1155_DATA`: Optional mint callback data. Defaults to `0x`.

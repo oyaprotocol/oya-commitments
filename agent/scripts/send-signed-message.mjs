@@ -77,6 +77,7 @@ Optional:
   --host=<host>                        Used if --url is omitted (default 127.0.0.1)
   --port=<int>                         Used if --url is omitted (default 8787)
   --scheme=<http|https>                Used if --url is omitted (default http)
+  --bearer-token=<string>              Optional bearer token (or MESSAGE_API_BEARER_TOKEN)
   --command=<string>                   Optional command field
   --args-json='<json-object>'          Optional args object
   --metadata-json='<json-object>'      Optional metadata object
@@ -106,6 +107,8 @@ async function main() {
     const account = privateKeyToAccount(normalizedPrivateKey);
 
     const baseUrl = buildBaseUrl();
+    const bearerToken =
+        getArgValue('--bearer-token=') ?? process.env.MESSAGE_API_BEARER_TOKEN ?? undefined;
     const command = getArgValue('--command=') ?? undefined;
     const args = parseOptionalObject(getArgValue('--args-json='), '--args-json');
     const metadata = parseOptionalObject(getArgValue('--metadata-json='), '--metadata-json');
@@ -157,6 +160,14 @@ async function main() {
                     baseUrl,
                     payload,
                     body,
+                    headers: bearerToken
+                        ? {
+                              Authorization: `Bearer ${bearerToken}`,
+                              'Content-Type': 'application/json',
+                          }
+                        : {
+                              'Content-Type': 'application/json',
+                          },
                 },
                 null,
                 2
@@ -172,9 +183,13 @@ async function main() {
     let response;
     let responseJson;
     try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (bearerToken) {
+            headers.Authorization = `Bearer ${bearerToken}`;
+        }
         response = await fetch(endpoint, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify(body),
             signal: abortController.signal,
         });
