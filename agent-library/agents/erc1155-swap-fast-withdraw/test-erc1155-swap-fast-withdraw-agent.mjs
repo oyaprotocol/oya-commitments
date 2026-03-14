@@ -824,6 +824,7 @@ async function createSubmittedSignedRequestReimbursementOrder({
     depositTransactionHash,
     directFillTxHash,
     proposalSubmissionTxHash,
+    ogProposalHash = null,
 }) {
     const directFillCalls = await getDeterministicToolCalls({
         signals: [
@@ -887,6 +888,7 @@ async function createSubmittedSignedRequestReimbursementOrder({
         parsedOutput: {
             status: 'submitted',
             transactionHash: proposalSubmissionTxHash,
+            ogProposalHash,
         },
     });
 
@@ -964,6 +966,95 @@ async function testProposalHashRecoveryRequiresMatchingExplanation() {
             state.orders[buildRequestOrderId(OTHER_SIGNER, 'req-b')].reimbursementSubmissionTxHash,
             PROPOSAL_TX_HASH_2
         );
+    });
+}
+
+async function testStartupQueuedProposalEventsSurviveFirstRuntimeInitialization() {
+    await withTempStateDir(async (stateDir) => {
+        const config = buildConfig({
+            agentConfig: {
+                stateDir,
+            },
+        });
+
+        await createSubmittedSignedRequestReimbursementOrder({
+            config,
+            signer: SIGNER,
+            recipient: RECIPIENT,
+            requestId: 'req-startup-queued-proposal',
+            depositId: 'deposit-startup-queued-proposal',
+            depositTransactionHash: `0x${'3'.repeat(64)}`,
+            directFillTxHash: DIRECT_FILL_TX_HASH,
+            proposalSubmissionTxHash: PROPOSAL_TX_HASH,
+            ogProposalHash: OG_PROPOSAL_HASH,
+        });
+
+        setSwapStatePathForTest(null);
+        await onProposalEvents({
+            executedProposals: [OG_PROPOSAL_HASH],
+        });
+
+        const toolCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                safeUsdcBalance: 1_000_000n,
+                agentErc1155Balance: 4n,
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+
+        assert.equal(toolCalls.length, 0);
+        const state = await getSwapState();
+        assert.ok(state.orders[buildRequestOrderId(SIGNER, 'req-startup-queued-proposal')].reimbursedAtMs);
+    });
+}
+
+async function testHydratedProposalEventsPersistImmediately() {
+    await withTempStateDir(async (stateDir) => {
+        const config = buildConfig({
+            agentConfig: {
+                stateDir,
+            },
+        });
+
+        await createSubmittedSignedRequestReimbursementOrder({
+            config,
+            signer: SIGNER,
+            recipient: RECIPIENT,
+            requestId: 'req-persisted-proposal-event',
+            depositId: 'deposit-persisted-proposal-event',
+            depositTransactionHash: `0x${'4'.repeat(64)}`,
+            directFillTxHash: DIRECT_FILL_TX_HASH,
+            proposalSubmissionTxHash: PROPOSAL_TX_HASH,
+            ogProposalHash: OG_PROPOSAL_HASH,
+        });
+
+        await onProposalEvents({
+            executedProposals: [OG_PROPOSAL_HASH],
+        });
+
+        setSwapStatePathForTest(null);
+
+        const toolCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                safeUsdcBalance: 1_000_000n,
+                agentErc1155Balance: 4n,
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+
+        assert.equal(toolCalls.length, 0);
+        const state = await getSwapState();
+        assert.ok(state.orders[buildRequestOrderId(SIGNER, 'req-persisted-proposal-event')].reimbursedAtMs);
     });
 }
 
@@ -1117,6 +1208,8 @@ async function run() {
     await testPendingDirectFillReservesInventory();
     await testAuthorizedAgentRequired();
     await testProposalHashRecoveryRequiresMatchingExplanation();
+    await testStartupQueuedProposalEventsSurviveFirstRuntimeInitialization();
+    await testHydratedProposalEventsPersistImmediately();
     await testStaleDirectFillSubmissionRetries();
     await testStaleProposalSubmissionRetries();
     console.log('[test] erc1155 swap fast withdraw agent OK');

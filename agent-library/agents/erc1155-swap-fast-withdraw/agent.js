@@ -26,23 +26,35 @@ const swapState = {
 
 let swapStateHydrated = false;
 let swapStateDirty = false;
+let swapStateRevision = 0;
+let lastPersistedSwapStateRevision = 0;
 let statePathOverride = null;
 let runtimeStatePath = null;
 let runtimeStateNamespaceKey = null;
 let pendingDirectFill = null;
 let pendingProposal = null;
+let persistSwapStateQueue = Promise.resolve();
 const queuedProposalEventUpdates = [];
 
-function resetInMemoryState({ hydrated = false } = {}) {
+function markSwapStateDirty() {
+    swapStateDirty = true;
+    swapStateRevision += 1;
+}
+
+function resetInMemoryState({ hydrated = false, preserveQueuedProposalEventUpdates = false } = {}) {
     swapState.nextSequence = 1;
     swapState.orders = {};
     swapState.deposits = {};
     swapState.backfilledDepositsThroughBlock = null;
     swapStateHydrated = hydrated;
     swapStateDirty = false;
+    swapStateRevision = 0;
+    lastPersistedSwapStateRevision = 0;
     pendingDirectFill = null;
     pendingProposal = null;
-    queuedProposalEventUpdates.length = 0;
+    if (!preserveQueuedProposalEventUpdates) {
+        queuedProposalEventUpdates.length = 0;
+    }
 }
 
 function sanitizeStatePathSegment(value) {
@@ -100,9 +112,11 @@ async function configureRuntimeStateContext({ publicClient, commitmentSafe, conf
         return;
     }
 
+    const preserveQueuedProposalEventUpdates =
+        runtimeStateNamespaceKey === null && runtimeStatePath === null;
     runtimeStateNamespaceKey = namespaceKey;
     runtimeStatePath = nextStatePath;
-    resetInMemoryState();
+    resetInMemoryState({ preserveQueuedProposalEventUpdates });
 }
 
 function cloneJson(value) {
@@ -295,7 +309,7 @@ function getOpenOrders() {
 function allocateSequence() {
     const nextSequence = Number(swapState.nextSequence ?? 1);
     swapState.nextSequence = nextSequence + 1;
-    swapStateDirty = true;
+    markSwapStateDirty();
     return nextSequence;
 }
 
@@ -329,9 +343,14 @@ async function hydrateSwapState() {
         return;
     }
     swapStateDirty = false;
+    swapStateRevision = 0;
+    lastPersistedSwapStateRevision = 0;
 }
 
 async function persistSwapState() {
+    const statePath = getStatePath();
+    const namespaceKey = runtimeStateNamespaceKey;
+    const writeRevision = swapStateRevision;
     const payload = JSON.stringify(
         {
             version: STATE_VERSION,
@@ -343,8 +362,18 @@ async function persistSwapState() {
         null,
         2
     );
-    await writeFile(getStatePath(), payload, 'utf8');
-    swapStateDirty = false;
+    const writeTask = persistSwapStateQueue.catch(() => {}).then(async () => {
+        await writeFile(statePath, payload, 'utf8');
+        const sameRuntimeContext =
+            runtimeStateNamespaceKey === namespaceKey && getStatePath() === statePath;
+        if (!sameRuntimeContext) {
+            return;
+        }
+        lastPersistedSwapStateRevision = Math.max(lastPersistedSwapStateRevision, writeRevision);
+        swapStateDirty = swapStateRevision > lastPersistedSwapStateRevision;
+    });
+    persistSwapStateQueue = writeTask;
+    await writeTask;
 }
 
 async function maybePersistSwapState() {
@@ -601,7 +630,7 @@ async function maybeBackfillDeposits({
     }
 
     swapState.backfilledDepositsThroughBlock = latestBlock.toString();
-    swapStateDirty = true;
+    markSwapStateDirty();
     if (logs.length > 0) {
         console.log(
             `[agent] Rebuilt ${logs.length} historical ERC20 deposit credit records for ${commitmentSafe}.`
@@ -650,7 +679,7 @@ function ingestSignals(signals, policy) {
     }
 
     if (changed) {
-        swapStateDirty = true;
+        markSwapStateDirty();
     }
     return changed;
 }
@@ -692,7 +721,7 @@ function applyProposalEventUpdate({ executedProposals = [], deletedProposals = [
     }
 
     if (changed) {
-        swapStateDirty = true;
+        markSwapStateDirty();
     }
     return changed;
 }
@@ -753,7 +782,7 @@ async function refreshDirectFillStatus({ publicClient, latestBlock, policy }) {
     }
 
     if (changed) {
-        swapStateDirty = true;
+        markSwapStateDirty();
     }
     return changed;
 }
@@ -802,7 +831,7 @@ async function refreshProposalSubmissionStatus({ publicClient, policy }) {
     }
 
     if (changed) {
-        swapStateDirty = true;
+        markSwapStateDirty();
     }
     return changed;
 }
@@ -894,7 +923,7 @@ function recoverProposalHashesFromSignals({ signals, agentAddress, policy }) {
     }
 
     if (changed) {
-        swapStateDirty = true;
+        markSwapStateDirty();
     }
     return changed;
 }
@@ -1092,7 +1121,7 @@ async function onToolOutput({ name, parsedOutput }) {
         order.directFillConfirmed =
             parsedOutput.status === 'confirmed' && pending.fillConfirmationThreshold <= 1n;
         order.lastUpdatedAtMs = Date.now();
-        swapStateDirty = true;
+        markSwapStateDirty();
         await persistSwapState();
         return;
     }
@@ -1118,12 +1147,12 @@ async function onToolOutput({ name, parsedOutput }) {
             normalizeHashOrNull(order.reimbursementProposalHash);
         order.reimbursementSubmittedAtMs = Date.now();
         order.lastUpdatedAtMs = Date.now();
-        swapStateDirty = true;
+        markSwapStateDirty();
         await persistSwapState();
     }
 }
 
-function onProposalEvents({ executedProposals = [], deletedProposals = [] }) {
+async function onProposalEvents({ executedProposals = [], deletedProposals = [] }) {
     const hasExecuted = Array.isArray(executedProposals) && executedProposals.length > 0;
     const hasDeleted = Array.isArray(deletedProposals) && deletedProposals.length > 0;
     if (!hasExecuted && !hasDeleted) {
@@ -1136,7 +1165,18 @@ function onProposalEvents({ executedProposals = [], deletedProposals = [] }) {
         });
         return;
     }
-    applyProposalEventUpdate({ executedProposals, deletedProposals });
+    const changed = applyProposalEventUpdate({ executedProposals, deletedProposals });
+    if (!changed) {
+        return;
+    }
+    try {
+        await persistSwapState();
+    } catch (error) {
+        console.warn(
+            '[erc1155-swap-fast-withdraw] Failed to persist proposal event update:',
+            error?.message ?? error
+        );
+    }
 }
 
 async function getSwapState() {
