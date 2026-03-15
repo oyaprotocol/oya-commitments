@@ -913,6 +913,9 @@ function recoverProposalHashesFromSignals({ signals, agentAddress, policy }) {
             continue;
         }
         for (const order of pendingOrders) {
+            if (order.reimbursementProposalHash) {
+                continue;
+            }
             if (!matchesReimbursementProposalSignal({ signal, order, agentAddress, policy })) {
                 continue;
             }
