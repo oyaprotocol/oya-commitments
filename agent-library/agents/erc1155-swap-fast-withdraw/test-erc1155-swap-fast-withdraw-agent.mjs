@@ -27,6 +27,7 @@ const OG_PROPOSAL_HASH = `0x${'c'.repeat(64)}`;
 const DIRECT_FILL_TX_HASH_2 = `0x${'d'.repeat(64)}`;
 const PROPOSAL_TX_HASH_2 = `0x${'e'.repeat(64)}`;
 const RECOVERED_PROPOSAL_HASH = `0x${'f'.repeat(64)}`;
+const RECOVERED_PROPOSAL_HASH_2 = `0x${'1'.repeat(64)}`;
 const SEPOLIA_CHAIN_ID = 11155111;
 
 function buildConfig(overrides = {}) {
@@ -969,6 +970,87 @@ async function testProposalHashRecoveryRequiresMatchingExplanation() {
     });
 }
 
+async function testProposalHashRecoveryPreservesFirstMatchingHash() {
+    await withTempStatePath(async () => {
+        const config = buildConfig();
+        const explanation = await createSubmittedSignedRequestReimbursementOrder({
+            config,
+            signer: SIGNER,
+            recipient: RECIPIENT,
+            requestId: 'req-first-hash-wins',
+            depositId: 'deposit-first-hash-wins',
+            depositTransactionHash: `0x${'5'.repeat(64)}`,
+            directFillTxHash: DIRECT_FILL_TX_HASH,
+            proposalSubmissionTxHash: PROPOSAL_TX_HASH,
+        });
+
+        const toolCalls = await getDeterministicToolCalls({
+            signals: [
+                {
+                    kind: 'proposal',
+                    proposalHash: RECOVERED_PROPOSAL_HASH,
+                    proposer: AGENT,
+                    explanation,
+                    transactions: [
+                        {
+                            to: USDC,
+                            operation: 0,
+                            value: 0n,
+                            data: encodeFunctionData({
+                                abi: erc20Abi,
+                                functionName: 'transfer',
+                                args: [AGENT, 1_000_000n],
+                            }),
+                        },
+                    ],
+                },
+                {
+                    kind: 'proposal',
+                    proposalHash: RECOVERED_PROPOSAL_HASH_2,
+                    proposer: AGENT,
+                    explanation,
+                    transactions: [
+                        {
+                            to: USDC,
+                            operation: 0,
+                            value: 0n,
+                            data: encodeFunctionData({
+                                abi: erc20Abi,
+                                functionName: 'transfer',
+                                args: [AGENT, 1_000_000n],
+                            }),
+                        },
+                    ],
+                },
+            ],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                safeUsdcBalance: 1_000_000n,
+                agentErc1155Balance: 4n,
+            }),
+            config,
+            onchainPendingProposal: true,
+        });
+
+        assert.equal(toolCalls.length, 0);
+
+        let state = await getSwapState();
+        assert.equal(
+            state.orders[buildRequestOrderId(SIGNER, 'req-first-hash-wins')].reimbursementProposalHash,
+            RECOVERED_PROPOSAL_HASH
+        );
+
+        await onProposalEvents({
+            executedProposals: [RECOVERED_PROPOSAL_HASH],
+        });
+
+        state = await getSwapState();
+        assert.ok(state.orders[buildRequestOrderId(SIGNER, 'req-first-hash-wins')].reimbursedAtMs);
+    });
+}
+
 async function testStartupQueuedProposalEventsSurviveFirstRuntimeInitialization() {
     await withTempStateDir(async (stateDir) => {
         const config = buildConfig({
@@ -1208,6 +1290,7 @@ async function run() {
     await testPendingDirectFillReservesInventory();
     await testAuthorizedAgentRequired();
     await testProposalHashRecoveryRequiresMatchingExplanation();
+    await testProposalHashRecoveryPreservesFirstMatchingHash();
     await testStartupQueuedProposalEventsSurviveFirstRuntimeInitialization();
     await testHydratedProposalEventsPersistImmediately();
     await testStaleDirectFillSubmissionRetries();
