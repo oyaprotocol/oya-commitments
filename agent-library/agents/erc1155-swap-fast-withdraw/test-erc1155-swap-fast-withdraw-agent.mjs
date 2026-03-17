@@ -83,18 +83,22 @@ function buildSignedRequestSignal({
     tokenId = ERC1155_TOKEN_ID,
     command = 'fast_withdraw_erc1155',
     text = 'Machine-readable request; see command and args.',
+    args = undefined,
 } = {}) {
     return {
         kind: 'userMessage',
         requestId,
         messageId: `msg-${requestId}`,
         command,
-        args: {
-            recipient,
-            amount,
-            token,
-            tokenId,
-        },
+        args:
+            args !== undefined
+                ? args
+                : {
+                      recipient,
+                      amount,
+                      token,
+                      tokenId,
+                  },
         text,
         sender: {
             authType: 'eip191',
@@ -302,6 +306,16 @@ async function withMockedNow(nowMs, fn) {
         return await fn();
     } finally {
         Date.now = originalNow;
+    }
+}
+
+async function withMockFetch(mockFetch, fn) {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = mockFetch;
+    try {
+        return await fn();
+    } finally {
+        globalThis.fetch = originalFetch;
     }
 }
 
@@ -626,6 +640,95 @@ async function testDirectFillWaitsForSafeReimbursementLiquidity() {
             state.orders[buildRequestOrderId(SIGNER, 'req-insufficient-safe-liquidity')].directFillTxHash,
             undefined
         );
+    });
+}
+
+async function testFreeTextSignedRequestUsesLlmInterpretation() {
+    await withTempStatePath(async () => {
+        let llmCalls = 0;
+        await withMockFetch(
+            async (url, options = {}) => {
+                llmCalls += 1;
+                assert.equal(url, 'https://api.openai.test/v1/responses');
+                const body = JSON.parse(options.body);
+                assert.equal(body.model, 'gpt-test');
+                return {
+                    ok: true,
+                    json: async () => ({
+                        output: [
+                            {
+                                content: [
+                                    {
+                                        text: '{"action":"fast_withdraw_erc1155","recipient":"0x4444444444444444444444444444444444444444","amount":"2"}',
+                                    },
+                                ],
+                            },
+                        ],
+                    }),
+                };
+            },
+            async () => {
+                const config = buildConfig({
+                    openAiApiKey: 'k_test',
+                    openAiBaseUrl: 'https://api.openai.test/v1',
+                    openAiModel: 'gpt-test',
+                });
+                const toolCalls = await getDeterministicToolCalls({
+                    signals: [
+                        buildDepositSignal({
+                            id: 'deposit-free-text-llm',
+                            from: SIGNER,
+                            amountWei: 2_000_000n,
+                        }),
+                        buildSignedRequestSignal({
+                            requestId: 'req-free-text-llm',
+                            signer: SIGNER,
+                            command: undefined,
+                            text: `Please send 2 of token 1001 to ${RECIPIENT}.`,
+                            args: {},
+                        }),
+                    ],
+                    commitmentText: 'The signer may ask the agent in plain English to send the test ERC1155.',
+                    commitmentSafe: SAFE,
+                    agentAddress: AGENT,
+                    publicClient: buildPublicClient({
+                        safeUsdcBalance: 2_000_000n,
+                        agentErc1155Balance: 5n,
+                    }),
+                    config,
+                    onchainPendingProposal: false,
+                });
+
+                assert.equal(toolCalls.length, 1);
+                assert.equal(toolCalls[0].name, 'make_erc1155_transfer');
+                assert.deepEqual(parseToolArgs(toolCalls[0]), {
+                    token: ERC1155,
+                    recipient: RECIPIENT,
+                    tokenId: ERC1155_TOKEN_ID,
+                    amount: '2',
+                    data: '0x',
+                });
+
+                const state = await getSwapState();
+                assert.deepEqual(state.interpretedRequests[buildRequestOrderId(SIGNER, 'req-free-text-llm')], {
+                    action: 'fast_withdraw_erc1155',
+                    args: {
+                        recipient: RECIPIENT,
+                        amount: '2',
+                        token: ERC1155,
+                        tokenId: ERC1155_TOKEN_ID,
+                    },
+                    interpretedAtMs: state.interpretedRequests[buildRequestOrderId(SIGNER, 'req-free-text-llm')].interpretedAtMs,
+                    text: `Please send 2 of token 1001 to ${RECIPIENT}.`,
+                });
+                assert.ok(
+                    state.orders[buildRequestOrderId(SIGNER, 'req-free-text-llm')],
+                    'order should be created from LLM-interpreted free text'
+                );
+            }
+        );
+
+        assert.equal(llmCalls, 1);
     });
 }
 
@@ -1475,6 +1578,7 @@ async function run() {
     await testStartupBackfillReconstructsHistoricalSpentCredit();
     await testSignedFastWithdrawLifecycleUsesDepositorCredit();
     await testDirectFillWaitsForSafeReimbursementLiquidity();
+    await testFreeTextSignedRequestUsesLlmInterpretation();
     await testStatePersistsSeparatelyPerCommitment();
     await testSignedRequestWithoutDepositorCreditDoesNothing();
     await testSignerMustMatchDepositor();
