@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { decodeFunctionData, erc20Abi, erc1155Abi, getAddress, hexToString, isAddressEqual } from 'viem';
 import { findContractDeploymentBlock, getLogsChunked } from '../../../agent/src/lib/chain-history.js';
 import { extractFirstText } from '../../../agent/src/lib/llm.js';
+import { buildSignedMessagePayload } from '../../../agent/src/lib/message-signing.js';
 import { proposalExecutedEvent, transactionsProposedEvent, transferEvent } from '../../../agent/src/lib/og.js';
 import { getAlwaysEmitBalanceSnapshotPollingOptions } from '../../../agent/src/lib/polling.js';
 import { buildOgTransactions } from '../../../agent/src/lib/tx.js';
@@ -11,12 +12,15 @@ import { buildOgTransactions } from '../../../agent/src/lib/tx.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const STATE_VERSION = 4;
+const STATE_VERSION = 5;
 const DEFAULT_USDC_UNIT_AMOUNT_WEI = 1_000_000n;
 const DEFAULT_FILL_CONFIRMATION_THRESHOLD = 1n;
 const DEFAULT_SIGNED_COMMANDS = ['fast_withdraw', 'fast_withdraw_erc1155'];
 const DEFAULT_PENDING_TX_TIMEOUT_MS = 900_000;
 const DEFAULT_LOG_CHUNK_SIZE = 5_000n;
+const ARTIFACT_VERSION = 'oya-signed-request-archive-v1';
+const FILENAME_PREFIX = 'signed-request-';
+const FILENAME_SUFFIX = '.json';
 
 const swapState = {
     nextSequence: 1,
@@ -33,6 +37,7 @@ let lastPersistedSwapStateRevision = 0;
 let statePathOverride = null;
 let runtimeStatePath = null;
 let runtimeStateNamespaceKey = null;
+let pendingArtifactPublish = null;
 let pendingDirectFill = null;
 let pendingProposal = null;
 let persistSwapStateQueue = Promise.resolve();
@@ -53,6 +58,7 @@ function resetInMemoryState({ hydrated = false, preserveQueuedProposalEventUpdat
     swapStateDirty = false;
     swapStateRevision = 0;
     lastPersistedSwapStateRevision = 0;
+    pendingArtifactPublish = null;
     pendingDirectFill = null;
     pendingProposal = null;
     if (!preserveQueuedProposalEventUpdates) {
@@ -442,6 +448,58 @@ function buildSignedRequestOrderId(signer, requestId) {
     return `request:${normalizeAddress(signer)}:${String(requestId).trim()}`;
 }
 
+function encodeRequestIdForFilename(requestId) {
+    return Buffer.from(String(requestId), 'utf8').toString('hex');
+}
+
+function buildArtifactFilename(requestId) {
+    return `${FILENAME_PREFIX}${encodeRequestIdForFilename(requestId)}${FILENAME_SUFFIX}`;
+}
+
+function buildSignedRequestArchiveArtifact({ order, commitmentSafe, agentAddress }) {
+    if (order?.sourceKind !== 'signed_request' || !order?.requestId || !order?.signer) {
+        throw new Error('buildSignedRequestArchiveArtifact requires a signed request order.');
+    }
+
+    const canonicalSignedMessage = buildSignedMessagePayload({
+        address: order.signer,
+        timestampMs: order.signedAtMs,
+        text: order.text ?? null,
+        command: order.command ?? null,
+        args: cloneJson(order.originalArgs ?? null),
+        metadata: cloneJson(order.metadata ?? null),
+        requestId: order.requestId,
+        deadline: order.deadline ?? null,
+    });
+
+    return {
+        version: ARTIFACT_VERSION,
+        requestId: order.requestId,
+        messageId: order.messageId ?? null,
+        signedRequest: {
+            authType: 'eip191',
+            signer: order.signer,
+            signature: order.signature,
+            signedAtMs: order.signedAtMs,
+            canonicalMessage: canonicalSignedMessage,
+            envelope: {
+                requestId: order.requestId,
+                deadline: order.deadline ?? null,
+                text: order.text ?? null,
+                command: order.command ?? null,
+                args: cloneJson(order.originalArgs ?? null),
+                metadata: cloneJson(order.metadata ?? null),
+            },
+        },
+        agentContext: {
+            commitmentSafe: commitmentSafe ?? null,
+            agentAddress: agentAddress ?? null,
+            orderId: order.orderId,
+            receivedAtMs: order.createdAtMs ?? null,
+        },
+    };
+}
+
 function getSignedRequestStateKey(signal) {
     if (!isSignedUserMessage(signal)) {
         return null;
@@ -677,6 +735,7 @@ function createSignedRequestOrder(signal, policy) {
         return null;
     }
 
+    const originalArgs = getStructuredArgs(signal);
     const args = getResolvedSignedRequestArgs(signal);
     if (args.token !== undefined && !isAddressEqual(args.token, policy.erc1155Token)) {
         return null;
@@ -709,9 +768,13 @@ function createSignedRequestOrder(signal, policy) {
         signedAtMs: signal.sender.signedAtMs,
         command: signal.command ?? null,
         text: signal.text ?? null,
+        originalArgs: cloneJson(originalArgs),
+        metadata: cloneJson(signal.metadata ?? null),
+        deadline: signal.deadline ?? null,
         recipient: normalizeAddress(recipientRaw),
         tokenAmount: tokenAmount.toString(),
         reimbursementAmountWei: reimbursementAmountWei.toString(),
+        archiveFilename: buildArtifactFilename(signal.requestId),
         createdAtMs: signal.receivedAtMs ?? Date.now(),
     };
 }
@@ -871,6 +934,10 @@ function buildHistoricalReimbursedOrder({ proposalHash, explanation, policy }) {
         if (typeof fields.recipient === 'string' && fields.recipient.trim() && fields.recipient !== 'unknown') {
             recipient = normalizeAddress(fields.recipient);
         }
+        const artifactUri =
+            typeof fields.signedRequestCid === 'string' && fields.signedRequestCid.trim()
+                ? fields.signedRequestCid.trim()
+                : null;
 
         const orderId =
             typeof fields.order === 'string' && fields.order.trim()
@@ -894,6 +961,7 @@ function buildHistoricalReimbursedOrder({ proposalHash, explanation, policy }) {
             reservedCreditAmountWei: reservedCreditWei.toString(),
             reimbursementProposalHash: proposalHash,
             reimbursementExplanation: explanation.trim(),
+            artifactUri,
             sourceKind: 'historical_reimbursement',
             createdAtMs: nowMs,
             creditReservedAtMs: nowMs,
@@ -1259,6 +1327,7 @@ function buildReimbursementExplanation(order, policy) {
         `order=${order.orderId}`,
         `requestId=${order.requestId ?? 'n/a'}`,
         `signer=${order.signer ?? 'unknown'}`,
+        `signedRequestCid=${order.artifactUri ?? 'missing'}`,
         `token=${policy.erc1155Token}`,
         `tokenId=${policy.erc1155TokenId}`,
         `amount=${order.tokenAmount}`,
@@ -1349,7 +1418,7 @@ function recoverProposalHashesFromSignals({ signals, agentAddress, policy }) {
 }
 
 function getInventoryCandidateOrders() {
-    return getOpenOrders().filter((order) => !order.directFillTxHash);
+    return getOpenOrders().filter((order) => order.artifactUri && !order.directFillTxHash);
 }
 
 function getPendingDirectFillReservedTokenAmount() {
@@ -1382,10 +1451,36 @@ function getPendingSafeReimbursementReservedWei() {
 function getReimbursementCandidateOrders() {
     return getOpenOrders().filter(
         (order) =>
+            order.artifactUri &&
             order.directFillConfirmed &&
             !order.reimbursementProposalHash &&
             !order.reimbursementSubmissionTxHash
     );
+}
+
+function getArchiveCandidateOrders() {
+    return getOpenOrders().filter(
+        (order) =>
+            !order.artifactUri &&
+            !order.reimbursementProposalHash &&
+            !order.reimbursementSubmissionTxHash
+    );
+}
+
+function buildArchiveToolCall(order, commitmentSafe, agentAddress) {
+    return {
+        callId: `archive-${order.sequence}`,
+        name: 'ipfs_publish',
+        arguments: JSON.stringify({
+            json: buildSignedRequestArchiveArtifact({
+                order,
+                commitmentSafe,
+                agentAddress,
+            }),
+            filename: order.archiveFilename,
+            pin: true,
+        }),
+    };
 }
 
 function buildDirectFillToolCall(order, policy) {
@@ -1476,6 +1571,18 @@ async function getDeterministicToolCalls({
     });
     await maybePersistSwapState();
 
+    for (const order of getArchiveCandidateOrders()) {
+        if (!config?.ipfsEnabled) {
+            continue;
+        }
+
+        pendingArtifactPublish = {
+            orderId: order.orderId,
+            filename: order.archiveFilename,
+        };
+        return [buildArchiveToolCall(order, normalizedSafeAddress, normalizedAgentAddress)];
+    }
+
     const [agentTokenBalance, safePaymentBalance] = await Promise.all([
         publicClient.readContract({
             address: policy.erc1155Token,
@@ -1548,6 +1655,40 @@ async function getDeterministicToolCalls({
 
 async function onToolOutput({ name, parsedOutput }) {
     await hydrateSwapState();
+
+    if (name === 'ipfs_publish') {
+        const pending = pendingArtifactPublish;
+        pendingArtifactPublish = null;
+        if (!pending) return;
+        if (!parsedOutput || parsedOutput.status !== 'published') {
+            return;
+        }
+
+        const order = swapState.orders[pending.orderId];
+        if (!order) {
+            return;
+        }
+
+        const cid =
+            typeof parsedOutput.cid === 'string' && parsedOutput.cid.trim()
+                ? parsedOutput.cid.trim()
+                : null;
+        const uri =
+            typeof parsedOutput.uri === 'string' && parsedOutput.uri.trim()
+                ? parsedOutput.uri.trim()
+                : cid
+                    ? `ipfs://${cid}`
+                    : null;
+
+        order.archiveFilename = pending.filename ?? order.archiveFilename ?? null;
+        order.artifactCid = cid ?? order.artifactCid ?? null;
+        order.artifactUri = uri ?? order.artifactUri ?? null;
+        order.artifactPublishedAtMs = Date.now();
+        order.lastUpdatedAtMs = Date.now();
+        markSwapStateDirty();
+        await persistSwapState();
+        return;
+    }
 
     if (name === 'make_erc1155_transfer') {
         const pending = pendingDirectFill;

@@ -4,6 +4,8 @@ When the agent receives a signed swap request message from the user, the agent m
 
 The swap request must be signed by the original depositor of the USDC, and the user must have enough USDC available to cover reimbursement for the agent.
 
+Any reimbursement proposal explanation must include an IPFS URI for an archived copy of the signed swap request message.
+
 "USDC" means the ERC20 token at 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238.
 "Test ERC1155 token" means the token with ID 1001 at 0xa1B6d741CF7EF18D4C2C6f76DaF981E4f5FCbe4E.
 
