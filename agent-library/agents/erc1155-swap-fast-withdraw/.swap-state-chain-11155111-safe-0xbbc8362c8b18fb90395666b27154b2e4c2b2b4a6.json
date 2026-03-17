@@ -1,0 +1,61 @@
+{
+  "version": 4,
+  "nextSequence": 2,
+  "orders": {
+    "request:0xd484386DBF7D656fA2363b89E10c89f928C09288:ft-sepolia-1": {
+      "orderId": "request:0xd484386DBF7D656fA2363b89E10c89f928C09288:ft-sepolia-1",
+      "sourceKind": "signed_request",
+      "sourceId": "ft-sepolia-1",
+      "requestId": "ft-sepolia-1",
+      "messageId": "msg_f52af603-15a7-427e-8eaf-96d17f3760b4",
+      "signer": "0xd484386DBF7D656fA2363b89E10c89f928C09288",
+      "signature": "0x705db5847bd18688f7b9388d8285ae50da5d39ca869062f05386ebf674a84c340496b4bdb67021074a2770fb60f49d831321f50ba5c731eb2c8cd0759d743c5f1b",
+      "signedAtMs": 1773789304418,
+      "command": null,
+      "text": "Please send 1 of the Sepolia test ERC1155 token with token ID 1001 to\n  0xd484386DBF7D656fA2363b89E10c89f928C09288 using my deposited USDC credit.",
+      "recipient": "0xd484386DBF7D656fA2363b89E10c89f928C09288",
+      "tokenAmount": "1",
+      "reimbursementAmountWei": "1000000",
+      "createdAtMs": 1773789304442,
+      "reservedCreditAmountWei": "1000000",
+      "creditReservedAtMs": 1773789313205,
+      "sequence": 1,
+      "lastUpdatedAtMs": 1773789524022,
+      "directFillTxHash": "0x3c69658bdaaccb2ff5c69c0a80be0e712d7dc79a244d46396e9cc0df6b029ac7",
+      "directFillSubmittedAtMs": 1773789339637,
+      "directFillConfirmations": 1,
+      "directFillConfirmed": true,
+      "reimbursementExplanation": "erc1155-swap-fast-withdraw reimbursement | order=request:0xd484386DBF7D656fA2363b89E10c89f928C09288:ft-sepolia-1 | requestId=ft-sepolia-1 | signer=0xd484386DBF7D656fA2363b89E10c89f928C09288 | token=0xa1B6d741CF7EF18D4C2C6f76DaF981E4f5FCbe4E | tokenId=1001 | amount=1 | reservedCreditWei=1000000 | recipient=0xd484386DBF7D656fA2363b89E10c89f928C09288 | directFillTx=0x3c69658bdaaccb2ff5c69c0a80be0e712d7dc79a244d46396e9cc0df6b029ac7",
+      "reimbursementSubmissionTxHash": "0x3c7529a5a7a0ab806a2c29068d5a943ead4abb7466849ae4f64ee491f6d3f238",
+      "reimbursementProposalHash": "0x1bf437156e014b18d38554e94af8b6d7681e66e79330d2e60d778c0c77722766",
+      "reimbursementSubmittedAtMs": 1773789373589,
+      "reimbursedAtMs": 1773789524022
+    }
+  },
+  "deposits": {
+    "tx:0x716ed40cccbe0789a827f413dff2577c8d8135bb10f8e6da69e3f11f977ad0e0:96": {
+      "depositKey": "tx:0x716ed40cccbe0789a827f413dff2577c8d8135bb10f8e6da69e3f11f977ad0e0:96",
+      "depositId": "0x716ed40cccbe0789a827f413dff2577c8d8135bb10f8e6da69e3f11f977ad0e0:96",
+      "depositor": "0xd484386DBF7D656fA2363b89E10c89f928C09288",
+      "amountWei": "1000000",
+      "transactionHash": "0x716ed40cccbe0789a827f413dff2577c8d8135bb10f8e6da69e3f11f977ad0e0",
+      "logIndex": "96",
+      "blockNumber": "10466493",
+      "createdAtMs": 1773789100674
+    }
+  },
+  "backfilledDepositsThroughBlock": "10466494",
+  "interpretedRequests": {
+    "request:0xd484386DBF7D656fA2363b89E10c89f928C09288:ft-sepolia-1": {
+      "action": "fast_withdraw_erc1155",
+      "args": {
+        "recipient": "0xd484386DBF7D656fA2363b89E10c89f928C09288",
+        "amount": "1",
+        "token": "0xa1B6d741CF7EF18D4C2C6f76DaF981E4f5FCbe4E",
+        "tokenId": "1001"
+      },
+      "interpretedAtMs": 1773789313204,
+      "text": "Please send 1 of the Sepolia test ERC1155 token with token ID 1001 to\n  0xd484386DBF7D656fA2363b89E10c89f928C09288 using my deposited USDC credit."
+    }
+  }
+}
