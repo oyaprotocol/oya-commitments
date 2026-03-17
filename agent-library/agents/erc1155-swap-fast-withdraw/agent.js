@@ -1,9 +1,9 @@
 import { readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { decodeFunctionData, erc20Abi, erc1155Abi, getAddress, isAddressEqual } from 'viem';
+import { decodeFunctionData, erc20Abi, erc1155Abi, getAddress, hexToString, isAddressEqual } from 'viem';
 import { findContractDeploymentBlock, getLogsChunked } from '../../../agent/src/lib/chain-history.js';
-import { transferEvent } from '../../../agent/src/lib/og.js';
+import { proposalExecutedEvent, transactionsProposedEvent, transferEvent } from '../../../agent/src/lib/og.js';
 import { getAlwaysEmitBalanceSnapshotPollingOptions } from '../../../agent/src/lib/polling.js';
 import { buildOgTransactions } from '../../../agent/src/lib/tx.js';
 
@@ -572,6 +572,183 @@ async function resolveInitialDepositBackfillStartBlock({
     return 0n;
 }
 
+function decodeProposalExplanationText(value) {
+    if (typeof value !== 'string' || !value.trim()) {
+        return null;
+    }
+    if (!value.startsWith('0x')) {
+        return value.trim();
+    }
+    try {
+        return hexToString(value).trim();
+    } catch (error) {
+        return null;
+    }
+}
+
+function parseReimbursementExplanationFields(explanation) {
+    if (typeof explanation !== 'string' || !explanation.trim()) {
+        return null;
+    }
+
+    const segments = explanation
+        .split('|')
+        .map((segment) => segment.trim())
+        .filter(Boolean);
+    if (segments[0] !== 'erc1155-swap-fast-withdraw reimbursement') {
+        return null;
+    }
+
+    const fields = {};
+    for (const segment of segments.slice(1)) {
+        const separatorIndex = segment.indexOf('=');
+        if (separatorIndex <= 0) {
+            continue;
+        }
+        const key = segment.slice(0, separatorIndex).trim();
+        const value = segment.slice(separatorIndex + 1).trim();
+        if (key) {
+            fields[key] = value;
+        }
+    }
+    return fields;
+}
+
+function buildHistoricalReimbursedOrder({ proposalHash, explanation, policy }) {
+    const fields = parseReimbursementExplanationFields(explanation);
+    if (!fields) {
+        return null;
+    }
+
+    try {
+        const signer = normalizeAddress(fields.signer);
+        const reservedCreditWei = normalizePositiveBigInt(
+            fields.reservedCreditWei ?? fields.reimbursementAmountWei,
+            'historical reserved credit'
+        );
+        const tokenAmount = fields.amount
+            ? normalizePositiveBigInt(fields.amount, 'historical token amount').toString()
+            : '1';
+
+        if (fields.token && !isAddressEqual(fields.token, policy.erc1155Token)) {
+            return null;
+        }
+        if (fields.tokenId && String(fields.tokenId).trim() !== String(policy.erc1155TokenId).trim()) {
+            return null;
+        }
+
+        let recipient = null;
+        if (typeof fields.recipient === 'string' && fields.recipient.trim() && fields.recipient !== 'unknown') {
+            recipient = normalizeAddress(fields.recipient);
+        }
+
+        const orderId =
+            typeof fields.order === 'string' && fields.order.trim()
+                ? fields.order.trim()
+                : `historical:${proposalHash}`;
+        const requestId =
+            typeof fields.requestId === 'string' &&
+            fields.requestId.trim() &&
+            fields.requestId.trim() !== 'n/a'
+                ? fields.requestId.trim()
+                : null;
+        const nowMs = Date.now();
+
+        return {
+            orderId,
+            requestId,
+            signer,
+            recipient,
+            tokenAmount,
+            reimbursementAmountWei: reservedCreditWei.toString(),
+            reservedCreditAmountWei: reservedCreditWei.toString(),
+            reimbursementProposalHash: proposalHash,
+            reimbursementExplanation: explanation.trim(),
+            sourceKind: 'historical_reimbursement',
+            createdAtMs: nowMs,
+            creditReservedAtMs: nowMs,
+            directFillConfirmed: true,
+            reimbursedAtMs: nowMs,
+            lastUpdatedAtMs: nowMs,
+            sequence: allocateSequence(),
+        };
+    } catch (error) {
+        return null;
+    }
+}
+
+async function backfillHistoricalReimbursements({
+    publicClient,
+    ogModule,
+    commitmentSafe,
+    fromBlock,
+    latestBlock,
+    policy,
+}) {
+    if (typeof ogModule !== 'string' || !ogModule.trim()) {
+        return false;
+    }
+
+    const [proposalLogs, executedLogs] = await Promise.all([
+        getLogsChunked({
+            publicClient,
+            address: ogModule,
+            event: transactionsProposedEvent,
+            fromBlock,
+            toBlock: latestBlock,
+            chunkSize: policy.logChunkSize,
+        }),
+        getLogsChunked({
+            publicClient,
+            address: ogModule,
+            event: proposalExecutedEvent,
+            fromBlock,
+            toBlock: latestBlock,
+            chunkSize: policy.logChunkSize,
+        }),
+    ]);
+
+    const executedProposalHashes = new Set(
+        executedLogs.map((log) => normalizeHashOrNull(log?.args?.proposalHash)).filter(Boolean)
+    );
+    if (executedProposalHashes.size === 0) {
+        return false;
+    }
+
+    let rebuiltCount = 0;
+    let changed = false;
+    for (const log of proposalLogs) {
+        const proposalHash = normalizeHashOrNull(log?.args?.proposalHash);
+        if (!proposalHash || !executedProposalHashes.has(proposalHash)) {
+            continue;
+        }
+        if (log?.args?.proposer && !isAddressEqual(log.args.proposer, policy.authorizedAgent)) {
+            continue;
+        }
+
+        const explanation = decodeProposalExplanationText(log?.args?.explanation);
+        const historicalOrder = buildHistoricalReimbursedOrder({
+            proposalHash,
+            explanation,
+            policy,
+        });
+        if (!historicalOrder || swapState.orders[historicalOrder.orderId]) {
+            continue;
+        }
+
+        swapState.orders[historicalOrder.orderId] = historicalOrder;
+        rebuiltCount += 1;
+        changed = true;
+    }
+
+    if (rebuiltCount > 0) {
+        console.log(
+            `[agent] Rebuilt ${rebuiltCount} historical reimbursed credit records for ${commitmentSafe}.`
+        );
+    }
+    return changed;
+}
+
 async function maybeBackfillDeposits({
     publicClient,
     commitmentSafe,
@@ -628,6 +805,16 @@ async function maybeBackfillDeposits({
         swapState.deposits[deposit.depositKey] = deposit;
         changed = true;
     }
+
+    const rebuiltHistoricalReimbursements = await backfillHistoricalReimbursements({
+        publicClient,
+        ogModule: config?.ogModule,
+        commitmentSafe,
+        fromBlock,
+        latestBlock,
+        policy,
+    });
+    changed = rebuiltHistoricalReimbursements || changed;
 
     swapState.backfilledDepositsThroughBlock = latestBlock.toString();
     markSwapStateDirty();
@@ -951,6 +1138,17 @@ function getPendingDirectFillReservedTokenAmount() {
     return total;
 }
 
+function getPendingSafeReimbursementReservedWei() {
+    let total = 0n;
+    for (const order of getOpenOrders()) {
+        if (!order?.directFillTxHash) {
+            continue;
+        }
+        total += BigInt(order.reimbursementAmountWei ?? 0);
+    }
+    return total;
+}
+
 function getReimbursementCandidateOrders() {
     return getOpenOrders().filter(
         (order) =>
@@ -1041,20 +1239,36 @@ async function getDeterministicToolCalls({
     });
     await maybePersistSwapState();
 
-    const agentTokenBalance = await publicClient.readContract({
-        address: policy.erc1155Token,
-        abi: erc1155Abi,
-        functionName: 'balanceOf',
-        args: [normalizedAgentAddress, BigInt(policy.erc1155TokenId)],
-    });
+    const [agentTokenBalance, safePaymentBalance] = await Promise.all([
+        publicClient.readContract({
+            address: policy.erc1155Token,
+            abi: erc1155Abi,
+            functionName: 'balanceOf',
+            args: [normalizedAgentAddress, BigInt(policy.erc1155TokenId)],
+        }),
+        publicClient.readContract({
+            address: policy.paymentToken,
+            abi: erc20Abi,
+            functionName: 'balanceOf',
+            args: [normalizedSafeAddress],
+        }),
+    ]);
     let availableAgentTokenBalance =
         BigInt(agentTokenBalance) - getPendingDirectFillReservedTokenAmount();
     if (availableAgentTokenBalance < 0n) {
         availableAgentTokenBalance = 0n;
     }
+    let availableSafePaymentBalance =
+        BigInt(safePaymentBalance) - getPendingSafeReimbursementReservedWei();
+    if (availableSafePaymentBalance < 0n) {
+        availableSafePaymentBalance = 0n;
+    }
 
     for (const order of getInventoryCandidateOrders()) {
         if (availableAgentTokenBalance < BigInt(order.tokenAmount)) {
+            continue;
+        }
+        if (availableSafePaymentBalance < BigInt(order.reimbursementAmountWei)) {
             continue;
         }
 
@@ -1068,13 +1282,6 @@ async function getDeterministicToolCalls({
     if (onchainPendingProposal) {
         return [];
     }
-
-    const safePaymentBalance = await publicClient.readContract({
-        address: policy.paymentToken,
-        abi: erc20Abi,
-        functionName: 'balanceOf',
-        args: [normalizedSafeAddress],
-    });
 
     for (const order of getReimbursementCandidateOrders()) {
         if (BigInt(safePaymentBalance) < BigInt(order.reimbursementAmountWei)) {

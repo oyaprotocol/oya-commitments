@@ -20,6 +20,7 @@ const SIGNER = '0x5555555555555555555555555555555555555555';
 const OTHER_SIGNER = '0x6666666666666666666666666666666666666666';
 const USDC = '0x7777777777777777777777777777777777777777';
 const ERC1155 = '0x8888888888888888888888888888888888888888';
+const OG_MODULE = '0x9999999999999999999999999999999999999998';
 const ERC1155_TOKEN_ID = '42';
 const DIRECT_FILL_TX_HASH = `0x${'a'.repeat(64)}`;
 const PROPOSAL_TX_HASH = `0x${'b'.repeat(64)}`;
@@ -34,6 +35,7 @@ function buildConfig(overrides = {}) {
     const { agentConfig: agentConfigOverrides = {}, ...topLevelOverrides } = overrides;
     return {
         commitmentSafe: SAFE,
+        ogModule: OG_MODULE,
         watchAssets: [USDC],
         watchErc1155Assets: [
             {
@@ -126,6 +128,65 @@ function buildErc20TransferLog({
     };
 }
 
+function buildHistoricalReimbursementExplanation({
+    orderId,
+    requestId,
+    signer = SIGNER,
+    token = ERC1155,
+    tokenId = ERC1155_TOKEN_ID,
+    amount = '1',
+    reservedCreditWei = '1000000',
+    recipient = RECIPIENT,
+    directFillTx = DIRECT_FILL_TX_HASH,
+} = {}) {
+    return [
+        'erc1155-swap-fast-withdraw reimbursement',
+        `order=${orderId}`,
+        `requestId=${requestId}`,
+        `signer=${signer}`,
+        `token=${token}`,
+        `tokenId=${tokenId}`,
+        `amount=${amount}`,
+        `reservedCreditWei=${reservedCreditWei}`,
+        `recipient=${recipient}`,
+        `directFillTx=${directFillTx}`,
+    ].join(' | ');
+}
+
+function buildTransactionsProposedLog({
+    proposalHash,
+    explanation,
+    proposer = AGENT,
+    blockNumber,
+    transactionHash = `0x${'2'.repeat(64)}`,
+    logIndex = 0,
+}) {
+    return {
+        args: {
+            proposalHash,
+            proposer,
+            explanation,
+        },
+        blockNumber,
+        transactionHash,
+        logIndex,
+    };
+}
+
+function buildProposalExecutedLog({
+    proposalHash,
+    blockNumber,
+    transactionHash = `0x${'3'.repeat(64)}`,
+    logIndex = 0,
+}) {
+    return {
+        args: { proposalHash },
+        blockNumber,
+        transactionHash,
+        logIndex,
+    };
+}
+
 function buildPublicClient({
     chainId = SEPOLIA_CHAIN_ID,
     commitmentSafe = SAFE,
@@ -137,6 +198,8 @@ function buildPublicClient({
     receiptErrorsByHash = null,
     safeDeploymentBlock = 0n,
     erc20TransferLogs = [],
+    ogProposalLogs = [],
+    ogExecutedLogs = [],
 } = {}) {
     return {
         async getChainId() {
@@ -152,20 +215,38 @@ function buildPublicClient({
             }
             return BigInt(blockNumber) >= BigInt(safeDeploymentBlock) ? '0x1234' : '0x';
         },
-        async getLogs({ address, args, fromBlock, toBlock }) {
+        async getLogs({ address, event, args, fromBlock, toBlock }) {
             const normalizedAddress = String(address).toLowerCase();
-            if (normalizedAddress !== USDC.toLowerCase()) {
-                return [];
+            const inRange = (log) => {
+                const logBlockNumber = BigInt(log.blockNumber ?? 0n);
+                return logBlockNumber >= BigInt(fromBlock) && logBlockNumber <= BigInt(toBlock);
+            };
+
+            if (normalizedAddress === USDC.toLowerCase()) {
+                return erc20TransferLogs.filter((log) => {
+                    const matchesRecipient =
+                        !args?.to ||
+                        String(log.args?.to ?? '').toLowerCase() === String(args.to).toLowerCase();
+                    return inRange(log) && matchesRecipient;
+                });
             }
 
-            return erc20TransferLogs.filter((log) => {
-                const logBlockNumber = BigInt(log.blockNumber ?? 0n);
-                const matchesRange = logBlockNumber >= BigInt(fromBlock) && logBlockNumber <= BigInt(toBlock);
-                const matchesRecipient =
-                    !args?.to ||
-                    String(log.args?.to ?? '').toLowerCase() === String(args.to).toLowerCase();
-                return matchesRange && matchesRecipient;
-            });
+            if (normalizedAddress === OG_MODULE.toLowerCase()) {
+                const eventName =
+                    typeof event?.name === 'string'
+                        ? event.name
+                        : typeof event?.item?.name === 'string'
+                            ? event.item.name
+                            : null;
+                if (eventName === 'TransactionsProposed') {
+                    return ogProposalLogs.filter(inRange);
+                }
+                if (eventName === 'ProposalExecuted') {
+                    return ogExecutedLogs.filter(inRange);
+                }
+            }
+
+            return [];
         },
         async readContract({ address, functionName, args }) {
             const normalizedAddress = String(address).toLowerCase();
@@ -332,6 +413,77 @@ async function testStartupBackfillsDepositorCreditFromHistory() {
     });
 }
 
+async function testStartupBackfillReconstructsHistoricalSpentCredit() {
+    await withTempStatePath(async () => {
+        const config = buildConfig();
+        const historicalOrderId = buildRequestOrderId(SIGNER, 'req-historical-spent');
+        const toolCalls = await getDeterministicToolCalls({
+            signals: [
+                buildSignedRequestSignal({
+                    requestId: 'req-overdraw-after-backfill',
+                    signer: SIGNER,
+                    recipient: RECIPIENT,
+                    amount: '2',
+                }),
+            ],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                latestBlock: 160n,
+                safeDeploymentBlock: 90n,
+                safeUsdcBalance: 5_000_000n,
+                agentErc1155Balance: 5n,
+                erc20TransferLogs: [
+                    buildErc20TransferLog({
+                        from: SIGNER,
+                        value: 2_000_000n,
+                        blockNumber: 120n,
+                        transactionHash: `0x${'4'.repeat(64)}`,
+                        logIndex: 0,
+                    }),
+                ],
+                ogProposalLogs: [
+                    buildTransactionsProposedLog({
+                        proposalHash: OG_PROPOSAL_HASH,
+                        explanation: buildHistoricalReimbursementExplanation({
+                            orderId: historicalOrderId,
+                            requestId: 'req-historical-spent',
+                            signer: SIGNER,
+                            amount: '1',
+                            reservedCreditWei: '1000000',
+                            recipient: BUYER,
+                        }),
+                        blockNumber: 130n,
+                    }),
+                ],
+                ogExecutedLogs: [
+                    buildProposalExecutedLog({
+                        proposalHash: OG_PROPOSAL_HASH,
+                        blockNumber: 140n,
+                    }),
+                ],
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+
+        assert.equal(toolCalls.length, 0);
+
+        const state = await getSwapState();
+        assert.deepEqual(getCreditFor(state, SIGNER), {
+            depositedWei: '2000000',
+            reservedWei: '1000000',
+            availableWei: '1000000',
+        });
+        assert.ok(state.orders[historicalOrderId]);
+        assert.equal(
+            state.orders[buildRequestOrderId(SIGNER, 'req-overdraw-after-backfill')],
+            undefined
+        );
+    });
+}
+
 async function testSignedFastWithdrawLifecycleUsesDepositorCredit() {
     await withTempStatePath(async () => {
         const config = buildConfig();
@@ -435,6 +587,45 @@ async function testSignedFastWithdrawLifecycleUsesDepositorCredit() {
             reservedWei: '3000000',
             availableWei: '0',
         });
+    });
+}
+
+async function testDirectFillWaitsForSafeReimbursementLiquidity() {
+    await withTempStatePath(async () => {
+        const config = buildConfig();
+        const toolCalls = await getDeterministicToolCalls({
+            signals: [
+                buildDepositSignal({
+                    id: 'deposit-insufficient-safe-liquidity',
+                    from: SIGNER,
+                    amountWei: 1_000_000n,
+                }),
+                buildSignedRequestSignal({
+                    requestId: 'req-insufficient-safe-liquidity',
+                    signer: SIGNER,
+                    recipient: RECIPIENT,
+                    amount: '1',
+                }),
+            ],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                safeUsdcBalance: 0n,
+                agentErc1155Balance: 5n,
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+
+        assert.equal(toolCalls.length, 0);
+
+        const state = await getSwapState();
+        assert.ok(state.orders[buildRequestOrderId(SIGNER, 'req-insufficient-safe-liquidity')]);
+        assert.equal(
+            state.orders[buildRequestOrderId(SIGNER, 'req-insufficient-safe-liquidity')].directFillTxHash,
+            undefined
+        );
     });
 }
 
@@ -1281,7 +1472,9 @@ async function testStaleProposalSubmissionRetries() {
 async function run() {
     await testDepositCreatesCreditOnly();
     await testStartupBackfillsDepositorCreditFromHistory();
+    await testStartupBackfillReconstructsHistoricalSpentCredit();
     await testSignedFastWithdrawLifecycleUsesDepositorCredit();
+    await testDirectFillWaitsForSafeReimbursementLiquidity();
     await testStatePersistsSeparatelyPerCommitment();
     await testSignedRequestWithoutDepositorCreditDoesNothing();
     await testSignerMustMatchDepositor();
