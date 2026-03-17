@@ -52,6 +52,7 @@ function buildConfig(overrides = {}) {
             signedCommands: ['fast_withdraw', 'fast_withdraw_erc1155'],
             ...agentConfigOverrides,
         },
+        ipfsEnabled: true,
         ...topLevelOverrides,
     };
 }
@@ -136,6 +137,7 @@ function buildHistoricalReimbursementExplanation({
     orderId,
     requestId,
     signer = SIGNER,
+    signedRequestCid = null,
     token = ERC1155,
     tokenId = ERC1155_TOKEN_ID,
     amount = '1',
@@ -148,6 +150,7 @@ function buildHistoricalReimbursementExplanation({
         `order=${orderId}`,
         `requestId=${requestId}`,
         `signer=${signer}`,
+        `signedRequestCid=${signedRequestCid ?? 'missing'}`,
         `token=${token}`,
         `tokenId=${tokenId}`,
         `amount=${amount}`,
@@ -292,6 +295,15 @@ function buildRequestOrderId(signer, requestId) {
     return `request:${getAddress(signer)}:${String(requestId).trim()}`;
 }
 
+function buildPublishedIpfsOutput(requestId = 'default') {
+    const cid = `bafy${String(requestId).replace(/[^a-z0-9]/gi, '').toLowerCase() || 'artifact'}`;
+    return {
+        status: 'published',
+        cid,
+        uri: `ipfs://${cid}`,
+    };
+}
+
 function getCreditFor(state, address) {
     const key = Object.keys(state.credits ?? {}).find(
         (candidate) => candidate.toLowerCase() === address.toLowerCase()
@@ -414,7 +426,7 @@ async function testStartupBackfillsDepositorCreditFromHistory() {
         });
 
         assert.equal(toolCalls.length, 1);
-        assert.equal(toolCalls[0].name, 'make_erc1155_transfer');
+        assert.equal(toolCalls[0].name, 'ipfs_publish');
 
         const state = await getSwapState();
         assert.equal(Object.keys(state.deposits).length, 1);
@@ -527,8 +539,40 @@ async function testSignedFastWithdrawLifecycleUsesDepositorCredit() {
         });
 
         assert.equal(directFillCalls.length, 1);
-        assert.equal(directFillCalls[0].name, 'make_erc1155_transfer');
-        assert.deepEqual(parseToolArgs(directFillCalls[0]), {
+        assert.equal(directFillCalls[0].name, 'ipfs_publish');
+        const archiveArgs = parseToolArgs(directFillCalls[0]);
+        assert.equal(archiveArgs.filename, 'signed-request-7265712d31.json');
+        assert.equal(archiveArgs.pin, true);
+        assert.equal(archiveArgs.json.signedRequest.signer, SIGNER);
+        assert.equal(archiveArgs.json.agentContext.commitmentSafe, SAFE);
+
+        await onToolOutput({
+            name: 'ipfs_publish',
+            parsedOutput: buildPublishedIpfsOutput('req-1'),
+        });
+
+        const archivedState = await getSwapState();
+        assert.equal(
+            archivedState.orders[buildRequestOrderId(SIGNER, 'req-1')].artifactUri,
+            'ipfs://bafyreq1'
+        );
+
+        const fillCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                safeUsdcBalance: 3_000_000n,
+                agentErc1155Balance: 5n,
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+
+        assert.equal(fillCalls.length, 1);
+        assert.equal(fillCalls[0].name, 'make_erc1155_transfer');
+        assert.deepEqual(parseToolArgs(fillCalls[0]), {
             token: ERC1155,
             recipient: RECIPIENT,
             tokenId: ERC1155_TOKEN_ID,
@@ -578,6 +622,7 @@ async function testSignedFastWithdrawLifecycleUsesDepositorCredit() {
             new RegExp(`order=${buildRequestOrderId(SIGNER, 'req-1')}`)
         );
         assert.match(reimbursementArgs.explanation, new RegExp(`signer=${SIGNER}`, 'i'));
+        assert.match(reimbursementArgs.explanation, /signedRequestCid=ipfs:\/\/bafyreq1/);
 
         await onToolOutput({
             name: 'post_bond_and_propose',
@@ -632,7 +677,28 @@ async function testDirectFillWaitsForSafeReimbursementLiquidity() {
             onchainPendingProposal: false,
         });
 
-        assert.equal(toolCalls.length, 0);
+        assert.equal(toolCalls.length, 1);
+        assert.equal(toolCalls[0].name, 'ipfs_publish');
+
+        await onToolOutput({
+            name: 'ipfs_publish',
+            parsedOutput: buildPublishedIpfsOutput('req-insufficient-safe-liquidity'),
+        });
+
+        const fillCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                safeUsdcBalance: 0n,
+                agentErc1155Balance: 5n,
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+
+        assert.equal(fillCalls.length, 0);
 
         const state = await getSwapState();
         assert.ok(state.orders[buildRequestOrderId(SIGNER, 'req-insufficient-safe-liquidity')]);
@@ -700,8 +766,29 @@ async function testFreeTextSignedRequestUsesLlmInterpretation() {
                 });
 
                 assert.equal(toolCalls.length, 1);
-                assert.equal(toolCalls[0].name, 'make_erc1155_transfer');
-                assert.deepEqual(parseToolArgs(toolCalls[0]), {
+                assert.equal(toolCalls[0].name, 'ipfs_publish');
+
+                await onToolOutput({
+                    name: 'ipfs_publish',
+                    parsedOutput: buildPublishedIpfsOutput('req-free-text-llm'),
+                });
+
+                const fillCalls = await getDeterministicToolCalls({
+                    signals: [],
+                    commitmentText: 'The signer may ask the agent in plain English to send the test ERC1155.',
+                    commitmentSafe: SAFE,
+                    agentAddress: AGENT,
+                    publicClient: buildPublicClient({
+                        safeUsdcBalance: 2_000_000n,
+                        agentErc1155Balance: 5n,
+                    }),
+                    config,
+                    onchainPendingProposal: false,
+                });
+
+                assert.equal(fillCalls.length, 1);
+                assert.equal(fillCalls[0].name, 'make_erc1155_transfer');
+                assert.deepEqual(parseToolArgs(fillCalls[0]), {
                     token: ERC1155,
                     recipient: RECIPIENT,
                     tokenId: ERC1155_TOKEN_ID,
@@ -921,12 +1008,11 @@ async function testReservedCreditPreventsOvercommitment() {
         });
 
         assert.equal(firstOrderCalls.length, 1);
+        assert.equal(firstOrderCalls[0].name, 'ipfs_publish');
+
         await onToolOutput({
-            name: 'make_erc1155_transfer',
-            parsedOutput: {
-                status: 'submitted',
-                transactionHash: DIRECT_FILL_TX_HASH,
-            },
+            name: 'ipfs_publish',
+            parsedOutput: buildPublishedIpfsOutput('req-credit-1'),
         });
 
         const secondOrderCalls = await getDeterministicToolCalls({
@@ -948,7 +1034,15 @@ async function testReservedCreditPreventsOvercommitment() {
             onchainPendingProposal: false,
         });
 
-        assert.equal(secondOrderCalls.length, 0);
+        assert.equal(secondOrderCalls.length, 1);
+        assert.equal(secondOrderCalls[0].name, 'make_erc1155_transfer');
+        assert.deepEqual(parseToolArgs(secondOrderCalls[0]), {
+            token: ERC1155,
+            recipient: RECIPIENT,
+            tokenId: ERC1155_TOKEN_ID,
+            amount: '2',
+            data: '0x',
+        });
 
         const state = await getSwapState();
         assert.ok(state.orders[buildRequestOrderId(SIGNER, 'req-credit-1')]);
@@ -1002,7 +1096,7 @@ async function testSameRequestIdAllowedForDifferentSigners() {
         });
 
         assert.equal(toolCalls.length, 1);
-        assert.equal(toolCalls[0].name, 'make_erc1155_transfer');
+        assert.equal(toolCalls[0].name, 'ipfs_publish');
 
         const state = await getSwapState();
         const firstOrderId = buildRequestOrderId(SIGNER, 'shared-request-id');
@@ -1042,7 +1136,27 @@ async function testPendingDirectFillReservesInventory() {
         });
 
         assert.equal(firstFillCalls.length, 1);
-        assert.equal(firstFillCalls[0].name, 'make_erc1155_transfer');
+        assert.equal(firstFillCalls[0].name, 'ipfs_publish');
+        await onToolOutput({
+            name: 'ipfs_publish',
+            parsedOutput: buildPublishedIpfsOutput('req-pending-inventory-a'),
+        });
+
+        const confirmedArchiveFillCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                safeUsdcBalance: 5_000_000n,
+                agentErc1155Balance: 4n,
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+
+        assert.equal(confirmedArchiveFillCalls.length, 1);
+        assert.equal(confirmedArchiveFillCalls[0].name, 'make_erc1155_transfer');
         await onToolOutput({
             name: 'make_erc1155_transfer',
             parsedOutput: {
@@ -1077,7 +1191,28 @@ async function testPendingDirectFillReservesInventory() {
             onchainPendingProposal: false,
         });
 
-        assert.equal(secondFillCalls.length, 0);
+        assert.equal(secondFillCalls.length, 1);
+        assert.equal(secondFillCalls[0].name, 'ipfs_publish');
+
+        await onToolOutput({
+            name: 'ipfs_publish',
+            parsedOutput: buildPublishedIpfsOutput('req-pending-inventory-b'),
+        });
+
+        const blockedFillCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                safeUsdcBalance: 5_000_000n,
+                agentErc1155Balance: 4n,
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+
+        assert.equal(blockedFillCalls.length, 0);
 
         const state = await getSwapState();
         assert.equal(
@@ -1121,7 +1256,7 @@ async function createSubmittedSignedRequestReimbursementOrder({
     proposalSubmissionTxHash,
     ogProposalHash = null,
 }) {
-    const directFillCalls = await getDeterministicToolCalls({
+    const archiveCalls = await getDeterministicToolCalls({
         signals: [
             buildDepositSignal({
                 id: depositId,
@@ -1136,6 +1271,26 @@ async function createSubmittedSignedRequestReimbursementOrder({
                 amount: '1',
             }),
         ],
+        commitmentText: '',
+        commitmentSafe: SAFE,
+        agentAddress: AGENT,
+        publicClient: buildPublicClient({
+            safeUsdcBalance: 2_000_000n,
+            agentErc1155Balance: 5n,
+        }),
+        config,
+        onchainPendingProposal: false,
+    });
+    assert.equal(archiveCalls.length, 1);
+    assert.equal(archiveCalls[0].name, 'ipfs_publish');
+
+    await onToolOutput({
+        name: 'ipfs_publish',
+        parsedOutput: buildPublishedIpfsOutput(requestId),
+    });
+
+    const directFillCalls = await getDeterministicToolCalls({
+        signals: [],
         commitmentText: '',
         commitmentSafe: SAFE,
         agentAddress: AGENT,
@@ -1443,7 +1598,7 @@ async function testStaleDirectFillSubmissionRetries() {
         });
 
         await withMockedNow(1_000, async () => {
-            const directFillCalls = await getDeterministicToolCalls({
+            const archiveCalls = await getDeterministicToolCalls({
                 signals: [
                     buildDepositSignal({
                         id: 'deposit-stale-fill',
@@ -1468,7 +1623,27 @@ async function testStaleDirectFillSubmissionRetries() {
                 config,
                 onchainPendingProposal: false,
             });
+            assert.equal(archiveCalls.length, 1);
+            assert.equal(archiveCalls[0].name, 'ipfs_publish');
+            await onToolOutput({
+                name: 'ipfs_publish',
+                parsedOutput: buildPublishedIpfsOutput('req-stale-fill'),
+            });
+
+            const directFillCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentText: '',
+                commitmentSafe: SAFE,
+                agentAddress: AGENT,
+                publicClient: buildPublicClient({
+                    safeUsdcBalance: 1_000_000n,
+                    agentErc1155Balance: 5n,
+                }),
+                config,
+                onchainPendingProposal: false,
+            });
             assert.equal(directFillCalls.length, 1);
+            assert.equal(directFillCalls[0].name, 'make_erc1155_transfer');
             await onToolOutput({
                 name: 'make_erc1155_transfer',
                 parsedOutput: {
