@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { decodeFunctionData, erc20Abi, erc1155Abi, getAddress, hexToString, isAddressEqual } from 'viem';
 import { findContractDeploymentBlock, getLogsChunked } from '../../../agent/src/lib/chain-history.js';
+import { extractFirstText } from '../../../agent/src/lib/llm.js';
 import { proposalExecutedEvent, transactionsProposedEvent, transferEvent } from '../../../agent/src/lib/og.js';
 import { getAlwaysEmitBalanceSnapshotPollingOptions } from '../../../agent/src/lib/polling.js';
 import { buildOgTransactions } from '../../../agent/src/lib/tx.js';
@@ -10,7 +11,7 @@ import { buildOgTransactions } from '../../../agent/src/lib/tx.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const STATE_VERSION = 3;
+const STATE_VERSION = 4;
 const DEFAULT_USDC_UNIT_AMOUNT_WEI = 1_000_000n;
 const DEFAULT_FILL_CONFIRMATION_THRESHOLD = 1n;
 const DEFAULT_SIGNED_COMMANDS = ['fast_withdraw', 'fast_withdraw_erc1155'];
@@ -22,6 +23,7 @@ const swapState = {
     orders: {},
     deposits: {},
     backfilledDepositsThroughBlock: null,
+    interpretedRequests: {},
 };
 
 let swapStateHydrated = false;
@@ -46,6 +48,7 @@ function resetInMemoryState({ hydrated = false, preserveQueuedProposalEventUpdat
     swapState.orders = {};
     swapState.deposits = {};
     swapState.backfilledDepositsThroughBlock = null;
+    swapState.interpretedRequests = {};
     swapStateHydrated = hydrated;
     swapStateDirty = false;
     swapStateRevision = 0;
@@ -337,6 +340,12 @@ async function hydrateSwapState() {
                 parsed.backfilledDepositsThroughBlock.trim()
                     ? parsed.backfilledDepositsThroughBlock.trim()
                     : null;
+            swapState.interpretedRequests =
+                parsed.interpretedRequests &&
+                typeof parsed.interpretedRequests === 'object' &&
+                !Array.isArray(parsed.interpretedRequests)
+                    ? parsed.interpretedRequests
+                    : {};
         }
     } catch (error) {
         resetInMemoryState({ hydrated: true });
@@ -358,6 +367,7 @@ async function persistSwapState() {
             orders: swapState.orders,
             deposits: swapState.deposits,
             backfilledDepositsThroughBlock: swapState.backfilledDepositsThroughBlock,
+            interpretedRequests: swapState.interpretedRequests,
         },
         null,
         2
@@ -432,6 +442,228 @@ function buildSignedRequestOrderId(signer, requestId) {
     return `request:${normalizeAddress(signer)}:${String(requestId).trim()}`;
 }
 
+function getSignedRequestStateKey(signal) {
+    if (!isSignedUserMessage(signal)) {
+        return null;
+    }
+    return buildSignedRequestOrderId(signal.sender.address, signal.requestId);
+}
+
+function getStructuredArgs(signal) {
+    return signal?.args && typeof signal.args === 'object' && !Array.isArray(signal.args)
+        ? signal.args
+        : {};
+}
+
+function getResolvedSignedRequestArgs(signal) {
+    const structuredArgs = getStructuredArgs(signal);
+    if (structuredArgs.recipient !== undefined || structuredArgs.to !== undefined) {
+        return structuredArgs;
+    }
+
+    const requestKey = getSignedRequestStateKey(signal);
+    if (!requestKey) {
+        return structuredArgs;
+    }
+
+    const cachedArgs =
+        swapState.interpretedRequests?.[requestKey]?.args &&
+        typeof swapState.interpretedRequests[requestKey].args === 'object' &&
+        !Array.isArray(swapState.interpretedRequests[requestKey].args)
+            ? swapState.interpretedRequests[requestKey].args
+            : null;
+    return cachedArgs ?? structuredArgs;
+}
+
+function needsFreeTextInterpretation(signal, policy) {
+    if (!isSignedUserMessage(signal)) {
+        return false;
+    }
+
+    const command =
+        typeof signal.command === 'string' && signal.command.trim()
+            ? signal.command.trim().toLowerCase()
+            : '';
+    if (command && !policy.signedCommands.has(command)) {
+        return false;
+    }
+
+    const args = getStructuredArgs(signal);
+    if (args.recipient !== undefined || args.to !== undefined) {
+        return false;
+    }
+
+    if (typeof signal.text !== 'string' || !signal.text.trim()) {
+        return false;
+    }
+
+    return !swapState.interpretedRequests?.[getSignedRequestStateKey(signal)];
+}
+
+function createOpenAiHttpError(statusCode, responseText) {
+    const error = new Error(`OpenAI API error while interpreting free-text request: ${statusCode} ${responseText}`);
+    error.statusCode = statusCode;
+    error.responseBody = responseText;
+    if (statusCode === 429) {
+        error.name = 'RateLimitError';
+    } else if (statusCode >= 500) {
+        error.name = 'HttpRequestError';
+    }
+    return error;
+}
+
+function createRetryableInterpretationError(message) {
+    const error = new Error(message);
+    error.name = 'HttpRequestError';
+    return error;
+}
+
+async function interpretFreeTextRequestSignal({
+    signal,
+    commitmentText,
+    config,
+    policy,
+}) {
+    if (!config?.openAiApiKey) {
+        throw new Error(
+            'erc1155-swap-fast-withdraw requires OPENAI_API_KEY to interpret free-text signed requests.'
+        );
+    }
+
+    const payload = {
+        model: config.openAiModel,
+        input: [
+            {
+                role: 'system',
+                content: [
+                    'Interpret signed free-text user requests for the erc1155-swap-fast-withdraw commitment.',
+                    'The only executable action is a fast withdrawal of the configured ERC1155 asset using the signer’s deposited USDC credit.',
+                    `Configured ERC1155 token: ${policy.erc1155Token}.`,
+                    `Configured ERC1155 tokenId: ${policy.erc1155TokenId}.`,
+                    'Return strict JSON only.',
+                    'If the text clearly requests a withdrawal and includes a recipient address, return {"action":"fast_withdraw_erc1155","recipient":"0x...","amount":"<positive integer string>"}.',
+                    'If amount is omitted but the request is otherwise clear, default amount to "1".',
+                    'If the request is not clearly a withdrawal instruction, or recipient/amount cannot be inferred confidently, return {"action":"ignore","reason":"..."}.',
+                    'Never invent addresses. Never return anything except valid JSON.',
+                ].join(' '),
+            },
+            {
+                role: 'user',
+                content: JSON.stringify({
+                    commitment: commitmentText ?? '',
+                    message: {
+                        text: signal.text,
+                        command: signal.command ?? null,
+                        sender: signal.sender?.address ?? null,
+                        requestId: signal.requestId,
+                    },
+                }),
+            },
+        ],
+        text: { format: { type: 'json_object' } },
+    };
+
+    const response = await fetch(`${config.openAiBaseUrl}/responses`, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${config.openAiApiKey}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(
+            Number.isFinite(Number(config?.openAiRequestTimeoutMs)) && Number(config.openAiRequestTimeoutMs) > 0
+                ? Number(config.openAiRequestTimeoutMs)
+                : 60_000
+        ),
+    });
+
+    if (!response.ok) {
+        const text = await response.text();
+        throw createOpenAiHttpError(response.status, text);
+    }
+
+    const json = await response.json();
+    const raw = extractFirstText(json);
+    if (!raw) {
+        throw createRetryableInterpretationError(
+            'OpenAI returned an empty response while interpreting a free-text signed request.'
+        );
+    }
+
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    } catch (error) {
+        throw createRetryableInterpretationError(
+            `Failed to parse free-text interpretation JSON: ${raw}`
+        );
+    }
+
+    const action =
+        typeof parsed?.action === 'string' && parsed.action.trim()
+            ? parsed.action.trim().toLowerCase()
+            : '';
+    if (action === 'ignore' || !action) {
+        return null;
+    }
+    if (action !== 'fast_withdraw_erc1155') {
+        throw createRetryableInterpretationError(
+            `Unexpected free-text interpretation action: ${action}`
+        );
+    }
+
+    let recipient;
+    let amount;
+    try {
+        recipient = normalizeAddress(parsed.recipient);
+        amount = normalizePositiveBigInt(parsed.amount ?? '1', 'interpreted signed request amount');
+    } catch (error) {
+        throw createRetryableInterpretationError(
+            `Invalid free-text interpretation payload: ${error?.message ?? error}`
+        );
+    }
+
+    return {
+        action,
+        args: {
+            recipient,
+            amount: amount.toString(),
+            token: policy.erc1155Token,
+            tokenId: policy.erc1155TokenId,
+        },
+        interpretedAtMs: Date.now(),
+        text: signal.text,
+    };
+}
+
+async function maybeInterpretFreeTextSignals({ signals, commitmentText, config, policy }) {
+    let changed = false;
+    for (const signal of Array.isArray(signals) ? signals : []) {
+        if (!needsFreeTextInterpretation(signal, policy)) {
+            continue;
+        }
+
+        const requestKey = getSignedRequestStateKey(signal);
+        const interpreted = await interpretFreeTextRequestSignal({
+            signal,
+            commitmentText,
+            config,
+            policy,
+        });
+        if (!interpreted || !requestKey) {
+            continue;
+        }
+
+        swapState.interpretedRequests[requestKey] = interpreted;
+        changed = true;
+    }
+
+    if (changed) {
+        markSwapStateDirty();
+    }
+    return changed;
+}
+
 function createSignedRequestOrder(signal, policy) {
     if (!isSignedUserMessage(signal)) {
         return null;
@@ -445,9 +677,7 @@ function createSignedRequestOrder(signal, policy) {
         return null;
     }
 
-    const args = signal.args && typeof signal.args === 'object' && !Array.isArray(signal.args)
-        ? signal.args
-        : {};
+    const args = getResolvedSignedRequestArgs(signal);
     if (args.token !== undefined && !isAddressEqual(args.token, policy.erc1155Token)) {
         return null;
     }
@@ -1196,6 +1426,7 @@ function buildReimbursementToolCall(order, policy, agentAddress) {
 
 async function getDeterministicToolCalls({
     signals,
+    commitmentText,
     commitmentSafe,
     agentAddress,
     publicClient,
@@ -1224,6 +1455,12 @@ async function getDeterministicToolCalls({
         latestBlock,
         policy,
         config,
+    });
+    await maybeInterpretFreeTextSignals({
+        signals,
+        commitmentText,
+        config,
+        policy,
     });
     ingestSignals(signals, policy);
     await refreshDirectFillStatus({
@@ -1397,6 +1634,7 @@ async function getSwapState() {
         orders: swapState.orders,
         deposits: swapState.deposits,
         backfilledDepositsThroughBlock: swapState.backfilledDepositsThroughBlock,
+        interpretedRequests: swapState.interpretedRequests,
         credits: buildCreditSnapshot(),
     });
 }
