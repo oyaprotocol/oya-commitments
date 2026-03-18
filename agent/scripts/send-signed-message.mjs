@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { loadAgentConfigFile, resolveAgentRuntimeConfig } from '../src/lib/agent-config.js';
+import { loadAgentConfigStack, resolveAgentRuntimeConfig } from '../src/lib/agent-config.js';
 import { privateKeyToAccount } from 'viem/accounts';
 import { buildSignedMessagePayload } from '../src/lib/message-signing.js';
 
@@ -141,7 +141,7 @@ async function resolveMessageApiConfigForAgent({
 }) {
     const resolvedModulePath = resolveAgentModulePath(agentRef, repoRootPath);
     const agentConfigPath = path.join(path.dirname(resolvedModulePath), 'config.json');
-    const agentConfigFile = await loadAgentConfigFile(agentConfigPath);
+    const agentConfigFile = await loadAgentConfigStack(agentConfigPath, { env });
     const runtimeChainId = inferRuntimeChainId(agentConfigFile.raw, chainId);
 
     const runtimeConfig = resolveAgentRuntimeConfig({
