@@ -304,6 +304,15 @@ function buildPublishedIpfsOutput(requestId = 'default') {
     };
 }
 
+function buildFailedIpfsOutput(message = 'connect ECONNREFUSED 127.0.0.1:5001') {
+    return {
+        status: 'error',
+        message,
+        retryable: true,
+        sideEffectsLikelyCommitted: false,
+    };
+}
+
 function getCreditFor(state, address) {
     const key = Object.keys(state.credits ?? {}).find(
         (candidate) => candidate.toLowerCase() === address.toLowerCase()
@@ -333,8 +342,16 @@ async function withMockFetch(mockFetch, fn) {
 
 async function withCapturedConsoleLogs(fn) {
     const originalLog = console.log;
+    const originalWarn = console.warn;
+    const originalError = console.error;
     const lines = [];
     console.log = (...args) => {
+        lines.push(args.map((value) => String(value)).join(' '));
+    };
+    console.warn = (...args) => {
+        lines.push(args.map((value) => String(value)).join(' '));
+    };
+    console.error = (...args) => {
         lines.push(args.map((value) => String(value)).join(' '));
     };
     try {
@@ -342,6 +359,8 @@ async function withCapturedConsoleLogs(fn) {
         return { result, lines };
     } finally {
         console.log = originalLog;
+        console.warn = originalWarn;
+        console.error = originalError;
     }
 }
 
@@ -931,6 +950,117 @@ async function testFreeTextSignedRequestUsesLlmInterpretation() {
         );
 
         assert.equal(llmCalls, 1);
+    });
+}
+
+async function testArchiveFailureLogsAndBacksOffBeforeRetry() {
+    await withTempStatePath(async () => {
+        const config = buildConfig({
+            agentConfig: {
+                archiveRetryDelayMs: 30_000,
+            },
+        });
+
+        const initialArchiveCalls = await withMockedNow(1_000, async () =>
+            getDeterministicToolCalls({
+                signals: [
+                    buildDepositSignal({
+                        id: 'deposit-archive-failure',
+                        from: SIGNER,
+                        amountWei: 1_000_000n,
+                    }),
+                    buildSignedRequestSignal({
+                        requestId: 'req-archive-failure',
+                        signer: SIGNER,
+                        recipient: RECIPIENT,
+                        amount: '1',
+                    }),
+                ],
+                commitmentText: '',
+                commitmentSafe: SAFE,
+                agentAddress: AGENT,
+                publicClient: buildPublicClient({
+                    safeUsdcBalance: 1_000_000n,
+                    agentErc1155Balance: 5n,
+                }),
+                config,
+                onchainPendingProposal: false,
+            })
+        );
+        assert.equal(initialArchiveCalls.length, 1);
+        assert.equal(initialArchiveCalls[0].name, 'ipfs_publish');
+
+        const { lines: failureLines } = await withCapturedConsoleLogs(() =>
+            withMockedNow(1_500, async () =>
+                onToolOutput({
+                    name: 'ipfs_publish',
+                    parsedOutput: buildFailedIpfsOutput(),
+                })
+            )
+        );
+        assert.equal(
+            failureLines.some((line) =>
+                line.includes('Signed request archive failed for order') &&
+                line.includes(buildRequestOrderId(SIGNER, 'req-archive-failure'))
+            ),
+            true
+        );
+        assert.equal(
+            failureLines.some((line) =>
+                line.includes('Archive retry for') &&
+                line.includes(buildRequestOrderId(SIGNER, 'req-archive-failure'))
+            ),
+            true
+        );
+
+        const stateAfterFailure = await getSwapState();
+        const failedOrder = stateAfterFailure.orders[buildRequestOrderId(SIGNER, 'req-archive-failure')];
+        assert.equal(failedOrder.lastArchiveError, 'connect ECONNREFUSED 127.0.0.1:5001');
+        assert.equal(failedOrder.lastArchiveErrorStatus, 'error');
+        assert.equal(failedOrder.lastArchiveErrorRetryable, true);
+        assert.equal(failedOrder.nextArchiveAttemptAtMs, 31_000);
+
+        const backoffCalls = await withMockedNow(5_000, async () =>
+            getDeterministicToolCalls({
+                signals: [],
+                commitmentText: '',
+                commitmentSafe: SAFE,
+                agentAddress: AGENT,
+                publicClient: buildPublicClient({
+                    safeUsdcBalance: 1_000_000n,
+                    agentErc1155Balance: 5n,
+                }),
+                config,
+                onchainPendingProposal: false,
+            })
+        );
+        assert.equal(backoffCalls.length, 0);
+
+        const { result: retryCalls, lines: retryLines } = await withCapturedConsoleLogs(() =>
+            withMockedNow(31_500, async () =>
+                getDeterministicToolCalls({
+                    signals: [],
+                    commitmentText: '',
+                    commitmentSafe: SAFE,
+                    agentAddress: AGENT,
+                    publicClient: buildPublicClient({
+                        safeUsdcBalance: 1_000_000n,
+                        agentErc1155Balance: 5n,
+                    }),
+                    config,
+                    onchainPendingProposal: false,
+                })
+            )
+        );
+        assert.equal(retryCalls.length, 1);
+        assert.equal(retryCalls[0].name, 'ipfs_publish');
+        assert.equal(
+            retryLines.some((line) =>
+                line.includes('Preparing signed request archive for order') &&
+                line.includes('attempt=2')
+            ),
+            true
+        );
     });
 }
 
@@ -1870,6 +2000,7 @@ async function run() {
     await testSignedFastWithdrawLifecycleUsesDepositorCredit();
     await testDirectFillWaitsForSafeReimbursementLiquidity();
     await testFreeTextSignedRequestUsesLlmInterpretation();
+    await testArchiveFailureLogsAndBacksOffBeforeRetry();
     await testStatePersistsSeparatelyPerCommitment();
     await testSignedRequestWithoutDepositorCreditDoesNothing();
     await testSignerMustMatchDepositor();

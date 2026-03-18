@@ -328,6 +328,39 @@ async function processAgentToolCalls({
             : DECISION_STATUS.FAILED_NON_RETRYABLE;
     }
 
+    for (const output of toolOutputs) {
+        if (!output?.name || typeof output.output !== 'string') {
+            continue;
+        }
+        let payload = null;
+        try {
+            payload = JSON.parse(output.output);
+        } catch (error) {
+            continue;
+        }
+        const status =
+            typeof payload?.status === 'string' && payload.status.trim()
+                ? payload.status.trim().toLowerCase()
+                : '';
+        if (status === 'error') {
+            const message =
+                typeof payload?.message === 'string' && payload.message.trim()
+                    ? payload.message.trim()
+                    : 'unknown tool error';
+            console.warn(
+                `[agent] Tool output error: name=${output.name} callId=${output.callId ?? 'unknown'} retryable=${payload?.retryable === true} sideEffectsLikelyCommitted=${payload?.sideEffectsLikelyCommitted === true} message=${message}`
+            );
+        } else if (status === 'skipped') {
+            const reason =
+                typeof payload?.reason === 'string' && payload.reason.trim()
+                    ? payload.reason.trim()
+                    : 'no reason provided';
+            console.warn(
+                `[agent] Tool output skipped: name=${output.name} callId=${output.callId ?? 'unknown'} reason=${reason}`
+            );
+        }
+    }
+
     if (toolOutputs.length > 0 && agentModule?.onToolOutput) {
         for (const output of toolOutputs) {
             if (!output?.name || !output?.output) continue;
