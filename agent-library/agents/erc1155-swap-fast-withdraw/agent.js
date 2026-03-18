@@ -704,17 +704,34 @@ async function maybeInterpretFreeTextSignals({ signals, commitmentText, config, 
         }
 
         const requestKey = getSignedRequestStateKey(signal);
-        const interpreted = await interpretFreeTextRequestSignal({
-            signal,
-            commitmentText,
-            config,
-            policy,
-        });
+        console.log(
+            `[agent] Interpreting free-text signed request ${requestKey ?? signal.requestId ?? 'unknown'} via OpenAI.`
+        );
+        let interpreted;
+        try {
+            interpreted = await interpretFreeTextRequestSignal({
+                signal,
+                commitmentText,
+                config,
+                policy,
+            });
+        } catch (error) {
+            console.warn(
+                `[agent] Free-text interpretation failed for ${requestKey ?? signal.requestId ?? 'unknown'}: ${error?.message ?? error}`
+            );
+            throw error;
+        }
         if (!interpreted || !requestKey) {
+            console.warn(
+                `[agent] Free-text signed request ${requestKey ?? signal.requestId ?? 'unknown'} was not interpreted as an executable ERC1155 withdrawal.`
+            );
             continue;
         }
 
         swapState.interpretedRequests[requestKey] = interpreted;
+        console.log(
+            `[agent] Free-text signed request ${requestKey} interpreted: recipient=${interpreted.args.recipient} amount=${interpreted.args.amount}.`
+        );
         changed = true;
     }
 
@@ -1604,6 +1621,9 @@ async function getDeterministicToolCalls({
             continue;
         }
 
+        console.log(
+            `[agent] Preparing signed request archive for order ${order.orderId}.`
+        );
         pendingArtifactPublish = {
             orderId: order.orderId,
             filename: order.archiveFilename,
@@ -1644,6 +1664,9 @@ async function getDeterministicToolCalls({
             continue;
         }
 
+        console.log(
+            `[agent] Preparing direct ERC1155 fill for order ${order.orderId}.`
+        );
         pendingDirectFill = {
             orderId: order.orderId,
             fillConfirmationThreshold: policy.fillConfirmationThreshold,
@@ -1660,6 +1683,9 @@ async function getDeterministicToolCalls({
             continue;
         }
 
+        console.log(
+            `[agent] Preparing reimbursement proposal for order ${order.orderId}.`
+        );
         const reimbursementCall = buildReimbursementToolCall(
             order,
             policy,

@@ -830,34 +830,58 @@ async function testFreeTextSignedRequestUsesLlmInterpretation() {
                     openAiBaseUrl: 'https://api.openai.test/v1',
                     openAiModel: 'gpt-test',
                 });
-                const toolCalls = await getDeterministicToolCalls({
-                    signals: [
-                        buildDepositSignal({
-                            id: 'deposit-free-text-llm',
-                            from: SIGNER,
-                            amountWei: 2_000_000n,
+                const { result: toolCalls, lines } = await withCapturedConsoleLogs(() =>
+                    getDeterministicToolCalls({
+                        signals: [
+                            buildDepositSignal({
+                                id: 'deposit-free-text-llm',
+                                from: SIGNER,
+                                amountWei: 2_000_000n,
+                            }),
+                            buildSignedRequestSignal({
+                                requestId: 'req-free-text-llm',
+                                signer: SIGNER,
+                                command: undefined,
+                                text: `Please send 2 of token 1001 to ${RECIPIENT}.`,
+                                args: {},
+                            }),
+                        ],
+                        commitmentText: 'The signer may ask the agent in plain English to send the test ERC1155.',
+                        commitmentSafe: SAFE,
+                        agentAddress: AGENT,
+                        publicClient: buildPublicClient({
+                            safeUsdcBalance: 2_000_000n,
+                            agentErc1155Balance: 5n,
                         }),
-                        buildSignedRequestSignal({
-                            requestId: 'req-free-text-llm',
-                            signer: SIGNER,
-                            command: undefined,
-                            text: `Please send 2 of token 1001 to ${RECIPIENT}.`,
-                            args: {},
-                        }),
-                    ],
-                    commitmentText: 'The signer may ask the agent in plain English to send the test ERC1155.',
-                    commitmentSafe: SAFE,
-                    agentAddress: AGENT,
-                    publicClient: buildPublicClient({
-                        safeUsdcBalance: 2_000_000n,
-                        agentErc1155Balance: 5n,
-                    }),
-                    config,
-                    onchainPendingProposal: false,
-                });
+                        config,
+                        onchainPendingProposal: false,
+                    })
+                );
 
                 assert.equal(toolCalls.length, 1);
                 assert.equal(toolCalls[0].name, 'ipfs_publish');
+                assert.equal(
+                    lines.some((line) =>
+                        line.includes('Interpreting free-text signed request') &&
+                        line.includes(buildRequestOrderId(SIGNER, 'req-free-text-llm'))
+                    ),
+                    true
+                );
+                assert.equal(
+                    lines.some((line) =>
+                        line.includes('Free-text signed request') &&
+                        line.includes('interpreted: recipient=') &&
+                        line.includes(`amount=2`)
+                    ),
+                    true
+                );
+                assert.equal(
+                    lines.some((line) =>
+                        line.includes('Preparing signed request archive for order') &&
+                        line.includes(buildRequestOrderId(SIGNER, 'req-free-text-llm'))
+                    ),
+                    true
+                );
 
                 await onToolOutput({
                     name: 'ipfs_publish',

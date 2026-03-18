@@ -68,10 +68,19 @@ async function processQueuedUserMessages({
             pendingMessageIds.add(message.messageId);
         }
 
+        if (queuedMessages.length > 0) {
+            logger.log?.(
+                `[agent] Processing ${queuedMessages.length} queued user message(s) at block ${latestBlock?.toString?.() ?? latestBlock}.`
+            );
+        }
+
         for (const message of queuedMessages) {
             activeMessageId = message.messageId;
             activeMessageSettled = false;
             let messageDecisionStatus = DECISION_STATUS.NO_ACTION;
+            logger.log?.(
+                `[agent] Handling queued user message (${describeMessage(message)}).`
+            );
             try {
                 // Evaluate user messages with message-only signals so non-message events
                 // are not replayed once per message in the same poll loop.

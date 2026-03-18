@@ -51,8 +51,12 @@ async function run() {
         failOnAckMessageId: second.message.messageId,
     });
     const logger = {
+        logs: [],
         errors: [],
         warnings: [],
+        log(...args) {
+            this.logs.push(args);
+        },
         error(...args) {
             this.errors.push(args);
         },
@@ -77,6 +81,22 @@ async function run() {
 
     assert.deepEqual(retriedIds, [second.message.messageId, third.message.messageId]);
     assert.equal(retriedIds.includes(first.message.messageId), false);
+    assert.equal(
+        logger.logs.some(
+            (entry) =>
+                String(entry[0]).includes('Processing 3 queued user message(s)') &&
+                String(entry[0]).includes('block 1')
+        ),
+        true
+    );
+    assert.equal(
+        logger.logs.some(
+            (entry) =>
+                String(entry[0]).includes('Handling queued user message') &&
+                String(entry[0]).includes(`messageId=${first.message.messageId}`)
+        ),
+        true
+    );
     assert.equal(logger.errors.some((entry) => entry[0] === '[agent] loop error'), true);
 
     const noActionResult = baseInbox.submitMessage({
