@@ -100,16 +100,57 @@ contract HarnessMockSafeProxyFactory {
 }
 
 contract HarnessMockOptimisticGovernor {
+    struct EscalationManagerSettings {
+        bool arbitrateViaEscalationManager;
+        bool discardOracle;
+        bool validateDisputers;
+        address assertingCaller;
+        address escalationManager;
+    }
+
+    struct Assertion {
+        EscalationManagerSettings escalationManagerSettings;
+        address asserter;
+        uint64 assertionTime;
+        bool settled;
+        address currency;
+        uint64 expirationTime;
+        bool settlementResolution;
+        bytes32 domainId;
+        bytes32 identifier;
+        uint256 bond;
+        address callbackRecipient;
+        address disputer;
+    }
+
     address public owner;
     address public collateral;
     uint256 public bondAmount;
+    address public optimisticOracleV3;
     string public rules;
     bytes32 public identifier;
     uint64 public liveness;
+    mapping(bytes32 => bytes32) public assertionIds;
 
     function setUp(bytes memory data) external {
         (owner, collateral, bondAmount, rules, identifier, liveness) =
             abi.decode(data, (address, address, uint256, string, bytes32, uint64));
+        optimisticOracleV3 = address(this);
+    }
+
+    function getMinimumBond(address) external pure returns (uint256) {
+        return 0;
+    }
+
+    function disputeAssertion(bytes32, address) external {}
+
+    function getAssertion(bytes32) external view returns (Assertion memory assertion) {
+        assertion.asserter = owner;
+        assertion.currency = collateral;
+        assertion.identifier = identifier;
+        assertion.bond = bondAmount;
+        assertion.assertionTime = uint64(block.timestamp);
+        assertion.expirationTime = uint64(block.timestamp) + liveness;
     }
 }
 
