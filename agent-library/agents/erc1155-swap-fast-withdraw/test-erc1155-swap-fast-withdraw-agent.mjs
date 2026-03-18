@@ -331,6 +331,20 @@ async function withMockFetch(mockFetch, fn) {
     }
 }
 
+async function withCapturedConsoleLogs(fn) {
+    const originalLog = console.log;
+    const lines = [];
+    console.log = (...args) => {
+        lines.push(args.map((value) => String(value)).join(' '));
+    };
+    try {
+        const result = await fn();
+        return { result, lines };
+    } finally {
+        console.log = originalLog;
+    }
+}
+
 async function withTempStateDir(fn) {
     const dir = await mkdtemp(path.join(tmpdir(), 'erc1155-swap-fast-withdraw-dir-'));
     setSwapStatePathForTest(null);
@@ -394,39 +408,46 @@ async function testDepositCreatesCreditOnly() {
 async function testStartupBackfillsDepositorCreditFromHistory() {
     await withTempStatePath(async () => {
         const config = buildConfig();
-        const toolCalls = await getDeterministicToolCalls({
-            signals: [
-                buildSignedRequestSignal({
-                    requestId: 'req-backfill',
-                    signer: SIGNER,
-                    recipient: RECIPIENT,
-                    amount: '2',
-                }),
-            ],
-            commitmentText: '',
-            commitmentSafe: SAFE,
-            agentAddress: AGENT,
-            publicClient: buildPublicClient({
-                latestBlock: 150n,
-                safeDeploymentBlock: 90n,
-                safeUsdcBalance: 2_000_000n,
-                agentErc1155Balance: 5n,
-                erc20TransferLogs: [
-                    buildErc20TransferLog({
-                        from: SIGNER,
-                        value: 2_000_000n,
-                        blockNumber: 120n,
-                        transactionHash: `0x${'1'.repeat(64)}`,
-                        logIndex: 0,
+        const { result: toolCalls, lines } = await withCapturedConsoleLogs(() =>
+            getDeterministicToolCalls({
+                signals: [
+                    buildSignedRequestSignal({
+                        requestId: 'req-backfill',
+                        signer: SIGNER,
+                        recipient: RECIPIENT,
+                        amount: '2',
                     }),
                 ],
-            }),
-            config,
-            onchainPendingProposal: false,
-        });
+                commitmentText: '',
+                commitmentSafe: SAFE,
+                agentAddress: AGENT,
+                publicClient: buildPublicClient({
+                    latestBlock: 150n,
+                    safeDeploymentBlock: 90n,
+                    safeUsdcBalance: 2_000_000n,
+                    agentErc1155Balance: 5n,
+                    erc20TransferLogs: [
+                        buildErc20TransferLog({
+                            from: SIGNER,
+                            value: 2_000_000n,
+                            blockNumber: 120n,
+                            transactionHash: `0x${'1'.repeat(64)}`,
+                            logIndex: 0,
+                        }),
+                    ],
+                }),
+                config,
+                onchainPendingProposal: false,
+            })
+        );
 
         assert.equal(toolCalls.length, 1);
         assert.equal(toolCalls[0].name, 'ipfs_publish');
+        assert.ok(
+            lines.some((line) =>
+                line.includes('erc1155-swap-fast-withdraw credit backfill complete through block 150')
+            )
+        );
 
         const state = await getSwapState();
         assert.equal(Object.keys(state.deposits).length, 1);

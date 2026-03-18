@@ -607,6 +607,7 @@ async function pollProposalChanges({
     startBlock,
     logChunkSize,
 }) {
+    const isStartupBackfill = lastProposalCheckedBlock === undefined;
     const latestBlock = await publicClient.getBlockNumber();
     let fromBlock;
     if (lastProposalCheckedBlock === undefined) {
@@ -767,6 +768,12 @@ async function pollProposalChanges({
     }
 
     const newProposals = [...newProposalsByHash.values()];
+
+    if (isStartupBackfill) {
+        console.log(
+            `[agent] Proposal history backfill complete through block ${scanResult.scannedToBlock.toString()}.`
+        );
+    }
 
     return {
         newProposals,

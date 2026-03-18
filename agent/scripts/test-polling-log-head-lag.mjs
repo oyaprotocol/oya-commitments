@@ -12,6 +12,25 @@ function buildHeadLagError() {
     return error;
 }
 
+async function withCapturedConsoleLogs(fn) {
+    const originalLog = console.log;
+    const originalWarn = console.warn;
+    const lines = [];
+    console.log = (...args) => {
+        lines.push(args.map((value) => String(value)).join(' '));
+    };
+    console.warn = (...args) => {
+        lines.push(args.map((value) => String(value)).join(' '));
+    };
+    try {
+        const result = await fn();
+        return { result, lines };
+    } finally {
+        console.log = originalLog;
+        console.warn = originalWarn;
+    }
+}
+
 async function testCommitmentPollingFallsBackToQueryableLogHead() {
     let readContractBlockNumbers = [];
     const publicClient = {
@@ -77,9 +96,41 @@ async function testProposalPollingFallsBackToQueryableLogHead() {
     assert.equal(result.deletedProposals.length, 0);
 }
 
+async function testStartupProposalBackfillLogsCompletion() {
+    const proposalsByHash = new Map();
+    const publicClient = {
+        async getBlockNumber() {
+            return 105n;
+        },
+        async getCode({ blockNumber }) {
+            return BigInt(blockNumber) >= 100n ? '0x1234' : '0x';
+        },
+        async getLogs() {
+            return [];
+        },
+    };
+
+    const { result, lines } = await withCapturedConsoleLogs(() =>
+        pollProposalChanges({
+            publicClient,
+            ogModule: OG_MODULE,
+            lastProposalCheckedBlock: undefined,
+            proposalsByHash,
+            startBlock: undefined,
+            logChunkSize: 5_000n,
+        })
+    );
+
+    assert.equal(result.lastProposalCheckedBlock, 105n);
+    assert.ok(
+        lines.some((line) => line.includes('Proposal history backfill complete through block 105'))
+    );
+}
+
 async function run() {
     await testCommitmentPollingFallsBackToQueryableLogHead();
     await testProposalPollingFallsBackToQueryableLogHead();
+    await testStartupProposalBackfillLogsCompletion();
     console.log('[test] polling log head lag handling OK');
 }
 
