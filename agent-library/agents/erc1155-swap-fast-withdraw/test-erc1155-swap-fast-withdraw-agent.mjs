@@ -309,13 +309,27 @@ function buildPublishedIpfsOutput(requestId = 'default') {
     };
 }
 
-function buildFailedIpfsOutput(message = 'connect ECONNREFUSED 127.0.0.1:5001') {
+function buildFailedToolOutput({
+    message = 'tool failed',
+    retryable = true,
+    sideEffectsLikelyCommitted = false,
+    status = 'error',
+} = {}) {
     return {
-        status: 'error',
+        status,
+        message,
+        retryable,
+        sideEffectsLikelyCommitted,
+    };
+}
+
+function buildFailedIpfsOutput(message = 'connect ECONNREFUSED 127.0.0.1:5001', overrides = {}) {
+    return buildFailedToolOutput({
         message,
         retryable: true,
         sideEffectsLikelyCommitted: false,
-    };
+        ...overrides,
+    });
 }
 
 function getCreditFor(state, address) {
@@ -1350,6 +1364,275 @@ async function testArchiveFailureLogsAndBacksOffBeforeRetry() {
     });
 }
 
+async function testArchiveNonRetryableFailureClosesOrderAndReleasesCredit() {
+    await withTempStatePath(async () => {
+        const config = buildConfig({
+            agentConfig: {
+                archiveRetryDelayMs: 30_000,
+            },
+        });
+
+        const archiveCalls = await getDeterministicToolCalls({
+            signals: [
+                buildDepositSignal({
+                    id: 'deposit-archive-terminal-failure',
+                    from: SIGNER,
+                    amountWei: 1_000_000n,
+                }),
+                buildSignedRequestSignal({
+                    requestId: 'req-archive-terminal-failure',
+                    signer: SIGNER,
+                    recipient: RECIPIENT,
+                    amount: '1',
+                }),
+            ],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                safeUsdcBalance: 1_000_000n,
+                agentErc1155Balance: 5n,
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+        assert.equal(archiveCalls.length, 1);
+        assert.equal(archiveCalls[0].name, 'ipfs_publish');
+
+        await onToolOutput({
+            name: 'ipfs_publish',
+            parsedOutput: buildFailedIpfsOutput('forbidden', { retryable: false }),
+        });
+
+        const state = await getSwapState();
+        const order = state.orders[buildRequestOrderId(SIGNER, 'req-archive-terminal-failure')];
+        assert.ok(order.closedAtMs);
+        assert.ok(order.creditReleasedAtMs);
+        assert.equal(order.lastArchiveErrorRetryable, false);
+        assert.equal(order.terminalFailureStage, 'archive');
+        assert.deepEqual(getCreditFor(state, SIGNER), {
+            depositedWei: '1000000',
+            reservedWei: '0',
+            availableWei: '1000000',
+        });
+
+        const retryCalls = await withMockedNow(40_000, async () =>
+            getDeterministicToolCalls({
+                signals: [],
+                commitmentText: '',
+                commitmentSafe: SAFE,
+                agentAddress: AGENT,
+                publicClient: buildPublicClient({
+                    safeUsdcBalance: 1_000_000n,
+                    agentErc1155Balance: 5n,
+                }),
+                config,
+                onchainPendingProposal: false,
+            })
+        );
+        assert.equal(retryCalls.length, 0);
+    });
+}
+
+async function testDirectFillNonRetryableFailureClosesOrderAndReleasesCredit() {
+    await withTempStatePath(async () => {
+        const config = buildConfig();
+        const archiveCalls = await getDeterministicToolCalls({
+            signals: [
+                buildDepositSignal({
+                    id: 'deposit-direct-fill-terminal-failure',
+                    from: SIGNER,
+                    amountWei: 1_000_000n,
+                }),
+                buildSignedRequestSignal({
+                    requestId: 'req-direct-fill-terminal-failure',
+                    signer: SIGNER,
+                    recipient: RECIPIENT,
+                    amount: '1',
+                }),
+            ],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                safeUsdcBalance: 1_000_000n,
+                agentErc1155Balance: 5n,
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+        assert.equal(archiveCalls.length, 1);
+        assert.equal(archiveCalls[0].name, 'ipfs_publish');
+
+        await onToolOutput({
+            name: 'ipfs_publish',
+            parsedOutput: buildPublishedIpfsOutput('req-direct-fill-terminal-failure'),
+        });
+
+        const fillCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                safeUsdcBalance: 1_000_000n,
+                agentErc1155Balance: 5n,
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+        assert.equal(fillCalls.length, 1);
+        assert.equal(fillCalls[0].name, 'make_erc1155_transfer');
+
+        await onToolOutput({
+            name: 'make_erc1155_transfer',
+            parsedOutput: buildFailedToolOutput({
+                message: 'insufficient balance',
+                retryable: false,
+            }),
+        });
+
+        const state = await getSwapState();
+        const order = state.orders[buildRequestOrderId(SIGNER, 'req-direct-fill-terminal-failure')];
+        assert.ok(order.closedAtMs);
+        assert.ok(order.creditReleasedAtMs);
+        assert.equal(order.terminalFailureStage, 'direct_fill');
+        assert.deepEqual(getCreditFor(state, SIGNER), {
+            depositedWei: '1000000',
+            reservedWei: '0',
+            availableWei: '1000000',
+        });
+
+        const retryCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                safeUsdcBalance: 1_000_000n,
+                agentErc1155Balance: 5n,
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+        assert.equal(retryCalls.length, 0);
+    });
+}
+
+async function testProposalNonRetryableFailureClosesOrderWithoutReleasingCredit() {
+    await withTempStatePath(async () => {
+        const config = buildConfig();
+        const archiveCalls = await getDeterministicToolCalls({
+            signals: [
+                buildDepositSignal({
+                    id: 'deposit-proposal-terminal-failure',
+                    from: SIGNER,
+                    amountWei: 1_000_000n,
+                }),
+                buildSignedRequestSignal({
+                    requestId: 'req-proposal-terminal-failure',
+                    signer: SIGNER,
+                    recipient: RECIPIENT,
+                    amount: '1',
+                }),
+            ],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                safeUsdcBalance: 1_000_000n,
+                agentErc1155Balance: 5n,
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+        assert.equal(archiveCalls.length, 1);
+        assert.equal(archiveCalls[0].name, 'ipfs_publish');
+
+        await onToolOutput({
+            name: 'ipfs_publish',
+            parsedOutput: buildPublishedIpfsOutput('req-proposal-terminal-failure'),
+        });
+
+        const fillCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                safeUsdcBalance: 1_000_000n,
+                agentErc1155Balance: 5n,
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+        assert.equal(fillCalls.length, 1);
+        assert.equal(fillCalls[0].name, 'make_erc1155_transfer');
+
+        await onToolOutput({
+            name: 'make_erc1155_transfer',
+            parsedOutput: {
+                status: 'confirmed',
+                transactionHash: DIRECT_FILL_TX_HASH,
+            },
+        });
+
+        const reimbursementCalls = await getDeterministicToolCalls({
+            signals: [
+                {
+                    kind: 'erc20BalanceSnapshot',
+                    asset: USDC,
+                    amount: 1_000_000n,
+                },
+            ],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                safeUsdcBalance: 1_000_000n,
+                agentErc1155Balance: 4n,
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+        assert.equal(reimbursementCalls.length, 1);
+        assert.equal(reimbursementCalls[0].name, 'post_bond_and_propose');
+
+        await onToolOutput({
+            name: 'post_bond_and_propose',
+            parsedOutput: buildFailedToolOutput({
+                message: 'proposal submission disabled',
+                retryable: false,
+            }),
+        });
+
+        const state = await getSwapState();
+        const order = state.orders[buildRequestOrderId(SIGNER, 'req-proposal-terminal-failure')];
+        assert.ok(order.closedAtMs);
+        assert.equal(order.creditReleasedAtMs, undefined);
+        assert.equal(order.terminalFailureStage, 'reimbursement_proposal');
+        assert.deepEqual(getCreditFor(state, SIGNER), {
+            depositedWei: '1000000',
+            reservedWei: '1000000',
+            availableWei: '0',
+        });
+
+        const retryCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                safeUsdcBalance: 1_000_000n,
+                agentErc1155Balance: 4n,
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+        assert.equal(retryCalls.length, 0);
+    });
+}
+
 async function testStatePersistsSeparatelyPerCommitment() {
     await withTempStateDir(async (stateDir) => {
         const safeA = SAFE;
@@ -2293,6 +2576,9 @@ async function run() {
     await testReimbursementProposalRespectsPendingSafeReservations();
     await testFreeTextSignedRequestUsesLlmInterpretation();
     await testArchiveFailureLogsAndBacksOffBeforeRetry();
+    await testArchiveNonRetryableFailureClosesOrderAndReleasesCredit();
+    await testDirectFillNonRetryableFailureClosesOrderAndReleasesCredit();
+    await testProposalNonRetryableFailureClosesOrderWithoutReleasingCredit();
     await testStatePersistsSeparatelyPerCommitment();
     await testSignedRequestWithoutDepositorCreditDoesNothing();
     await testSignerMustMatchDepositor();
