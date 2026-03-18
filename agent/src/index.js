@@ -60,19 +60,7 @@ const tokenMetaCache = new Map();
 const poolMetaCache = new Map();
 const resolvedPoolCache = new Map();
 const LOOP_PHASE_WARN_INTERVAL_MS = 15_000;
-const messageInbox = config.messageApiEnabled
-    ? createMessageInbox({
-        queueLimit: config.messageApiQueueLimit,
-        defaultTtlSeconds: config.messageApiDefaultTtlSeconds,
-        minTtlSeconds: config.messageApiMinTtlSeconds,
-        maxTtlSeconds: config.messageApiMaxTtlSeconds,
-        idempotencyTtlSeconds: config.messageApiIdempotencyTtlSeconds,
-        signedReplayWindowSeconds: config.messageApiSignatureMaxAgeSeconds,
-        maxTextLength: config.messageApiMaxTextLength,
-        rateLimitPerMinute: config.messageApiRateLimitPerMinute,
-        rateLimitBurst: config.messageApiRateLimitBurst,
-    })
-    : null;
+let messageInbox = null;
 let messageApiServer;
 
 function formatLoopPhaseContext(context) {
@@ -165,6 +153,19 @@ if (!config.commitmentSafe) {
 }
 if (!config.ogModule) {
     throw new Error('Missing OG_MODULE env or agent config.json ogModule for the active chain.');
+}
+if (config.messageApiEnabled) {
+    messageInbox = createMessageInbox({
+        queueLimit: config.messageApiQueueLimit,
+        defaultTtlSeconds: config.messageApiDefaultTtlSeconds,
+        minTtlSeconds: config.messageApiMinTtlSeconds,
+        maxTtlSeconds: config.messageApiMaxTtlSeconds,
+        idempotencyTtlSeconds: config.messageApiIdempotencyTtlSeconds,
+        signedReplayWindowSeconds: config.messageApiSignatureMaxAgeSeconds,
+        maxTextLength: config.messageApiMaxTextLength,
+        rateLimitPerMinute: config.messageApiRateLimitPerMinute,
+        rateLimitBurst: config.messageApiRateLimitBurst,
+    });
 }
 for (const asset of config.watchAssets) {
     trackedAssets.add(String(asset).toLowerCase());
