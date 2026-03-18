@@ -59,6 +59,7 @@ const priceTriggerState = new Map();
 const tokenMetaCache = new Map();
 const poolMetaCache = new Map();
 const resolvedPoolCache = new Map();
+const LOOP_PHASE_WARN_INTERVAL_MS = 15_000;
 const messageInbox = config.messageApiEnabled
     ? createMessageInbox({
         queueLimit: config.messageApiQueueLimit,
@@ -73,6 +74,58 @@ const messageInbox = config.messageApiEnabled
     })
     : null;
 let messageApiServer;
+
+function formatLoopPhaseContext(context) {
+    if (!context || typeof context !== 'object') {
+        return '';
+    }
+    const parts = Object.entries(context)
+        .filter(([, value]) => value !== undefined && value !== null && value !== '')
+        .map(([key, value]) => `${key}=${value}`);
+    return parts.length > 0 ? ` (${parts.join(' ')})` : '';
+}
+
+async function runLoopPhase(name, work, { warnIntervalMs = LOOP_PHASE_WARN_INTERVAL_MS, logStart = false, context } = {}) {
+    const startedAtMs = Date.now();
+    const contextText = formatLoopPhaseContext(context);
+    if (logStart) {
+        console.log(`[agent] Loop phase started: ${name}${contextText}.`);
+    }
+
+    let warningCount = 0;
+    const timer =
+        warnIntervalMs > 0
+            ? setInterval(() => {
+                warningCount += 1;
+                console.warn(
+                    `[agent] Loop phase still running: ${name}${contextText} elapsedMs=${warningCount * warnIntervalMs}.`
+                );
+            }, warnIntervalMs)
+            : null;
+    timer?.unref?.();
+
+    try {
+        const result = await work();
+        const durationMs = Date.now() - startedAtMs;
+        if (logStart || durationMs >= warnIntervalMs) {
+            console.log(
+                `[agent] Loop phase complete: ${name}${contextText} durationMs=${durationMs}.`
+            );
+        }
+        return result;
+    } catch (error) {
+        const durationMs = Date.now() - startedAtMs;
+        console.error(
+            `[agent] Loop phase failed: ${name}${contextText} durationMs=${durationMs}.`,
+            error
+        );
+        throw error;
+    } finally {
+        if (timer) {
+            clearInterval(timer);
+        }
+    }
+}
 
 async function loadAgentModule() {
     const agentRef = config.agentModule ?? 'default';
@@ -275,6 +328,39 @@ async function processAgentToolCalls({
             : DECISION_STATUS.FAILED_NON_RETRYABLE;
     }
 
+    for (const output of toolOutputs) {
+        if (!output?.name || typeof output.output !== 'string') {
+            continue;
+        }
+        let payload = null;
+        try {
+            payload = JSON.parse(output.output);
+        } catch (error) {
+            continue;
+        }
+        const status =
+            typeof payload?.status === 'string' && payload.status.trim()
+                ? payload.status.trim().toLowerCase()
+                : '';
+        if (status === 'error') {
+            const message =
+                typeof payload?.message === 'string' && payload.message.trim()
+                    ? payload.message.trim()
+                    : 'unknown tool error';
+            console.warn(
+                `[agent] Tool output error: name=${output.name} callId=${output.callId ?? 'unknown'} retryable=${payload?.retryable === true} sideEffectsLikelyCommitted=${payload?.sideEffectsLikelyCommitted === true} message=${message}`
+            );
+        } else if (status === 'skipped') {
+            const reason =
+                typeof payload?.reason === 'string' && payload.reason.trim()
+                    ? payload.reason.trim()
+                    : 'no reason provided';
+            console.warn(
+                `[agent] Tool output skipped: name=${output.name} callId=${output.callId ?? 'unknown'} reason=${reason}`
+            );
+        }
+    }
+
     if (toolOutputs.length > 0 && agentModule?.onToolOutput) {
         for (const output of toolOutputs) {
             if (!output?.name || !output?.output) continue;
@@ -460,6 +546,14 @@ async function prepareSignalsForDecision(
 
 async function agentLoop() {
     try {
+        const queuedMessageCountAtLoopStart = messageInbox?.getQueueDepth?.() ?? 0;
+        const noisyLoop = queuedMessageCountAtLoopStart > 0;
+        if (noisyLoop) {
+            console.log(
+                `[agent] Starting loop with ${queuedMessageCountAtLoopStart} queued user message(s).`
+            );
+        }
+
         const triggerSeedRulesText = ogContext?.rules ?? commitmentText ?? '';
         const triggerSeed = await getActivePriceTriggers({ rulesText: triggerSeedRulesText });
         for (const trigger of triggerSeed) {
@@ -467,8 +561,20 @@ async function agentLoop() {
             if (trigger?.quoteToken) trackedAssets.add(String(trigger.quoteToken).toLowerCase());
         }
 
-        const latestBlock = await publicClient.getBlockNumber();
-        const latestBlockData = await publicClient.getBlock({ blockNumber: latestBlock });
+        const { latestBlock, latestBlockData } = await runLoopPhase(
+            'load_head_block',
+            async () => {
+                const latestBlock = await publicClient.getBlockNumber();
+                const latestBlockData = await publicClient.getBlock({ blockNumber: latestBlock });
+                return { latestBlock, latestBlockData };
+            },
+            {
+                logStart: noisyLoop,
+                context: {
+                    queuedMessages: queuedMessageCountAtLoopStart,
+                },
+            }
+        );
         const nowMs = Number(latestBlockData.timestamp) * 1000;
 
         const {
@@ -477,10 +583,13 @@ async function agentLoop() {
             lastCheckedBlock: nextCheckedBlock,
             lastNativeBalance: nextNative,
             lastAssetBalances: nextAssetBalances,
-        } =
-            await pollCommitmentChanges({
+        } = await runLoopPhase(
+            'poll_commitment_changes',
+            async () =>
+                pollCommitmentChanges({
                 publicClient,
                 trackedAssets,
+                trackedErc1155Assets: config.watchErc1155Assets,
                 commitmentSafe: config.commitmentSafe,
                 watchNativeBalance: config.watchNativeBalance,
                 lastCheckedBlock,
@@ -488,7 +597,15 @@ async function agentLoop() {
                 lastAssetBalances,
                 logChunkSize: config.logChunkSize,
                 emitBalanceSnapshotsEveryPoll: Boolean(pollingOptions.emitBalanceSnapshotsEveryPoll),
-            });
+                }),
+            {
+                logStart: noisyLoop,
+                context: {
+                    queuedMessages: queuedMessageCountAtLoopStart,
+                    fromBlock: lastCheckedBlock?.toString?.() ?? 'unset',
+                },
+            }
+        );
         lastCheckedBlock = nextCheckedBlock;
         lastNativeBalance = nextNative;
         lastAssetBalances = nextAssetBalances ?? lastAssetBalances;
@@ -506,14 +623,25 @@ async function agentLoop() {
             executedProposals,
             deletedProposals,
             lastProposalCheckedBlock: nextProposalBlock,
-        } = await pollProposalChanges({
-            publicClient,
-            ogModule: config.ogModule,
-            lastProposalCheckedBlock,
-            proposalsByHash,
-            startBlock: config.startBlock,
-            logChunkSize: config.logChunkSize,
-        });
+        } = await runLoopPhase(
+            'poll_proposal_changes',
+            async () =>
+                pollProposalChanges({
+                    publicClient,
+                    ogModule: config.ogModule,
+                    lastProposalCheckedBlock,
+                    proposalsByHash,
+                    startBlock: config.startBlock,
+                    logChunkSize: config.logChunkSize,
+                }),
+            {
+                logStart: noisyLoop,
+                context: {
+                    queuedMessages: queuedMessageCountAtLoopStart,
+                    fromBlock: lastProposalCheckedBlock?.toString?.() ?? 'unset',
+                },
+            }
+        );
         lastProposalCheckedBlock = nextProposalBlock;
         const executedProposalCount = executedProposals?.length ?? 0;
         const deletedProposalCount = deletedProposals?.length ?? 0;
@@ -533,30 +661,52 @@ async function agentLoop() {
             });
         }
 
-        await executeReadyProposals({
-            publicClient,
-            walletClient,
-            account,
-            ogModule: config.ogModule,
-            proposalsByHash,
-            executeRetryMs: config.executeRetryMs,
-            executePendingTxTimeoutMs: config.executePendingTxTimeoutMs,
-        });
+        await runLoopPhase(
+            'execute_ready_proposals',
+            async () =>
+                executeReadyProposals({
+                    publicClient,
+                    walletClient,
+                    account,
+                    ogModule: config.ogModule,
+                    proposalsByHash,
+                    executeRetryMs: config.executeRetryMs,
+                    executePendingTxTimeoutMs: config.executePendingTxTimeoutMs,
+                }),
+            {
+                logStart: noisyLoop && proposalsByHash.size > 0,
+                context: {
+                    queuedMessages: queuedMessageCountAtLoopStart,
+                    proposals: proposalsByHash.size,
+                },
+            }
+        );
 
         const rulesText = ogContext?.rules ?? commitmentText ?? '';
         updateTimelockSchedule({ rulesText });
         const dueTimelocks = collectDueTimelocks(nowMs);
         const activePriceTriggers = await getActivePriceTriggers({ rulesText });
-        const duePriceSignals = await collectPriceTriggerSignals({
-            publicClient,
-            config,
-            triggers: activePriceTriggers,
-            nowMs,
-            triggerState: priceTriggerState,
-            tokenMetaCache,
-            poolMetaCache,
-            resolvedPoolCache,
-        });
+        const duePriceSignals = await runLoopPhase(
+            'collect_price_trigger_signals',
+            async () =>
+                collectPriceTriggerSignals({
+                    publicClient,
+                    config,
+                    triggers: activePriceTriggers,
+                    nowMs,
+                    triggerState: priceTriggerState,
+                    tokenMetaCache,
+                    poolMetaCache,
+                    resolvedPoolCache,
+                }),
+            {
+                logStart: noisyLoop && activePriceTriggers.length > 0,
+                context: {
+                    queuedMessages: queuedMessageCountAtLoopStart,
+                    triggers: activePriceTriggers.length,
+                },
+            }
+        );
         const baseSignals = deposits.concat(
             balanceSnapshots,
             newProposals.map((proposal) => ({
@@ -586,30 +736,64 @@ async function agentLoop() {
         const onchainPendingProposal = proposalsByHash.size > 0;
         let decisionStatus = DECISION_STATUS.NO_ACTION;
         if (baseSignals.length > 0) {
-            const signalsToProcess = await prepareSignalsForDecision(baseSignals, {
-                nowMs,
-                latestBlock,
-                onchainPendingProposal,
-            });
+            const signalsToProcess = await runLoopPhase(
+                'prepare_base_signals',
+                async () =>
+                    prepareSignalsForDecision(baseSignals, {
+                        nowMs,
+                        latestBlock,
+                        onchainPendingProposal,
+                    }),
+                {
+                    logStart: noisyLoop,
+                    context: {
+                        queuedMessages: queuedMessageCountAtLoopStart,
+                        baseSignals: baseSignals.length,
+                    },
+                }
+            );
             if (signalsToProcess.length > 0) {
-                decisionStatus = await decideOnSignals(signalsToProcess, {
-                    onchainPendingProposal,
-                });
+                decisionStatus = await runLoopPhase(
+                    'decide_on_base_signals',
+                    async () =>
+                        decideOnSignals(signalsToProcess, {
+                            onchainPendingProposal,
+                        }),
+                    {
+                        logStart: noisyLoop,
+                        context: {
+                            queuedMessages: queuedMessageCountAtLoopStart,
+                            signals: signalsToProcess.length,
+                        },
+                    }
+                );
             }
             if (decisionStatus === DECISION_STATUS.HANDLED && dueTimelocks.length > 0) {
                 markTimelocksFired(dueTimelocks);
             }
         }
 
-        await processQueuedUserMessages({
-            messageInbox,
-            maxBatchSize: config.messageApiBatchSize,
-            nowMs,
-            latestBlock,
-            onchainPendingProposal,
-            prepareSignals: prepareSignalsForDecision,
-            decideOnSignals,
-        });
+        const queuedMessageCountBeforeProcessing = messageInbox?.getQueueDepth?.() ?? 0;
+        await runLoopPhase(
+            'process_queued_user_messages',
+            async () =>
+                processQueuedUserMessages({
+                    messageInbox,
+                    maxBatchSize: config.messageApiBatchSize,
+                    nowMs,
+                    latestBlock,
+                    onchainPendingProposal,
+                    prepareSignals: prepareSignalsForDecision,
+                    decideOnSignals,
+                }),
+            {
+                logStart: queuedMessageCountBeforeProcessing > 0,
+                context: {
+                    queueDepth: queuedMessageCountBeforeProcessing,
+                    latestBlock: latestBlock.toString(),
+                },
+            }
+        );
     } catch (error) {
         console.error('[agent] loop error', error);
     }
