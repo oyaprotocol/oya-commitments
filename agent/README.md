@@ -26,10 +26,11 @@ This is beta software provided “as is.” Use at your own risk. No guarantees 
      - `keychain`: `KEYCHAIN_SERVICE`, `KEYCHAIN_ACCOUNT` (macOS Keychain or Linux Secret Service)
      - `vault`: `VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_SECRET_PATH`, optional `VAULT_SECRET_KEY` (default `private_key`), optional `VAULT_REQUEST_TIMEOUT_MS`
      - `kms`/`vault-signer`/`rpc`: `SIGNER_RPC_URL`, `SIGNER_ADDRESS` (JSON-RPC signer that accepts `eth_sendTransaction`)
-   - Optional tuning: `POLL_INTERVAL_MS`, `LOG_CHUNK_SIZE`, `EXECUTE_RETRY_MS`, `EXECUTE_PENDING_TX_TIMEOUT_MS`, `PROPOSAL_HASH_RESOLVE_TIMEOUT_MS`, `PROPOSAL_HASH_RESOLVE_POLL_INTERVAL_MS`, `START_BLOCK`, `WATCH_NATIVE_BALANCE`, `DEFAULT_DEPOSIT_*`, `AGENT_MODULE`, `UNISWAP_V3_FACTORY`, `UNISWAP_V3_QUOTER`, `UNISWAP_V3_FEE_TIERS`, `POLYMARKET_*`, `MESSAGE_API_*`
+   - Optional tuning: `POLL_INTERVAL_MS`, `LOG_CHUNK_SIZE`, `EXECUTE_RETRY_MS`, `EXECUTE_PENDING_TX_TIMEOUT_MS`, `PROPOSAL_HASH_RESOLVE_TIMEOUT_MS`, `PROPOSAL_HASH_RESOLVE_POLL_INTERVAL_MS`, `START_BLOCK`, `WATCH_NATIVE_BALANCE`, `DEFAULT_DEPOSIT_*`, `AGENT_MODULE`, `UNISWAP_V3_FACTORY`, `UNISWAP_V3_QUOTER`, `UNISWAP_V3_FEE_TIERS`, `POLYMARKET_*`
    - Optional proposals: `PROPOSE_ENABLED` (default true), `ALLOW_PROPOSE_ON_SIMULATION_FAIL` (default false)
    - Optional disputes: `DISPUTE_ENABLED` (default true), `DISPUTE_RETRY_MS` (default 60000)
    - Optional LLM: `OPENAI_API_KEY`, `OPENAI_MODEL` (default `gpt-4.1-mini`), `OPENAI_BASE_URL`, `OPENAI_REQUEST_TIMEOUT_MS`
+   - Commitment-specific message API settings now live in the selected agent module's `config.json` under a `messageApi` object, with optional `byChain` overrides. Environment variables remain fallback defaults when a module does not override them.
 2. Install deps and start the loop:
 
 ```bash
@@ -83,30 +84,56 @@ Export `getPriceTriggers({ commitmentText, config })` from `agent-library/agents
 Enable inbound user messages with signed requests (EIP-191 message signatures).
 Optional bearer tokens can be layered on top as an additional gate to limit who may submit those signed requests.
 
-- `MESSAGE_API_ENABLED`: Set to `true` to start the API server.
-- `MESSAGE_API_HOST`: Bind host (default `127.0.0.1`).
-- `MESSAGE_API_PORT`: Bind port (default `8787`).
-- `MESSAGE_API_KEYS_JSON`: Optional JSON object of API key ids to tokens, for example `{"ops":"k_live_replace_me"}`. When set, requests must include both a valid bearer token and valid signed auth.
-- `MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST`: Require `MESSAGE_API_SIGNER_ALLOWLIST` membership for signed requests (`true`/`false`, default `true`).
-- `MESSAGE_API_SIGNER_ALLOWLIST`: Optional comma-separated EVM addresses allowed to sign requests. Required when `MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST=true`.
-- `MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS`: Max signature age (default `300`).
-- `MESSAGE_API_MAX_BODY_BYTES`: Request body limit in bytes (default `8192`).
-- `MESSAGE_API_MAX_TEXT_LENGTH`: Max `text` length (default `2000`).
-- `MESSAGE_API_QUEUE_LIMIT`: Max queued/in-flight messages (default `500`).
-- `MESSAGE_API_BATCH_SIZE`: Max messages consumed per agent loop (default `25`).
-- `MESSAGE_API_DEFAULT_TTL_SECONDS`: Default message lifetime applied when `deadline` is omitted (default `3600`).
-- `MESSAGE_API_MIN_TTL_SECONDS`: Minimum allowed remaining lifetime for `deadline` (default `30`).
-- `MESSAGE_API_MAX_TTL_SECONDS`: Maximum allowed remaining lifetime for `deadline` (default `86400`).
-- `MESSAGE_API_IDEMPOTENCY_TTL_SECONDS`: Request replay/dedup cache window (default `86400`).
-- `MESSAGE_API_RATE_LIMIT_PER_MINUTE`: Per-key refill rate (default `30`).
-- `MESSAGE_API_RATE_LIMIT_BURST`: Per-key burst capacity (default `10`).
+Configure Message API settings in `agent-library/agents/<name>/config.json`:
 
-When `MESSAGE_API_ENABLED=true`, configure:
-- `MESSAGE_API_SIGNER_ALLOWLIST` when `MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST=true`
+```json
+{
+  "messageApi": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 8787,
+    "requireSignerAllowlist": true,
+    "signerAllowlist": [
+      "0x1111111111111111111111111111111111111111"
+    ],
+    "keys": {
+      "ops": "k_live_replace_me"
+    },
+    "signatureMaxAgeSeconds": 300,
+    "maxBodyBytes": 8192,
+    "maxTextLength": 2000,
+    "queueLimit": 500,
+    "batchSize": 25,
+    "defaultTtlSeconds": 3600,
+    "minTtlSeconds": 30,
+    "maxTtlSeconds": 86400,
+    "idempotencyTtlSeconds": 86400,
+    "rateLimitPerMinute": 30,
+    "rateLimitBurst": 10
+  }
+}
+```
 
-Optionally configure:
-- `MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST`
-- `MESSAGE_API_KEYS_JSON`
+Supported `messageApi` fields:
+- `enabled`: Set to `true` to start the API server.
+- `host`: Bind host (default `127.0.0.1`).
+- `port`: Bind port (default `8787`).
+- `keys`: Optional JSON object of API key ids to tokens, for example `{"ops":"k_live_replace_me"}`. When set, requests must include both a valid bearer token and valid signed auth.
+- `requireSignerAllowlist`: Require `signerAllowlist` membership for signed requests (`true`/`false`, default `true`).
+- `signerAllowlist`: Optional array of EVM addresses allowed to sign requests. Required when `requireSignerAllowlist=true`.
+- `signatureMaxAgeSeconds`: Max signature age (default `300`).
+- `maxBodyBytes`: Request body limit in bytes (default `8192`).
+- `maxTextLength`: Max `text` length (default `2000`).
+- `queueLimit`: Max queued/in-flight messages (default `500`).
+- `batchSize`: Max messages consumed per agent loop (default `25`).
+- `defaultTtlSeconds`: Default message lifetime applied when `deadline` is omitted (default `3600`).
+- `minTtlSeconds`: Minimum allowed remaining lifetime for `deadline` (default `30`).
+- `maxTtlSeconds`: Maximum allowed remaining lifetime for `deadline` (default `86400`).
+- `idempotencyTtlSeconds`: Request replay/dedup cache window (default `86400`).
+- `rateLimitPerMinute`: Per-key refill rate (default `30`).
+- `rateLimitBurst`: Per-key burst capacity (default `10`).
+
+Use `byChain.<chainId>.messageApi` for chain-specific overrides to the shared `messageApi` object.
 
 Endpoints:
 
@@ -138,9 +165,9 @@ All accepted messages must include signed auth:
 - `deadline` is optional and, when present, must be a Unix timestamp in milliseconds
 - signature is verified against a canonical payload that includes
   `address`, `timestampMs`, `text`, `command`, `args`, `metadata`, `requestId`, and `deadline`
-- when `MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST=true`, the recovered signer must also appear in `MESSAGE_API_SIGNER_ALLOWLIST`
-- signed requests keep `requestId` replay-locked for at least `MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS`; replays during that window return `409` with code `request_replay_blocked`
-- when `MESSAGE_API_KEYS_JSON` is configured, a valid `Authorization: Bearer ...` header is also required
+- when `messageApi.requireSignerAllowlist=true`, the recovered signer must also appear in `messageApi.signerAllowlist`
+- signed requests keep `requestId` replay-locked for at least `messageApi.signatureMaxAgeSeconds`; replays during that window return `409` with code `request_replay_blocked`
+- when `messageApi.keys` is configured, a valid `Authorization: Bearer ...` header is also required
 
 Example request with optional bearer gate:
 

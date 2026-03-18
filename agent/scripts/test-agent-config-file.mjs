@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, writeFile } from 'node:fs/promises';
+import { getAddress } from 'viem';
 import { buildConfig } from '../src/lib/config.js';
 import { loadAgentConfigFile, resolveAgentRuntimeConfig } from '../src/lib/agent-config.js';
 
@@ -15,6 +16,8 @@ const ENV_SAFE = '0x6666666666666666666666666666666666666666';
 const FILE_SAFE = '0x7777777777777777777777777777777777777777';
 const ENV_OG = '0x8888888888888888888888888888888888888888';
 const FILE_OG = '0x9999999999999999999999999999999999999999';
+const FILE_SIGNER = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const CHAIN_SIGNER = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 const MANAGED_ENV_KEYS = ['RPC_URL', 'COMMITMENT_SAFE', 'OG_MODULE'];
 
 function withManagedEnv(overrides, fn) {
@@ -74,6 +77,23 @@ async function run() {
                 symbol: 'ENV-1155',
             },
         ],
+        messageApiEnabled: false,
+        messageApiHost: '127.0.0.1',
+        messageApiPort: 8787,
+        messageApiKeys: {},
+        messageApiRequireSignerAllowlist: true,
+        messageApiSignerAllowlist: [],
+        messageApiSignatureMaxAgeSeconds: 300,
+        messageApiMaxBodyBytes: 8192,
+        messageApiMaxTextLength: 2000,
+        messageApiQueueLimit: 500,
+        messageApiBatchSize: 25,
+        messageApiDefaultTtlSeconds: 3600,
+        messageApiMinTtlSeconds: 30,
+        messageApiMaxTtlSeconds: 86400,
+        messageApiIdempotencyTtlSeconds: 86400,
+        messageApiRateLimitPerMinute: 30,
+        messageApiRateLimitBurst: 10,
     };
 
     const missingFile = await loadAgentConfigFile(missingPath);
@@ -97,10 +117,27 @@ async function run() {
                 policyName: 'fast-withdraw',
                 commitmentSafe: FILE_SAFE,
                 watchAssets: [FILE_ERC20],
+                messageApi: {
+                    enabled: true,
+                    host: '0.0.0.0',
+                    port: 9999,
+                    requireSignerAllowlist: true,
+                    signerAllowlist: [FILE_SIGNER],
+                    rateLimitPerMinute: 12,
+                    keys: {
+                        ops: 'root-token',
+                    },
+                },
                 byChain: {
                     '11155111': {
                         ogModule: FILE_OG,
                         watchAssets: [FILE_CHAIN_ERC20],
+                        messageApi: {
+                            port: 9898,
+                            requireSignerAllowlist: false,
+                            signerAllowlist: [CHAIN_SIGNER],
+                            batchSize: 7,
+                        },
                         watchErc1155Assets: [
                             {
                                 token: FILE_ERC1155,
@@ -139,6 +176,15 @@ async function run() {
     assert.equal(resolved.ogModule, FILE_OG);
     assert.equal(resolved.agentConfig.commitmentSafe, FILE_SAFE);
     assert.equal(resolved.agentConfig.ogModule, FILE_OG);
+    assert.equal(resolved.messageApiEnabled, true);
+    assert.equal(resolved.messageApiHost, '0.0.0.0');
+    assert.equal(resolved.messageApiPort, 9898);
+    assert.deepEqual(resolved.messageApiKeys, { ops: 'root-token' });
+    assert.equal(resolved.messageApiRequireSignerAllowlist, false);
+    assert.deepEqual(resolved.messageApiSignerAllowlist, [getAddress(CHAIN_SIGNER)]);
+    assert.equal(resolved.messageApiBatchSize, 7);
+    assert.equal(resolved.messageApiRateLimitPerMinute, 12);
+    assert.deepEqual(resolved.agentConfig.messageApi.signerAllowlist, [getAddress(CHAIN_SIGNER)]);
 
     await writeFile(
         configPath,
@@ -167,6 +213,34 @@ async function run() {
     assert.equal(nullFallbackResolved.ogModule, ENV_OG);
     assert.equal(nullFallbackResolved.agentConfig.commitmentSafe, ENV_SAFE);
     assert.equal(nullFallbackResolved.agentConfig.ogModule, ENV_OG);
+    assert.equal(nullFallbackResolved.messageApiEnabled, false);
+    assert.equal(nullFallbackResolved.messageApiPort, 8787);
+
+    await writeFile(
+        configPath,
+        JSON.stringify(
+            {
+                messageApi: {
+                    enabled: true,
+                    requireSignerAllowlist: true,
+                },
+            },
+            null,
+            2
+        ),
+        'utf8'
+    );
+
+    const invalidMessageApiFile = await loadAgentConfigFile(configPath);
+    assert.throws(
+        () =>
+            resolveAgentRuntimeConfig({
+                baseConfig,
+                agentConfigFile: invalidMessageApiFile,
+                chainId: 11155111,
+            }),
+        /requires signerAllowlist when enabled=true and requireSignerAllowlist=true/
+    );
 
     await writeFile(
         configPath,
