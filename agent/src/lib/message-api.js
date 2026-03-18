@@ -39,7 +39,13 @@ async function authenticateSignedRequest({
     signatureMaxAgeSeconds,
     nowMs,
 }) {
-    if (!body?.auth) return null;
+    if (!body?.auth) {
+        return {
+            ok: false,
+            statusCode: 401,
+            message: 'Signed auth is required.',
+        };
+    }
     if (!isPlainObject(body.auth)) {
         return { ok: false, statusCode: 400, message: 'auth must be an object when provided.' };
     }
@@ -227,13 +233,44 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
         (config.messageApiSignerAllowlist ?? []).map((address) => getAddress(address).toLowerCase())
     );
     const signatureMaxAgeSeconds = Number(config.messageApiSignatureMaxAgeSeconds ?? 300);
-    if (keyEntries.length === 0 && signerAllowlist.size === 0) {
+    if (signerAllowlist.size === 0) {
         throw new Error(
-            'Message API requires at least one auth method: MESSAGE_API_KEYS_JSON or MESSAGE_API_SIGNER_ALLOWLIST.'
+            'Message API requires MESSAGE_API_SIGNER_ALLOWLIST. MESSAGE_API_KEYS_JSON is optional additional bearer gating.'
         );
     }
 
     let server;
+
+    function emitLog(level, message) {
+        const method =
+            typeof logger?.[level] === 'function'
+                ? logger[level].bind(logger)
+                : typeof logger?.log === 'function'
+                    ? logger.log.bind(logger)
+                    : console.log.bind(console);
+        method(message);
+    }
+
+    function formatRequestContext({ body, senderAddress, senderKeyId, code, statusCode }) {
+        const parts = [];
+        if (code) parts.push(`code=${code}`);
+        if (statusCode !== undefined) parts.push(`status=${statusCode}`);
+        const requestId =
+            typeof body?.requestId === 'string' && body.requestId.trim() ? body.requestId.trim() : null;
+        if (requestId) parts.push(`requestId=${requestId}`);
+        const command =
+            typeof body?.command === 'string' && body.command.trim() ? body.command.trim() : null;
+        if (command) parts.push(`command=${command}`);
+        const signer =
+            typeof senderAddress === 'string' && senderAddress.trim()
+                ? senderAddress.trim()
+                : typeof body?.auth?.address === 'string' && body.auth.address.trim()
+                    ? body.auth.address.trim()
+                    : null;
+        if (signer) parts.push(`signer=${signer}`);
+        if (senderKeyId) parts.push(`senderKeyId=${senderKeyId}`);
+        return parts.length > 0 ? ` (${parts.join(' ')})` : '';
+    }
 
     async function start() {
         if (server) {
@@ -285,43 +322,71 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
 
             const validation = validateMessageBody(body);
             if (!validation.ok) {
+                emitLog(
+                    'warn',
+                    `[agent] Message API rejected request${formatRequestContext({
+                        body,
+                        code: 'invalid_request',
+                        statusCode: 400,
+                    })}: ${validation.message}`
+                );
                 sendJson(res, 400, { error: validation.message });
                 return;
             }
 
             const nowMs = Date.now();
-            let senderKeyId = authenticateRequest({
-                authorizationHeader: req.headers.authorization,
-                keyEntries,
-            });
-            let sender = senderKeyId
-                ? {
-                      authType: 'apiKey',
-                      keyId: senderKeyId,
-                  }
-                : undefined;
-            if (!senderKeyId && body.auth) {
-                const signedAuth = await authenticateSignedRequest({
-                    body,
-                    signerAllowlist,
-                    signatureMaxAgeSeconds,
-                    nowMs,
-                });
-                if (!signedAuth?.ok) {
-                    sendJson(res, signedAuth?.statusCode ?? 401, {
-                        error: signedAuth?.message ?? 'Unauthorized.',
-                    });
-                    return;
-                }
-                senderKeyId = signedAuth.senderKeyId;
-                sender = signedAuth.sender;
-            }
-            if (!senderKeyId) {
+            const bearerKeyId =
+                keyEntries.length > 0
+                    ? authenticateRequest({
+                          authorizationHeader: req.headers.authorization,
+                          keyEntries,
+                      })
+                    : null;
+            if (keyEntries.length > 0 && !bearerKeyId) {
+                emitLog(
+                    'warn',
+                    `[agent] Message API rejected request${formatRequestContext({
+                        body,
+                        code: 'missing_bearer_token',
+                        statusCode: 401,
+                    })}: Bearer token is required.`
+                );
                 sendJson(
                     res,
                     401,
-                    { error: 'Unauthorized.' },
+                    { error: 'Bearer token is required.' },
                     { 'WWW-Authenticate': 'Bearer realm="agent-message-api"' }
+                );
+                return;
+            }
+
+            const signedAuth = await authenticateSignedRequest({
+                body,
+                signerAllowlist,
+                signatureMaxAgeSeconds,
+                nowMs,
+            });
+            if (!signedAuth?.ok) {
+                emitLog(
+                    'warn',
+                    `[agent] Message API rejected request${formatRequestContext({
+                        body,
+                        senderAddress: body?.auth?.address,
+                        code: 'signed_auth_failed',
+                        statusCode: signedAuth?.statusCode ?? 401,
+                    })}: ${signedAuth?.message ?? 'Unauthorized.'}`
+                );
+                const extraHeaders =
+                    keyEntries.length > 0
+                        ? { 'WWW-Authenticate': 'Bearer realm="agent-message-api"' }
+                        : {};
+                sendJson(
+                    res,
+                    signedAuth?.statusCode ?? 401,
+                    {
+                        error: signedAuth?.message ?? 'Unauthorized.',
+                    },
+                    extraHeaders
                 );
                 return;
             }
@@ -333,14 +398,24 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
                 metadata: body.metadata,
                 requestId: body.requestId,
                 deadline: body.deadline,
-                senderKeyId,
-                sender,
+                senderKeyId: signedAuth.senderKeyId,
+                sender: signedAuth.sender,
                 nowMs,
             });
 
             if (!result.ok) {
                 // Propagate inbox backpressure/rate-limit outcomes with HTTP-compatible semantics.
                 if (result.code === 'rate_limited') {
+                    emitLog(
+                        'warn',
+                        `[agent] Message API rejected request${formatRequestContext({
+                            body,
+                            senderAddress: signedAuth.sender?.address,
+                            senderKeyId: signedAuth.senderKeyId,
+                            code: result.code,
+                            statusCode: 429,
+                        })}: ${result.message}`
+                    );
                     sendJson(
                         res,
                         429,
@@ -355,6 +430,16 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
                     return;
                 }
                 if (result.code === 'queue_full') {
+                    emitLog(
+                        'warn',
+                        `[agent] Message API rejected request${formatRequestContext({
+                            body,
+                            senderAddress: signedAuth.sender?.address,
+                            senderKeyId: signedAuth.senderKeyId,
+                            code: result.code,
+                            statusCode: 429,
+                        })}: ${result.message}`
+                    );
                     sendJson(res, 429, {
                         error: result.message,
                         code: result.code,
@@ -363,6 +448,16 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
                     return;
                 }
                 if (result.code === 'request_replay_blocked') {
+                    emitLog(
+                        'warn',
+                        `[agent] Message API rejected request${formatRequestContext({
+                            body,
+                            senderAddress: signedAuth.sender?.address,
+                            senderKeyId: signedAuth.senderKeyId,
+                            code: result.code,
+                            statusCode: 409,
+                        })}: ${result.message}`
+                    );
                     sendJson(res, 409, {
                         error: result.message,
                         code: result.code,
@@ -372,11 +467,34 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
                     });
                     return;
                 }
+                emitLog(
+                    'warn',
+                    `[agent] Message API rejected request${formatRequestContext({
+                        body,
+                        senderAddress: signedAuth.sender?.address,
+                        senderKeyId: signedAuth.senderKeyId,
+                        code: result.code ?? 'invalid_request',
+                        statusCode: 400,
+                    })}: ${result.message ?? 'Invalid request.'}`
+                );
                 sendJson(res, 400, {
                     error: result.message ?? 'Invalid request.',
                     code: result.code ?? 'invalid_request',
                 });
                 return;
+            }
+
+            if (result.status === 'duplicate') {
+                emitLog(
+                    'warn',
+                    `[agent] Message API ignored duplicate request${formatRequestContext({
+                        body,
+                        senderAddress: signedAuth.sender?.address,
+                        senderKeyId: signedAuth.senderKeyId,
+                        code: 'duplicate',
+                        statusCode: 200,
+                    })}: reusing existing queued message ${result.message.messageId}.`
+                );
             }
 
             sendJson(res, result.status === 'duplicate' ? 200 : 202, {

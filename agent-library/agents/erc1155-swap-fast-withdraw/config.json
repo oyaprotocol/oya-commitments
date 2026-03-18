@@ -1,0 +1,27 @@
+{
+  "policyName": "erc1155-swap-fast-withdraw",
+  "paymentTokenSymbol": "USDC",
+  "usdcUnitAmountWei": "1000000",
+  "fillConfirmationThreshold": 1,
+  "byChain": {
+    "11155111": {
+      "authorizedAgent": "0x2967C076182F0303037072670e744e26Ed4A830f",
+      "commitmentSafe": "0xbBc8362c8b18FB90395666b27154b2E4c2B2b4A6",
+      "ogModule": "0x4EA81968539A7Ca607b8EBf01Bf85e759B552228",
+      "watchAssets": [
+        "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
+      ],
+      "watchErc1155Assets": [
+        {
+          "token": "0xa1B6d741CF7EF18D4C2C6f76DaF981E4f5FCbe4E",
+          "tokenId": "1001",
+          "symbol": "OYAT1155-1001"
+        }
+      ]
+    }
+  },
+  "signedCommands": [
+    "fast_withdraw",
+    "fast_withdraw_erc1155"
+  ]
+}
