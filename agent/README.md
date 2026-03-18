@@ -16,21 +16,21 @@ This is beta software provided “as is.” Use at your own risk. No guarantees 
 
 1. Copy `.env.example` to `.env` and fill in:
    - `RPC_URL`: RPC the agent should use
-   - `COMMITMENT_SAFE`: Safe address holding assets, unless the selected agent overrides it in `config.json`
-   - `OG_MODULE`: Optimistic Governor module address, unless the selected agent overrides it in `config.json`
-   - `WATCH_ASSETS`: Comma-separated ERC20s to monitor when the selected agent does not override watchlists in `config.json` (the OG collateral is auto-added)
-   - `WATCH_ERC1155_ASSETS_JSON`: Optional JSON array of tracked ERC1155 assets used as fallback when the selected agent does not override ERC1155 watchlists in `config.json`
+   - `AGENT_MODULE`: Agent implementation name, unless you pass `--module` to helper scripts
    - Signer selection: `SIGNER_TYPE` (default `env`)
      - `env`: `PRIVATE_KEY`
      - `keystore`: `KEYSTORE_PATH`, `KEYSTORE_PASSWORD`
      - `keychain`: `KEYCHAIN_SERVICE`, `KEYCHAIN_ACCOUNT` (macOS Keychain or Linux Secret Service)
      - `vault`: `VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_SECRET_PATH`, optional `VAULT_SECRET_KEY` (default `private_key`), optional `VAULT_REQUEST_TIMEOUT_MS`
      - `kms`/`vault-signer`/`rpc`: `SIGNER_RPC_URL`, `SIGNER_ADDRESS` (JSON-RPC signer that accepts `eth_sendTransaction`)
-   - Optional tuning: `POLL_INTERVAL_MS`, `LOG_CHUNK_SIZE`, `EXECUTE_RETRY_MS`, `EXECUTE_PENDING_TX_TIMEOUT_MS`, `PROPOSAL_HASH_RESOLVE_TIMEOUT_MS`, `PROPOSAL_HASH_RESOLVE_POLL_INTERVAL_MS`, `START_BLOCK`, `WATCH_NATIVE_BALANCE`, `DEFAULT_DEPOSIT_*`, `AGENT_MODULE`, `UNISWAP_V3_FACTORY`, `UNISWAP_V3_QUOTER`, `UNISWAP_V3_FEE_TIERS`, `POLYMARKET_*`
-   - Optional proposals: `PROPOSE_ENABLED` (default true), `ALLOW_PROPOSE_ON_SIMULATION_FAIL` (default false)
-   - Optional disputes: `DISPUTE_ENABLED` (default true), `DISPUTE_RETRY_MS` (default 60000)
-   - Optional LLM: `OPENAI_API_KEY`, `OPENAI_MODEL` (default `gpt-4.1-mini`), `OPENAI_BASE_URL`, `OPENAI_REQUEST_TIMEOUT_MS`
-   - Commitment-specific message API settings now live in the selected agent module's `config.json` under a `messageApi` object, with optional `byChain` overrides. Environment variables remain fallback defaults when a module does not override them.
+   - Secret API/auth values only:
+     - `OPENAI_API_KEY`
+     - `MESSAGE_API_KEYS_JSON` for secret bearer tokens layered on signed Message API auth
+     - `POLYMARKET_CLOB_API_KEY`, `POLYMARKET_CLOB_API_SECRET`, `POLYMARKET_CLOB_API_PASSPHRASE`
+     - `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, `POLYMARKET_API_PASSPHRASE`
+     - `POLYMARKET_BUILDER_API_KEY`, `POLYMARKET_BUILDER_SECRET`, `POLYMARKET_BUILDER_PASSPHRASE`
+     - `IPFS_HEADERS_JSON` when it carries auth headers
+   - Non-secret runner behavior now belongs in the selected agent module's `config.json`, with env retained only as fallback for backward compatibility.
 2. Install deps and start the loop:
 
 ```bash
@@ -96,9 +96,6 @@ Configure Message API settings in `agent-library/agents/<name>/config.json`:
     "signerAllowlist": [
       "0x1111111111111111111111111111111111111111"
     ],
-    "keys": {
-      "ops": "k_live_replace_me"
-    },
     "signatureMaxAgeSeconds": 300,
     "maxBodyBytes": 8192,
     "maxTextLength": 2000,
@@ -118,7 +115,6 @@ Supported `messageApi` fields:
 - `enabled`: Set to `true` to start the API server.
 - `host`: Bind host (default `127.0.0.1`).
 - `port`: Bind port (default `8787`).
-- `keys`: Optional JSON object of API key ids to tokens, for example `{"ops":"k_live_replace_me"}`. When set, requests must include both a valid bearer token and valid signed auth.
 - `requireSignerAllowlist`: Require `signerAllowlist` membership for signed requests (`true`/`false`, default `true`).
 - `signerAllowlist`: Optional array of EVM addresses allowed to sign requests. Required when `requireSignerAllowlist=true`.
 - `signatureMaxAgeSeconds`: Max signature age (default `300`).
@@ -132,6 +128,8 @@ Supported `messageApi` fields:
 - `idempotencyTtlSeconds`: Request replay/dedup cache window (default `86400`).
 - `rateLimitPerMinute`: Per-key refill rate (default `30`).
 - `rateLimitBurst`: Per-key burst capacity (default `10`).
+
+Keep bearer tokens in env via `MESSAGE_API_KEYS_JSON`; `messageApi.keys` is intentionally not supported in repo-tracked commitment config because those tokens are secret.
 
 Use `byChain.<chainId>.messageApi` for chain-specific overrides to the shared `messageApi` object.
 
@@ -167,7 +165,7 @@ All accepted messages must include signed auth:
   `address`, `timestampMs`, `text`, `command`, `args`, `metadata`, `requestId`, and `deadline`
 - when `messageApi.requireSignerAllowlist=true`, the recovered signer must also appear in `messageApi.signerAllowlist`
 - signed requests keep `requestId` replay-locked for at least `messageApi.signatureMaxAgeSeconds`; replays during that window return `409` with code `request_replay_blocked`
-- when `messageApi.keys` is configured, a valid `Authorization: Bearer ...` header is also required
+- when `MESSAGE_API_KEYS_JSON` is configured, a valid `Authorization: Bearer ...` header is also required
 
 Example request with optional bearer gate:
 
@@ -442,18 +440,26 @@ An agent directory may also include an optional `config.json` for repo-tracked, 
 `config.json` is loaded from `agent-library/agents/<name>/config.json` and merged like this:
 - top-level keys apply on every chain
 - `byChain.<chainId>` overrides top-level keys for the active RPC chain
-- `commitmentSafe`, `ogModule`, `watchAssets`, and `watchErc1155Assets` from the file override env values when present
-- if the file is missing, or those keys are absent or `null`, the runner falls back to `COMMITMENT_SAFE`, `OG_MODULE`, `WATCH_ASSETS`, and `WATCH_ERC1155_ASSETS_JSON`
+- non-secret shared runner fields from the file override env fallbacks when present, including `commitmentSafe`, `ogModule`, `watchAssets`, `watchErc1155Assets`, `pollIntervalMs`, `logChunkSize`, `startBlock`, `watchNativeBalance`, `defaultDepositAsset`, `defaultDepositAmountWei`, `bondSpender`, proposal/dispute toggles and retry controls, `openAiModel`, `openAiBaseUrl`, `openAiRequestTimeoutMs`, `ipfsEnabled`, `ipfsApiUrl`, `ipfsRequestTimeoutMs`, `ipfsMaxRetries`, `ipfsRetryDelayMs`, `chainlinkPriceFeed`, `uniswapV3*`, `polymarket*`, and `messageApi`
+- if the file is missing, or those keys are absent or `null`, the runner falls back to env values
+- secrets remain env-only: signer credentials, `OPENAI_API_KEY`, `MESSAGE_API_KEYS_JSON`, Polymarket API credentials, `IPFS_HEADERS_JSON` auth headers, and similar bearer/API keys
 
 Example:
 
 ```json
 {
   "policyName": "fast-withdraw",
+  "pollIntervalMs": 15000,
+  "proposeEnabled": true,
+  "disputeEnabled": true,
+  "openAiModel": "gpt-4.1-mini",
+  "polymarketClobEnabled": true,
+  "polymarketClobHost": "https://clob.polymarket.com",
   "byChain": {
     "11155111": {
       "commitmentSafe": "0x1111111111111111111111111111111111111111",
       "ogModule": "0x2222222222222222222222222222222222222222",
+      "startBlock": "8123456",
       "watchAssets": [
         "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
       ],

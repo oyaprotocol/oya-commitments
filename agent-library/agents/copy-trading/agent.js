@@ -93,6 +93,14 @@ function hasClobCredentials(config) {
     );
 }
 
+function getCopyTradingConfig(config) {
+    const candidate = config?.agentConfig?.copyTrading ?? config?.copyTrading;
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+        return {};
+    }
+    return candidate;
+}
+
 function getClobAuthAddress({ config, accountAddress }) {
     return (
         normalizeAddress(config?.polymarketClobAddress) ??
@@ -362,15 +370,24 @@ function parseActivityEntry(entry) {
 }
 
 function getPolicy(config) {
-    const sourceUserRaw = process.env.COPY_TRADING_SOURCE_USER;
-    const market = process.env.COPY_TRADING_MARKET?.trim() || null;
-    const yesTokenId = normalizeTokenId(process.env.COPY_TRADING_YES_TOKEN_ID);
-    const noTokenId = normalizeTokenId(process.env.COPY_TRADING_NO_TOKEN_ID);
+    const policyConfig = getCopyTradingConfig(config);
+    const sourceUserRaw = policyConfig.sourceUser ?? process.env.COPY_TRADING_SOURCE_USER;
+    const market = String(policyConfig.market ?? process.env.COPY_TRADING_MARKET ?? '').trim() || null;
+    const yesTokenId = normalizeTokenId(
+        policyConfig.yesTokenId ?? process.env.COPY_TRADING_YES_TOKEN_ID
+    );
+    const noTokenId = normalizeTokenId(
+        policyConfig.noTokenId ?? process.env.COPY_TRADING_NO_TOKEN_ID
+    );
     const collateralToken =
-        normalizeAddress(process.env.COPY_TRADING_COLLATERAL_TOKEN) ??
+        normalizeAddress(
+            policyConfig.collateralToken ?? process.env.COPY_TRADING_COLLATERAL_TOKEN
+        ) ??
         normalizeAddress(DEFAULT_COLLATERAL_TOKEN);
     const ctfContract =
-        normalizeAddress(process.env.COPY_TRADING_CTF_CONTRACT) ??
+        normalizeAddress(
+            policyConfig.ctfContract ?? process.env.COPY_TRADING_CTF_CONTRACT
+        ) ??
         normalizeAddress(config?.polymarketConditionalTokens);
 
     const errors = [];
