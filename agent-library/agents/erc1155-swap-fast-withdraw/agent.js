@@ -17,6 +17,7 @@ const DEFAULT_USDC_UNIT_AMOUNT_WEI = 1_000_000n;
 const DEFAULT_FILL_CONFIRMATION_THRESHOLD = 1n;
 const DEFAULT_SIGNED_COMMANDS = ['fast_withdraw', 'fast_withdraw_erc1155'];
 const DEFAULT_PENDING_TX_TIMEOUT_MS = 900_000;
+const DEFAULT_ARCHIVE_RETRY_DELAY_MS = 30_000;
 const DEFAULT_LOG_CHUNK_SIZE = 5_000n;
 const ARTIFACT_VERSION = 'oya-signed-request-archive-v1';
 const FILENAME_PREFIX = 'signed-request-';
@@ -286,6 +287,13 @@ function resolvePolicy(config) {
                       'agentConfig.pendingTxTimeoutMs'
                   )
                 : DEFAULT_PENDING_TX_TIMEOUT_MS,
+        archiveRetryDelayMs:
+            agentConfig.archiveRetryDelayMs !== undefined
+                ? normalizePositiveInteger(
+                      agentConfig.archiveRetryDelayMs,
+                      'agentConfig.archiveRetryDelayMs'
+                  )
+                : DEFAULT_ARCHIVE_RETRY_DELAY_MS,
         logChunkSize:
             config?.logChunkSize !== undefined && config?.logChunkSize !== null
                 ? BigInt(config.logChunkSize)
@@ -1503,10 +1511,14 @@ function getReimbursementCandidateOrders() {
     );
 }
 
-function getArchiveCandidateOrders() {
+function getArchiveCandidateOrders(policy) {
+    const nowMs = Date.now();
     return getOpenOrders().filter(
         (order) =>
             !order.artifactUri &&
+            (!order.nextArchiveAttemptAtMs ||
+                Number(order.nextArchiveAttemptAtMs) <= nowMs ||
+                !Number.isFinite(Number(order.nextArchiveAttemptAtMs))) &&
             !order.reimbursementProposalHash &&
             !order.reimbursementSubmissionTxHash
     );
@@ -1616,13 +1628,20 @@ async function getDeterministicToolCalls({
     });
     await maybePersistSwapState();
 
-    for (const order of getArchiveCandidateOrders()) {
+    for (const order of getArchiveCandidateOrders(policy)) {
         if (!config?.ipfsEnabled) {
             continue;
         }
 
+        const nowMs = Date.now();
+        order.archiveAttemptCount = Number(order.archiveAttemptCount ?? 0) + 1;
+        order.lastArchiveAttemptAtMs = nowMs;
+        order.nextArchiveAttemptAtMs = nowMs + policy.archiveRetryDelayMs;
+        order.lastUpdatedAtMs = nowMs;
+        markSwapStateDirty();
+        await maybePersistSwapState();
         console.log(
-            `[agent] Preparing signed request archive for order ${order.orderId}.`
+            `[agent] Preparing signed request archive for order ${order.orderId} (attempt=${order.archiveAttemptCount} retryDelayMs=${policy.archiveRetryDelayMs}).`
         );
         pendingArtifactPublish = {
             orderId: order.orderId,
@@ -1713,13 +1732,45 @@ async function onToolOutput({ name, parsedOutput }) {
     if (name === 'ipfs_publish') {
         const pending = pendingArtifactPublish;
         pendingArtifactPublish = null;
-        if (!pending) return;
-        if (!parsedOutput || parsedOutput.status !== 'published') {
+        if (!pending) {
+            console.warn('[agent] Received ipfs_publish tool output with no pending archive request.');
             return;
         }
 
         const order = swapState.orders[pending.orderId];
         if (!order) {
+            console.warn(
+                `[agent] Received ipfs_publish tool output for unknown order ${pending.orderId}.`
+            );
+            return;
+        }
+
+        if (!parsedOutput || parsedOutput.status !== 'published') {
+            const status =
+                typeof parsedOutput?.status === 'string' && parsedOutput.status.trim()
+                    ? parsedOutput.status.trim()
+                    : 'unknown';
+            const detail =
+                typeof parsedOutput?.message === 'string' && parsedOutput.message.trim()
+                    ? parsedOutput.message.trim()
+                    : typeof parsedOutput?.reason === 'string' && parsedOutput.reason.trim()
+                        ? parsedOutput.reason.trim()
+                        : `tool returned status=${status}`;
+            order.lastArchiveError = detail;
+            order.lastArchiveErrorStatus = status;
+            order.lastArchiveErrorRetryable = parsedOutput?.retryable === true;
+            order.lastArchiveErrorAtMs = Date.now();
+            order.lastUpdatedAtMs = Date.now();
+            markSwapStateDirty();
+            await persistSwapState();
+            console.warn(
+                `[agent] Signed request archive failed for order ${pending.orderId}: status=${status} retryable=${parsedOutput?.retryable === true} detail=${detail}.`
+            );
+            if (typeof order.nextArchiveAttemptAtMs === 'number') {
+                console.warn(
+                    `[agent] Archive retry for ${pending.orderId} deferred until ${order.nextArchiveAttemptAtMs}.`
+                );
+            }
             return;
         }
 
@@ -1738,9 +1789,17 @@ async function onToolOutput({ name, parsedOutput }) {
         order.artifactCid = cid ?? order.artifactCid ?? null;
         order.artifactUri = uri ?? order.artifactUri ?? null;
         order.artifactPublishedAtMs = Date.now();
+        order.lastArchiveError = null;
+        order.lastArchiveErrorStatus = null;
+        order.lastArchiveErrorRetryable = null;
+        order.lastArchiveErrorAtMs = null;
+        order.nextArchiveAttemptAtMs = null;
         order.lastUpdatedAtMs = Date.now();
         markSwapStateDirty();
         await persistSwapState();
+        console.log(
+            `[agent] Signed request archive published for order ${pending.orderId}: uri=${order.artifactUri}.`
+        );
         return;
     }
 
