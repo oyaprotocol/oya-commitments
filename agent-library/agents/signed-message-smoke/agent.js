@@ -14,4 +14,8 @@ function getSystemPrompt({ commitmentText }) {
         .join(' ');
 }
 
-export { getSystemPrompt };
+async function getDeterministicToolCalls() {
+    return [];
+}
+
+export { getDeterministicToolCalls, getSystemPrompt };
