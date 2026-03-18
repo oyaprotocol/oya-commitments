@@ -900,6 +900,211 @@ async function testDirectFillWaitsForSafeReimbursementLiquidity() {
     });
 }
 
+async function testSignedRequestRequiresIpfsEnabled() {
+    await withTempStatePath(async () => {
+        const config = buildConfig({
+            ipfsEnabled: false,
+        });
+
+        await assert.rejects(
+            () =>
+                getDeterministicToolCalls({
+                    signals: [
+                        buildDepositSignal({
+                            id: 'deposit-ipfs-disabled',
+                            from: SIGNER,
+                            amountWei: 1_000_000n,
+                        }),
+                        buildSignedRequestSignal({
+                            requestId: 'req-ipfs-disabled',
+                            signer: SIGNER,
+                            recipient: RECIPIENT,
+                            amount: '1',
+                        }),
+                    ],
+                    commitmentText: '',
+                    commitmentSafe: SAFE,
+                    agentAddress: AGENT,
+                    publicClient: buildPublicClient({
+                        safeUsdcBalance: 1_000_000n,
+                        agentErc1155Balance: 5n,
+                    }),
+                    config,
+                    onchainPendingProposal: false,
+                }),
+            /IPFS_ENABLED=true/i
+        );
+
+        const state = await getSwapState();
+        assert.equal(state.orders[buildRequestOrderId(SIGNER, 'req-ipfs-disabled')], undefined);
+    });
+}
+
+async function testPendingArchiveOrdersRequireIpfsEnabled() {
+    await withTempStatePath(async () => {
+        const initialConfig = buildConfig();
+        const archiveCalls = await getDeterministicToolCalls({
+            signals: [
+                buildDepositSignal({
+                    id: 'deposit-pending-archive-ipfs-disabled',
+                    from: SIGNER,
+                    amountWei: 1_000_000n,
+                }),
+                buildSignedRequestSignal({
+                    requestId: 'req-pending-archive-ipfs-disabled',
+                    signer: SIGNER,
+                    recipient: RECIPIENT,
+                    amount: '1',
+                }),
+            ],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                safeUsdcBalance: 1_000_000n,
+                agentErc1155Balance: 5n,
+            }),
+            config: initialConfig,
+            onchainPendingProposal: false,
+        });
+        assert.equal(archiveCalls.length, 1);
+        assert.equal(archiveCalls[0].name, 'ipfs_publish');
+
+        const configWithoutIpfs = buildConfig({
+            ipfsEnabled: false,
+        });
+        await assert.rejects(
+            () =>
+                getDeterministicToolCalls({
+                    signals: [],
+                    commitmentText: '',
+                    commitmentSafe: SAFE,
+                    agentAddress: AGENT,
+                    publicClient: buildPublicClient({
+                        safeUsdcBalance: 1_000_000n,
+                        agentErc1155Balance: 5n,
+                    }),
+                    config: configWithoutIpfs,
+                    onchainPendingProposal: false,
+                }),
+            /IPFS_ENABLED=true/i
+        );
+    });
+}
+
+async function testReimbursementProposalRespectsPendingSafeReservations() {
+    await withTempStatePath(async () => {
+        const config = buildConfig();
+        await createSubmittedSignedRequestReimbursementOrder({
+            config,
+            signer: SIGNER,
+            recipient: BUYER,
+            requestId: 'req-reserved-safe-a',
+            depositId: 'deposit-reserved-safe-a',
+            depositTransactionHash: `0x${'7'.repeat(64)}`,
+            directFillTxHash: DIRECT_FILL_TX_HASH,
+            proposalSubmissionTxHash: PROPOSAL_TX_HASH,
+        });
+
+        const secondArchiveCalls = await getDeterministicToolCalls({
+            signals: [
+                buildDepositSignal({
+                    id: 'deposit-reserved-safe-b',
+                    from: OTHER_SIGNER,
+                    amountWei: 1_000_000n,
+                    transactionHash: `0x${'8'.repeat(64)}`,
+                }),
+                buildSignedRequestSignal({
+                    requestId: 'req-reserved-safe-b',
+                    signer: OTHER_SIGNER,
+                    recipient: RECIPIENT,
+                    amount: '1',
+                }),
+            ],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                safeUsdcBalance: 2_000_000n,
+                agentErc1155Balance: 5n,
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+        assert.equal(secondArchiveCalls.length, 1);
+        assert.equal(secondArchiveCalls[0].name, 'ipfs_publish');
+
+        await onToolOutput({
+            name: 'ipfs_publish',
+            parsedOutput: buildPublishedIpfsOutput('req-reserved-safe-b'),
+        });
+
+        const secondFillCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                safeUsdcBalance: 2_000_000n,
+                agentErc1155Balance: 4n,
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+        assert.equal(secondFillCalls.length, 1);
+        assert.equal(secondFillCalls[0].name, 'make_erc1155_transfer');
+
+        await onToolOutput({
+            name: 'make_erc1155_transfer',
+            parsedOutput: {
+                status: 'confirmed',
+                transactionHash: DIRECT_FILL_TX_HASH_2,
+            },
+        });
+
+        const blockedReimbursementCalls = await getDeterministicToolCalls({
+            signals: [
+                {
+                    kind: 'erc20BalanceSnapshot',
+                    asset: USDC,
+                    amount: 1_000_000n,
+                },
+            ],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                safeUsdcBalance: 1_000_000n,
+                agentErc1155Balance: 3n,
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+        assert.equal(blockedReimbursementCalls.length, 0);
+
+        const allowedReimbursementCalls = await getDeterministicToolCalls({
+            signals: [
+                {
+                    kind: 'erc20BalanceSnapshot',
+                    asset: USDC,
+                    amount: 2_000_000n,
+                },
+            ],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                safeUsdcBalance: 2_000_000n,
+                agentErc1155Balance: 3n,
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+        assert.equal(allowedReimbursementCalls.length, 1);
+        assert.equal(allowedReimbursementCalls[0].name, 'post_bond_and_propose');
+    });
+}
+
 async function testFreeTextSignedRequestUsesLlmInterpretation() {
     await withTempStatePath(async () => {
         let llmCalls = 0;
@@ -2083,6 +2288,9 @@ async function run() {
     await testHistoricalBackfillDecodesEscapedRequestIds();
     await testSignedFastWithdrawLifecycleUsesDepositorCredit();
     await testDirectFillWaitsForSafeReimbursementLiquidity();
+    await testSignedRequestRequiresIpfsEnabled();
+    await testPendingArchiveOrdersRequireIpfsEnabled();
+    await testReimbursementProposalRespectsPendingSafeReservations();
     await testFreeTextSignedRequestUsesLlmInterpretation();
     await testArchiveFailureLogsAndBacksOffBeforeRetry();
     await testStatePersistsSeparatelyPerCommitment();
