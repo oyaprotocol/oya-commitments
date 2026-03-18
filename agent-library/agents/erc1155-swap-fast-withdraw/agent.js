@@ -1553,6 +1553,7 @@ function getArchiveCandidateOrders(policy) {
     const nowMs = Date.now();
     return getOrdersAwaitingArchive().filter(
         (order) =>
+            order.lastArchiveErrorRetryable !== false &&
             (!order.nextArchiveAttemptAtMs ||
                 Number(order.nextArchiveAttemptAtMs) <= nowMs ||
                 !Number.isFinite(Number(order.nextArchiveAttemptAtMs)))
@@ -1773,6 +1774,38 @@ async function getDeterministicToolCalls({
     return [];
 }
 
+function getParsedToolOutputStatus(parsedOutput) {
+    return typeof parsedOutput?.status === 'string' && parsedOutput.status.trim()
+        ? parsedOutput.status.trim()
+        : 'unknown';
+}
+
+function getParsedToolOutputDetail(parsedOutput, status) {
+    if (typeof parsedOutput?.message === 'string' && parsedOutput.message.trim()) {
+        return parsedOutput.message.trim();
+    }
+    if (typeof parsedOutput?.reason === 'string' && parsedOutput.reason.trim()) {
+        return parsedOutput.reason.trim();
+    }
+    return `tool returned status=${status}`;
+}
+
+function markTerminalOrderFailure(order, { stage, status, detail, retryable, sideEffectsLikelyCommitted, releaseCredit }) {
+    const nowMs = Date.now();
+    order.terminalFailureStage = stage;
+    order.terminalFailureStatus = status;
+    order.terminalFailureMessage = detail;
+    order.terminalFailureRetryable = retryable === true;
+    order.terminalFailureSideEffectsLikelyCommitted = sideEffectsLikelyCommitted === true;
+    order.terminalFailedAtMs = nowMs;
+    order.closedAtMs = nowMs;
+    if (releaseCredit) {
+        order.creditReleasedAtMs = nowMs;
+    }
+    order.lastUpdatedAtMs = nowMs;
+    markSwapStateDirty();
+}
+
 async function onToolOutput({ name, parsedOutput }) {
     await hydrateSwapState();
 
@@ -1793,27 +1826,35 @@ async function onToolOutput({ name, parsedOutput }) {
         }
 
         if (!parsedOutput || parsedOutput.status !== 'published') {
-            const status =
-                typeof parsedOutput?.status === 'string' && parsedOutput.status.trim()
-                    ? parsedOutput.status.trim()
-                    : 'unknown';
-            const detail =
-                typeof parsedOutput?.message === 'string' && parsedOutput.message.trim()
-                    ? parsedOutput.message.trim()
-                    : typeof parsedOutput?.reason === 'string' && parsedOutput.reason.trim()
-                        ? parsedOutput.reason.trim()
-                        : `tool returned status=${status}`;
+            const status = getParsedToolOutputStatus(parsedOutput);
+            const detail = getParsedToolOutputDetail(parsedOutput, status);
+            const retryable = parsedOutput?.retryable === true;
             order.lastArchiveError = detail;
             order.lastArchiveErrorStatus = status;
-            order.lastArchiveErrorRetryable = parsedOutput?.retryable === true;
+            order.lastArchiveErrorRetryable = retryable;
             order.lastArchiveErrorAtMs = Date.now();
             order.lastUpdatedAtMs = Date.now();
+            if (!retryable) {
+                order.nextArchiveAttemptAtMs = null;
+                markTerminalOrderFailure(order, {
+                    stage: 'archive',
+                    status,
+                    detail,
+                    retryable,
+                    sideEffectsLikelyCommitted: false,
+                    releaseCredit: true,
+                });
+            }
             markSwapStateDirty();
             await persistSwapState();
             console.warn(
-                `[agent] Signed request archive failed for order ${pending.orderId}: status=${status} retryable=${parsedOutput?.retryable === true} detail=${detail}.`
+                `[agent] Signed request archive failed for order ${pending.orderId}: status=${status} retryable=${retryable} detail=${detail}.`
             );
-            if (typeof order.nextArchiveAttemptAtMs === 'number') {
+            if (!retryable) {
+                console.warn(
+                    `[agent] Signed request archive failed permanently for order ${pending.orderId}; released reserved credit and closed the order.`
+                );
+            } else if (typeof order.nextArchiveAttemptAtMs === 'number') {
                 console.warn(
                     `[agent] Archive retry for ${pending.orderId} deferred until ${order.nextArchiveAttemptAtMs}.`
                 );
@@ -1854,12 +1895,32 @@ async function onToolOutput({ name, parsedOutput }) {
         const pending = pendingDirectFill;
         pendingDirectFill = null;
         if (!pending) return;
-        if (!parsedOutput || (parsedOutput.status !== 'confirmed' && parsedOutput.status !== 'submitted')) {
+        const order = swapState.orders[pending.orderId];
+        if (!order) {
             return;
         }
 
-        const order = swapState.orders[pending.orderId];
-        if (!order) {
+        if (!parsedOutput || (parsedOutput.status !== 'confirmed' && parsedOutput.status !== 'submitted')) {
+            const retryable = parsedOutput?.retryable === true;
+            if (!parsedOutput || retryable) {
+                return;
+            }
+
+            const status = getParsedToolOutputStatus(parsedOutput);
+            const detail = getParsedToolOutputDetail(parsedOutput, status);
+            const sideEffectsLikelyCommitted = parsedOutput?.sideEffectsLikelyCommitted === true;
+            markTerminalOrderFailure(order, {
+                stage: 'direct_fill',
+                status,
+                detail,
+                retryable,
+                sideEffectsLikelyCommitted,
+                releaseCredit: !sideEffectsLikelyCommitted,
+            });
+            await persistSwapState();
+            console.warn(
+                `[agent] Direct ERC1155 fill failed permanently for order ${pending.orderId}: status=${status} sideEffectsLikelyCommitted=${sideEffectsLikelyCommitted} detail=${detail}.`
+            );
             return;
         }
 
@@ -1878,12 +1939,32 @@ async function onToolOutput({ name, parsedOutput }) {
         const pending = pendingProposal;
         pendingProposal = null;
         if (!pending) return;
-        if (!parsedOutput || parsedOutput.status !== 'submitted') {
+        const order = swapState.orders[pending.orderId];
+        if (!order) {
             return;
         }
 
-        const order = swapState.orders[pending.orderId];
-        if (!order) {
+        if (!parsedOutput || parsedOutput.status !== 'submitted') {
+            const retryable = parsedOutput?.retryable === true;
+            if (!parsedOutput || retryable) {
+                return;
+            }
+
+            const status = getParsedToolOutputStatus(parsedOutput);
+            const detail = getParsedToolOutputDetail(parsedOutput, status);
+            const sideEffectsLikelyCommitted = parsedOutput?.sideEffectsLikelyCommitted === true;
+            markTerminalOrderFailure(order, {
+                stage: 'reimbursement_proposal',
+                status,
+                detail,
+                retryable,
+                sideEffectsLikelyCommitted,
+                releaseCredit: false,
+            });
+            await persistSwapState();
+            console.warn(
+                `[agent] Reimbursement proposal failed permanently for order ${pending.orderId}: status=${status} sideEffectsLikelyCommitted=${sideEffectsLikelyCommitted} detail=${detail}.`
+            );
             return;
         }
 
