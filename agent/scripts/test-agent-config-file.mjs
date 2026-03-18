@@ -214,6 +214,12 @@ async function run() {
                 ipfsRequestTimeoutMs: 20_000,
                 ipfsMaxRetries: 4,
                 ipfsRetryDelayMs: 500,
+                copyTrading: {
+                    sourceUser: FILE_SIGNER,
+                    market: 'shared-market',
+                    yesTokenId: '111',
+                    noTokenId: '222',
+                },
                 messageApi: {
                     enabled: true,
                     host: '0.0.0.0',
@@ -230,6 +236,9 @@ async function run() {
                         proposeEnabled: true,
                         polymarketRelayerPollTimeoutMs: 222_000,
                         ipfsRetryDelayMs: 750,
+                        copyTrading: {
+                            market: 'chain-market',
+                        },
                         messageApi: {
                             port: 9898,
                             requireSignerAllowlist: false,
@@ -323,6 +332,12 @@ async function run() {
     assert.equal(resolved.ipfsRequestTimeoutMs, 20_000);
     assert.equal(resolved.ipfsMaxRetries, 4);
     assert.equal(resolved.ipfsRetryDelayMs, 750);
+    assert.deepEqual(resolved.agentConfig.copyTrading, {
+        sourceUser: FILE_SIGNER,
+        market: 'chain-market',
+        yesTokenId: '111',
+        noTokenId: '222',
+    });
     assert.equal(resolved.messageApiEnabled, true);
     assert.equal(resolved.messageApiHost, '0.0.0.0');
     assert.equal(resolved.messageApiPort, 9898);
