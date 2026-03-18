@@ -20,7 +20,7 @@
       "reservedCreditAmountWei": "1000000",
       "creditReservedAtMs": 1773789313205,
       "sequence": 1,
-      "lastUpdatedAtMs": 1773795562598,
+      "lastUpdatedAtMs": 1773796581334,
       "directFillTxHash": "0x3c69658bdaaccb2ff5c69c0a80be0e712d7dc79a244d46396e9cc0df6b029ac7",
       "directFillSubmittedAtMs": 1773789339637,
       "directFillConfirmations": 1,
@@ -29,7 +29,7 @@
       "reimbursementSubmissionTxHash": "0x3c7529a5a7a0ab806a2c29068d5a943ead4abb7466849ae4f64ee491f6d3f238",
       "reimbursementProposalHash": "0x1bf437156e014b18d38554e94af8b6d7681e66e79330d2e60d778c0c77722766",
       "reimbursementSubmittedAtMs": 1773789373589,
-      "reimbursedAtMs": 1773795562598
+      "reimbursedAtMs": 1773796581334
     },
     "request:0xd484386DBF7D656fA2363b89E10c89f928C09288:ft-sepolia-2": {
       "orderId": "request:0xd484386DBF7D656fA2363b89E10c89f928C09288:ft-sepolia-2",
@@ -53,7 +53,26 @@
       "reservedCreditAmountWei": "1000000",
       "creditReservedAtMs": 1773793905620,
       "sequence": 2,
-      "lastUpdatedAtMs": 1773793905620
+      "lastUpdatedAtMs": 1773796581334,
+      "archiveAttemptCount": 2,
+      "lastArchiveAttemptAtMs": 1773796194299,
+      "nextArchiveAttemptAtMs": null,
+      "lastArchiveError": null,
+      "lastArchiveErrorStatus": null,
+      "lastArchiveErrorRetryable": null,
+      "lastArchiveErrorAtMs": null,
+      "artifactCid": "bafkreidbbhwk7q2yinic62dlern2g2ufnkalgsu4ajkontntv4yuadlppa",
+      "artifactUri": "ipfs://bafkreidbbhwk7q2yinic62dlern2g2ufnkalgsu4ajkontntv4yuadlppa",
+      "artifactPublishedAtMs": 1773796194361,
+      "directFillTxHash": "0x4c302821a3cf7c70336905835f292620b86bd4d7f7340daa3f788a732a50bed4",
+      "directFillSubmittedAtMs": 1773796216297,
+      "directFillConfirmations": 1,
+      "directFillConfirmed": true,
+      "reimbursementExplanation": "erc1155-swap-fast-withdraw reimbursement | order=request:0xd484386DBF7D656fA2363b89E10c89f928C09288:ft-sepolia-2 | requestId=ft-sepolia-2 | signer=0xd484386DBF7D656fA2363b89E10c89f928C09288 | signedRequestCid=ipfs://bafkreidbbhwk7q2yinic62dlern2g2ufnkalgsu4ajkontntv4yuadlppa | token=0xa1B6d741CF7EF18D4C2C6f76DaF981E4f5FCbe4E | tokenId=1001 | amount=1 | reservedCreditWei=1000000 | recipient=0xd484386DBF7D656fA2363b89E10c89f928C09288 | directFillTx=0x4c302821a3cf7c70336905835f292620b86bd4d7f7340daa3f788a732a50bed4",
+      "reimbursementSubmissionTxHash": "0x337505b05f57f93c80605d15678f2285a3911dd9df33749111aa08815d8f6978",
+      "reimbursementProposalHash": "0x1bf437156e014b18d38554e94af8b6d7681e66e79330d2e60d778c0c77722766",
+      "reimbursementSubmittedAtMs": 1773796248708,
+      "reimbursedAtMs": 1773796581334
     }
   },
   "deposits": {
