@@ -68,6 +68,33 @@ function parseIntegerValue(value, label, { min = undefined, max = undefined } = 
     return parsed;
 }
 
+function parseBigIntValue(value, label, { min = undefined, max = undefined } = {}) {
+    let parsed;
+    try {
+        parsed = BigInt(value);
+    } catch (error) {
+        throw new Error(`${label} must be an integer`);
+    }
+    if (min !== undefined && parsed < min) {
+        throw new Error(`${label} must be >= ${min.toString()}`);
+    }
+    if (max !== undefined && parsed > max) {
+        throw new Error(`${label} must be <= ${max.toString()}`);
+    }
+    return parsed;
+}
+
+function parseStringValue(value, label) {
+    if (typeof value !== 'string') {
+        throw new Error(`${label} must be a string`);
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+        throw new Error(`${label} must not be blank`);
+    }
+    return trimmed;
+}
+
 function parseStringRecord(value, label) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
         throw new Error(`${label} must be a JSON object`);
@@ -142,6 +169,103 @@ function parseErc1155AssetArray(values, label) {
     });
 }
 
+function parseBondSpenderValue(value, label) {
+    const normalized = parseStringValue(value, label).toLowerCase();
+    if (normalized !== 'og' && normalized !== 'oo' && normalized !== 'both') {
+        throw new Error(`${label} must be one of: og, oo, both`);
+    }
+    return normalized;
+}
+
+function parseFeeTierArrayValue(value, label) {
+    if (!Array.isArray(value)) {
+        throw new Error(`${label} must be an array of positive integers`);
+    }
+
+    return value.map((item, index) =>
+        parseIntegerValue(item, `${label}[${index}]`, { min: 1 })
+    );
+}
+
+const SHARED_RUNTIME_FIELD_DEFINITIONS = Object.freeze([
+    ['pollIntervalMs', (value, label) => parseIntegerValue(value, label, { min: 1 })],
+    ['logChunkSize', (value, label) => parseBigIntValue(value, label, { min: 1n })],
+    ['startBlock', (value, label) => parseBigIntValue(value, label, { min: 0n })],
+    ['watchNativeBalance', parseBooleanValue],
+    ['defaultDepositAsset', parseOptionalAddress],
+    ['defaultDepositAmountWei', (value, label) => parseBigIntValue(value, label, { min: 0n })],
+    ['bondSpender', parseBondSpenderValue],
+    ['openAiModel', parseStringValue],
+    ['openAiBaseUrl', parseHostValue],
+    ['openAiRequestTimeoutMs', (value, label) => parseIntegerValue(value, label, { min: 1 })],
+    ['allowProposeOnSimulationFail', parseBooleanValue],
+    ['proposeGasLimit', (value, label) => parseBigIntValue(value, label, { min: 1n })],
+    ['executeRetryMs', (value, label) => parseIntegerValue(value, label, { min: 1 })],
+    ['executePendingTxTimeoutMs', (value, label) => parseIntegerValue(value, label, { min: 1 })],
+    ['proposeEnabled', parseBooleanValue],
+    ['disputeEnabled', parseBooleanValue],
+    ['disputeRetryMs', (value, label) => parseIntegerValue(value, label, { min: 1 })],
+    ['proposalHashResolveTimeoutMs', (value, label) => parseIntegerValue(value, label, { min: 0 })],
+    [
+        'proposalHashResolvePollIntervalMs',
+        (value, label) => parseIntegerValue(value, label, { min: 1 }),
+    ],
+    ['chainlinkPriceFeed', parseOptionalAddress],
+    ['polymarketConditionalTokens', parseOptionalAddress],
+    ['polymarketExchange', parseOptionalAddress],
+    ['polymarketClobEnabled', parseBooleanValue],
+    ['polymarketClobHost', parseHostValue],
+    ['polymarketClobAddress', parseOptionalAddress],
+    ['polymarketClobSignatureType', parseStringValue],
+    ['polymarketClobRequestTimeoutMs', (value, label) => parseIntegerValue(value, label, { min: 0 })],
+    ['polymarketClobMaxRetries', (value, label) => parseIntegerValue(value, label, { min: 0 })],
+    ['polymarketClobRetryDelayMs', (value, label) => parseIntegerValue(value, label, { min: 0 })],
+    ['polymarketRelayerEnabled', parseBooleanValue],
+    ['polymarketRelayerHost', parseHostValue],
+    ['polymarketRelayerTxType', parseStringValue],
+    ['polymarketRelayerFromAddress', parseOptionalAddress],
+    ['polymarketRelayerSafeFactory', parseOptionalAddress],
+    ['polymarketRelayerProxyFactory', parseOptionalAddress],
+    ['polymarketRelayerResolveProxyAddress', parseBooleanValue],
+    ['polymarketRelayerAutoDeployProxy', parseBooleanValue],
+    ['polymarketRelayerChainId', (value, label) => parseIntegerValue(value, label, { min: 1 })],
+    ['polymarketRelayerRequestTimeoutMs', (value, label) => parseIntegerValue(value, label, { min: 0 })],
+    ['polymarketRelayerPollIntervalMs', (value, label) => parseIntegerValue(value, label, { min: 1 })],
+    ['polymarketRelayerPollTimeoutMs', (value, label) => parseIntegerValue(value, label, { min: 0 })],
+    ['uniswapV3Factory', parseOptionalAddress],
+    ['uniswapV3Quoter', parseOptionalAddress],
+    ['uniswapV3FeeTiers', parseFeeTierArrayValue],
+    ['ipfsEnabled', parseBooleanValue],
+    ['ipfsApiUrl', parseHostValue],
+    ['ipfsRequestTimeoutMs', (value, label) => parseIntegerValue(value, label, { min: 1 })],
+    ['ipfsMaxRetries', (value, label) => parseIntegerValue(value, label, { min: 0 })],
+    ['ipfsRetryDelayMs', (value, label) => parseIntegerValue(value, label, { min: 0 })],
+]);
+
+const SHARED_RUNTIME_FIELD_KEYS = Object.freeze(
+    SHARED_RUNTIME_FIELD_DEFINITIONS.map(([key]) => key)
+);
+
+function pickConfigFields(source, keys) {
+    const out = {};
+    for (const key of keys) {
+        out[key] = source?.[key];
+    }
+    return out;
+}
+
+function resolveFieldOverride({ resolvedAgentConfig, baseConfig, key, label, parser }) {
+    if (!hasOwn(resolvedAgentConfig, key)) {
+        return baseConfig[key];
+    }
+
+    const rawValue = resolvedAgentConfig[key];
+    const resolvedValue =
+        rawValue === undefined || rawValue === null ? baseConfig[key] : parser(rawValue, label);
+    resolvedAgentConfig[key] = resolvedValue;
+    return resolvedValue;
+}
+
 function parseMessageApiOverride(value, label) {
     if (value === undefined || value === null) {
         return undefined;
@@ -161,7 +285,9 @@ function parseMessageApiOverride(value, label) {
         out.port = parseIntegerValue(value.port, `${label}.port`, { min: 1 });
     }
     if (hasOwn(value, 'keys')) {
-        out.keys = parseStringRecord(value.keys, `${label}.keys`);
+        throw new Error(
+            `${label}.keys is not supported in config.json; use MESSAGE_API_KEYS_JSON for secret bearer tokens`
+        );
     }
     if (hasOwn(value, 'requireSignerAllowlist')) {
         out.requireSignerAllowlist = parseBooleanValue(
@@ -346,6 +472,7 @@ function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
             ogModule: baseConfig.ogModule,
             watchAssets: baseConfig.watchAssets,
             watchErc1155Assets: baseConfig.watchErc1155Assets,
+            ...pickConfigFields(baseConfig, SHARED_RUNTIME_FIELD_KEYS),
             messageApiEnabled: baseConfig.messageApiEnabled,
             messageApiHost: baseConfig.messageApiHost,
             messageApiPort: baseConfig.messageApiPort,
@@ -430,6 +557,18 @@ function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
               `${agentConfigFile.path} field "watchErc1155Assets"`
           )
         : baseConfig.watchErc1155Assets;
+    const sharedRuntimeConfig = Object.fromEntries(
+        SHARED_RUNTIME_FIELD_DEFINITIONS.map(([key, parser]) => [
+            key,
+            resolveFieldOverride({
+                resolvedAgentConfig,
+                baseConfig,
+                key,
+                label: `${agentConfigFile.path} field "${key}"`,
+                parser,
+            }),
+        ])
+    );
 
     if (hasOwn(resolvedAgentConfig, 'watchAssets')) {
         resolvedAgentConfig.watchAssets = watchAssets;
@@ -471,6 +610,7 @@ function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
         ogModule,
         watchAssets,
         watchErc1155Assets,
+        ...sharedRuntimeConfig,
         ...resolvedMessageApi,
     };
 }

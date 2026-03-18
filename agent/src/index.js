@@ -378,6 +378,7 @@ async function processAgentToolCalls({
                     commitmentText,
                     commitmentSafe: config.commitmentSafe,
                     agentAddress,
+                    config,
                 });
             } catch (error) {
                 // Tool already executed; hook failures should not trigger message replay.
@@ -652,6 +653,7 @@ async function agentLoop() {
                 deletedProposalCount,
                 executedProposals,
                 deletedProposals,
+                config,
             });
         }
         if (agentModule?.reconcileProposalSubmission) {
@@ -659,6 +661,7 @@ async function agentLoop() {
                 publicClient,
                 ogModule: config.ogModule,
                 startBlock: config.startBlock,
+                config,
             });
         }
 

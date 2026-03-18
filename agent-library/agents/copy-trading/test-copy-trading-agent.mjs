@@ -21,6 +21,14 @@ const TEST_RELAYER_PROXY = '0x5555555555555555555555555555555555555555';
 const TEST_PROPOSAL_HASH = `0x${'a'.repeat(64)}`;
 const OTHER_PROPOSAL_HASH = `0x${'b'.repeat(64)}`;
 const TEST_TX_HASH = `0x${'c'.repeat(64)}`;
+const COPY_TRADING_ENV_KEYS = [
+    'COPY_TRADING_SOURCE_USER',
+    'COPY_TRADING_MARKET',
+    'COPY_TRADING_YES_TOKEN_ID',
+    'COPY_TRADING_NO_TOKEN_ID',
+    'COPY_TRADING_COLLATERAL_TOKEN',
+    'COPY_TRADING_CTF_CONTRACT',
+];
 
 function encodeErc20TransferData({ to, amount }) {
     const toWord = to.toLowerCase().replace(/^0x/, '').padStart(64, '0');
@@ -228,14 +236,77 @@ async function runValidateToolCallTests() {
     assert.equal(reimbursementValidated[0].parsedArguments.actions[0].amountWei, '1000000');
 }
 
+async function runConfigBackedPolicyTest() {
+    resetCopyTradingState();
+    const oldEnv = Object.fromEntries(COPY_TRADING_ENV_KEYS.map((key) => [key, process.env[key]]));
+    const oldFetch = globalThis.fetch;
+
+    for (const key of COPY_TRADING_ENV_KEYS) {
+        delete process.env[key];
+    }
+
+    try {
+        globalThis.fetch = async () => ({
+            ok: true,
+            async json() {
+                return [
+                    {
+                        id: 'trade-config-1',
+                        side: 'BUY',
+                        outcome: 'YES',
+                        price: 0.5,
+                    },
+                ];
+            },
+        });
+
+        await enrichSignals([], {
+            publicClient: {
+                async readContract({ args }) {
+                    if (args.length === 1) {
+                        return 1_000_000n;
+                    }
+                    return 0n;
+                },
+            },
+            config: {
+                commitmentSafe: TEST_SAFE,
+                polymarketConditionalTokens: '0x4d97dcd97ec945f40cf65f87097ace5ea0476045',
+                agentConfig: {
+                    copyTrading: {
+                        sourceUser: TEST_SOURCE_USER,
+                        market: 'config-market',
+                        yesTokenId: YES_TOKEN_ID,
+                        noTokenId: NO_TOKEN_ID,
+                    },
+                },
+            },
+            account: { address: TEST_ACCOUNT },
+            onchainPendingProposal: false,
+        });
+
+        const state = getCopyTradingState();
+        assert.equal(state.activeSourceTradeId, 'trade-config-1');
+        assert.equal(state.activeTradeSide, 'BUY');
+        assert.equal(state.activeOutcome, 'YES');
+        assert.equal(state.copyTradeAmountWei, '990000');
+        assert.equal(state.reimbursementAmountWei, '1000000');
+    } finally {
+        for (const key of COPY_TRADING_ENV_KEYS) {
+            if (oldEnv[key] === undefined) {
+                delete process.env[key];
+            } else {
+                process.env[key] = oldEnv[key];
+            }
+        }
+        globalThis.fetch = oldFetch;
+        resetCopyTradingState();
+    }
+}
+
 async function runProposalHashGatingTest() {
     resetCopyTradingState();
-    const envKeys = [
-        'COPY_TRADING_SOURCE_USER',
-        'COPY_TRADING_MARKET',
-        'COPY_TRADING_YES_TOKEN_ID',
-        'COPY_TRADING_NO_TOKEN_ID',
-    ];
+    const envKeys = COPY_TRADING_ENV_KEYS;
     const oldEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
     const oldFetch = globalThis.fetch;
 
@@ -1502,6 +1573,7 @@ async function run() {
     runMathTests();
     runLegacyProposalHashFallbackTest();
     await runValidateToolCallTests();
+    await runConfigBackedPolicyTest();
     await runProposalHashGatingTest();
     await runProposalHashRecoveryFromSignalTest();
     await runProposalHashRecoveryFromSignalUsesFundingWalletTest();

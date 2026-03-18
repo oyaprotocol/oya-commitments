@@ -50,7 +50,8 @@ const AUTO_DISCOVERY_RETRY_DELAY_MS = 60_000;
 
 function resolvePolicyPresetName(config) {
     const raw = String(
-        config?.deterministicDcaPolicyPreset ??
+        config?.agentConfig?.deterministicDcaPolicyPreset ??
+            config?.deterministicDcaPolicyPreset ??
             process.env.DETERMINISTIC_DCA_POLICY_PRESET ??
             ''
     )
@@ -118,7 +119,10 @@ function resolveLogChunkSize(config) {
         return genericChunkSize;
     }
 
-    const legacyRaw = process.env.DETERMINISTIC_DCA_LOG_CHUNK_SIZE;
+    const legacyRaw =
+        config?.agentConfig?.deterministicDcaLogChunkSize ??
+        config?.deterministicDcaLogChunkSize ??
+        process.env.DETERMINISTIC_DCA_LOG_CHUNK_SIZE;
     if (legacyRaw === undefined || legacyRaw === null || String(legacyRaw).trim() === '') {
         return POLICY.logChunkSize;
     }
