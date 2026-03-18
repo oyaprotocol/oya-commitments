@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { sendHarnessSignedMessage } from './lib/testnet-harness-actions.mjs';
@@ -58,48 +57,6 @@ async function reserveLocalPort(host = '127.0.0.1') {
             });
         });
     });
-}
-
-async function createTempModule({ messageApiPort }) {
-    const tempRoot = await mkdtemp(path.join(repoRoot, 'agent/.state/harness-phase4-module-'));
-    const moduleDir = path.join(tempRoot, 'fixture-agent');
-    await mkdir(moduleDir, { recursive: true });
-    await writeFile(
-        path.join(moduleDir, 'agent.js'),
-        'export async function getDeterministicToolCalls() {\n  return [];\n}\n',
-        'utf8'
-    );
-    await writeFile(
-        path.join(moduleDir, 'commitment.txt'),
-        'Signed message API end-to-end local-mock fixture.\n',
-        'utf8'
-    );
-    await writeFile(
-        path.join(moduleDir, 'config.json'),
-        `${JSON.stringify(
-            {
-                pollIntervalMs: 500,
-                messageApi: {
-                    enabled: true,
-                    host: '127.0.0.1',
-                    port: messageApiPort,
-                    requireSignerAllowlist: false,
-                },
-                harness: {
-                    deployment: {
-                        bondAmount: '1',
-                    },
-                },
-            },
-            null,
-            2
-        )}\n`,
-        'utf8'
-    );
-    return {
-        tempRoot,
-        agentPath: path.join(moduleDir, 'agent.js'),
-    };
 }
 
 async function waitForPattern({
@@ -159,15 +116,18 @@ async function run() {
     const localProfile = resolveHarnessProfile('local-mock', { env: {} });
     const roles = deriveHarnessRoles();
     const messageApiPort = await reserveLocalPort();
-    const fixture = await createTempModule({ messageApiPort });
-    const agentRef = fixture.agentPath;
+    const agentRef = 'signed-message-smoke';
     const sessionPaths = await ensureHarnessSession({
         repoRootPath: repoRoot,
         agentRef,
         profile: 'local-mock',
     });
 
-    await writeHarnessJson(sessionPaths.files.overlay, {});
+    await writeHarnessJson(sessionPaths.files.overlay, {
+        messageApi: {
+            port: messageApiPort,
+        },
+    });
     await writeHarnessJson(sessionPaths.files.roles, roles);
 
     let anvilRecord;
@@ -245,7 +205,6 @@ async function run() {
             agentRef,
             profile: 'local-mock',
         });
-        await rm(fixture.tempRoot, { recursive: true, force: true });
     }
 
     console.log('ok');

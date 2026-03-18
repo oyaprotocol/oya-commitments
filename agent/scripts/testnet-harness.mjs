@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { loadAgentConfigStack } from '../src/lib/agent-config.js';
 import {
@@ -51,6 +52,7 @@ function printUsage() {
   node agent/scripts/testnet-harness.mjs init --module=<agent-ref> --profile=<name>
   node agent/scripts/testnet-harness.mjs up --module=<agent-ref> --profile=<name> [--port=<int>]
   node agent/scripts/testnet-harness.mjs deploy --module=<agent-ref> --profile=<name> [--force]
+  node agent/scripts/testnet-harness.mjs run-agent --module=<agent-ref> --profile=<name> [--port=<int>] [--force]
   node agent/scripts/testnet-harness.mjs status --module=<agent-ref> --profile=<name>
   node agent/scripts/testnet-harness.mjs seed-erc20 --module=<agent-ref> --profile=<name> --token=<address> --amount-wei=<int> [--role=<name>] [--holder=<address>|--mint]
   node agent/scripts/testnet-harness.mjs deposit --module=<agent-ref> --profile=<name> [--role=<name>] [--asset=<address|native>] [--amount-wei=<int>]
@@ -61,7 +63,7 @@ function printUsage() {
 Available profiles: ${profiles}
 
 Phase 2 manages session state, deterministic local roles, and Anvil supervision.
-Phase 3 adds commitment deployment plus seeded deposit/message participant actions.`);
+Phase 4 adds short-name smoke-module workflows, including run-agent.`);
 }
 
 function resolveCommand(argv = process.argv) {
@@ -295,6 +297,56 @@ async function handleDeploy({ agentRef, profileName, port, force }) {
     });
 
     console.log(JSON.stringify(result, null, 2));
+}
+
+async function handleRunAgent({ agentRef, profileName, port, force }) {
+    const runtime = await ensureHarnessRuntime({ agentRef, profileName, port });
+    const runtimeContext = await resolveHarnessRuntimeContext({
+        repoRootPath: repoRoot,
+        agentRef,
+        profileName,
+        overlayPath: runtime.sessionPaths.files.overlay,
+        env: process.env,
+    });
+
+    if (!runtimeContext.runtimeConfig.commitmentSafe || !runtimeContext.runtimeConfig.ogModule || force) {
+        const deployerRole = loadRoleRecord(runtime.rolesData, 'deployer');
+        await deployHarnessCommitment({
+            repoRootPath: repoRoot,
+            agentRef,
+            profileName,
+            sessionPaths: runtime.sessionPaths,
+            rpcUrl: runtime.anvilRecord.rpcUrl,
+            deployerPrivateKey: deployerRole.privateKey,
+            force,
+            env: process.env,
+        });
+    }
+
+    const child = spawn('node', ['agent/src/index.js'], {
+        cwd: repoRoot,
+        env: {
+            ...process.env,
+            RPC_URL: runtime.anvilRecord.rpcUrl,
+            AGENT_MODULE: agentRef,
+            AGENT_CONFIG_OVERLAY_PATH: runtime.sessionPaths.files.overlay,
+        },
+        stdio: 'inherit',
+    });
+
+    const result = await new Promise((resolve, reject) => {
+        child.once('error', reject);
+        child.once('exit', (code, signal) => {
+            resolve({ code, signal });
+        });
+    });
+
+    if (result.signal) {
+        throw new Error(`Agent runner exited from signal ${result.signal}.`);
+    }
+    if (result.code !== 0) {
+        process.exitCode = result.code ?? 1;
+    }
 }
 
 async function handleSeedErc20({
@@ -575,6 +627,10 @@ async function main() {
         await handleDeploy({ agentRef, profileName, port, force });
         return;
     }
+    if (command === 'run-agent') {
+        await handleRunAgent({ agentRef, profileName, port, force });
+        return;
+    }
     if (command === 'status') {
         await handleStatus({ agentRef, profileName });
         return;
@@ -629,7 +685,7 @@ async function main() {
     }
 
     throw new Error(
-        `Unsupported command "${command}". Phase 3 supports: init, up, deploy, status, seed-erc20, deposit, message, down, reset.`
+        `Unsupported command "${command}". Phase 4 supports: init, up, deploy, run-agent, status, seed-erc20, deposit, message, down, reset.`
     );
 }
 

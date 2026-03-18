@@ -1,7 +1,7 @@
 {
   "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
   "name": "Oya Signed Message Smoke Agent",
-  "description": "Smoke-test agent for signed inbound user messages. It recommends a course of action based on authenticated sender metadata and message content.",
+  "description": "Smoke-test agent for signed inbound user messages and local harness message API flows. It accepts signed messages, consumes them deterministically, and avoids tool execution.",
   "image": "https://raw.githubusercontent.com/oya-commitments/oya-commitments/main/agent-library/agents/signed-message-smoke/agent.png",
   "endpoints": [],
   "registrations": []

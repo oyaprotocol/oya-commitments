@@ -1,0 +1,14 @@
+{
+  "pollIntervalMs": 500,
+  "messageApi": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 9888,
+    "requireSignerAllowlist": false
+  },
+  "harness": {
+    "deployment": {
+      "bondAmount": "1"
+    }
+  }
+}
