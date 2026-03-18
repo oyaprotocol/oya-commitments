@@ -80,14 +80,15 @@ Export `getPriceTriggers({ commitmentText, config })` from `agent-library/agents
 
 ### Message API (Optional)
 
-Enable inbound user messages with signed requests (EIP-191 message signatures from allowlisted addresses).
+Enable inbound user messages with signed requests (EIP-191 message signatures).
 Optional bearer tokens can be layered on top as an additional gate to limit who may submit those signed requests.
 
 - `MESSAGE_API_ENABLED`: Set to `true` to start the API server.
 - `MESSAGE_API_HOST`: Bind host (default `127.0.0.1`).
 - `MESSAGE_API_PORT`: Bind port (default `8787`).
 - `MESSAGE_API_KEYS_JSON`: Optional JSON object of API key ids to tokens, for example `{"ops":"k_live_replace_me"}`. When set, requests must include both a valid bearer token and valid signed auth.
-- `MESSAGE_API_SIGNER_ALLOWLIST`: Comma-separated EVM addresses allowed to sign requests. Required when `MESSAGE_API_ENABLED=true`.
+- `MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST`: Require `MESSAGE_API_SIGNER_ALLOWLIST` membership for signed requests (`true`/`false`, default `true`).
+- `MESSAGE_API_SIGNER_ALLOWLIST`: Optional comma-separated EVM addresses allowed to sign requests. Required when `MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST=true`.
 - `MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS`: Max signature age (default `300`).
 - `MESSAGE_API_MAX_BODY_BYTES`: Request body limit in bytes (default `8192`).
 - `MESSAGE_API_MAX_TEXT_LENGTH`: Max `text` length (default `2000`).
@@ -101,9 +102,10 @@ Optional bearer tokens can be layered on top as an additional gate to limit who 
 - `MESSAGE_API_RATE_LIMIT_BURST`: Per-key burst capacity (default `10`).
 
 When `MESSAGE_API_ENABLED=true`, configure:
-- `MESSAGE_API_SIGNER_ALLOWLIST`
+- `MESSAGE_API_SIGNER_ALLOWLIST` when `MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST=true`
 
 Optionally configure:
+- `MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST`
 - `MESSAGE_API_KEYS_JSON`
 
 Endpoints:
@@ -136,6 +138,7 @@ All accepted messages must include signed auth:
 - `deadline` is optional and, when present, must be a Unix timestamp in milliseconds
 - signature is verified against a canonical payload that includes
   `address`, `timestampMs`, `text`, `command`, `args`, `metadata`, `requestId`, and `deadline`
+- when `MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST=true`, the recovered signer must also appear in `MESSAGE_API_SIGNER_ALLOWLIST`
 - signed requests keep `requestId` replay-locked for at least `MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS`; replays during that window return `409` with code `request_replay_blocked`
 - when `MESSAGE_API_KEYS_JSON` is configured, a valid `Authorization: Bearer ...` header is also required
 

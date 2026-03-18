@@ -36,6 +36,7 @@ function authenticateRequest({ authorizationHeader, keyEntries }) {
 async function authenticateSignedRequest({
     body,
     signerAllowlist,
+    requireSignerAllowlist,
     signatureMaxAgeSeconds,
     nowMs,
 }) {
@@ -78,8 +79,15 @@ async function authenticateSignedRequest({
         return { ok: false, statusCode: 400, message: 'auth.address must be a valid EVM address.' };
     }
     const normalizedDeclared = declaredAddress.toLowerCase();
-    if (!signerAllowlist.has(normalizedDeclared)) {
+    if (signerAllowlist.size > 0 && !signerAllowlist.has(normalizedDeclared)) {
         return { ok: false, statusCode: 401, message: 'Signer is not allowlisted.' };
+    }
+    if (requireSignerAllowlist && signerAllowlist.size === 0) {
+        return {
+            ok: false,
+            statusCode: 503,
+            message: 'Signer allowlist is required but not configured.',
+        };
     }
 
     const maxAgeMs = signatureMaxAgeSeconds * 1000;
@@ -232,10 +240,11 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
     const signerAllowlist = new Set(
         (config.messageApiSignerAllowlist ?? []).map((address) => getAddress(address).toLowerCase())
     );
+    const requireSignerAllowlist = config.messageApiRequireSignerAllowlist !== false;
     const signatureMaxAgeSeconds = Number(config.messageApiSignatureMaxAgeSeconds ?? 300);
-    if (signerAllowlist.size === 0) {
+    if (requireSignerAllowlist && signerAllowlist.size === 0) {
         throw new Error(
-            'Message API requires MESSAGE_API_SIGNER_ALLOWLIST. MESSAGE_API_KEYS_JSON is optional additional bearer gating.'
+            'Message API requires MESSAGE_API_SIGNER_ALLOWLIST when MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST=true. MESSAGE_API_KEYS_JSON is optional additional bearer gating.'
         );
     }
 
@@ -363,6 +372,7 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
             const signedAuth = await authenticateSignedRequest({
                 body,
                 signerAllowlist,
+                requireSignerAllowlist,
                 signatureMaxAgeSeconds,
                 nowMs,
             });
