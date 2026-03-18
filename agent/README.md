@@ -482,7 +482,21 @@ Example:
 
 The merged result is exposed to agent modules as `config.agentConfig`, while the resolved active-chain addresses and watchlists still appear at `config.commitmentSafe`, `config.ogModule`, `config.watchAssets`, and `config.watchErc1155Assets`.
 
-The phase-1 testnet harness stores untracked session state under `agent/.state/harness/<module>/<profile>/`, including an `overlay.json` file intended to sit on top of the tracked module config without mutating it.
+The local testnet harness stores untracked session state under `agent/.state/harness/<module>/<profile>/`, including:
+- `overlay.json` for ephemeral config overrides layered above the tracked module config
+- `roles.json` for deterministic local dev roles (`deployer`, `agent`, `depositor`)
+- `pids.json` plus `anvil.log` for local process supervision
+
+Phase 2 commands:
+
+```bash
+node agent/scripts/testnet-harness.mjs init --module=default --profile=local-mock
+node agent/scripts/testnet-harness.mjs up --module=default --profile=local-mock
+node agent/scripts/testnet-harness.mjs status --module=default --profile=local-mock
+node agent/scripts/testnet-harness.mjs down --module=default --profile=local-mock
+```
+
+Available built-in profiles are `local-mock`, `fork-sepolia`, and `fork-polygon`. Fork profiles expect their RPC URLs in `SEPOLIA_RPC_URL` or `POLYGON_RPC_URL`.
 
 You can validate a module quickly:
 
