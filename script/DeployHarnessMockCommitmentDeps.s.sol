@@ -87,10 +87,7 @@ contract HarnessMockSafe {
 contract HarnessMockSafeProxyFactory {
     address public lastProxy;
 
-    function createProxyWithNonce(address, bytes memory initializer, uint256)
-        external
-        returns (address proxy)
-    {
+    function createProxyWithNonce(address, bytes memory initializer, uint256) external returns (address proxy) {
         HarnessMockSafe safe = new HarnessMockSafe();
         (bool success,) = address(safe).call(initializer);
         require(success, "setup failed");
