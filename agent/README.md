@@ -484,19 +484,44 @@ The merged result is exposed to agent modules as `config.agentConfig`, while the
 
 The local testnet harness stores untracked session state under `agent/.state/harness/<module>/<profile>/`, including:
 - `overlay.json` for ephemeral config overrides layered above the tracked module config
+- `deployment.json` for the most recent commitment deployment discovered or created by the harness
 - `roles.json` for deterministic local dev roles (`deployer`, `agent`, `depositor`)
 - `pids.json` plus `anvil.log` for local process supervision
 
-Phase 2 commands:
+Phase 3 commands:
 
 ```bash
 node agent/scripts/testnet-harness.mjs init --module=default --profile=local-mock
 node agent/scripts/testnet-harness.mjs up --module=default --profile=local-mock
+node agent/scripts/testnet-harness.mjs deploy --module=default --profile=local-mock
+node agent/scripts/testnet-harness.mjs seed-erc20 --module=default --profile=local-mock --token=0x... --amount-wei=1000000 --mint
+node agent/scripts/testnet-harness.mjs deposit --module=default --profile=local-mock --amount-wei=1000000
+node agent/scripts/testnet-harness.mjs message --module=default --profile=local-mock --text="Test signed instruction" --dry-run
 node agent/scripts/testnet-harness.mjs status --module=default --profile=local-mock
 node agent/scripts/testnet-harness.mjs down --module=default --profile=local-mock
 ```
 
 Available built-in profiles are `local-mock`, `fork-sepolia`, and `fork-polygon`. Fork profiles expect their RPC URLs in `SEPOLIA_RPC_URL` or `POLYGON_RPC_URL`.
+
+For local harness deployment, you can optionally add non-secret defaults under `harness` in the module config:
+
+```json
+{
+  "defaultDepositAmountWei": "1000000",
+  "harness": {
+    "deployment": {
+      "collateral": "0xYourCollateral",
+      "bondAmount": "1000000",
+      "liveness": "7200"
+    },
+    "seedErc20Holders": {
+      "0xYourCollateralLowercase": "0xFundedHolder"
+    }
+  }
+}
+```
+
+`local-mock` can auto-deploy mock Safe/OG dependencies and a mock collateral token. Fork profiles reuse configured dependency addresses when present, and otherwise expect `harness.deployment` to provide the non-secret deployment inputs.
 
 You can validate a module quickly:
 

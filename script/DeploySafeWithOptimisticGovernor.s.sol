@@ -112,7 +112,10 @@ contract DeploySafeWithOptimisticGovernor is Script {
     address internal constant BURN_OWNER = 0x000000000000000000000000000000000000dEaD;
     address internal constant SENTINEL_OWNERS = 0x0000000000000000000000000000000000000001;
 
-    function run() external {
+    function run()
+        external
+        returns (address deployedModuleProxyFactory, address deployedSafe, address deployedOgModule)
+    {
         // ---------
         // Required
         // ---------
@@ -139,6 +142,8 @@ contract DeploySafeWithOptimisticGovernor is Script {
         vm.stopBroadcast();
 
         logDeployment(moduleProxyFactory, safeProxy, ogModule, config);
+
+        return (moduleProxyFactory, safeProxy, ogModule);
     }
 
     function loadConfig() internal returns (Config memory config) {

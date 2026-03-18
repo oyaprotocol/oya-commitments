@@ -14,8 +14,19 @@ import {
     startHarnessAnvil,
     stopHarnessAnvil,
 } from './lib/testnet-harness-anvil.mjs';
+import {
+    createHarnessClients,
+    loadRoleRecord,
+    mintHarnessErc20,
+    parseHarnessAsset,
+    seedHarnessErc20FromHolder,
+    sendHarnessDeposit,
+    sendHarnessSignedMessage,
+} from './lib/testnet-harness-actions.mjs';
+import { deployHarnessCommitment } from './lib/testnet-harness-deploy.mjs';
 import { listHarnessProfiles, resolveHarnessProfile } from './lib/testnet-harness-profiles.mjs';
 import { deriveHarnessRoles } from './lib/testnet-harness-roles.mjs';
+import { resolveHarnessRuntimeContext } from './lib/testnet-harness-runtime.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -39,14 +50,18 @@ function printUsage() {
     console.log(`Usage:
   node agent/scripts/testnet-harness.mjs init --module=<agent-ref> --profile=<name>
   node agent/scripts/testnet-harness.mjs up --module=<agent-ref> --profile=<name> [--port=<int>]
+  node agent/scripts/testnet-harness.mjs deploy --module=<agent-ref> --profile=<name> [--force]
   node agent/scripts/testnet-harness.mjs status --module=<agent-ref> --profile=<name>
+  node agent/scripts/testnet-harness.mjs seed-erc20 --module=<agent-ref> --profile=<name> --token=<address> --amount-wei=<int> [--role=<name>] [--holder=<address>|--mint]
+  node agent/scripts/testnet-harness.mjs deposit --module=<agent-ref> --profile=<name> [--role=<name>] [--asset=<address|native>] [--amount-wei=<int>]
+  node agent/scripts/testnet-harness.mjs message --module=<agent-ref> --profile=<name> --text=<string> [--role=<name>] [--dry-run]
   node agent/scripts/testnet-harness.mjs down --module=<agent-ref> --profile=<name>
   node agent/scripts/testnet-harness.mjs reset --module=<agent-ref> --profile=<name>
 
 Available profiles: ${profiles}
 
 Phase 2 manages session state, deterministic local roles, and Anvil supervision.
-Later phases will add deployment, seeding, and smoke execution.`);
+Phase 3 adds commitment deployment plus seeded deposit/message participant actions.`);
 }
 
 function resolveCommand(argv = process.argv) {
@@ -75,6 +90,36 @@ function parseOptionalPort(argv = process.argv) {
         throw new Error('--port must be an integer between 1 and 65535.');
     }
     return parsed;
+}
+
+function parseOptionalObject(raw, label) {
+    if (raw === null || raw === undefined || raw === '') {
+        return undefined;
+    }
+    try {
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            throw new Error('not object');
+        }
+        return parsed;
+    } catch (error) {
+        throw new Error(`${label} must be a JSON object.`);
+    }
+}
+
+function parseOptionalInteger(raw, label) {
+    if (raw === null || raw === undefined || raw === '') {
+        return undefined;
+    }
+    const parsed = Number(raw);
+    if (!Number.isInteger(parsed)) {
+        throw new Error(`${label} must be an integer.`);
+    }
+    return parsed;
+}
+
+function hasFlag(flag, argv = process.argv) {
+    return argv.includes(flag);
 }
 
 function resolveAgentModulePath(agentRef) {
@@ -175,17 +220,7 @@ async function ensureOverlayFile(sessionPaths) {
     }
 }
 
-async function handleInit({ agentRef, profileName }) {
-    const sessionPaths = await ensureHarnessSession({
-        repoRootPath: repoRoot,
-        agentRef,
-        profile: profileName,
-    });
-    await ensureOverlayFile(sessionPaths);
-    await handleStatus({ agentRef, profileName });
-}
-
-async function handleUp({ agentRef, profileName, port }) {
+async function ensureHarnessRuntime({ agentRef, profileName, port }) {
     const sessionPaths = await ensureHarnessSession({
         repoRootPath: repoRoot,
         agentRef,
@@ -195,7 +230,10 @@ async function handleUp({ agentRef, profileName, port }) {
 
     const profile = resolveHarnessProfile(profileName, { env: process.env });
     const roles = deriveHarnessRoles();
-    await writeHarnessJson(sessionPaths.files.roles, roles);
+    const existingRoles = await readHarnessJson(sessionPaths.files.roles);
+    if (existingRoles === null) {
+        await writeHarnessJson(sessionPaths.files.roles, roles);
+    }
 
     const existingPids = (await readHarnessJson(sessionPaths.files.pids)) ?? {};
     const existingAnvilStatus = await getAnvilRuntimeStatus(existingPids.anvil);
@@ -203,8 +241,9 @@ async function handleUp({ agentRef, profileName, port }) {
         await stopHarnessAnvil(existingPids.anvil);
     }
 
+    let anvilRecord = existingPids.anvil;
     if (!existingAnvilStatus.running) {
-        const anvilRecord = await startHarnessAnvil({
+        anvilRecord = await startHarnessAnvil({
             profile,
             sessionPaths,
             env: process.env,
@@ -216,7 +255,209 @@ async function handleUp({ agentRef, profileName, port }) {
         });
     }
 
+    const rolesData = (await readHarnessJson(sessionPaths.files.roles)) ?? roles;
+
+    return {
+        sessionPaths,
+        profile,
+        anvilRecord,
+        rolesData,
+    };
+}
+
+async function handleInit({ agentRef, profileName }) {
+    const sessionPaths = await ensureHarnessSession({
+        repoRootPath: repoRoot,
+        agentRef,
+        profile: profileName,
+    });
+    await ensureOverlayFile(sessionPaths);
     await handleStatus({ agentRef, profileName });
+}
+
+async function handleUp({ agentRef, profileName, port }) {
+    await ensureHarnessRuntime({ agentRef, profileName, port });
+    await handleStatus({ agentRef, profileName });
+}
+
+async function handleDeploy({ agentRef, profileName, port, force }) {
+    const runtime = await ensureHarnessRuntime({ agentRef, profileName, port });
+    const deployerRole = loadRoleRecord(runtime.rolesData, 'deployer');
+    const result = await deployHarnessCommitment({
+        repoRootPath: repoRoot,
+        agentRef,
+        profileName,
+        sessionPaths: runtime.sessionPaths,
+        rpcUrl: runtime.anvilRecord.rpcUrl,
+        deployerPrivateKey: deployerRole.privateKey,
+        force,
+        env: process.env,
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+}
+
+async function handleSeedErc20({
+    agentRef,
+    profileName,
+    port,
+    roleName,
+    token,
+    amountWei,
+    holder,
+    mint,
+}) {
+    if (!token) {
+        throw new Error('--token is required.');
+    }
+    if (amountWei === undefined) {
+        throw new Error('--amount-wei is required.');
+    }
+
+    const runtime = await ensureHarnessRuntime({ agentRef, profileName, port });
+    const harnessClients = createHarnessClients({
+        rpcUrl: runtime.anvilRecord.rpcUrl,
+        chainId: runtime.profile.chainId,
+        rolesData: runtime.rolesData,
+    });
+    const recipientRole = loadRoleRecord(runtime.rolesData, roleName ?? 'depositor');
+    let result;
+
+    if (mint) {
+        const deployerEntry = harnessClients.walletClients.deployer;
+        if (!deployerEntry) {
+            throw new Error('Missing deployer wallet client.');
+        }
+        result = await mintHarnessErc20({
+            walletClient: deployerEntry.walletClient,
+            account: deployerEntry.account,
+            token,
+            recipient: recipientRole.address,
+            amountWei: BigInt(amountWei),
+            publicClient: harnessClients.publicClient,
+        });
+    } else {
+        const runtimeContext = await resolveHarnessRuntimeContext({
+            repoRootPath: repoRoot,
+            agentRef,
+            profileName,
+            overlayPath: runtime.sessionPaths.files.overlay,
+            env: process.env,
+        });
+        const defaultHolder =
+            runtimeContext.runtimeConfig.agentConfig?.harness?.seedErc20Holders?.[getNormalizedAddressKey(token)];
+        const sourceHolder = holder ?? defaultHolder;
+        if (!sourceHolder) {
+            throw new Error(
+                'ERC20 seeding requires --holder=<address> or config.agentConfig.harness.seedErc20Holders[token].'
+            );
+        }
+        result = await seedHarnessErc20FromHolder({
+            publicClient: harnessClients.publicClient,
+            testClient: harnessClients.testClient,
+            rpcUrl: runtime.anvilRecord.rpcUrl,
+            token,
+            holder: sourceHolder,
+            recipient: recipientRole.address,
+            amountWei: BigInt(amountWei),
+        });
+    }
+
+    console.log(
+        JSON.stringify(
+            {
+                token,
+                amountWei: BigInt(amountWei).toString(),
+                recipientRole: normalizeRoleForOutput(roleName),
+                recipient: recipientRole.address,
+                ...summarizeSeedResult(result),
+            },
+            null,
+            2
+        )
+    );
+}
+
+function getNormalizedAddressKey(value) {
+    return String(value).trim().toLowerCase();
+}
+
+function normalizeRoleForOutput(roleName) {
+    return typeof roleName === 'string' && roleName.trim() ? roleName.trim() : 'depositor';
+}
+
+function summarizeSeedResult(result) {
+    return {
+        mode: result?.mode,
+        transactionHash: result?.transactionHash,
+        blockNumber:
+            result?.receipt?.blockNumber !== undefined
+                ? result.receipt.blockNumber.toString()
+                : undefined,
+    };
+}
+
+async function handleDeposit({ agentRef, profileName, port, roleName, asset, amountWei }) {
+    const runtime = await ensureHarnessRuntime({ agentRef, profileName, port });
+    const runtimeContext = await resolveHarnessRuntimeContext({
+        repoRootPath: repoRoot,
+        agentRef,
+        profileName,
+        overlayPath: runtime.sessionPaths.files.overlay,
+        env: process.env,
+    });
+    if (!runtimeContext.runtimeConfig.commitmentSafe) {
+        throw new Error('No commitment deployment is configured for the selected module/profile.');
+    }
+
+    const harnessClients = createHarnessClients({
+        rpcUrl: runtime.anvilRecord.rpcUrl,
+        chainId: runtime.profile.chainId,
+        rolesData: runtime.rolesData,
+    });
+    const result = await sendHarnessDeposit({
+        runtimeConfig: runtimeContext.runtimeConfig,
+        roleName,
+        asset,
+        amountWei,
+        harnessClients,
+    });
+    console.log(JSON.stringify(result, null, 2));
+}
+
+async function handleMessage({
+    agentRef,
+    profileName,
+    port,
+    roleName,
+    text,
+    requestId,
+    command,
+    args,
+    metadata,
+    deadline,
+    dryRun,
+}) {
+    if (!text || !text.trim()) {
+        throw new Error('--text is required.');
+    }
+    const runtime = await ensureHarnessRuntime({ agentRef, profileName, port });
+    const role = loadRoleRecord(runtime.rolesData, roleName ?? 'depositor');
+    const result = await sendHarnessSignedMessage({
+        repoRootPath: repoRoot,
+        agentRef,
+        profile: runtime.profile,
+        overlayPath: runtime.sessionPaths.files.overlay,
+        role,
+        text,
+        requestId,
+        command,
+        args,
+        metadata,
+        deadline,
+        dryRun,
+    });
+    console.log(JSON.stringify(result, null, 2));
 }
 
 async function handleDown({ agentRef, profileName }) {
@@ -306,6 +547,21 @@ async function main() {
     const agentRef = resolveAgentRef();
     const profileName = resolveProfile();
     const port = parseOptionalPort();
+    const roleName = getArgValue('--role=');
+    const amountWeiRaw = getArgValue('--amount-wei=');
+    const amountWei = amountWeiRaw === null ? undefined : BigInt(amountWeiRaw);
+    const asset = parseHarnessAsset(getArgValue('--asset='));
+    const text = getArgValue('--text=');
+    const requestId = getArgValue('--request-id=') ?? undefined;
+    const commandArg = getArgValue('--command=') ?? undefined;
+    const args = parseOptionalObject(getArgValue('--args-json='), '--args-json');
+    const metadata = parseOptionalObject(getArgValue('--metadata-json='), '--metadata-json');
+    const deadline = parseOptionalInteger(getArgValue('--deadline-ms='), '--deadline-ms');
+    const token = getArgValue('--token=');
+    const holder = getArgValue('--holder=') ?? undefined;
+    const force = hasFlag('--force');
+    const mint = hasFlag('--mint');
+    const dryRun = hasFlag('--dry-run');
 
     if (command === 'init') {
         await handleInit({ agentRef, profileName });
@@ -315,8 +571,52 @@ async function main() {
         await handleUp({ agentRef, profileName, port });
         return;
     }
+    if (command === 'deploy') {
+        await handleDeploy({ agentRef, profileName, port, force });
+        return;
+    }
     if (command === 'status') {
         await handleStatus({ agentRef, profileName });
+        return;
+    }
+    if (command === 'seed-erc20') {
+        await handleSeedErc20({
+            agentRef,
+            profileName,
+            port,
+            roleName,
+            token,
+            amountWei,
+            holder,
+            mint,
+        });
+        return;
+    }
+    if (command === 'deposit') {
+        await handleDeposit({
+            agentRef,
+            profileName,
+            port,
+            roleName,
+            asset,
+            amountWei,
+        });
+        return;
+    }
+    if (command === 'message') {
+        await handleMessage({
+            agentRef,
+            profileName,
+            port,
+            roleName,
+            text,
+            requestId,
+            command: commandArg,
+            args,
+            metadata,
+            deadline,
+            dryRun,
+        });
         return;
     }
     if (command === 'down') {
@@ -328,7 +628,9 @@ async function main() {
         return;
     }
 
-    throw new Error(`Unsupported command "${command}". Phase 2 supports: init, up, status, down, reset.`);
+    throw new Error(
+        `Unsupported command "${command}". Phase 3 supports: init, up, deploy, status, seed-erc20, deposit, message, down, reset.`
+    );
 }
 
 main().catch((error) => {
