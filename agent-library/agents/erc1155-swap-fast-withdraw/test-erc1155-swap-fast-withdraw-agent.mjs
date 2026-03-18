@@ -363,7 +363,7 @@ async function withTempStatePath(fn) {
     setSwapStatePathForTest(statePath);
     await resetSwapState();
     try {
-        await fn();
+        await fn({ statePath });
     } finally {
         setSwapStatePathForTest(null);
         await rm(dir, { recursive: true, force: true });
@@ -373,26 +373,32 @@ async function withTempStatePath(fn) {
 async function testDepositCreatesCreditOnly() {
     await withTempStatePath(async () => {
         const config = buildConfig();
-        const toolCalls = await getDeterministicToolCalls({
-            signals: [
-                buildDepositSignal({
-                    id: 'deposit-credit-only',
-                    amountWei: 2_000_000n,
-                }),
-            ],
-            commitmentText: '',
-            commitmentSafe: SAFE,
-            agentAddress: AGENT,
-            publicClient: buildPublicClient({
+        const { result: toolCalls, lines } = await withCapturedConsoleLogs(() =>
+            getDeterministicToolCalls({
+                signals: [
+                    buildDepositSignal({
+                        id: 'deposit-credit-only',
+                        amountWei: 2_000_000n,
+                    }),
+                ],
+                commitmentText: '',
                 commitmentSafe: SAFE,
-                safeUsdcBalance: 2_000_000n,
-                agentErc1155Balance: 5n,
-            }),
-            config,
-            onchainPendingProposal: false,
-        });
+                agentAddress: AGENT,
+                publicClient: buildPublicClient({
+                    commitmentSafe: SAFE,
+                    safeUsdcBalance: 2_000_000n,
+                    agentErc1155Balance: 5n,
+                }),
+                config,
+                onchainPendingProposal: false,
+            })
+        );
 
         assert.equal(toolCalls.length, 0);
+        assert.equal(
+            lines.some((line) => line.includes('Recorded ERC20 deposit credit for')),
+            true
+        );
 
         const state = await getSwapState();
         assert.equal(Object.keys(state.orders).length, 0);
@@ -445,6 +451,18 @@ async function testStartupBackfillsDepositorCreditFromHistory() {
         assert.equal(toolCalls[0].name, 'ipfs_publish');
         assert.ok(
             lines.some((line) =>
+                line.includes(
+                    'Starting erc1155-swap-fast-withdraw credit backfill for'
+                )
+            )
+        );
+        assert.ok(
+            lines.some((line) =>
+                line.includes('Backfilling ERC20 deposit history from Safe deployment block 90')
+            )
+        );
+        assert.ok(
+            lines.some((line) =>
                 line.includes('erc1155-swap-fast-withdraw credit backfill complete through block 150')
             )
         );
@@ -457,6 +475,58 @@ async function testStartupBackfillsDepositorCreditFromHistory() {
             reservedWei: '2000000',
             availableWei: '0',
         });
+    });
+}
+
+async function testStartupLogsWhenCreditBackfillAlreadyComplete() {
+    await withTempStatePath(async ({ statePath }) => {
+        const config = buildConfig();
+        const publicClient = buildPublicClient({
+            latestBlock: 150n,
+            safeDeploymentBlock: 90n,
+            safeUsdcBalance: 1_000_000n,
+            agentErc1155Balance: 5n,
+            erc20TransferLogs: [
+                buildErc20TransferLog({
+                    from: SIGNER,
+                    value: 1_000_000n,
+                    blockNumber: 120n,
+                    transactionHash: `0x${'2'.repeat(64)}`,
+                    logIndex: 0,
+                }),
+            ],
+        });
+
+        await getDeterministicToolCalls({
+            signals: [],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient,
+            config,
+            onchainPendingProposal: false,
+        });
+
+        setSwapStatePathForTest(statePath);
+
+        const { lines } = await withCapturedConsoleLogs(() =>
+            getDeterministicToolCalls({
+                signals: [],
+                commitmentText: '',
+                commitmentSafe: SAFE,
+                agentAddress: AGENT,
+                publicClient,
+                config,
+                onchainPendingProposal: false,
+            })
+        );
+
+        assert.equal(
+            lines.some((line) =>
+                line.includes('erc1155-swap-fast-withdraw credit backfill already complete through block 150')
+            ),
+            true
+        );
     });
 }
 
@@ -1771,6 +1841,7 @@ async function testStaleProposalSubmissionRetries() {
 async function run() {
     await testDepositCreatesCreditOnly();
     await testStartupBackfillsDepositorCreditFromHistory();
+    await testStartupLogsWhenCreditBackfillAlreadyComplete();
     await testStartupBackfillReconstructsHistoricalSpentCredit();
     await testSignedFastWithdrawLifecycleUsesDepositorCredit();
     await testDirectFillWaitsForSafeReimbursementLiquidity();

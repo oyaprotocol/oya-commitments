@@ -52,8 +52,12 @@ async function run() {
     });
     const logger = {
         errors: [],
+        warnings: [],
         error(...args) {
             this.errors.push(args);
+        },
+        warn(...args) {
+            this.warnings.push(args);
         },
     };
 
@@ -74,6 +78,62 @@ async function run() {
     assert.deepEqual(retriedIds, [second.message.messageId, third.message.messageId]);
     assert.equal(retriedIds.includes(first.message.messageId), false);
     assert.equal(logger.errors.some((entry) => entry[0] === '[agent] loop error'), true);
+
+    const noActionResult = baseInbox.submitMessage({
+        text: 'no action',
+        requestId: 'no-action',
+        senderKeyId: 'ops',
+        sender: { address: '0x0000000000000000000000000000000000000001' },
+        nowMs: startMs + 20,
+    });
+    assert.equal(noActionResult.ok, true);
+
+    await processQueuedUserMessages({
+        messageInbox: baseInbox,
+        maxBatchSize: 10,
+        nowMs: startMs + 21,
+        latestBlock: 2n,
+        onchainPendingProposal: false,
+        prepareSignals: async (signals) => signals,
+        decideOnSignals: async () => DECISION_STATUS.NO_ACTION,
+        logger,
+    });
+    assert.equal(
+        logger.warnings.some(
+            (entry) =>
+                String(entry[0]).includes('User message produced no action') &&
+                String(entry[0]).includes('requestId=no-action')
+        ),
+        true
+    );
+
+    const failedResult = baseInbox.submitMessage({
+        text: 'fail',
+        requestId: 'fail-once',
+        senderKeyId: 'ops',
+        sender: { address: '0x0000000000000000000000000000000000000002' },
+        nowMs: startMs + 22,
+    });
+    assert.equal(failedResult.ok, true);
+
+    await processQueuedUserMessages({
+        messageInbox: baseInbox,
+        maxBatchSize: 10,
+        nowMs: startMs + 23,
+        latestBlock: 3n,
+        onchainPendingProposal: false,
+        prepareSignals: async (signals) => signals,
+        decideOnSignals: async () => DECISION_STATUS.FAILED_NON_RETRYABLE,
+        logger,
+    });
+    assert.equal(
+        logger.errors.some(
+            (entry) =>
+                String(entry[0]).includes('User message failed non-retryably') &&
+                String(entry[0]).includes('requestId=fail-once')
+        ),
+        true
+    );
 
     console.log('[test] message loop rescue OK');
 }

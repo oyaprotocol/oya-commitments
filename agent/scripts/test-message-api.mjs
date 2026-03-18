@@ -35,10 +35,24 @@ async function main() {
     const account = privateKeyToAccount(`0x${'1'.repeat(64)}`);
     const inbox = buildInbox();
     const config = buildServerConfig(account.address);
+    const logger = {
+        logs: [],
+        warnings: [],
+        errors: [],
+        log(message) {
+            this.logs.push(String(message));
+        },
+        warn(message) {
+            this.warnings.push(String(message));
+        },
+        error(message) {
+            this.errors.push(String(message));
+        },
+    };
     const messageApi = createMessageApiServer({
         config,
         inbox,
-        logger: { log() {} },
+        logger,
     });
     const server = await messageApi.start();
     const address = server.address();
@@ -58,6 +72,13 @@ async function main() {
             body: JSON.stringify({ text: 'hello' }),
         });
         assert.equal(unauthorized.status, 401);
+        assert.equal(
+            logger.warnings.some((line) =>
+                line.includes('Message API rejected request') &&
+                line.includes('code=missing_bearer_token')
+            ),
+            true
+        );
 
         const timestampMs = Date.now();
         const signedBody = {
@@ -145,6 +166,13 @@ async function main() {
         const duplicateJson = await duplicate.json();
         assert.equal(duplicateJson.status, 'duplicate');
         assert.equal(duplicateJson.messageId, acceptedJson.messageId);
+        assert.equal(
+            logger.warnings.some((line) =>
+                line.includes('Message API ignored duplicate request') &&
+                line.includes('requestId=pause-2h')
+            ),
+            true
+        );
 
         // Body validation should catch schema violations.
         const badRequest = await fetch(`${baseUrl}/v1/messages`, {
@@ -156,6 +184,14 @@ async function main() {
             body: JSON.stringify({ text: 42 }),
         });
         assert.equal(badRequest.status, 400);
+        assert.equal(
+            logger.warnings.some((line) =>
+                line.includes('Message API rejected request') &&
+                line.includes('code=invalid_request') &&
+                line.includes('text is required and must be a string')
+            ),
+            true
+        );
 
         // Inbox should contain exactly one queued userMessage from the accepted request.
         const batch = inbox.takeBatch({ maxItems: 2 });
