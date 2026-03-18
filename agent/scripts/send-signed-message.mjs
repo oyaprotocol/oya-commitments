@@ -1,7 +1,8 @@
 import dotenv from 'dotenv';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { loadAgentConfigFile, resolveAgentRuntimeConfig } from '../src/lib/agent-config.js';
 import { privateKeyToAccount } from 'viem/accounts';
 import { buildSignedMessagePayload } from '../src/lib/message-signing.js';
 
@@ -12,13 +13,13 @@ const repoRoot = path.resolve(__dirname, '../..');
 dotenv.config();
 dotenv.config({ path: path.resolve(repoRoot, 'agent/.env') });
 
-function getArgValue(prefix) {
-    const arg = process.argv.find((value) => value.startsWith(prefix));
+function getArgValue(prefix, argv = process.argv) {
+    const arg = argv.find((value) => value.startsWith(prefix));
     return arg ? arg.slice(prefix.length) : null;
 }
 
-function hasFlag(flag) {
-    return process.argv.includes(flag);
+function hasFlag(flag, argv = process.argv) {
+    return argv.includes(flag);
 }
 
 function parseInteger(value, label) {
@@ -52,16 +53,197 @@ function normalizePrivateKey(value) {
     return value.startsWith('0x') ? value : `0x${value}`;
 }
 
-function buildBaseUrl() {
-    const explicit = getArgValue('--url=') ?? process.env.MESSAGE_API_URL;
-    if (explicit) {
-        return explicit.replace(/\/+$/, '');
+function normalizeBaseUrl(value) {
+    if (typeof value !== 'string' || !value.trim()) {
+        throw new Error('base URL must be a non-empty string.');
     }
-    const host = getArgValue('--host=') ?? process.env.MESSAGE_API_HOST ?? '127.0.0.1';
-    const portRaw = getArgValue('--port=') ?? process.env.MESSAGE_API_PORT ?? '8787';
-    const port = parseInteger(portRaw, 'port');
-    const scheme = getArgValue('--scheme=') ?? process.env.MESSAGE_API_SCHEME ?? 'http';
-    return `${scheme}://${host}:${port}`;
+    return value.trim().replace(/\/+$/, '');
+}
+
+function parseBaseUrlParts(value, label) {
+    let parsed;
+    try {
+        parsed = new URL(normalizeBaseUrl(value));
+    } catch (error) {
+        throw new Error(`${label} must be a valid URL.`);
+    }
+
+    const scheme = parsed.protocol.replace(/:$/, '');
+    if (!scheme) {
+        throw new Error(`${label} must include a scheme.`);
+    }
+    if (!parsed.hostname) {
+        throw new Error(`${label} must include a host.`);
+    }
+
+    let port;
+    if (parsed.port) {
+        port = parseInteger(parsed.port, `${label} port`);
+    } else if (scheme === 'http') {
+        port = 80;
+    } else if (scheme === 'https') {
+        port = 443;
+    } else {
+        throw new Error(`${label} must include an explicit port for scheme "${scheme}".`);
+    }
+
+    return {
+        scheme,
+        host: parsed.hostname,
+        port,
+        pathname: parsed.pathname,
+        search: parsed.search,
+    };
+}
+
+function formatBaseUrl({ scheme, host, port, pathname = '', search = '' }) {
+    const authorityHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+    const normalizedPath =
+        pathname && pathname !== '/'
+            ? pathname.replace(/\/+$/, '')
+            : '';
+    return `${scheme}://${authorityHost}:${port}${normalizedPath}${search}`;
+}
+
+function resolveAgentRef(argv = process.argv, env = process.env) {
+    return getArgValue('--module=', argv) ?? env.AGENT_MODULE ?? 'default';
+}
+
+function resolveAgentModulePath(agentRef, repoRootPath = repoRoot) {
+    const modulePath = agentRef.includes('/')
+        ? agentRef
+        : `agent-library/agents/${agentRef}/agent.js`;
+    return path.isAbsolute(modulePath)
+        ? modulePath
+        : path.resolve(repoRootPath, modulePath);
+}
+
+function inferRuntimeChainId(rawAgentConfig, explicitChainIdRaw) {
+    if (explicitChainIdRaw !== null && explicitChainIdRaw !== undefined && explicitChainIdRaw !== '') {
+        return parseInteger(explicitChainIdRaw, 'chainId');
+    }
+    const byChain = rawAgentConfig?.byChain;
+    if (!byChain || typeof byChain !== 'object' || Array.isArray(byChain)) {
+        return undefined;
+    }
+    const keys = Object.keys(byChain);
+    if (keys.length !== 1) {
+        return undefined;
+    }
+    return parseInteger(keys[0], 'chainId');
+}
+
+async function resolveMessageApiConfigForAgent({
+    agentRef,
+    chainId,
+    repoRootPath = repoRoot,
+    env = process.env,
+}) {
+    const resolvedModulePath = resolveAgentModulePath(agentRef, repoRootPath);
+    const agentConfigPath = path.join(path.dirname(resolvedModulePath), 'config.json');
+    const agentConfigFile = await loadAgentConfigFile(agentConfigPath);
+    const runtimeChainId = inferRuntimeChainId(agentConfigFile.raw, chainId);
+
+    const runtimeConfig = resolveAgentRuntimeConfig({
+        baseConfig: {
+            commitmentSafe: undefined,
+            ogModule: undefined,
+            watchAssets: [],
+            watchErc1155Assets: [],
+            messageApiEnabled:
+                env.MESSAGE_API_ENABLED === undefined
+                    ? false
+                    : env.MESSAGE_API_ENABLED.toLowerCase() !== 'false',
+            messageApiHost: env.MESSAGE_API_HOST ?? '127.0.0.1',
+            messageApiPort:
+                env.MESSAGE_API_PORT === undefined ? 8787 : parseInteger(env.MESSAGE_API_PORT, 'port'),
+            messageApiKeys: {},
+            messageApiRequireSignerAllowlist:
+                env.MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST === undefined
+                    ? true
+                    : env.MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST.toLowerCase() !== 'false',
+            messageApiSignerAllowlist: [],
+            messageApiSignatureMaxAgeSeconds: 300,
+            messageApiMaxBodyBytes: 8192,
+            messageApiMaxTextLength: 2000,
+            messageApiQueueLimit: 500,
+            messageApiBatchSize: 25,
+            messageApiDefaultTtlSeconds: 3600,
+            messageApiMinTtlSeconds: 30,
+            messageApiMaxTtlSeconds: 86400,
+            messageApiIdempotencyTtlSeconds: 86400,
+            messageApiRateLimitPerMinute: 30,
+            messageApiRateLimitBurst: 10,
+        },
+        agentConfigFile,
+        chainId: runtimeChainId,
+    });
+
+    return {
+        ...runtimeConfig,
+        hasMessageApiConfig: Boolean(runtimeConfig.agentConfig?.messageApi),
+        modulePath: resolvedModulePath,
+        configPath: agentConfigPath,
+    };
+}
+
+async function buildBaseUrl({
+    argv = process.argv,
+    env = process.env,
+    repoRootPath = repoRoot,
+} = {}) {
+    const explicit = getArgValue('--url=', argv);
+    if (explicit) {
+        return normalizeBaseUrl(explicit);
+    }
+
+    const explicitHost = getArgValue('--host=', argv);
+    const explicitPortRaw = getArgValue('--port=', argv);
+    const explicitPort =
+        explicitPortRaw === null ? undefined : parseInteger(explicitPortRaw, 'port');
+    const explicitScheme = getArgValue('--scheme=', argv);
+
+    const agentRef = resolveAgentRef(argv, env);
+    const chainId = getArgValue('--chain-id=', argv) ?? env.MESSAGE_API_CHAIN_ID ?? undefined;
+    const runtimeConfig = await resolveMessageApiConfigForAgent({
+        agentRef,
+        chainId,
+        repoRootPath,
+        env,
+    });
+
+    let baseParts = null;
+    if (runtimeConfig.hasMessageApiConfig) {
+        baseParts = {
+            scheme: env.MESSAGE_API_SCHEME ?? 'http',
+            host: runtimeConfig.messageApiHost,
+            port: runtimeConfig.messageApiPort,
+        };
+    }
+
+    const envUrl = env.MESSAGE_API_URL;
+    if (!baseParts && envUrl) {
+        if (explicitHost === null && explicitPort === undefined && explicitScheme === null) {
+            return normalizeBaseUrl(envUrl);
+        }
+        baseParts = parseBaseUrlParts(envUrl, 'MESSAGE_API_URL');
+    }
+
+    if (!baseParts) {
+        const envPortRaw = env.MESSAGE_API_PORT ?? '8787';
+        baseParts = {
+            scheme: env.MESSAGE_API_SCHEME ?? 'http',
+            host: env.MESSAGE_API_HOST ?? '127.0.0.1',
+            port: parseInteger(envPortRaw, 'port'),
+        };
+    }
+
+    return formatBaseUrl({
+        ...baseParts,
+        scheme: explicitScheme ?? baseParts.scheme,
+        host: explicitHost ?? baseParts.host,
+        port: explicitPort ?? baseParts.port,
+    });
 }
 
 function printUsage() {
@@ -74,9 +256,11 @@ Required:
 
 Optional:
   --url=<base-url>                     Full base URL, e.g. http://127.0.0.1:8787
-  --host=<host>                        Used if --url is omitted (default 127.0.0.1)
-  --port=<int>                         Used if --url is omitted (default 8787)
+  --host=<host>                        Used if --url is omitted; overrides module config host
+  --port=<int>                         Used if --url is omitted; overrides module config port
   --scheme=<http|https>                Used if --url is omitted (default http)
+  --module=<agent-ref>                 Agent module whose config.json should supply messageApi host/port
+  --chain-id=<int>                     Optional chain id for selecting byChain.messageApi overrides
   --bearer-token=<string>              Optional bearer token (or MESSAGE_API_BEARER_TOKEN)
   --command=<string>                   Optional command field
   --args-json='<json-object>'          Optional args object
@@ -91,7 +275,7 @@ Optional:
 }
 
 async function main() {
-    if (hasFlag('--help') || hasFlag('-h')) {
+    if (hasFlag('--help', process.argv) || hasFlag('-h', process.argv)) {
         printUsage();
         return;
     }
@@ -106,7 +290,7 @@ async function main() {
     );
     const account = privateKeyToAccount(normalizedPrivateKey);
 
-    const baseUrl = buildBaseUrl();
+    const baseUrl = await buildBaseUrl();
     const bearerToken =
         getArgValue('--bearer-token=') ?? process.env.MESSAGE_API_BEARER_TOKEN ?? undefined;
     const command = getArgValue('--command=') ?? undefined;
@@ -153,7 +337,7 @@ async function main() {
     if (metadata !== undefined) body.metadata = metadata;
     if (deadline !== undefined) body.deadline = deadline;
 
-    if (hasFlag('--dry-run')) {
+    if (hasFlag('--dry-run', process.argv)) {
         console.log(
             JSON.stringify(
                 {
@@ -218,7 +402,11 @@ async function main() {
     }
 }
 
-main().catch((error) => {
-    console.error('[agent] send signed message failed:', error?.message ?? error);
-    process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+    main().catch((error) => {
+        console.error('[agent] send signed message failed:', error?.message ?? error);
+        process.exit(1);
+    });
+}
+
+export { buildBaseUrl, resolveMessageApiConfigForAgent, resolveAgentModulePath };

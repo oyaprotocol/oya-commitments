@@ -197,6 +197,8 @@ node agent/scripts/send-signed-message.mjs \
   --request-id="pause-2h"
 ```
 
+If `--url` is omitted, the helper reads `messageApi.host` and `messageApi.port` from the selected agent module's `config.json`. Use `--module=<agent-name>` and optional `--chain-id=<int>` to select the commitment config; `MESSAGE_API_URL` and `MESSAGE_API_HOST`/`MESSAGE_API_PORT` remain fallback defaults when the module does not override them.
+
 If bearer gating is configured, also pass `--bearer-token="<token>"` or set `MESSAGE_API_BEARER_TOKEN`.
 
 ### IPFS Publishing (Optional)
