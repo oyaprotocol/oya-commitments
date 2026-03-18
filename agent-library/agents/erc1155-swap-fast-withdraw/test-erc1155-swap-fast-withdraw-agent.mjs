@@ -145,18 +145,19 @@ function buildHistoricalReimbursementExplanation({
     recipient = RECIPIENT,
     directFillTx = DIRECT_FILL_TX_HASH,
 } = {}) {
+    const encode = (value) => encodeURIComponent(String(value ?? ''));
     return [
         'erc1155-swap-fast-withdraw reimbursement',
-        `order=${orderId}`,
-        `requestId=${requestId}`,
-        `signer=${signer}`,
-        `signedRequestCid=${signedRequestCid ?? 'missing'}`,
-        `token=${token}`,
-        `tokenId=${tokenId}`,
-        `amount=${amount}`,
-        `reservedCreditWei=${reservedCreditWei}`,
-        `recipient=${recipient}`,
-        `directFillTx=${directFillTx}`,
+        `order=${encode(orderId)}`,
+        `requestId=${encode(requestId)}`,
+        `signer=${encode(signer)}`,
+        `signedRequestCid=${encode(signedRequestCid ?? 'missing')}`,
+        `token=${encode(token)}`,
+        `tokenId=${encode(tokenId)}`,
+        `amount=${encode(amount)}`,
+        `reservedCreditWei=${encode(reservedCreditWei)}`,
+        `recipient=${encode(recipient)}`,
+        `directFillTx=${encode(directFillTx)}`,
     ].join(' | ');
 }
 
@@ -293,6 +294,10 @@ function parseToolArgs(call) {
 
 function buildRequestOrderId(signer, requestId) {
     return `request:${getAddress(signer)}:${String(requestId).trim()}`;
+}
+
+function encodeExplanationValue(value) {
+    return encodeURIComponent(String(value ?? ''));
 }
 
 function buildPublishedIpfsOutput(requestId = 'default') {
@@ -620,6 +625,76 @@ async function testStartupBackfillReconstructsHistoricalSpentCredit() {
     });
 }
 
+async function testHistoricalBackfillDecodesEscapedRequestIds() {
+    await withTempStatePath(async () => {
+        const config = buildConfig();
+        const historicalRequestId = 'req|historical|spent';
+        const historicalOrderId = buildRequestOrderId(SIGNER, historicalRequestId);
+
+        const toolCalls = await getDeterministicToolCalls({
+            signals: [
+                buildSignedRequestSignal({
+                    requestId: 'req-overdraw-after-pipe-backfill',
+                    signer: SIGNER,
+                    recipient: RECIPIENT,
+                    amount: '2',
+                }),
+            ],
+            commitmentText: '',
+            commitmentSafe: SAFE,
+            agentAddress: AGENT,
+            publicClient: buildPublicClient({
+                latestBlock: 160n,
+                safeDeploymentBlock: 90n,
+                safeUsdcBalance: 5_000_000n,
+                agentErc1155Balance: 5n,
+                erc20TransferLogs: [
+                    buildErc20TransferLog({
+                        from: SIGNER,
+                        value: 2_000_000n,
+                        blockNumber: 120n,
+                        transactionHash: `0x${'6'.repeat(64)}`,
+                        logIndex: 0,
+                    }),
+                ],
+                ogProposalLogs: [
+                    buildTransactionsProposedLog({
+                        proposalHash: RECOVERED_PROPOSAL_HASH_2,
+                        explanation: buildHistoricalReimbursementExplanation({
+                            orderId: historicalOrderId,
+                            requestId: historicalRequestId,
+                            signer: SIGNER,
+                            amount: '1',
+                            reservedCreditWei: '1000000',
+                            recipient: BUYER,
+                        }),
+                        blockNumber: 130n,
+                    }),
+                ],
+                ogExecutedLogs: [
+                    buildProposalExecutedLog({
+                        proposalHash: RECOVERED_PROPOSAL_HASH_2,
+                        blockNumber: 140n,
+                    }),
+                ],
+            }),
+            config,
+            onchainPendingProposal: false,
+        });
+
+        assert.equal(toolCalls.length, 0);
+
+        const state = await getSwapState();
+        assert.ok(state.orders[historicalOrderId]);
+        assert.equal(state.orders[historicalOrderId].requestId, historicalRequestId);
+        assert.deepEqual(getCreditFor(state, SIGNER), {
+            depositedWei: '2000000',
+            reservedWei: '1000000',
+            availableWei: '1000000',
+        });
+    });
+}
+
 async function testSignedFastWithdrawLifecycleUsesDepositorCredit() {
     await withTempStatePath(async () => {
         const config = buildConfig();
@@ -729,10 +804,16 @@ async function testSignedFastWithdrawLifecycleUsesDepositorCredit() {
         assert.equal(reimbursementArgs.transactions[0].to.toLowerCase(), USDC.toLowerCase());
         assert.match(
             reimbursementArgs.explanation,
-            new RegExp(`order=${buildRequestOrderId(SIGNER, 'req-1')}`)
+            new RegExp(`order=${encodeExplanationValue(buildRequestOrderId(SIGNER, 'req-1'))}`)
         );
-        assert.match(reimbursementArgs.explanation, new RegExp(`signer=${SIGNER}`, 'i'));
-        assert.match(reimbursementArgs.explanation, /signedRequestCid=ipfs:\/\/bafyreq1/);
+        assert.match(
+            reimbursementArgs.explanation,
+            new RegExp(`signer=${encodeExplanationValue(SIGNER)}`, 'i')
+        );
+        assert.match(
+            reimbursementArgs.explanation,
+            new RegExp(`signedRequestCid=${encodeExplanationValue('ipfs://bafyreq1')}`)
+        );
 
         await onToolOutput({
             name: 'post_bond_and_propose',
@@ -1981,7 +2062,9 @@ async function testStaleProposalSubmissionRetries() {
         assert.equal(retryArgs.transactions.length, 1);
         assert.match(
             retryArgs.explanation,
-            new RegExp(`order=${buildRequestOrderId(SIGNER, 'req-stale-proposal')}`)
+            new RegExp(
+                `order=${encodeExplanationValue(buildRequestOrderId(SIGNER, 'req-stale-proposal'))}`
+            )
         );
 
         const state = await getSwapState();
@@ -1997,6 +2080,7 @@ async function run() {
     await testStartupBackfillsDepositorCreditFromHistory();
     await testStartupLogsWhenCreditBackfillAlreadyComplete();
     await testStartupBackfillReconstructsHistoricalSpentCredit();
+    await testHistoricalBackfillDecodesEscapedRequestIds();
     await testSignedFastWithdrawLifecycleUsesDepositorCredit();
     await testDirectFillWaitsForSafeReimbursementLiquidity();
     await testFreeTextSignedRequestUsesLlmInterpretation();

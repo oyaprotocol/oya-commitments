@@ -74,7 +74,7 @@ forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimis
 
 Deploy a repo-owned mintable ERC1155 for Sepolia or Anvil.
 
-The recommended CLI path now uses the wrapper script below. It reads `RPC_URL` first, then falls back to `SEPOLIA_RPC_URL` or `MAINNET_RPC_URL`, and always requires `DEPLOYER_PK`. If `ETHERSCAN_API_KEY` is set, it also verifies the deployment on Etherscan after broadcast; otherwise it deploys without verification.
+The recommended CLI path now uses the wrapper script below. It reads `RPC_URL` first, then falls back to `SEPOLIA_RPC_URL`, and always requires `DEPLOYER_PK`. It does not implicitly consume `MAINNET_RPC_URL`. If `ETHERSCAN_API_KEY` is set, it also verifies the deployment on Etherscan after broadcast; otherwise it deploys without verification.
 
 Deploy only:
 
