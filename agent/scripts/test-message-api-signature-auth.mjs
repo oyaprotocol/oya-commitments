@@ -19,12 +19,14 @@ function buildInbox() {
 
 async function main() {
     const account = privateKeyToAccount(`0x${'1'.repeat(64)}`);
+    const otherAccount = privateKeyToAccount(`0x${'2'.repeat(64)}`);
     const inbox = buildInbox();
     const config = {
         messageApiHost: '127.0.0.1',
         messageApiPort: 0,
         messageApiKeys: {},
         messageApiSignerAllowlist: [account.address],
+        messageApiRequireSignerAllowlist: true,
         messageApiSignatureMaxAgeSeconds: 300,
         messageApiMaxBodyBytes: 2048,
     };
@@ -190,8 +192,93 @@ async function main() {
             }),
         });
         assert.equal(expired.status, 401);
+
+        // Unknown signers should still be rejected when allowlist mode is enabled.
+        const otherTimestampMs = Date.now();
+        const otherRequestBody = {
+            text: 'Open a trade',
+            requestId: 'sig-other-signer',
+        };
+        const otherPayload = buildSignedMessagePayload({
+            address: otherAccount.address,
+            timestampMs: otherTimestampMs,
+            ...otherRequestBody,
+        });
+        const otherSignature = await otherAccount.signMessage({ message: otherPayload });
+        const rejectedOtherSigner = await fetch(`${baseUrl}/v1/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ...otherRequestBody,
+                auth: {
+                    type: 'eip191',
+                    address: otherAccount.address,
+                    timestampMs: otherTimestampMs,
+                    signature: otherSignature,
+                },
+            }),
+        });
+        assert.equal(rejectedOtherSigner.status, 401);
     } finally {
         await messageApi.stop();
+    }
+
+    const openInbox = buildInbox();
+    const openConfig = {
+        messageApiHost: '127.0.0.1',
+        messageApiPort: 0,
+        messageApiKeys: {},
+        messageApiSignerAllowlist: [],
+        messageApiRequireSignerAllowlist: false,
+        messageApiSignatureMaxAgeSeconds: 300,
+        messageApiMaxBodyBytes: 2048,
+    };
+    const openMessageApi = createMessageApiServer({
+        config: openConfig,
+        inbox: openInbox,
+        logger: { log() {} },
+    });
+    const openServer = await openMessageApi.start();
+    const openAddress = openServer.address();
+    assert.ok(openAddress && typeof openAddress === 'object' && typeof openAddress.port === 'number');
+    const openBaseUrl = `http://127.0.0.1:${openAddress.port}`;
+
+    try {
+        const timestampMs = Date.now();
+        const openBody = {
+            text: 'Open a YES trade with 5 USDC',
+            requestId: 'sig-open-mode',
+        };
+        const payload = buildSignedMessagePayload({
+            address: otherAccount.address,
+            timestampMs,
+            ...openBody,
+        });
+        const signature = await otherAccount.signMessage({ message: payload });
+
+        const accepted = await fetch(`${openBaseUrl}/v1/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ...openBody,
+                auth: {
+                    type: 'eip191',
+                    address: otherAccount.address,
+                    timestampMs,
+                    signature,
+                },
+            }),
+        });
+        assert.equal(accepted.status, 202);
+        const acceptedJson = await accepted.json();
+        assert.equal(acceptedJson.status, 'queued');
+
+        const queued = openInbox.takeBatch({ maxItems: 1 });
+        assert.equal(queued.length, 1);
+        assert.equal(queued[0].sender.address, otherAccount.address);
+        openInbox.ackBatch(queued.map((message) => message.messageId));
+    } finally {
+        await openMessageApi.stop();
     }
 
     console.log('[test] message API signature auth OK');

@@ -12,6 +12,7 @@ const MANAGED_ENV_KEYS = [
     'MESSAGE_API_ENABLED',
     'MESSAGE_API_KEYS_JSON',
     'MESSAGE_API_SIGNER_ALLOWLIST',
+    'MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST',
     'MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS',
     'MESSAGE_API_PORT',
     'MESSAGE_API_MAX_BODY_BYTES',
@@ -112,7 +113,7 @@ async function run() {
         }
     );
 
-    // Enabled API requires signer allowlist auth even when bearer keys are present.
+    // Enabled API requires signer allowlist auth by default, even when bearer keys are present.
     withManagedEnv(
         {
             MESSAGE_API_ENABLED: 'true',
@@ -122,8 +123,24 @@ async function run() {
         () => {
             assert.throws(
                 () => buildConfig(),
-                /MESSAGE_API_ENABLED=true requires MESSAGE_API_SIGNER_ALLOWLIST/
+                /MESSAGE_API_ENABLED=true with MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST=true requires MESSAGE_API_SIGNER_ALLOWLIST/
             );
+        }
+    );
+
+    // Enabled API can opt into open signed access without a signer allowlist.
+    withManagedEnv(
+        {
+            MESSAGE_API_ENABLED: 'true',
+            MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST: 'false',
+            MESSAGE_API_KEYS_JSON: '{"ops":"k_test"}',
+            MESSAGE_API_SIGNER_ALLOWLIST: undefined,
+        },
+        () => {
+            const config = buildConfig();
+            assert.equal(config.messageApiRequireSignerAllowlist, false);
+            assert.deepEqual(config.messageApiSignerAllowlist, []);
+            assert.deepEqual(config.messageApiKeys, { ops: 'k_test' });
         }
     );
 
@@ -136,6 +153,7 @@ async function run() {
         },
         () => {
             const config = buildConfig();
+            assert.equal(config.messageApiRequireSignerAllowlist, true);
             assert.equal(config.messageApiSignerAllowlist.length, 1);
             assert.equal(config.messageApiSignerAllowlist[0], '0x3333333333333333333333333333333333333333');
         }

@@ -197,6 +197,9 @@ function buildConfig() {
     const ogModule = parseOptionalAddressEnv(process.env.OG_MODULE, 'OG_MODULE');
 
     const messageApiEnabled = parseBoolean(process.env.MESSAGE_API_ENABLED, false);
+    const messageApiRequireSignerAllowlist = messageApiEnabled
+        ? parseBoolean(process.env.MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST, true)
+        : true;
     // Keep optional ingress isolated: malformed keys should only fail when the feature is enabled.
     const messageApiKeys = messageApiEnabled
         ? parseMessageApiKeys(process.env.MESSAGE_API_KEYS_JSON)
@@ -204,9 +207,13 @@ function buildConfig() {
     const messageApiSignerAllowlist = messageApiEnabled
         ? parseAddressList(process.env.MESSAGE_API_SIGNER_ALLOWLIST)
         : [];
-    if (messageApiEnabled && messageApiSignerAllowlist.length === 0) {
+    if (
+        messageApiEnabled &&
+        messageApiRequireSignerAllowlist &&
+        messageApiSignerAllowlist.length === 0
+    ) {
         throw new Error(
-            'MESSAGE_API_ENABLED=true requires MESSAGE_API_SIGNER_ALLOWLIST. MESSAGE_API_KEYS_JSON is optional additional bearer gating.'
+            'MESSAGE_API_ENABLED=true with MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST=true requires MESSAGE_API_SIGNER_ALLOWLIST. MESSAGE_API_KEYS_JSON is optional additional bearer gating.'
         );
     }
     // Keep disabled ingress fully inert: optional MESSAGE_API_* parsing/validation
@@ -271,6 +278,7 @@ function buildConfig() {
                   10,
                   { min: 0 }
               ),
+              messageApiRequireSignerAllowlist,
               messageApiSignerAllowlist,
               messageApiSignatureMaxAgeSeconds: parsePositiveInteger(
                   process.env.MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS,
@@ -291,6 +299,7 @@ function buildConfig() {
               messageApiIdempotencyTtlSeconds: 86400,
               messageApiRateLimitPerMinute: 30,
               messageApiRateLimitBurst: 10,
+              messageApiRequireSignerAllowlist: true,
               messageApiSignerAllowlist: [],
               messageApiSignatureMaxAgeSeconds: 300,
           };
