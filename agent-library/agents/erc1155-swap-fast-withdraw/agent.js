@@ -1121,6 +1121,9 @@ async function maybeBackfillDeposits({
             `[agent] Rebuilt ${logs.length} historical ERC20 deposit credit records for ${commitmentSafe}.`
         );
     }
+    console.log(
+        `[agent] erc1155-swap-fast-withdraw credit backfill complete through block ${latestBlock.toString()}.`
+    );
     return changed;
 }
 
