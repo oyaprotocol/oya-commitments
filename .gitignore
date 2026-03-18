@@ -22,3 +22,6 @@ anvil.pid
 node_modules
 frontend/node_modules
 agent/node_modules
+
+# Agent-local persisted state
+agent-library/agents/**/.swap-state*.json

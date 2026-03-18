@@ -909,6 +909,25 @@ function decodeProposalExplanationText(value) {
     }
 }
 
+function encodeExplanationFieldValue(value) {
+    return encodeURIComponent(String(value ?? ''));
+}
+
+function decodeExplanationFieldValue(value) {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return '';
+    }
+    try {
+        return decodeURIComponent(trimmed);
+    } catch (error) {
+        return trimmed;
+    }
+}
+
 function parseReimbursementExplanationFields(explanation) {
     if (typeof explanation !== 'string' || !explanation.trim()) {
         return null;
@@ -929,7 +948,7 @@ function parseReimbursementExplanationFields(explanation) {
             continue;
         }
         const key = segment.slice(0, separatorIndex).trim();
-        const value = segment.slice(separatorIndex + 1).trim();
+        const value = decodeExplanationFieldValue(segment.slice(separatorIndex + 1).trim());
         if (key) {
             fields[key] = value;
         }
@@ -1377,16 +1396,18 @@ async function refreshProposalSubmissionStatus({ publicClient, policy }) {
 function buildReimbursementExplanation(order, policy) {
     return [
         'erc1155-swap-fast-withdraw reimbursement',
-        `order=${order.orderId}`,
-        `requestId=${order.requestId ?? 'n/a'}`,
-        `signer=${order.signer ?? 'unknown'}`,
-        `signedRequestCid=${order.artifactUri ?? 'missing'}`,
-        `token=${policy.erc1155Token}`,
-        `tokenId=${policy.erc1155TokenId}`,
-        `amount=${order.tokenAmount}`,
-        `reservedCreditWei=${order.reservedCreditAmountWei ?? order.reimbursementAmountWei}`,
-        `recipient=${order.recipient}`,
-        `directFillTx=${order.directFillTxHash ?? 'pending'}`,
+        `order=${encodeExplanationFieldValue(order.orderId)}`,
+        `requestId=${encodeExplanationFieldValue(order.requestId ?? 'n/a')}`,
+        `signer=${encodeExplanationFieldValue(order.signer ?? 'unknown')}`,
+        `signedRequestCid=${encodeExplanationFieldValue(order.artifactUri ?? 'missing')}`,
+        `token=${encodeExplanationFieldValue(policy.erc1155Token)}`,
+        `tokenId=${encodeExplanationFieldValue(policy.erc1155TokenId)}`,
+        `amount=${encodeExplanationFieldValue(order.tokenAmount)}`,
+        `reservedCreditWei=${encodeExplanationFieldValue(
+            order.reservedCreditAmountWei ?? order.reimbursementAmountWei
+        )}`,
+        `recipient=${encodeExplanationFieldValue(order.recipient)}`,
+        `directFillTx=${encodeExplanationFieldValue(order.directFillTxHash ?? 'pending')}`,
     ].join(' | ');
 }
 

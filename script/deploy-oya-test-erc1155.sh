@@ -20,10 +20,10 @@ if [[ -n "${ENV_FILE:-}" ]]; then
   set +a
 fi
 
-RPC_URL_VALUE="${RPC_URL:-${SEPOLIA_RPC_URL:-${MAINNET_RPC_URL:-}}}"
+RPC_URL_VALUE="${RPC_URL:-${SEPOLIA_RPC_URL:-}}"
 CHAIN_VALUE="${CHAIN:-sepolia}"
 
-: "${RPC_URL_VALUE:?RPC_URL, SEPOLIA_RPC_URL, or MAINNET_RPC_URL is required}"
+: "${RPC_URL_VALUE:?RPC_URL or SEPOLIA_RPC_URL is required}"
 : "${DEPLOYER_PK:?DEPLOYER_PK is required}"
 
 cd "$ROOT_DIR"
