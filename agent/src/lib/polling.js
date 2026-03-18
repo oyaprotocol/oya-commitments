@@ -39,6 +39,64 @@ function isReceiptUnavailableError(error) {
     return message.includes('transaction receipt') && message.includes('not found');
 }
 
+function isLogHeadLagError(error) {
+    const message = [
+        error?.details,
+        error?.shortMessage,
+        error?.message,
+    ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+    return (
+        message.includes('block range extends beyond current head block') ||
+        (message.includes('beyond current head block') && message.includes('block range'))
+    );
+}
+
+async function runLogScanWithHeadFallback({
+    publicClient,
+    fromBlock,
+    toBlock,
+    label,
+    scan,
+}) {
+    let currentToBlock = toBlock;
+    while (currentToBlock >= fromBlock) {
+        try {
+            return {
+                ...(await scan(currentToBlock)),
+                scannedToBlock: currentToBlock,
+            };
+        } catch (error) {
+            if (!isLogHeadLagError(error)) {
+                throw error;
+            }
+
+            let nextToBlock = currentToBlock - 1n;
+            try {
+                const refreshedHead = await publicClient.getBlockNumber();
+                if (refreshedHead < nextToBlock) {
+                    nextToBlock = refreshedHead;
+                }
+            } catch (refreshError) {
+                // Fall back to decrementing one block when the head refresh fails.
+            }
+
+            if (nextToBlock < fromBlock) {
+                return null;
+            }
+
+            console.warn(
+                `[agent] RPC log head lagged behind blockNumber; retrying ${label} through block ${nextToBlock.toString()}.`
+            );
+            currentToBlock = nextToBlock;
+        }
+    }
+
+    return null;
+}
+
 function isReceiptReverted(receipt) {
     const status = receipt?.status;
     return status === 0n || status === 0 || status === 'reverted';
@@ -320,167 +378,192 @@ async function pollCommitmentChanges({
     }
 
     const fromBlock = lastCheckedBlock + 1n;
-    const toBlock = latestBlock;
-    const deposits = [];
-    const erc1155DescriptorsByToken = new Map();
-
-    for (const asset of trackedAssets) {
-        if (isAddressEqual(asset, zeroAddress)) {
-            continue;
-        }
-        const logs = await getLogsChunked({
-            publicClient,
-            address: asset,
-            event: transferEvent,
-            args: { to: commitmentSafe },
-            fromBlock,
-            toBlock,
-            chunkSize: logChunkSize,
-        });
-
-        for (const log of logs) {
-            deposits.push({
-                kind: 'erc20Deposit',
-                asset,
-                from: log.args.from,
-                amount: log.args.value,
-                blockNumber: log.blockNumber,
-                transactionHash: log.transactionHash,
-                logIndex: log.logIndex,
-                id: log.transactionHash
-                    ? `${log.transactionHash}:${log.logIndex ?? '0'}`
-                    : `${log.blockNumber.toString()}:${log.logIndex ?? '0'}`,
-            });
-        }
-    }
-
-    for (const descriptor of normalizeTrackedErc1155Assets(trackedErc1155Assets)) {
-        const tokenKey = descriptor.token.toLowerCase();
-        let tokenDescriptors = erc1155DescriptorsByToken.get(tokenKey);
-        if (!tokenDescriptors) {
-            tokenDescriptors = new Map();
-            erc1155DescriptorsByToken.set(tokenKey, tokenDescriptors);
-        }
-        tokenDescriptors.set(descriptor.tokenId, descriptor);
-    }
-
-    for (const [tokenKey, tokenDescriptors] of erc1155DescriptorsByToken.entries()) {
-        const token = getAddress(tokenKey);
-        const [singleLogs, batchLogs] = await Promise.all([
-            getLogsChunked({
-                publicClient,
-                address: token,
-                event: erc1155TransferSingleEvent,
-                args: { to: commitmentSafe },
-                fromBlock,
-                toBlock,
-                chunkSize: logChunkSize,
-            }),
-            getLogsChunked({
-                publicClient,
-                address: token,
-                event: erc1155TransferBatchEvent,
-                args: { to: commitmentSafe },
-                fromBlock,
-                toBlock,
-                chunkSize: logChunkSize,
-            }),
-        ]);
-
-        for (const log of singleLogs) {
-            const tokenId = BigInt(log.args.id).toString();
-            const descriptor = tokenDescriptors.get(tokenId);
-            if (!descriptor) {
-                continue;
-            }
-            deposits.push({
-                kind: 'erc1155Deposit',
-                asset: token,
-                token,
-                tokenId,
-                symbol: descriptor.symbol,
-                operator: log.args.operator,
-                from: log.args.from,
-                amount: log.args.value,
-                blockNumber: log.blockNumber,
-                transactionHash: log.transactionHash,
-                logIndex: log.logIndex,
-                id: log.transactionHash
-                    ? `${log.transactionHash}:${log.logIndex ?? '0'}:${tokenId}`
-                    : `${log.blockNumber.toString()}:${log.logIndex ?? '0'}:${tokenId}`,
-            });
-        }
-
-        for (const log of batchLogs) {
-            const ids = Array.isArray(log.args.ids) ? log.args.ids : [];
-            const values = Array.isArray(log.args.values) ? log.args.values : [];
-            ids.forEach((id, index) => {
-                const tokenId = BigInt(id).toString();
-                const descriptor = tokenDescriptors.get(tokenId);
-                const amount = values[index];
-                if (!descriptor || amount === undefined) {
-                    return;
-                }
-                deposits.push({
-                    kind: 'erc1155Deposit',
-                    asset: token,
-                    token,
-                    tokenId,
-                    symbol: descriptor.symbol,
-                    operator: log.args.operator,
-                    from: log.args.from,
-                    amount,
-                    blockNumber: log.blockNumber,
-                    transactionHash: log.transactionHash,
-                    logIndex: log.logIndex,
-                    batchIndex: index,
-                    id: log.transactionHash
-                        ? `${log.transactionHash}:${log.logIndex ?? '0'}:${tokenId}:${index}`
-                        : `${log.blockNumber.toString()}:${log.logIndex ?? '0'}:${tokenId}:${index}`,
-                });
-            });
-        }
-    }
-
-    let nextNativeBalance = lastNativeBalance;
-    if (watchNativeBalance) {
-        const nativeBalance = await publicClient.getBalance({
-            address: commitmentSafe,
-            blockNumber: toBlock,
-        });
-
-        if (lastNativeBalance !== undefined && nativeBalance > lastNativeBalance) {
-            deposits.push({
-                kind: 'nativeDeposit',
-                asset: zeroAddress,
-                from: 'unknown',
-                amount: nativeBalance - lastNativeBalance,
-                blockNumber: toBlock,
-                transactionHash: undefined,
-                logIndex: undefined,
-                id: `native:${toBlock.toString()}:${(nativeBalance - lastNativeBalance).toString()}`,
-            });
-        }
-
-        nextNativeBalance = nativeBalance;
-    }
-
-    const { signals: balanceSnapshots, nextAssetBalances } = await collectAssetBalanceChangeSignals({
+    const scanResult = await runLogScanWithHeadFallback({
         publicClient,
-        trackedAssets,
-        trackedErc1155Assets,
-        commitmentSafe,
-        blockNumber: toBlock,
-        lastAssetBalances,
-        emitBalanceSnapshotsEveryPoll,
+        fromBlock,
+        toBlock: latestBlock,
+        label: 'commitment scan',
+        scan: async (toBlock) => {
+            const deposits = [];
+            const erc1155DescriptorsByToken = new Map();
+
+            for (const asset of trackedAssets) {
+                if (isAddressEqual(asset, zeroAddress)) {
+                    continue;
+                }
+                const logs = await getLogsChunked({
+                    publicClient,
+                    address: asset,
+                    event: transferEvent,
+                    args: { to: commitmentSafe },
+                    fromBlock,
+                    toBlock,
+                    chunkSize: logChunkSize,
+                });
+
+                for (const log of logs) {
+                    deposits.push({
+                        kind: 'erc20Deposit',
+                        asset,
+                        from: log.args.from,
+                        amount: log.args.value,
+                        blockNumber: log.blockNumber,
+                        transactionHash: log.transactionHash,
+                        logIndex: log.logIndex,
+                        id: log.transactionHash
+                            ? `${log.transactionHash}:${log.logIndex ?? '0'}`
+                            : `${log.blockNumber.toString()}:${log.logIndex ?? '0'}`,
+                    });
+                }
+            }
+
+            for (const descriptor of normalizeTrackedErc1155Assets(trackedErc1155Assets)) {
+                const tokenKey = descriptor.token.toLowerCase();
+                let tokenDescriptors = erc1155DescriptorsByToken.get(tokenKey);
+                if (!tokenDescriptors) {
+                    tokenDescriptors = new Map();
+                    erc1155DescriptorsByToken.set(tokenKey, tokenDescriptors);
+                }
+                tokenDescriptors.set(descriptor.tokenId, descriptor);
+            }
+
+            for (const [tokenKey, tokenDescriptors] of erc1155DescriptorsByToken.entries()) {
+                const token = getAddress(tokenKey);
+                const [singleLogs, batchLogs] = await Promise.all([
+                    getLogsChunked({
+                        publicClient,
+                        address: token,
+                        event: erc1155TransferSingleEvent,
+                        args: { to: commitmentSafe },
+                        fromBlock,
+                        toBlock,
+                        chunkSize: logChunkSize,
+                    }),
+                    getLogsChunked({
+                        publicClient,
+                        address: token,
+                        event: erc1155TransferBatchEvent,
+                        args: { to: commitmentSafe },
+                        fromBlock,
+                        toBlock,
+                        chunkSize: logChunkSize,
+                    }),
+                ]);
+
+                for (const log of singleLogs) {
+                    const tokenId = BigInt(log.args.id).toString();
+                    const descriptor = tokenDescriptors.get(tokenId);
+                    if (!descriptor) {
+                        continue;
+                    }
+                    deposits.push({
+                        kind: 'erc1155Deposit',
+                        asset: token,
+                        token,
+                        tokenId,
+                        symbol: descriptor.symbol,
+                        operator: log.args.operator,
+                        from: log.args.from,
+                        amount: log.args.value,
+                        blockNumber: log.blockNumber,
+                        transactionHash: log.transactionHash,
+                        logIndex: log.logIndex,
+                        id: log.transactionHash
+                            ? `${log.transactionHash}:${log.logIndex ?? '0'}:${tokenId}`
+                            : `${log.blockNumber.toString()}:${log.logIndex ?? '0'}:${tokenId}`,
+                    });
+                }
+
+                for (const log of batchLogs) {
+                    const ids = Array.isArray(log.args.ids) ? log.args.ids : [];
+                    const values = Array.isArray(log.args.values) ? log.args.values : [];
+                    ids.forEach((id, index) => {
+                        const tokenId = BigInt(id).toString();
+                        const descriptor = tokenDescriptors.get(tokenId);
+                        const amount = values[index];
+                        if (!descriptor || amount === undefined) {
+                            return;
+                        }
+                        deposits.push({
+                            kind: 'erc1155Deposit',
+                            asset: token,
+                            token,
+                            tokenId,
+                            symbol: descriptor.symbol,
+                            operator: log.args.operator,
+                            from: log.args.from,
+                            amount,
+                            blockNumber: log.blockNumber,
+                            transactionHash: log.transactionHash,
+                            logIndex: log.logIndex,
+                            batchIndex: index,
+                            id: log.transactionHash
+                                ? `${log.transactionHash}:${log.logIndex ?? '0'}:${tokenId}:${index}`
+                                : `${log.blockNumber.toString()}:${log.logIndex ?? '0'}:${tokenId}:${index}`,
+                        });
+                    });
+                }
+            }
+
+            let nextNativeBalance = lastNativeBalance;
+            if (watchNativeBalance) {
+                const nativeBalance = await publicClient.getBalance({
+                    address: commitmentSafe,
+                    blockNumber: toBlock,
+                });
+
+                if (lastNativeBalance !== undefined && nativeBalance > lastNativeBalance) {
+                    deposits.push({
+                        kind: 'nativeDeposit',
+                        asset: zeroAddress,
+                        from: 'unknown',
+                        amount: nativeBalance - lastNativeBalance,
+                        blockNumber: toBlock,
+                        transactionHash: undefined,
+                        logIndex: undefined,
+                        id: `native:${toBlock.toString()}:${(nativeBalance - lastNativeBalance).toString()}`,
+                    });
+                }
+
+                nextNativeBalance = nativeBalance;
+            }
+
+            const { signals: balanceSnapshots, nextAssetBalances } =
+                await collectAssetBalanceChangeSignals({
+                    publicClient,
+                    trackedAssets,
+                    trackedErc1155Assets,
+                    commitmentSafe,
+                    blockNumber: toBlock,
+                    lastAssetBalances,
+                    emitBalanceSnapshotsEveryPoll,
+                });
+
+            return {
+                deposits,
+                balanceSnapshots,
+                lastNativeBalance: nextNativeBalance,
+                lastAssetBalances: nextAssetBalances,
+            };
+        },
     });
 
+    if (!scanResult) {
+        return {
+            deposits: [],
+            balanceSnapshots: [],
+            lastCheckedBlock,
+            lastNativeBalance,
+            lastAssetBalances,
+        };
+    }
+
     return {
-        deposits,
-        balanceSnapshots,
-        lastCheckedBlock: toBlock,
-        lastNativeBalance: nextNativeBalance,
-        lastAssetBalances: nextAssetBalances,
+        deposits: scanResult.deposits,
+        balanceSnapshots: scanResult.balanceSnapshots,
+        lastCheckedBlock: scanResult.scannedToBlock,
+        lastNativeBalance: scanResult.lastNativeBalance,
+        lastAssetBalances: scanResult.lastAssetBalances,
     };
 }
 
@@ -551,34 +634,50 @@ async function pollProposalChanges({
     } else {
         fromBlock = lastProposalCheckedBlock + 1n;
     }
-    const toBlock = latestBlock;
-
-    const [proposedLogs, executedLogs, deletedLogs] = await Promise.all([
-        getLogsChunked({
-            publicClient,
-            address: ogModule,
-            event: transactionsProposedEvent,
-            fromBlock,
-            toBlock,
-            chunkSize: logChunkSize,
-        }),
-        getLogsChunked({
-            publicClient,
-            address: ogModule,
-            event: proposalExecutedEvent,
-            fromBlock,
-            toBlock,
-            chunkSize: logChunkSize,
-        }),
-        getLogsChunked({
-            publicClient,
-            address: ogModule,
-            event: proposalDeletedEvent,
-            fromBlock,
-            toBlock,
-            chunkSize: logChunkSize,
-        }),
-    ]);
+    const scanResult = await runLogScanWithHeadFallback({
+        publicClient,
+        fromBlock,
+        toBlock: latestBlock,
+        label: 'proposal scan',
+        scan: async (toBlock) => {
+            const [proposedLogs, executedLogs, deletedLogs] = await Promise.all([
+                getLogsChunked({
+                    publicClient,
+                    address: ogModule,
+                    event: transactionsProposedEvent,
+                    fromBlock,
+                    toBlock,
+                    chunkSize: logChunkSize,
+                }),
+                getLogsChunked({
+                    publicClient,
+                    address: ogModule,
+                    event: proposalExecutedEvent,
+                    fromBlock,
+                    toBlock,
+                    chunkSize: logChunkSize,
+                }),
+                getLogsChunked({
+                    publicClient,
+                    address: ogModule,
+                    event: proposalDeletedEvent,
+                    fromBlock,
+                    toBlock,
+                    chunkSize: logChunkSize,
+                }),
+            ]);
+            return { proposedLogs, executedLogs, deletedLogs };
+        },
+    });
+    if (!scanResult) {
+        return {
+            newProposals: [],
+            executedProposals: [],
+            deletedProposals: [],
+            lastProposalCheckedBlock,
+        };
+    }
+    const { proposedLogs, executedLogs, deletedLogs } = scanResult;
 
     // Process proposal lifecycle events in strict chain order so startup backfills
     // do not emit stale proposals that are finalized later in the same scan range.
@@ -669,7 +768,12 @@ async function pollProposalChanges({
 
     const newProposals = [...newProposalsByHash.values()];
 
-    return { newProposals, executedProposals, deletedProposals, lastProposalCheckedBlock: toBlock };
+    return {
+        newProposals,
+        executedProposals,
+        deletedProposals,
+        lastProposalCheckedBlock: scanResult.scannedToBlock,
+    };
 }
 
 async function executeReadyProposals({
