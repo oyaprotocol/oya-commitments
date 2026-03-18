@@ -246,6 +246,30 @@ const SHARED_RUNTIME_FIELD_KEYS = Object.freeze(
     SHARED_RUNTIME_FIELD_DEFINITIONS.map(([key]) => key)
 );
 
+function isPlainObjectValue(value) {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function mergeConfigObjects(base, override) {
+    if (!isPlainObjectValue(base)) {
+        return isPlainObjectValue(override) ? { ...override } : override;
+    }
+    if (!isPlainObjectValue(override)) {
+        return override === undefined ? { ...base } : override;
+    }
+
+    const merged = { ...base };
+    for (const [key, overrideValue] of Object.entries(override)) {
+        const baseValue = merged[key];
+        if (isPlainObjectValue(baseValue) && isPlainObjectValue(overrideValue)) {
+            merged[key] = mergeConfigObjects(baseValue, overrideValue);
+        } else {
+            merged[key] = overrideValue;
+        }
+    }
+    return merged;
+}
+
 function pickConfigFields(source, keys) {
     const out = {};
     for (const key of keys) {
@@ -507,10 +531,7 @@ function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
         throw new Error(`${agentConfigFile.path} field "byChain.${chainKey}" must be a JSON object`);
     }
 
-    const resolvedAgentConfig = {
-        ...sharedConfig,
-        ...(chainOverrides ?? {}),
-    };
+    const resolvedAgentConfig = mergeConfigObjects(sharedConfig, chainOverrides ?? {});
     const sharedMessageApi = parseMessageApiOverride(
         sharedConfig.messageApi,
         `${agentConfigFile.path} field "messageApi"`

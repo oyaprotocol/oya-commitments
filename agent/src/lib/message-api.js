@@ -79,15 +79,15 @@ async function authenticateSignedRequest({
         return { ok: false, statusCode: 400, message: 'auth.address must be a valid EVM address.' };
     }
     const normalizedDeclared = declaredAddress.toLowerCase();
-    if (signerAllowlist.size > 0 && !signerAllowlist.has(normalizedDeclared)) {
-        return { ok: false, statusCode: 401, message: 'Signer is not allowlisted.' };
-    }
     if (requireSignerAllowlist && signerAllowlist.size === 0) {
         return {
             ok: false,
             statusCode: 503,
             message: 'Signer allowlist is required but not configured.',
         };
+    }
+    if (requireSignerAllowlist && !signerAllowlist.has(normalizedDeclared)) {
+        return { ok: false, statusCode: 401, message: 'Signer is not allowlisted.' };
     }
 
     const maxAgeMs = signatureMaxAgeSeconds * 1000;

@@ -228,7 +228,7 @@ async function main() {
         messageApiHost: '127.0.0.1',
         messageApiPort: 0,
         messageApiKeys: {},
-        messageApiSignerAllowlist: [],
+        messageApiSignerAllowlist: [account.address],
         messageApiRequireSignerAllowlist: false,
         messageApiSignatureMaxAgeSeconds: 300,
         messageApiMaxBodyBytes: 2048,
