@@ -41,6 +41,7 @@ let pendingArtifactPublish = null;
 let pendingDirectFill = null;
 let pendingProposal = null;
 let persistSwapStateQueue = Promise.resolve();
+let depositBackfillStatusLogged = false;
 const queuedProposalEventUpdates = [];
 
 function markSwapStateDirty() {
@@ -61,6 +62,7 @@ function resetInMemoryState({ hydrated = false, preserveQueuedProposalEventUpdat
     pendingArtifactPublish = null;
     pendingDirectFill = null;
     pendingProposal = null;
+    depositBackfillStatusLogged = false;
     if (!preserveQueuedProposalEventUpdates) {
         queuedProposalEventUpdates.length = 0;
     }
@@ -840,6 +842,9 @@ async function resolveInitialDepositBackfillStartBlock({
     latestBlock,
 }) {
     if (startBlock !== undefined && startBlock !== null) {
+        console.log(
+            `[agent] Backfilling ERC20 deposit history from configured start block ${BigInt(startBlock).toString()}.`
+        );
         return BigInt(startBlock);
     }
 
@@ -1055,6 +1060,12 @@ async function maybeBackfillDeposits({
     config,
 }) {
     if (swapState.backfilledDepositsThroughBlock !== null) {
+        if (!depositBackfillStatusLogged) {
+            console.log(
+                `[agent] erc1155-swap-fast-withdraw credit backfill already complete through block ${swapState.backfilledDepositsThroughBlock}.`
+            );
+            depositBackfillStatusLogged = true;
+        }
         return false;
     }
 
@@ -1064,6 +1075,9 @@ async function maybeBackfillDeposits({
         startBlock: config?.startBlock,
         latestBlock,
     });
+    console.log(
+        `[agent] Starting erc1155-swap-fast-withdraw credit backfill for ${commitmentSafe} from block ${fromBlock.toString()} through ${latestBlock.toString()}.`
+    );
 
     const logs = await getLogsChunked({
         publicClient,
@@ -1124,6 +1138,7 @@ async function maybeBackfillDeposits({
     console.log(
         `[agent] erc1155-swap-fast-withdraw credit backfill complete through block ${latestBlock.toString()}.`
     );
+    depositBackfillStatusLogged = true;
     return changed;
 }
 
@@ -1135,6 +1150,9 @@ function ingestSignals(signals, policy) {
             const deposit = createDepositRecord(signal, policy);
             if (deposit && !swapState.deposits[deposit.depositKey]) {
                 swapState.deposits[deposit.depositKey] = deposit;
+                console.log(
+                    `[agent] Recorded ERC20 deposit credit for ${deposit.depositor}: amountWei=${deposit.amountWei} depositKey=${deposit.depositKey}.`
+                );
                 changed = true;
             }
         } catch (error) {
@@ -1152,7 +1170,11 @@ function ingestSignals(signals, policy) {
         if (!order || swapState.orders[order.orderId]) {
             continue;
         }
-        if (getAvailableCreditWeiForAddress(order.signer) < BigInt(order.reimbursementAmountWei)) {
+        const availableCreditWei = getAvailableCreditWeiForAddress(order.signer);
+        if (availableCreditWei < BigInt(order.reimbursementAmountWei)) {
+            console.warn(
+                `[agent] Ignoring signed ERC1155 withdrawal request ${order.orderId}: insufficient deposited USDC credit for signer ${order.signer} (availableWei=${availableCreditWei.toString()} requiredWei=${order.reimbursementAmountWei}).`
+            );
             continue;
         }
 
@@ -1163,6 +1185,9 @@ function ingestSignals(signals, policy) {
             sequence: allocateSequence(),
             lastUpdatedAtMs: Date.now(),
         };
+        console.log(
+            `[agent] Accepted signed ERC1155 withdrawal request ${order.orderId}: reservedCreditWei=${order.reimbursementAmountWei} recipient=${order.recipient} amount=${order.tokenAmount}.`
+        );
         changed = true;
     }
 
