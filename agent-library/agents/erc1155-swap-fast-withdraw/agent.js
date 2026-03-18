@@ -1186,7 +1186,7 @@ async function maybeBackfillDeposits({
     return changed;
 }
 
-function ingestSignals(signals, policy) {
+function ingestSignals(signals, policy, config) {
     let changed = false;
 
     for (const signal of Array.isArray(signals) ? signals : []) {
@@ -1220,6 +1220,11 @@ function ingestSignals(signals, policy) {
                 `[agent] Ignoring signed ERC1155 withdrawal request ${order.orderId}: insufficient deposited USDC credit for signer ${order.signer} (availableWei=${availableCreditWei.toString()} requiredWei=${order.reimbursementAmountWei}).`
             );
             continue;
+        }
+        if (!config?.ipfsEnabled) {
+            throw new Error(
+                'erc1155-swap-fast-withdraw requires IPFS_ENABLED=true to archive signed withdrawal requests before reserving deposited credit.'
+            );
         }
 
         swapState.orders[order.orderId] = {
@@ -1511,10 +1516,13 @@ function getPendingDirectFillReservedTokenAmount() {
     return total;
 }
 
-function getPendingSafeReimbursementReservedWei() {
+function getPendingSafeReimbursementReservedWei(excludeOrderId = null) {
     let total = 0n;
     for (const order of getOpenOrders()) {
         if (!order?.directFillTxHash) {
+            continue;
+        }
+        if (excludeOrderId && order.orderId === excludeOrderId) {
             continue;
         }
         total += BigInt(order.reimbursementAmountWei ?? 0);
@@ -1532,16 +1540,22 @@ function getReimbursementCandidateOrders() {
     );
 }
 
-function getArchiveCandidateOrders(policy) {
-    const nowMs = Date.now();
+function getOrdersAwaitingArchive() {
     return getOpenOrders().filter(
         (order) =>
             !order.artifactUri &&
-            (!order.nextArchiveAttemptAtMs ||
-                Number(order.nextArchiveAttemptAtMs) <= nowMs ||
-                !Number.isFinite(Number(order.nextArchiveAttemptAtMs))) &&
             !order.reimbursementProposalHash &&
             !order.reimbursementSubmissionTxHash
+    );
+}
+
+function getArchiveCandidateOrders(policy) {
+    const nowMs = Date.now();
+    return getOrdersAwaitingArchive().filter(
+        (order) =>
+            (!order.nextArchiveAttemptAtMs ||
+                Number(order.nextArchiveAttemptAtMs) <= nowMs ||
+                !Number.isFinite(Number(order.nextArchiveAttemptAtMs)))
     );
 }
 
@@ -1635,7 +1649,7 @@ async function getDeterministicToolCalls({
         config,
         policy,
     });
-    ingestSignals(signals, policy);
+    ingestSignals(signals, policy, config);
     await refreshDirectFillStatus({
         publicClient,
         latestBlock,
@@ -1648,6 +1662,12 @@ async function getDeterministicToolCalls({
         policy,
     });
     await maybePersistSwapState();
+
+    if (!config?.ipfsEnabled && getOrdersAwaitingArchive().length > 0) {
+        throw new Error(
+            'erc1155-swap-fast-withdraw requires IPFS_ENABLED=true to continue signed withdrawal orders awaiting IPFS archival.'
+        );
+    }
 
     for (const order of getArchiveCandidateOrders(policy)) {
         if (!config?.ipfsEnabled) {
@@ -1719,7 +1739,13 @@ async function getDeterministicToolCalls({
     }
 
     for (const order of getReimbursementCandidateOrders()) {
-        if (BigInt(safePaymentBalance) < BigInt(order.reimbursementAmountWei)) {
+        let availableSafePaymentBalanceForOrder =
+            BigInt(safePaymentBalance) -
+            getPendingSafeReimbursementReservedWei(order.orderId);
+        if (availableSafePaymentBalanceForOrder < 0n) {
+            availableSafePaymentBalanceForOrder = 0n;
+        }
+        if (availableSafePaymentBalanceForOrder < BigInt(order.reimbursementAmountWei)) {
             continue;
         }
 
