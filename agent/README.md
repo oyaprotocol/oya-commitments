@@ -195,7 +195,7 @@ node agent/scripts/send-signed-message.mjs \
   --request-id="pause-2h"
 ```
 
-If `--url` is omitted, the helper reads `messageApi.host` and `messageApi.port` from the selected agent module's `config.json`. Use `--module=<agent-name>` and optional `--chain-id=<int>` to select the commitment config; `MESSAGE_API_URL` and `MESSAGE_API_HOST`/`MESSAGE_API_PORT` remain fallback defaults when the module does not override them.
+If `--url` is omitted, the helper reads `messageApi.host` and `messageApi.port` from the selected agent module's merged config stack (`config.json`, optional `config.local.json`, and any `AGENT_CONFIG_OVERLAY_PATH*` files). Use `--module=<agent-name>` and optional `--chain-id=<int>` to select the commitment config; `MESSAGE_API_URL` and `MESSAGE_API_HOST`/`MESSAGE_API_PORT` remain fallback defaults when the module does not override them.
 
 If bearer gating is configured, also pass `--bearer-token="<token>"` or set `MESSAGE_API_BEARER_TOKEN`.
 
@@ -436,8 +436,12 @@ Set `PROPOSE_ENABLED` and `DISPUTE_ENABLED` to control behavior:
 Use `AGENT_MODULE` to point to an agent implementation name (e.g., `default`, `timelock-withdraw`). The runner will load `agent-library/agents/<name>/agent.js`.
 Each agent directory must include a `commitment.txt` with the plain language commitment the agent is designed to serve.
 An agent directory may also include an optional `config.json` for repo-tracked, non-secret configuration.
+For machine-local or ephemeral overrides, the loader also supports an optional untracked `config.local.json` next to `config.json`, plus extra overlay files passed through `AGENT_CONFIG_OVERLAY_PATH` or `AGENT_CONFIG_OVERLAY_PATHS`.
 
-`config.json` is loaded from `agent-library/agents/<name>/config.json` and merged like this:
+The config stack is loaded and merged like this:
+- `agent-library/agents/<name>/config.json`
+- optional `agent-library/agents/<name>/config.local.json`
+- optional overlay files from `AGENT_CONFIG_OVERLAY_PATH` and `AGENT_CONFIG_OVERLAY_PATHS`
 - top-level keys apply on every chain
 - `byChain.<chainId>` overrides top-level keys for the active RPC chain
 - nested plain objects are merged recursively; arrays and scalar values replace the shared value
@@ -477,6 +481,8 @@ Example:
 ```
 
 The merged result is exposed to agent modules as `config.agentConfig`, while the resolved active-chain addresses and watchlists still appear at `config.commitmentSafe`, `config.ogModule`, `config.watchAssets`, and `config.watchErc1155Assets`.
+
+The phase-1 testnet harness stores untracked session state under `agent/.state/harness/<module>/<profile>/`, including an `overlay.json` file intended to sit on top of the tracked module config without mutating it.
 
 You can validate a module quickly:
 

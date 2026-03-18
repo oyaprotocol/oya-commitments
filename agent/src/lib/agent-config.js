@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { getAddress } from 'viem';
 
@@ -487,6 +488,120 @@ async function loadAgentConfigFile(configPath) {
     }
 }
 
+function parseConfigOverlayEnvValue(rawValue) {
+    if (typeof rawValue !== 'string') {
+        return [];
+    }
+    return rawValue
+        .split(path.delimiter)
+        .map((value) => value.trim())
+        .filter(Boolean);
+}
+
+function resolveAgentConfigLayerPaths(
+    configPath,
+    { localConfigPath, overlayPaths, env = process.env } = {}
+) {
+    const primaryPath = path.resolve(configPath);
+    const candidatePaths = [
+        {
+            kind: 'config',
+            path: primaryPath,
+        },
+    ];
+
+    const resolvedLocalPath =
+        localConfigPath === undefined
+            ? path.join(path.dirname(primaryPath), 'config.local.json')
+            : localConfigPath;
+    if (resolvedLocalPath) {
+        candidatePaths.push({
+            kind: 'local',
+            path: path.resolve(resolvedLocalPath),
+        });
+    }
+
+    const explicitOverlayPaths = Array.isArray(overlayPaths)
+        ? overlayPaths
+        : overlayPaths === undefined || overlayPaths === null
+            ? []
+            : [overlayPaths];
+    const envOverlayPaths = [
+        ...(env?.AGENT_CONFIG_OVERLAY_PATH
+            ? [String(env.AGENT_CONFIG_OVERLAY_PATH).trim()]
+            : []),
+        ...parseConfigOverlayEnvValue(env?.AGENT_CONFIG_OVERLAY_PATHS),
+    ];
+
+    for (const overlayPath of [...explicitOverlayPaths, ...envOverlayPaths]) {
+        if (!overlayPath) {
+            continue;
+        }
+        candidatePaths.push({
+            kind: 'overlay',
+            path: path.resolve(overlayPath),
+        });
+    }
+
+    const dedupedPaths = [];
+    const seen = new Set();
+    for (const candidate of candidatePaths) {
+        const normalizedPath = path.resolve(candidate.path);
+        if (seen.has(normalizedPath)) {
+            continue;
+        }
+        seen.add(normalizedPath);
+        dedupedPaths.push({
+            kind: candidate.kind,
+            path: normalizedPath,
+        });
+    }
+
+    return dedupedPaths;
+}
+
+async function loadAgentConfigStack(
+    configPath,
+    { localConfigPath, overlayPaths, env = process.env } = {}
+) {
+    const layerPaths = resolveAgentConfigLayerPaths(configPath, {
+        localConfigPath,
+        overlayPaths,
+        env,
+    });
+    const layers = [];
+    let mergedRaw = null;
+
+    for (const layer of layerPaths) {
+        const loadedLayer = await loadAgentConfigFile(layer.path);
+        const normalizedLayer = {
+            ...loadedLayer,
+            kind: layer.kind,
+        };
+        layers.push(normalizedLayer);
+        if (normalizedLayer.exists && normalizedLayer.raw) {
+            mergedRaw =
+                mergedRaw === null
+                    ? mergeConfigObjects({}, normalizedLayer.raw)
+                    : mergeConfigObjects(mergedRaw, normalizedLayer.raw);
+        }
+    }
+
+    const existingLayers = layers.filter((layer) => layer.exists);
+    const sourceLabel =
+        existingLayers.length > 0
+            ? existingLayers.map((layer) => layer.path).join(' + ')
+            : path.resolve(configPath);
+
+    return {
+        exists: existingLayers.length > 0,
+        path: path.resolve(configPath),
+        raw: mergedRaw,
+        layers,
+        sourceLabel,
+    };
+}
+
 function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
     const rawAgentConfig = agentConfigFile?.raw;
     if (!rawAgentConfig) {
@@ -517,9 +632,11 @@ function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
         };
     }
 
+    const configSourceLabel = agentConfigFile?.sourceLabel ?? agentConfigFile?.path ?? 'agent config';
+
     const { byChain, ...sharedConfig } = rawAgentConfig;
     if (byChain !== undefined && (!byChain || typeof byChain !== 'object' || Array.isArray(byChain))) {
-        throw new Error(`${agentConfigFile.path} field "byChain" must be a JSON object`);
+        throw new Error(`${configSourceLabel} field "byChain" must be a JSON object`);
     }
 
     const chainKey = String(chainId);
@@ -528,17 +645,17 @@ function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
         chainOverrides !== undefined &&
         (!chainOverrides || typeof chainOverrides !== 'object' || Array.isArray(chainOverrides))
     ) {
-        throw new Error(`${agentConfigFile.path} field "byChain.${chainKey}" must be a JSON object`);
+        throw new Error(`${configSourceLabel} field "byChain.${chainKey}" must be a JSON object`);
     }
 
     const resolvedAgentConfig = mergeConfigObjects(sharedConfig, chainOverrides ?? {});
     const sharedMessageApi = parseMessageApiOverride(
         sharedConfig.messageApi,
-        `${agentConfigFile.path} field "messageApi"`
+        `${configSourceLabel} field "messageApi"`
     );
     const chainMessageApi = parseMessageApiOverride(
         chainOverrides?.messageApi,
-        `${agentConfigFile.path} field "byChain.${chainKey}.messageApi"`
+        `${configSourceLabel} field "byChain.${chainKey}.messageApi"`
     );
     const mergedMessageApiOverride =
         sharedMessageApi || chainMessageApi
@@ -550,32 +667,32 @@ function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
     const resolvedMessageApi = resolveMessageApiRuntimeConfig({
         baseConfig,
         override: mergedMessageApiOverride,
-        label: `${agentConfigFile.path} field "messageApi"`,
+        label: `${configSourceLabel} field "messageApi"`,
     });
 
     const commitmentSafe = hasOwn(resolvedAgentConfig, 'commitmentSafe')
         ? (parseOptionalAddress(
               resolvedAgentConfig.commitmentSafe,
-              `${agentConfigFile.path} field "commitmentSafe"`
+              `${configSourceLabel} field "commitmentSafe"`
           ) ?? baseConfig.commitmentSafe)
         : baseConfig.commitmentSafe;
     const ogModule = hasOwn(resolvedAgentConfig, 'ogModule')
         ? (parseOptionalAddress(
               resolvedAgentConfig.ogModule,
-              `${agentConfigFile.path} field "ogModule"`
+              `${configSourceLabel} field "ogModule"`
           ) ?? baseConfig.ogModule)
         : baseConfig.ogModule;
 
     const watchAssets = hasOwn(resolvedAgentConfig, 'watchAssets')
         ? parseAddressArray(
               resolvedAgentConfig.watchAssets,
-              `${agentConfigFile.path} field "watchAssets"`
+              `${configSourceLabel} field "watchAssets"`
           )
         : baseConfig.watchAssets;
     const watchErc1155Assets = hasOwn(resolvedAgentConfig, 'watchErc1155Assets')
         ? parseErc1155AssetArray(
               resolvedAgentConfig.watchErc1155Assets,
-              `${agentConfigFile.path} field "watchErc1155Assets"`
+              `${configSourceLabel} field "watchErc1155Assets"`
           )
         : baseConfig.watchErc1155Assets;
     const sharedRuntimeConfig = Object.fromEntries(
@@ -585,7 +702,7 @@ function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
                 resolvedAgentConfig,
                 baseConfig,
                 key,
-                label: `${agentConfigFile.path} field "${key}"`,
+                label: `${configSourceLabel} field "${key}"`,
                 parser,
             }),
         ])
@@ -638,5 +755,7 @@ function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
 
 export {
     loadAgentConfigFile,
+    loadAgentConfigStack,
+    resolveAgentConfigLayerPaths,
     resolveAgentRuntimeConfig,
 };

@@ -4,7 +4,11 @@ import path from 'node:path';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { getAddress } from 'viem';
 import { buildConfig } from '../src/lib/config.js';
-import { loadAgentConfigFile, resolveAgentRuntimeConfig } from '../src/lib/agent-config.js';
+import {
+    loadAgentConfigFile,
+    loadAgentConfigStack,
+    resolveAgentRuntimeConfig,
+} from '../src/lib/agent-config.js';
 
 const RPC_URL = 'http://127.0.0.1:8545';
 const ENV_ERC20 = '0x1111111111111111111111111111111111111111';
@@ -347,6 +351,102 @@ async function run() {
     assert.equal(resolved.messageApiBatchSize, 7);
     assert.equal(resolved.messageApiRateLimitPerMinute, 12);
     assert.deepEqual(resolved.agentConfig.messageApi.signerAllowlist, [getAddress(CHAIN_SIGNER)]);
+
+    const configLocalPath = path.join(tmpDir, 'config.local.json');
+    const overlayOnePath = path.join(tmpDir, 'overlay-one.json');
+    const overlayTwoPath = path.join(tmpDir, 'overlay-two.json');
+    await writeFile(
+        configLocalPath,
+        JSON.stringify(
+            {
+                pollIntervalMs: 21_000,
+                byChain: {
+                    '11155111': {
+                        ipfsRetryDelayMs: 900,
+                        copyTrading: {
+                            yesTokenId: '333',
+                        },
+                    },
+                },
+            },
+            null,
+            2
+        ),
+        'utf8'
+    );
+    await writeFile(
+        overlayOnePath,
+        JSON.stringify(
+            {
+                byChain: {
+                    '11155111': {
+                        proposeEnabled: false,
+                        copyTrading: {
+                            market: 'overlay-market-one',
+                        },
+                    },
+                },
+            },
+            null,
+            2
+        ),
+        'utf8'
+    );
+    await writeFile(
+        overlayTwoPath,
+        JSON.stringify(
+            {
+                byChain: {
+                    '11155111': {
+                        defaultDepositAmountWei: '7654321',
+                        copyTrading: {
+                            noTokenId: '444',
+                        },
+                    },
+                },
+            },
+            null,
+            2
+        ),
+        'utf8'
+    );
+
+    const stackedAgentConfig = await loadAgentConfigStack(configPath, {
+        env: {
+            AGENT_CONFIG_OVERLAY_PATH: overlayOnePath,
+            AGENT_CONFIG_OVERLAY_PATHS: overlayTwoPath,
+        },
+    });
+    assert.equal(stackedAgentConfig.exists, true);
+    assert.deepEqual(
+        stackedAgentConfig.layers.map((layer) => ({
+            kind: layer.kind,
+            path: path.basename(layer.path),
+            exists: layer.exists,
+        })),
+        [
+            { kind: 'config', path: 'config.json', exists: true },
+            { kind: 'local', path: 'config.local.json', exists: true },
+            { kind: 'overlay', path: 'overlay-one.json', exists: true },
+            { kind: 'overlay', path: 'overlay-two.json', exists: true },
+        ]
+    );
+
+    const stackedResolved = resolveAgentRuntimeConfig({
+        baseConfig,
+        agentConfigFile: stackedAgentConfig,
+        chainId: 11155111,
+    });
+    assert.equal(stackedResolved.pollIntervalMs, 21_000);
+    assert.equal(stackedResolved.proposeEnabled, false);
+    assert.equal(stackedResolved.defaultDepositAmountWei, 7654321n);
+    assert.equal(stackedResolved.ipfsRetryDelayMs, 900);
+    assert.deepEqual(stackedResolved.agentConfig.copyTrading, {
+        sourceUser: FILE_SIGNER,
+        market: 'overlay-market-one',
+        yesTokenId: '333',
+        noTokenId: '444',
+    });
 
     await writeFile(
         configPath,

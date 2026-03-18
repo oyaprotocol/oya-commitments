@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createPublicClient, http } from 'viem';
-import { loadAgentConfigFile, resolveAgentRuntimeConfig } from './lib/agent-config.js';
+import { loadAgentConfigStack, resolveAgentRuntimeConfig } from './lib/agent-config.js';
 import { buildConfig } from './lib/config.js';
 import { createSignerClient } from './lib/signer.js';
 import {
@@ -133,7 +133,7 @@ async function loadAgentModule() {
     }
 
     const agentConfigPath = path.join(path.dirname(resolvedPath), 'config.json');
-    const agentConfigFile = await loadAgentConfigFile(agentConfigPath);
+    const agentConfigFile = await loadAgentConfigStack(agentConfigPath);
 
     return { agentModule, commitmentText, agentConfigFile };
 }
