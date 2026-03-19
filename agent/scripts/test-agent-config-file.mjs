@@ -483,6 +483,41 @@ async function run() {
         JSON.stringify(
             {
                 messageApi: {
+                    enabled: true,
+                    host: '0.0.0.0',
+                    port: 9999,
+                    requireSignerAllowlist: false,
+                },
+                byChain: {
+                    '11155111': {
+                        messageApi: {
+                            host: null,
+                        },
+                    },
+                },
+            },
+            null,
+            2
+        ),
+        'utf8'
+    );
+
+    const nestedNullMessageApiFile = await loadAgentConfigFile(configPath);
+    const nestedNullMessageApiResolved = resolveAgentRuntimeConfig({
+        baseConfig,
+        agentConfigFile: nestedNullMessageApiFile,
+        chainId: 11155111,
+    });
+    assert.equal(nestedNullMessageApiResolved.messageApiEnabled, true);
+    assert.equal(nestedNullMessageApiResolved.messageApiHost, '127.0.0.1');
+    assert.equal(nestedNullMessageApiResolved.messageApiPort, 9999);
+    assert.equal(nestedNullMessageApiResolved.messageApiRequireSignerAllowlist, false);
+
+    await writeFile(
+        configPath,
+        JSON.stringify(
+            {
+                messageApi: {
                     keys: {
                         ops: 'secret-token',
                     },
