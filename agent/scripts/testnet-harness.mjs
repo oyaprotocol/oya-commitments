@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import {
-    ensureHarnessOverlayFile,
+    ensureHarnessOverlayChainId,
     ensureHarnessSession,
     readHarnessPids,
     readHarnessSessionStatus,
@@ -177,13 +177,19 @@ function sanitizeStatusData(data) {
 }
 
 async function buildStatusPayload({ agentRef, profileName }) {
+    const profile = resolveHarnessProfile(profileName, { env: process.env });
+    const sessionPaths = await ensureHarnessSession({
+        repoRootPath: repoRoot,
+        agentRef,
+        profile: profileName,
+    });
+    await ensureHarnessOverlayChainId(sessionPaths, profile.chainId);
     const sessionStatus = await readHarnessSessionStatus({
         repoRootPath: repoRoot,
         agentRef,
         profile: profileName,
     });
     const config = await resolveConfigSummary(agentRef, sessionStatus.files.overlay);
-    const profile = resolveHarnessProfile(profileName, { env: process.env });
     const runtimeContext = await resolveHarnessRuntimeContext({
         repoRootPath: repoRoot,
         agentRef,
@@ -238,12 +244,11 @@ async function handleStatus({ agentRef, profileName }) {
 }
 
 async function handleInit({ agentRef, profileName }) {
-    const sessionPaths = await ensureHarnessSession({
+    await ensureHarnessSession({
         repoRootPath: repoRoot,
         agentRef,
         profile: profileName,
     });
-    await ensureHarnessOverlayFile(sessionPaths);
     await handleStatus({ agentRef, profileName });
 }
 

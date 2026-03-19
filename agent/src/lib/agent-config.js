@@ -384,7 +384,11 @@ function parseObjectWithFieldDefinitions(value, label, definitions) {
         if (!hasOwn(value, definition.key)) {
             continue;
         }
-        out[definition.key] = definition.parser(value[definition.key], `${label}.${definition.key}`);
+        const rawFieldValue = value[definition.key];
+        out[definition.key] =
+            rawFieldValue === undefined || rawFieldValue === null
+                ? rawFieldValue
+                : definition.parser(rawFieldValue, `${label}.${definition.key}`);
     }
     return out;
 }
@@ -442,7 +446,9 @@ function parseMessageApiOverride(value, label) {
 
     if (
         out.minTtlSeconds !== undefined &&
+        out.minTtlSeconds !== null &&
         out.maxTtlSeconds !== undefined &&
+        out.maxTtlSeconds !== null &&
         out.maxTtlSeconds < out.minTtlSeconds
     ) {
         throw new Error(`${label}.maxTtlSeconds must be >= ${label}.minTtlSeconds`);

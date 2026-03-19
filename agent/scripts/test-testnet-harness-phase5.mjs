@@ -60,6 +60,16 @@ async function run() {
     const moduleArgs = ['--module=signed-message-smoke', '--profile=local-mock'];
 
     try {
+        runHarnessCommand(['reset', ...moduleArgs]);
+        const freshStatus = runHarnessCommand(['status', ...moduleArgs]);
+        assert.equal(freshStatus.runtime.rpc.chainId, 31337);
+        assert.equal(freshStatus.data.overlay.chainId, 31337);
+
+        runHarnessCommand(['reset', ...moduleArgs]);
+        const initResult = runHarnessCommand(['init', ...moduleArgs]);
+        assert.equal(initResult.runtime.rpc.chainId, 31337);
+        assert.equal(initResult.data.overlay.chainId, 31337);
+
         const smokeResult = runHarnessCommand(['smoke', ...moduleArgs]);
         assert.equal(smokeResult.ok, true);
         assert.equal(smokeResult.usedModuleHarness, true);

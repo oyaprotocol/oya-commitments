@@ -79,6 +79,23 @@ async function ensureHarnessOverlayFile(sessionPaths) {
     return await ensureHarnessJson(sessionPaths.files.overlay, {});
 }
 
+async function ensureHarnessOverlayChainId(sessionPaths, chainId) {
+    const overlay = await ensureHarnessOverlayFile(sessionPaths);
+    if (chainId === undefined || chainId === null) {
+        return overlay;
+    }
+    if (overlay?.chainId === chainId) {
+        return overlay;
+    }
+
+    const nextOverlay =
+        overlay && typeof overlay === 'object' && !Array.isArray(overlay)
+            ? { ...overlay, chainId }
+            : { chainId };
+    await writeHarnessJson(sessionPaths.files.overlay, nextOverlay);
+    return nextOverlay;
+}
+
 async function readHarnessPids(sessionPaths) {
     return (await readHarnessJson(sessionPaths.files.pids)) ?? {};
 }
@@ -123,6 +140,7 @@ async function readHarnessSessionStatus({ repoRootPath, agentRef, profile }) {
 }
 
 export {
+    ensureHarnessOverlayChainId,
     ensureHarnessJson,
     ensureHarnessOverlayFile,
     ensureHarnessSession,
