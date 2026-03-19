@@ -194,64 +194,138 @@ function parseFeeTierArrayValue(value, label) {
     );
 }
 
-const SHARED_RUNTIME_FIELD_DEFINITIONS = Object.freeze([
-    ['pollIntervalMs', (value, label) => parseIntegerValue(value, label, { min: 1 })],
-    ['logChunkSize', (value, label) => parseBigIntValue(value, label, { min: 1n })],
-    ['startBlock', (value, label) => parseBigIntValue(value, label, { min: 0n })],
-    ['watchNativeBalance', parseBooleanValue],
-    ['defaultDepositAsset', parseOptionalAddress],
-    ['defaultDepositAmountWei', (value, label) => parseBigIntValue(value, label, { min: 0n })],
-    ['bondSpender', parseBondSpenderValue],
-    ['openAiModel', parseStringValue],
-    ['openAiBaseUrl', parseHostValue],
-    ['openAiRequestTimeoutMs', (value, label) => parseIntegerValue(value, label, { min: 1 })],
-    ['allowProposeOnSimulationFail', parseBooleanValue],
-    ['proposeGasLimit', (value, label) => parseBigIntValue(value, label, { min: 1n })],
-    ['executeRetryMs', (value, label) => parseIntegerValue(value, label, { min: 1 })],
-    ['executePendingTxTimeoutMs', (value, label) => parseIntegerValue(value, label, { min: 1 })],
-    ['proposeEnabled', parseBooleanValue],
-    ['disputeEnabled', parseBooleanValue],
-    ['disputeRetryMs', (value, label) => parseIntegerValue(value, label, { min: 1 })],
-    ['proposalHashResolveTimeoutMs', (value, label) => parseIntegerValue(value, label, { min: 0 })],
-    [
-        'proposalHashResolvePollIntervalMs',
-        (value, label) => parseIntegerValue(value, label, { min: 1 }),
-    ],
-    ['chainlinkPriceFeed', parseOptionalAddress],
-    ['polymarketConditionalTokens', parseOptionalAddress],
-    ['polymarketExchange', parseOptionalAddress],
-    ['polymarketClobEnabled', parseBooleanValue],
-    ['polymarketClobHost', parseHostValue],
-    ['polymarketClobAddress', parseOptionalAddress],
-    ['polymarketClobSignatureType', parseStringValue],
-    ['polymarketClobRequestTimeoutMs', (value, label) => parseIntegerValue(value, label, { min: 0 })],
-    ['polymarketClobMaxRetries', (value, label) => parseIntegerValue(value, label, { min: 0 })],
-    ['polymarketClobRetryDelayMs', (value, label) => parseIntegerValue(value, label, { min: 0 })],
-    ['polymarketRelayerEnabled', parseBooleanValue],
-    ['polymarketRelayerHost', parseHostValue],
-    ['polymarketRelayerTxType', parseStringValue],
-    ['polymarketRelayerFromAddress', parseOptionalAddress],
-    ['polymarketRelayerSafeFactory', parseOptionalAddress],
-    ['polymarketRelayerProxyFactory', parseOptionalAddress],
-    ['polymarketRelayerResolveProxyAddress', parseBooleanValue],
-    ['polymarketRelayerAutoDeployProxy', parseBooleanValue],
-    ['polymarketRelayerChainId', (value, label) => parseIntegerValue(value, label, { min: 1 })],
-    ['polymarketRelayerRequestTimeoutMs', (value, label) => parseIntegerValue(value, label, { min: 0 })],
-    ['polymarketRelayerPollIntervalMs', (value, label) => parseIntegerValue(value, label, { min: 1 })],
-    ['polymarketRelayerPollTimeoutMs', (value, label) => parseIntegerValue(value, label, { min: 0 })],
-    ['uniswapV3Factory', parseOptionalAddress],
-    ['uniswapV3Quoter', parseOptionalAddress],
-    ['uniswapV3FeeTiers', parseFeeTierArrayValue],
-    ['ipfsEnabled', parseBooleanValue],
-    ['ipfsApiUrl', parseHostValue],
-    ['ipfsRequestTimeoutMs', (value, label) => parseIntegerValue(value, label, { min: 1 })],
-    ['ipfsMaxRetries', (value, label) => parseIntegerValue(value, label, { min: 0 })],
-    ['ipfsRetryDelayMs', (value, label) => parseIntegerValue(value, label, { min: 0 })],
+const CORE_RUNTIME_FIELD_DEFINITIONS = Object.freeze([
+    { key: 'commitmentSafe', parser: parseOptionalAddress },
+    { key: 'ogModule', parser: parseOptionalAddress },
+    { key: 'watchAssets', parser: parseAddressArray },
+    { key: 'watchErc1155Assets', parser: parseErc1155AssetArray },
 ]);
 
-const SHARED_RUNTIME_FIELD_KEYS = Object.freeze(
-    SHARED_RUNTIME_FIELD_DEFINITIONS.map(([key]) => key)
-);
+const SHARED_RUNTIME_FIELD_DEFINITIONS = Object.freeze([
+    { key: 'pollIntervalMs', parser: (value, label) => parseIntegerValue(value, label, { min: 1 }) },
+    { key: 'logChunkSize', parser: (value, label) => parseBigIntValue(value, label, { min: 1n }) },
+    { key: 'startBlock', parser: (value, label) => parseBigIntValue(value, label, { min: 0n }) },
+    { key: 'watchNativeBalance', parser: parseBooleanValue },
+    { key: 'defaultDepositAsset', parser: parseOptionalAddress },
+    { key: 'defaultDepositAmountWei', parser: (value, label) => parseBigIntValue(value, label, { min: 0n }) },
+    { key: 'bondSpender', parser: parseBondSpenderValue },
+    { key: 'openAiModel', parser: parseStringValue },
+    { key: 'openAiBaseUrl', parser: parseHostValue },
+    { key: 'openAiRequestTimeoutMs', parser: (value, label) => parseIntegerValue(value, label, { min: 1 }) },
+    { key: 'allowProposeOnSimulationFail', parser: parseBooleanValue },
+    { key: 'proposeGasLimit', parser: (value, label) => parseBigIntValue(value, label, { min: 1n }) },
+    { key: 'executeRetryMs', parser: (value, label) => parseIntegerValue(value, label, { min: 1 }) },
+    { key: 'executePendingTxTimeoutMs', parser: (value, label) => parseIntegerValue(value, label, { min: 1 }) },
+    { key: 'proposeEnabled', parser: parseBooleanValue },
+    { key: 'disputeEnabled', parser: parseBooleanValue },
+    { key: 'disputeRetryMs', parser: (value, label) => parseIntegerValue(value, label, { min: 1 }) },
+    { key: 'proposalHashResolveTimeoutMs', parser: (value, label) => parseIntegerValue(value, label, { min: 0 }) },
+    {
+        key: 'proposalHashResolvePollIntervalMs',
+        parser: (value, label) => parseIntegerValue(value, label, { min: 1 }),
+    },
+    { key: 'chainlinkPriceFeed', parser: parseOptionalAddress },
+    { key: 'polymarketConditionalTokens', parser: parseOptionalAddress },
+    { key: 'polymarketExchange', parser: parseOptionalAddress },
+    { key: 'polymarketClobEnabled', parser: parseBooleanValue },
+    { key: 'polymarketClobHost', parser: parseHostValue },
+    { key: 'polymarketClobAddress', parser: parseOptionalAddress },
+    { key: 'polymarketClobSignatureType', parser: parseStringValue },
+    { key: 'polymarketClobRequestTimeoutMs', parser: (value, label) => parseIntegerValue(value, label, { min: 0 }) },
+    { key: 'polymarketClobMaxRetries', parser: (value, label) => parseIntegerValue(value, label, { min: 0 }) },
+    { key: 'polymarketClobRetryDelayMs', parser: (value, label) => parseIntegerValue(value, label, { min: 0 }) },
+    { key: 'polymarketRelayerEnabled', parser: parseBooleanValue },
+    { key: 'polymarketRelayerHost', parser: parseHostValue },
+    { key: 'polymarketRelayerTxType', parser: parseStringValue },
+    { key: 'polymarketRelayerFromAddress', parser: parseOptionalAddress },
+    { key: 'polymarketRelayerSafeFactory', parser: parseOptionalAddress },
+    { key: 'polymarketRelayerProxyFactory', parser: parseOptionalAddress },
+    { key: 'polymarketRelayerResolveProxyAddress', parser: parseBooleanValue },
+    { key: 'polymarketRelayerAutoDeployProxy', parser: parseBooleanValue },
+    { key: 'polymarketRelayerChainId', parser: (value, label) => parseIntegerValue(value, label, { min: 1 }) },
+    { key: 'polymarketRelayerRequestTimeoutMs', parser: (value, label) => parseIntegerValue(value, label, { min: 0 }) },
+    { key: 'polymarketRelayerPollIntervalMs', parser: (value, label) => parseIntegerValue(value, label, { min: 1 }) },
+    { key: 'polymarketRelayerPollTimeoutMs', parser: (value, label) => parseIntegerValue(value, label, { min: 0 }) },
+    { key: 'uniswapV3Factory', parser: parseOptionalAddress },
+    { key: 'uniswapV3Quoter', parser: parseOptionalAddress },
+    { key: 'uniswapV3FeeTiers', parser: parseFeeTierArrayValue },
+    { key: 'ipfsEnabled', parser: parseBooleanValue },
+    { key: 'ipfsApiUrl', parser: parseHostValue },
+    { key: 'ipfsRequestTimeoutMs', parser: (value, label) => parseIntegerValue(value, label, { min: 1 }) },
+    { key: 'ipfsMaxRetries', parser: (value, label) => parseIntegerValue(value, label, { min: 0 }) },
+    { key: 'ipfsRetryDelayMs', parser: (value, label) => parseIntegerValue(value, label, { min: 0 }) },
+]);
+
+const MESSAGE_API_FIELD_DEFINITIONS = Object.freeze([
+    { key: 'enabled', runtimeKey: 'messageApiEnabled', parser: parseBooleanValue },
+    { key: 'host', runtimeKey: 'messageApiHost', parser: parseHostValue },
+    { key: 'port', runtimeKey: 'messageApiPort', parser: (value, label) => parseIntegerValue(value, label, { min: 1 }) },
+    {
+        key: 'requireSignerAllowlist',
+        runtimeKey: 'messageApiRequireSignerAllowlist',
+        parser: parseBooleanValue,
+    },
+    {
+        key: 'signerAllowlist',
+        runtimeKey: 'messageApiSignerAllowlist',
+        parser: parseAddressArray,
+    },
+    {
+        key: 'signatureMaxAgeSeconds',
+        runtimeKey: 'messageApiSignatureMaxAgeSeconds',
+        parser: (value, label) => parseIntegerValue(value, label, { min: 1 }),
+    },
+    {
+        key: 'maxBodyBytes',
+        runtimeKey: 'messageApiMaxBodyBytes',
+        parser: (value, label) => parseIntegerValue(value, label, { min: 1 }),
+    },
+    {
+        key: 'maxTextLength',
+        runtimeKey: 'messageApiMaxTextLength',
+        parser: (value, label) => parseIntegerValue(value, label, { min: 1 }),
+    },
+    {
+        key: 'queueLimit',
+        runtimeKey: 'messageApiQueueLimit',
+        parser: (value, label) => parseIntegerValue(value, label, { min: 1 }),
+    },
+    {
+        key: 'batchSize',
+        runtimeKey: 'messageApiBatchSize',
+        parser: (value, label) => parseIntegerValue(value, label, { min: 1 }),
+    },
+    {
+        key: 'defaultTtlSeconds',
+        runtimeKey: 'messageApiDefaultTtlSeconds',
+        parser: (value, label) => parseIntegerValue(value, label, { min: 1 }),
+    },
+    {
+        key: 'minTtlSeconds',
+        runtimeKey: 'messageApiMinTtlSeconds',
+        parser: (value, label) => parseIntegerValue(value, label, { min: 1 }),
+    },
+    {
+        key: 'maxTtlSeconds',
+        runtimeKey: 'messageApiMaxTtlSeconds',
+        parser: (value, label) => parseIntegerValue(value, label, { min: 1 }),
+    },
+    {
+        key: 'idempotencyTtlSeconds',
+        runtimeKey: 'messageApiIdempotencyTtlSeconds',
+        parser: (value, label) => parseIntegerValue(value, label, { min: 1 }),
+    },
+    {
+        key: 'rateLimitPerMinute',
+        runtimeKey: 'messageApiRateLimitPerMinute',
+        parser: (value, label) => parseIntegerValue(value, label, { min: 0 }),
+    },
+    {
+        key: 'rateLimitBurst',
+        runtimeKey: 'messageApiRateLimitBurst',
+        parser: (value, label) => parseIntegerValue(value, label, { min: 0 }),
+    },
+]);
 
 function isPlainObjectValue(value) {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -277,14 +351,6 @@ function mergeConfigObjects(base, override) {
     return merged;
 }
 
-function pickConfigFields(source, keys) {
-    const out = {};
-    for (const key of keys) {
-        out[key] = source?.[key];
-    }
-    return out;
-}
-
 function hasExplicitConfigValue(source, key) {
     return hasOwn(source, key) && source[key] !== undefined && source[key] !== null;
 }
@@ -301,7 +367,7 @@ function resolveFieldOverride({ resolvedAgentConfig, baseConfig, key, label, par
     return resolvedValue;
 }
 
-function parseMessageApiOverride(value, label) {
+function parseObjectWithFieldDefinitions(value, label, definitions) {
     if (value === undefined || value === null) {
         return undefined;
     }
@@ -310,95 +376,63 @@ function parseMessageApiOverride(value, label) {
     }
 
     const out = {};
-    if (hasOwn(value, 'enabled')) {
-        out.enabled = parseBooleanValue(value.enabled, `${label}.enabled`);
+    for (const definition of definitions) {
+        if (!hasOwn(value, definition.key)) {
+            continue;
+        }
+        out[definition.key] = definition.parser(value[definition.key], `${label}.${definition.key}`);
     }
-    if (hasOwn(value, 'host')) {
-        out.host = parseHostValue(value.host, `${label}.host`);
+    return out;
+}
+
+function resolveFieldDefinitions({ definitions, resolvedAgentConfig, baseConfig, configSourceLabel }) {
+    return Object.fromEntries(
+        definitions.map(({ key, parser }) => [
+            key,
+            resolveFieldOverride({
+                resolvedAgentConfig,
+                baseConfig,
+                key,
+                label: `${configSourceLabel} field "${key}"`,
+                parser,
+            }),
+        ])
+    );
+}
+
+function pickRuntimeFields(source, definitions) {
+    const out = {};
+    for (const definition of definitions) {
+        const runtimeKey = definition.runtimeKey ?? definition.key;
+        out[runtimeKey] = source?.[runtimeKey];
     }
-    if (hasOwn(value, 'port')) {
-        out.port = parseIntegerValue(value.port, `${label}.port`, { min: 1 });
+    return out;
+}
+
+function resolveMappedRuntimeFields({ definitions, baseConfig, override }) {
+    const out = {};
+    for (const definition of definitions) {
+        out[definition.runtimeKey] = override?.[definition.key] ?? baseConfig[definition.runtimeKey];
+    }
+    return out;
+}
+
+function serializeMappedRuntimeFields({ definitions, runtimeConfig }) {
+    const out = {};
+    for (const definition of definitions) {
+        out[definition.key] = runtimeConfig[definition.runtimeKey];
+    }
+    return out;
+}
+
+function parseMessageApiOverride(value, label) {
+    const out = parseObjectWithFieldDefinitions(value, label, MESSAGE_API_FIELD_DEFINITIONS);
+    if (!out) {
+        return undefined;
     }
     if (hasOwn(value, 'keys')) {
         throw new Error(
             `${label}.keys is not supported in config.json; use MESSAGE_API_KEYS_JSON for secret bearer tokens`
-        );
-    }
-    if (hasOwn(value, 'requireSignerAllowlist')) {
-        out.requireSignerAllowlist = parseBooleanValue(
-            value.requireSignerAllowlist,
-            `${label}.requireSignerAllowlist`
-        );
-    }
-    if (hasOwn(value, 'signerAllowlist')) {
-        out.signerAllowlist = parseAddressArray(
-            value.signerAllowlist,
-            `${label}.signerAllowlist`
-        );
-    }
-    if (hasOwn(value, 'signatureMaxAgeSeconds')) {
-        out.signatureMaxAgeSeconds = parseIntegerValue(
-            value.signatureMaxAgeSeconds,
-            `${label}.signatureMaxAgeSeconds`,
-            { min: 1 }
-        );
-    }
-    if (hasOwn(value, 'maxBodyBytes')) {
-        out.maxBodyBytes = parseIntegerValue(value.maxBodyBytes, `${label}.maxBodyBytes`, {
-            min: 1,
-        });
-    }
-    if (hasOwn(value, 'maxTextLength')) {
-        out.maxTextLength = parseIntegerValue(
-            value.maxTextLength,
-            `${label}.maxTextLength`,
-            { min: 1 }
-        );
-    }
-    if (hasOwn(value, 'queueLimit')) {
-        out.queueLimit = parseIntegerValue(value.queueLimit, `${label}.queueLimit`, {
-            min: 1,
-        });
-    }
-    if (hasOwn(value, 'batchSize')) {
-        out.batchSize = parseIntegerValue(value.batchSize, `${label}.batchSize`, { min: 1 });
-    }
-    if (hasOwn(value, 'defaultTtlSeconds')) {
-        out.defaultTtlSeconds = parseIntegerValue(
-            value.defaultTtlSeconds,
-            `${label}.defaultTtlSeconds`,
-            { min: 1 }
-        );
-    }
-    if (hasOwn(value, 'minTtlSeconds')) {
-        out.minTtlSeconds = parseIntegerValue(value.minTtlSeconds, `${label}.minTtlSeconds`, {
-            min: 1,
-        });
-    }
-    if (hasOwn(value, 'maxTtlSeconds')) {
-        out.maxTtlSeconds = parseIntegerValue(value.maxTtlSeconds, `${label}.maxTtlSeconds`, {
-            min: 1,
-        });
-    }
-    if (hasOwn(value, 'idempotencyTtlSeconds')) {
-        out.idempotencyTtlSeconds = parseIntegerValue(
-            value.idempotencyTtlSeconds,
-            `${label}.idempotencyTtlSeconds`,
-            { min: 1 }
-        );
-    }
-    if (hasOwn(value, 'rateLimitPerMinute')) {
-        out.rateLimitPerMinute = parseIntegerValue(
-            value.rateLimitPerMinute,
-            `${label}.rateLimitPerMinute`,
-            { min: 0 }
-        );
-    }
-    if (hasOwn(value, 'rateLimitBurst')) {
-        out.rateLimitBurst = parseIntegerValue(
-            value.rateLimitBurst,
-            `${label}.rateLimitBurst`,
-            { min: 0 }
         );
     }
 
@@ -415,30 +449,12 @@ function parseMessageApiOverride(value, label) {
 
 function resolveMessageApiRuntimeConfig({ baseConfig, override, label }) {
     const resolved = {
-        messageApiEnabled: override?.enabled ?? baseConfig.messageApiEnabled,
-        messageApiHost: override?.host ?? baseConfig.messageApiHost,
-        messageApiPort: override?.port ?? baseConfig.messageApiPort,
+        ...resolveMappedRuntimeFields({
+            definitions: MESSAGE_API_FIELD_DEFINITIONS,
+            baseConfig,
+            override,
+        }),
         messageApiKeys: override?.keys ?? baseConfig.messageApiKeys,
-        messageApiRequireSignerAllowlist:
-            override?.requireSignerAllowlist ?? baseConfig.messageApiRequireSignerAllowlist,
-        messageApiSignerAllowlist:
-            override?.signerAllowlist ?? baseConfig.messageApiSignerAllowlist,
-        messageApiSignatureMaxAgeSeconds:
-            override?.signatureMaxAgeSeconds ?? baseConfig.messageApiSignatureMaxAgeSeconds,
-        messageApiMaxBodyBytes: override?.maxBodyBytes ?? baseConfig.messageApiMaxBodyBytes,
-        messageApiMaxTextLength: override?.maxTextLength ?? baseConfig.messageApiMaxTextLength,
-        messageApiQueueLimit: override?.queueLimit ?? baseConfig.messageApiQueueLimit,
-        messageApiBatchSize: override?.batchSize ?? baseConfig.messageApiBatchSize,
-        messageApiDefaultTtlSeconds:
-            override?.defaultTtlSeconds ?? baseConfig.messageApiDefaultTtlSeconds,
-        messageApiMinTtlSeconds: override?.minTtlSeconds ?? baseConfig.messageApiMinTtlSeconds,
-        messageApiMaxTtlSeconds: override?.maxTtlSeconds ?? baseConfig.messageApiMaxTtlSeconds,
-        messageApiIdempotencyTtlSeconds:
-            override?.idempotencyTtlSeconds ?? baseConfig.messageApiIdempotencyTtlSeconds,
-        messageApiRateLimitPerMinute:
-            override?.rateLimitPerMinute ?? baseConfig.messageApiRateLimitPerMinute,
-        messageApiRateLimitBurst:
-            override?.rateLimitBurst ?? baseConfig.messageApiRateLimitBurst,
     };
 
     if (resolved.messageApiDefaultTtlSeconds < resolved.messageApiMinTtlSeconds) {
@@ -617,29 +633,11 @@ function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
     if (!rawAgentConfig) {
         return {
             agentConfig: {},
-            commitmentSafe: baseConfig.commitmentSafe,
-            ogModule: baseConfig.ogModule,
-            watchAssets: baseConfig.watchAssets,
-            watchErc1155Assets: baseConfig.watchErc1155Assets,
-            ...pickConfigFields(baseConfig, SHARED_RUNTIME_FIELD_KEYS),
+            ...pickRuntimeFields(baseConfig, CORE_RUNTIME_FIELD_DEFINITIONS),
+            ...pickRuntimeFields(baseConfig, SHARED_RUNTIME_FIELD_DEFINITIONS),
             ipfsHeaders: baseConfig.ipfsHeaders,
-            messageApiEnabled: baseConfig.messageApiEnabled,
-            messageApiHost: baseConfig.messageApiHost,
-            messageApiPort: baseConfig.messageApiPort,
+            ...pickRuntimeFields(baseConfig, MESSAGE_API_FIELD_DEFINITIONS),
             messageApiKeys: baseConfig.messageApiKeys,
-            messageApiRequireSignerAllowlist: baseConfig.messageApiRequireSignerAllowlist,
-            messageApiSignerAllowlist: baseConfig.messageApiSignerAllowlist,
-            messageApiSignatureMaxAgeSeconds: baseConfig.messageApiSignatureMaxAgeSeconds,
-            messageApiMaxBodyBytes: baseConfig.messageApiMaxBodyBytes,
-            messageApiMaxTextLength: baseConfig.messageApiMaxTextLength,
-            messageApiQueueLimit: baseConfig.messageApiQueueLimit,
-            messageApiBatchSize: baseConfig.messageApiBatchSize,
-            messageApiDefaultTtlSeconds: baseConfig.messageApiDefaultTtlSeconds,
-            messageApiMinTtlSeconds: baseConfig.messageApiMinTtlSeconds,
-            messageApiMaxTtlSeconds: baseConfig.messageApiMaxTtlSeconds,
-            messageApiIdempotencyTtlSeconds: baseConfig.messageApiIdempotencyTtlSeconds,
-            messageApiRateLimitPerMinute: baseConfig.messageApiRateLimitPerMinute,
-            messageApiRateLimitBurst: baseConfig.messageApiRateLimitBurst,
         };
     }
 
@@ -711,84 +709,31 @@ function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
         label: `${configSourceLabel} field "messageApi"`,
     });
 
-    const commitmentSafe = hasOwn(resolvedAgentConfig, 'commitmentSafe')
-        ? (parseOptionalAddress(
-              resolvedAgentConfig.commitmentSafe,
-              `${configSourceLabel} field "commitmentSafe"`
-          ) ?? baseConfig.commitmentSafe)
-        : baseConfig.commitmentSafe;
-    const ogModule = hasOwn(resolvedAgentConfig, 'ogModule')
-        ? (parseOptionalAddress(
-              resolvedAgentConfig.ogModule,
-              `${configSourceLabel} field "ogModule"`
-          ) ?? baseConfig.ogModule)
-        : baseConfig.ogModule;
-
-    const watchAssets = hasOwn(resolvedAgentConfig, 'watchAssets')
-        ? parseAddressArray(
-              resolvedAgentConfig.watchAssets,
-              `${configSourceLabel} field "watchAssets"`
-          )
-        : baseConfig.watchAssets;
-    const watchErc1155Assets = hasOwn(resolvedAgentConfig, 'watchErc1155Assets')
-        ? parseErc1155AssetArray(
-              resolvedAgentConfig.watchErc1155Assets,
-              `${configSourceLabel} field "watchErc1155Assets"`
-          )
-        : baseConfig.watchErc1155Assets;
-    const sharedRuntimeConfig = Object.fromEntries(
-        SHARED_RUNTIME_FIELD_DEFINITIONS.map(([key, parser]) => [
-            key,
-            resolveFieldOverride({
-                resolvedAgentConfig,
-                baseConfig: runtimeBaseConfig,
-                key,
-                label: `${configSourceLabel} field "${key}"`,
-                parser,
-            }),
-        ])
-    );
-
-    if (hasOwn(resolvedAgentConfig, 'watchAssets')) {
-        resolvedAgentConfig.watchAssets = watchAssets;
-    }
-    if (hasOwn(resolvedAgentConfig, 'watchErc1155Assets')) {
-        resolvedAgentConfig.watchErc1155Assets = watchErc1155Assets;
-    }
-    if (hasOwn(resolvedAgentConfig, 'commitmentSafe')) {
-        resolvedAgentConfig.commitmentSafe = commitmentSafe;
-    }
-    if (hasOwn(resolvedAgentConfig, 'ogModule')) {
-        resolvedAgentConfig.ogModule = ogModule;
-    }
+    const coreRuntimeConfig = resolveFieldDefinitions({
+        definitions: CORE_RUNTIME_FIELD_DEFINITIONS,
+        resolvedAgentConfig,
+        baseConfig,
+        configSourceLabel,
+    });
+    const sharedRuntimeConfig = resolveFieldDefinitions({
+        definitions: SHARED_RUNTIME_FIELD_DEFINITIONS,
+        resolvedAgentConfig,
+        baseConfig: runtimeBaseConfig,
+        configSourceLabel,
+    });
     if (mergedMessageApiOverride) {
         resolvedAgentConfig.messageApi = {
-            enabled: resolvedMessageApi.messageApiEnabled,
-            host: resolvedMessageApi.messageApiHost,
-            port: resolvedMessageApi.messageApiPort,
+            ...serializeMappedRuntimeFields({
+                definitions: MESSAGE_API_FIELD_DEFINITIONS,
+                runtimeConfig: resolvedMessageApi,
+            }),
             keys: resolvedMessageApi.messageApiKeys,
-            requireSignerAllowlist: resolvedMessageApi.messageApiRequireSignerAllowlist,
-            signerAllowlist: resolvedMessageApi.messageApiSignerAllowlist,
-            signatureMaxAgeSeconds: resolvedMessageApi.messageApiSignatureMaxAgeSeconds,
-            maxBodyBytes: resolvedMessageApi.messageApiMaxBodyBytes,
-            maxTextLength: resolvedMessageApi.messageApiMaxTextLength,
-            queueLimit: resolvedMessageApi.messageApiQueueLimit,
-            batchSize: resolvedMessageApi.messageApiBatchSize,
-            defaultTtlSeconds: resolvedMessageApi.messageApiDefaultTtlSeconds,
-            minTtlSeconds: resolvedMessageApi.messageApiMinTtlSeconds,
-            maxTtlSeconds: resolvedMessageApi.messageApiMaxTtlSeconds,
-            idempotencyTtlSeconds: resolvedMessageApi.messageApiIdempotencyTtlSeconds,
-            rateLimitPerMinute: resolvedMessageApi.messageApiRateLimitPerMinute,
-            rateLimitBurst: resolvedMessageApi.messageApiRateLimitBurst,
         };
     }
 
     return {
         agentConfig: resolvedAgentConfig,
-        commitmentSafe,
-        ogModule,
-        watchAssets,
-        watchErc1155Assets,
+        ...coreRuntimeConfig,
         ...sharedRuntimeConfig,
         ipfsHeaders: runtimeBaseConfig.ipfsHeaders,
         ...resolvedMessageApi,
