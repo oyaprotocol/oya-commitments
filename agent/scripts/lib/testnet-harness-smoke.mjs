@@ -2,6 +2,8 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { stat } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
+import { resolveAgentModulePath } from './cli-runtime.mjs';
+import { buildHarnessRuntimeEnv } from './testnet-harness-context.mjs';
 import {
     createHarnessClients,
     loadRoleRecord,
@@ -17,8 +19,11 @@ import {
     stopHarnessAgent,
     waitForLogPattern,
 } from './testnet-harness-agent.mjs';
-import { readHarnessJson, writeHarnessJson } from './testnet-harness-session.mjs';
-import { resolveAgentModulePath, resolveHarnessRuntimeContext } from './testnet-harness-runtime.mjs';
+import {
+    readHarnessPids,
+    writeHarnessPids,
+} from './testnet-harness-session.mjs';
+import { resolveHarnessRuntimeContext } from './testnet-harness-runtime.mjs';
 
 async function pathExists(filePath) {
     try {
@@ -33,7 +38,7 @@ async function pathExists(filePath) {
 }
 
 async function loadModuleHarness({ repoRootPath, agentRef }) {
-    const modulePath = resolveAgentModulePath(repoRootPath, agentRef);
+    const modulePath = resolveAgentModulePath(agentRef, { repoRootPath });
     const harnessPath = path.join(path.dirname(modulePath), 'harness.mjs');
     if (!(await pathExists(harnessPath))) {
         return {
@@ -66,7 +71,11 @@ async function createSmokeContext({
         agentRef,
         profileName,
         overlayPath: runtime.sessionPaths.files.overlay,
-        env: process.env,
+        env: buildHarnessRuntimeEnv({
+            env: process.env,
+            profile: runtime.profile,
+            rpcUrl: runtime.rpcUrl,
+        }),
     });
 
     async function refreshRuntimeContext() {
@@ -75,17 +84,21 @@ async function createSmokeContext({
             agentRef,
             profileName,
             overlayPath: runtime.sessionPaths.files.overlay,
-            env: process.env,
+            env: buildHarnessRuntimeEnv({
+                env: process.env,
+                profile: runtime.profile,
+                rpcUrl: runtime.rpcUrl,
+            }),
         });
         return runtimeContext;
     }
 
     async function readPids() {
-        return (await readHarnessJson(runtime.sessionPaths.files.pids)) ?? {};
+        return await readHarnessPids(runtime.sessionPaths);
     }
 
     async function writePids(nextPids) {
-        await writeHarnessJson(runtime.sessionPaths.files.pids, nextPids);
+        await writeHarnessPids(runtime.sessionPaths, nextPids);
     }
 
     async function ensureAgentStarted({ restart = false, forceDeploy = false } = {}) {

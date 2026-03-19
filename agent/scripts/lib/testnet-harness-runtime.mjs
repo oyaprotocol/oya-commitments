@@ -2,6 +2,7 @@ import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { createDefaultRuntimeConfig } from '../../src/lib/config.js';
 import { loadAgentConfigStack, resolveAgentRuntimeConfig } from '../../src/lib/agent-config.js';
+import { resolveAgentModulePath } from './cli-runtime.mjs';
 import { resolveHarnessProfile } from './testnet-harness-profiles.mjs';
 
 function createHarnessBaseConfig({ env = process.env } = {}) {
@@ -9,15 +10,6 @@ function createHarnessBaseConfig({ env = process.env } = {}) {
         env: {},
         rpcUrl: env.RPC_URL ?? 'http://127.0.0.1:8545',
     });
-}
-
-function resolveAgentModulePath(repoRootPath, agentRef) {
-    const modulePath = agentRef.includes('/')
-        ? agentRef
-        : `agent-library/agents/${agentRef}/agent.js`;
-    return path.isAbsolute(modulePath)
-        ? modulePath
-        : path.resolve(repoRootPath, modulePath);
 }
 
 async function readCommitmentText(commitmentPath) {
@@ -39,7 +31,7 @@ async function resolveHarnessRuntimeContext({
     env = process.env,
 }) {
     const profile = resolveHarnessProfile(profileName, { env });
-    const modulePath = resolveAgentModulePath(repoRootPath, agentRef);
+    const modulePath = resolveAgentModulePath(agentRef, { repoRootPath });
     const moduleDir = path.dirname(modulePath);
     const configPath = path.join(moduleDir, 'config.json');
     const commitmentPath = path.join(moduleDir, 'commitment.txt');
@@ -71,6 +63,5 @@ async function resolveHarnessRuntimeContext({
 export {
     createHarnessBaseConfig,
     readCommitmentText,
-    resolveAgentModulePath,
     resolveHarnessRuntimeContext,
 };
