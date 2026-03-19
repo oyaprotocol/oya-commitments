@@ -129,7 +129,7 @@ async function run() {
             },
             repoRootPath,
         }),
-        'http://env-url:8555/base'
+        'http://127.0.0.1:8787'
     );
 
     assert.equal(
@@ -145,7 +145,7 @@ async function run() {
             },
             repoRootPath,
         }),
-        'http://override-host:8555/base'
+        'http://override-host:8787'
     );
 
     assert.equal(
@@ -157,7 +157,7 @@ async function run() {
             },
             repoRootPath,
         }),
-        'http://env-host.local:8123'
+        'http://127.0.0.1:8787'
     );
 
     console.log('ok');

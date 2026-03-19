@@ -30,7 +30,7 @@ This is beta software provided “as is.” Use at your own risk. No guarantees 
      - `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, `POLYMARKET_API_PASSPHRASE`
      - `POLYMARKET_BUILDER_API_KEY`, `POLYMARKET_BUILDER_SECRET`, `POLYMARKET_BUILDER_PASSPHRASE`
      - `IPFS_HEADERS_JSON` when it carries auth headers
-   - Non-secret runner behavior now belongs in the selected agent module's `config.json`, with env retained only as fallback for backward compatibility.
+   - Non-secret runner behavior belongs in the selected agent module's `config.json`.
 2. Install deps and start the loop:
 
 ```bash
@@ -195,7 +195,7 @@ node agent/scripts/send-signed-message.mjs \
   --request-id="pause-2h"
 ```
 
-If `--url` is omitted, the helper reads `messageApi.host` and `messageApi.port` from the selected agent module's merged config stack (`config.json`, optional `config.local.json`, and any `AGENT_CONFIG_OVERLAY_PATH*` files). Use `--module=<agent-name>` and optional `--chain-id=<int>` to select the commitment config; `MESSAGE_API_URL` and `MESSAGE_API_HOST`/`MESSAGE_API_PORT` remain fallback defaults when the module does not override them.
+If `--url` is omitted, the helper reads `messageApi.host` and `messageApi.port` from the selected agent module's merged config stack (`config.json`, optional `config.local.json`, and any `AGENT_CONFIG_OVERLAY_PATH*` files). Use `--module=<agent-name>` and optional `--chain-id=<int>` to select the commitment config. When the module does not override those fields, the helper falls back to the built-in default `http://127.0.0.1:8787`.
 
 If bearer gating is configured, also pass `--bearer-token="<token>"` or set `MESSAGE_API_BEARER_TOKEN`.
 
@@ -260,36 +260,36 @@ The shared tooling supports:
 
 #### Polymarket Environment Variables
 
-Set these when using Polymarket functionality. Non-secret `polymarket*` fields belong in the module config; env is still used for secrets and remains a fallback for backward compatibility:
-- `POLYMARKET_CONDITIONAL_TOKENS`: Optional CTF contract address override used by CTF actions (default is Polymarket mainnet ConditionalTokens).
-- `POLYMARKET_EXCHANGE`: Optional CTF exchange override for EIP-712 order signing domain.
-- `POLYMARKET_CLOB_ENABLED`: Enable CLOB tools (`true`/`false`, default `false`).
-- `POLYMARKET_CLOB_HOST`: CLOB API host (default `https://clob.polymarket.com`).
-- `POLYMARKET_CLOB_ADDRESS`: Optional address used as `POLY_ADDRESS` for CLOB auth (for proxy/funder setups). Defaults to runtime signer address.
-- `POLYMARKET_CLOB_SIGNATURE_TYPE`: Optional default order signature type for build/sign flow (`EOA`/`POLY_PROXY`/`POLY_GNOSIS_SAFE` or `0`/`1`/`2`).
+Set these in module config when using Polymarket functionality. Secret API credentials remain env-only:
+- `polymarketConditionalTokens`: Optional CTF contract address override used by CTF actions (default is Polymarket mainnet ConditionalTokens).
+- `polymarketExchange`: Optional CTF exchange override for EIP-712 order signing domain.
+- `polymarketClobEnabled`: Enable CLOB tools (`true`/`false`, default `false`).
+- `polymarketClobHost`: CLOB API host (default `https://clob.polymarket.com`).
+- `polymarketClobAddress`: Optional address used as `POLY_ADDRESS` for CLOB auth (for proxy/funder setups). Defaults to runtime signer address.
+- `polymarketClobSignatureType`: Optional default order signature type for build/sign flow (`EOA`/`POLY_PROXY`/`POLY_GNOSIS_SAFE` or `0`/`1`/`2`).
   - Per Polymarket docs: `0=EOA`, `1=POLY_PROXY`, `2=POLY_GNOSIS_SAFE`.
   - When using `POLY_PROXY` or `POLY_GNOSIS_SAFE`, set `POLYMARKET_CLOB_ADDRESS` to the proxy/funder wallet address.
 - `POLYMARKET_CLOB_API_KEY`, `POLYMARKET_CLOB_API_SECRET`, `POLYMARKET_CLOB_API_PASSPHRASE`: Required for authenticated CLOB calls.
-- `POLYMARKET_CLOB_REQUEST_TIMEOUT_MS`, `POLYMARKET_CLOB_MAX_RETRIES`, `POLYMARKET_CLOB_RETRY_DELAY_MS`: Optional request tuning.
-- `POLYMARKET_RELAYER_ENABLED`: Enable Polymarket relayer submission for ERC1155 deposits (`true`/`false`, default `false`).
-- `POLYMARKET_RELAYER_HOST`: Relayer API host (default `https://relayer-v2.polymarket.com`).
-- `POLYMARKET_RELAYER_TX_TYPE`: Relayer wallet type (`SAFE` default, or `PROXY`).
-- `POLYMARKET_RELAYER_FROM_ADDRESS`: Optional explicit relayer proxy wallet address (if omitted, runtime auto-resolves from signer + relayer APIs / deterministic address).
-- `POLYMARKET_RELAYER_SAFE_FACTORY`, `POLYMARKET_RELAYER_PROXY_FACTORY`: Optional factory overrides for deterministic SAFE/PROXY address derivation.
-- `POLYMARKET_RELAYER_RESOLVE_PROXY_ADDRESS`: Resolve proxy address via relayer API when from-address is not set (default `true`).
-- `POLYMARKET_RELAYER_AUTO_DEPLOY_PROXY`: Optionally create proxy wallet when absent (default `false`).
-- `POLYMARKET_RELAYER_CHAIN_ID`, `POLYMARKET_RELAYER_REQUEST_TIMEOUT_MS`, `POLYMARKET_RELAYER_POLL_INTERVAL_MS`, `POLYMARKET_RELAYER_POLL_TIMEOUT_MS`: Optional relayer runtime tuning.
+- `polymarketClobRequestTimeoutMs`, `polymarketClobMaxRetries`, `polymarketClobRetryDelayMs`: Optional request tuning.
+- `polymarketRelayerEnabled`: Enable Polymarket relayer submission for ERC1155 deposits (`true`/`false`, default `false`).
+- `polymarketRelayerHost`: Relayer API host (default `https://relayer-v2.polymarket.com`).
+- `polymarketRelayerTxType`: Relayer wallet type (`SAFE` default, or `PROXY`).
+- `polymarketRelayerFromAddress`: Optional explicit relayer proxy wallet address (if omitted, runtime auto-resolves from signer + relayer APIs / deterministic address).
+- `polymarketRelayerSafeFactory`, `polymarketRelayerProxyFactory`: Optional factory overrides for deterministic SAFE/PROXY address derivation.
+- `polymarketRelayerResolveProxyAddress`: Resolve proxy address via relayer API when from-address is not set (default `true`).
+- `polymarketRelayerAutoDeployProxy`: Optionally create proxy wallet when absent (default `false`).
+- `polymarketRelayerChainId`, `polymarketRelayerRequestTimeoutMs`, `polymarketRelayerPollIntervalMs`, `polymarketRelayerPollTimeoutMs`: Optional relayer runtime tuning.
 - Builder credentials for relayer auth headers:
   - Preferred: `POLYMARKET_BUILDER_API_KEY`, `POLYMARKET_BUILDER_SECRET`, `POLYMARKET_BUILDER_PASSPHRASE`.
   - Fallbacks supported: `POLYMARKET_API_*` then `POLYMARKET_CLOB_API_*`.
 
 #### Execution Modes
 
-- `PROPOSE_ENABLED=true` and/or `DISPUTE_ENABLED=true`: onchain tools are enabled (`build_og_transactions`, `make_deposit`, `make_transfer`, `make_erc1155_deposit`, `make_erc1155_transfer`, propose/dispute tools).
-- `PROPOSE_ENABLED=false` and `DISPUTE_ENABLED=false`: onchain tools are disabled.
-- `POLYMARKET_CLOB_ENABLED=true`: CLOB tools can still run in this mode (`polymarket_clob_place_order`, `polymarket_clob_build_sign_and_place_order`, `polymarket_clob_cancel_orders`).
-- `IPFS_ENABLED=true`: IPFS publishing tools can run in this mode (`ipfs_publish`), even if onchain/CLOB tools are disabled.
-- All four disabled (`PROPOSE_ENABLED=false`, `DISPUTE_ENABLED=false`, `POLYMARKET_CLOB_ENABLED=false`, `IPFS_ENABLED=false`): monitor/opinion only.
+- `proposeEnabled=true` and/or `disputeEnabled=true`: onchain tools are enabled (`build_og_transactions`, `make_deposit`, `make_transfer`, `make_erc1155_deposit`, `make_erc1155_transfer`, propose/dispute tools).
+- `proposeEnabled=false` and `disputeEnabled=false`: onchain tools are disabled.
+- `polymarketClobEnabled=true`: CLOB tools can still run in this mode (`polymarket_clob_place_order`, `polymarket_clob_build_sign_and_place_order`, `polymarket_clob_cancel_orders`).
+- `ipfsEnabled=true`: IPFS publishing tools can run in this mode (`ipfs_publish`), even if onchain/CLOB tools are disabled.
+- All four disabled (`proposeEnabled=false`, `disputeEnabled=false`, `polymarketClobEnabled=false`, `ipfsEnabled=false`): monitor/opinion only.
 
 #### CTF Actions (`build_og_transactions`)
 
@@ -427,10 +427,10 @@ This tool requires a signer backend that supports `signTypedData`.
 
 ### Propose vs Dispute Modes
 
-Set `proposeEnabled` and `disputeEnabled` in module config, or use the env fallbacks `PROPOSE_ENABLED` and `DISPUTE_ENABLED`, to control behavior:
+Set `proposeEnabled` and `disputeEnabled` in module config to control behavior:
 - Both true: propose and dispute as needed (default).
-- Only `PROPOSE_ENABLED=true`: propose only, never dispute.
-- Only `DISPUTE_ENABLED=true`: dispute only, never propose.
+- Only `proposeEnabled=true`: propose only, never dispute.
+- Only `disputeEnabled=true`: dispute only, never propose.
 - Both false: monitor and log opinions only; no on-chain actions.
 
 ### Agent Modules & Commitments
@@ -447,8 +447,8 @@ The config stack is loaded and merged like this:
 - top-level keys apply on every chain
 - `byChain.<chainId>` overrides top-level keys for the active RPC chain
 - nested plain objects are merged recursively; arrays and scalar values replace the shared value
-- non-secret shared runner fields from the file override env fallbacks when present, including `commitmentSafe`, `ogModule`, `watchAssets`, `watchErc1155Assets`, `pollIntervalMs`, `logChunkSize`, `startBlock`, `watchNativeBalance`, `defaultDepositAsset`, `defaultDepositAmountWei`, `bondSpender`, proposal/dispute toggles and retry controls, `openAiModel`, `openAiBaseUrl`, `openAiRequestTimeoutMs`, `ipfsEnabled`, `ipfsApiUrl`, `ipfsRequestTimeoutMs`, `ipfsMaxRetries`, `ipfsRetryDelayMs`, `chainlinkPriceFeed`, `uniswapV3*`, `polymarket*`, and `messageApi`
-- if the file is missing, or those keys are absent or `null`, the runner falls back to env values
+- non-secret shared runner fields come from the config stack, including `commitmentSafe`, `ogModule`, `watchAssets`, `watchErc1155Assets`, `pollIntervalMs`, `logChunkSize`, `startBlock`, `watchNativeBalance`, `defaultDepositAsset`, `defaultDepositAmountWei`, `bondSpender`, proposal/dispute toggles and retry controls, `openAiModel`, `openAiBaseUrl`, `openAiRequestTimeoutMs`, `ipfsEnabled`, `ipfsApiUrl`, `ipfsRequestTimeoutMs`, `ipfsMaxRetries`, `ipfsRetryDelayMs`, `chainlinkPriceFeed`, `uniswapV3*`, `polymarket*`, and `messageApi`
+- if the file is missing, or those keys are absent or `null`, the runner uses built-in defaults for optional fields and requires config values for commitment-specific addresses like `commitmentSafe` and `ogModule`
 - secrets remain env-only: signer credentials, `OPENAI_API_KEY`, `MESSAGE_API_KEYS_JSON`, Polymarket API credentials, `IPFS_HEADERS_JSON` auth headers, and similar bearer/API keys
 
 Example:

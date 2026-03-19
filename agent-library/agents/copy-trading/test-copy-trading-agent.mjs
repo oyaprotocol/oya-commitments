@@ -21,14 +21,32 @@ const TEST_RELAYER_PROXY = '0x5555555555555555555555555555555555555555';
 const TEST_PROPOSAL_HASH = `0x${'a'.repeat(64)}`;
 const OTHER_PROPOSAL_HASH = `0x${'b'.repeat(64)}`;
 const TEST_TX_HASH = `0x${'c'.repeat(64)}`;
-const COPY_TRADING_ENV_KEYS = [
-    'COPY_TRADING_SOURCE_USER',
-    'COPY_TRADING_MARKET',
-    'COPY_TRADING_YES_TOKEN_ID',
-    'COPY_TRADING_NO_TOKEN_ID',
-    'COPY_TRADING_COLLATERAL_TOKEN',
-    'COPY_TRADING_CTF_CONTRACT',
-];
+const TEST_CTF_CONTRACT = '0x4d97dcd97ec945f40cf65f87097ace5ea0476045';
+
+function buildCopyTradingConfig(overrides = {}) {
+    const baseAgentConfig = {
+        copyTrading: {
+            sourceUser: TEST_SOURCE_USER,
+            market: 'test-market',
+            yesTokenId: YES_TOKEN_ID,
+            noTokenId: NO_TOKEN_ID,
+        },
+    };
+    const overrideAgentConfig = overrides.agentConfig ?? {};
+    return {
+        commitmentSafe: TEST_SAFE,
+        polymarketConditionalTokens: TEST_CTF_CONTRACT,
+        ...overrides,
+        agentConfig: {
+            ...baseAgentConfig,
+            ...overrideAgentConfig,
+            copyTrading: {
+                ...baseAgentConfig.copyTrading,
+                ...(overrideAgentConfig.copyTrading ?? {}),
+            },
+        },
+    };
+}
 
 function encodeErc20TransferData({ to, amount }) {
     const toWord = to.toLowerCase().replace(/^0x/, '').padStart(64, '0');
@@ -238,12 +256,7 @@ async function runValidateToolCallTests() {
 
 async function runConfigBackedPolicyTest() {
     resetCopyTradingState();
-    const oldEnv = Object.fromEntries(COPY_TRADING_ENV_KEYS.map((key) => [key, process.env[key]]));
     const oldFetch = globalThis.fetch;
-
-    for (const key of COPY_TRADING_ENV_KEYS) {
-        delete process.env[key];
-    }
 
     try {
         globalThis.fetch = async () => ({
@@ -266,21 +279,16 @@ async function runConfigBackedPolicyTest() {
                     if (args.length === 1) {
                         return 1_000_000n;
                     }
-                    return 0n;
-                },
-            },
-            config: {
-                commitmentSafe: TEST_SAFE,
-                polymarketConditionalTokens: '0x4d97dcd97ec945f40cf65f87097ace5ea0476045',
-                agentConfig: {
-                    copyTrading: {
-                        sourceUser: TEST_SOURCE_USER,
-                        market: 'config-market',
-                        yesTokenId: YES_TOKEN_ID,
-                        noTokenId: NO_TOKEN_ID,
+                        return 0n;
                     },
                 },
-            },
+            config: buildCopyTradingConfig({
+                agentConfig: {
+                    copyTrading: {
+                        market: 'config-market',
+                    },
+                },
+            }),
             account: { address: TEST_ACCOUNT },
             onchainPendingProposal: false,
         });
@@ -292,13 +300,6 @@ async function runConfigBackedPolicyTest() {
         assert.equal(state.copyTradeAmountWei, '990000');
         assert.equal(state.reimbursementAmountWei, '1000000');
     } finally {
-        for (const key of COPY_TRADING_ENV_KEYS) {
-            if (oldEnv[key] === undefined) {
-                delete process.env[key];
-            } else {
-                process.env[key] = oldEnv[key];
-            }
-        }
         globalThis.fetch = oldFetch;
         resetCopyTradingState();
     }
@@ -306,14 +307,8 @@ async function runConfigBackedPolicyTest() {
 
 async function runProposalHashGatingTest() {
     resetCopyTradingState();
-    const envKeys = COPY_TRADING_ENV_KEYS;
-    const oldEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
     const oldFetch = globalThis.fetch;
-
-    process.env.COPY_TRADING_SOURCE_USER = TEST_SOURCE_USER;
-    process.env.COPY_TRADING_MARKET = 'test-market';
-    process.env.COPY_TRADING_YES_TOKEN_ID = YES_TOKEN_ID;
-    process.env.COPY_TRADING_NO_TOKEN_ID = NO_TOKEN_ID;
+    const config = buildCopyTradingConfig();
 
     try {
         globalThis.fetch = async () => ({
@@ -339,10 +334,7 @@ async function runProposalHashGatingTest() {
                     return 0n;
                 },
             },
-            config: {
-                commitmentSafe: TEST_SAFE,
-                polymarketConditionalTokens: '0x4d97dcd97ec945f40cf65f87097ace5ea0476045',
-            },
+            config,
             account: { address: TEST_ACCOUNT },
             onchainPendingProposal: false,
         });
@@ -384,13 +376,6 @@ async function runProposalHashGatingTest() {
         assert.equal(state.activeSourceTradeId, null);
         assert.equal(state.seenSourceTradeId, 'trade-1');
     } finally {
-        for (const key of envKeys) {
-            if (oldEnv[key] === undefined) {
-                delete process.env[key];
-            } else {
-                process.env[key] = oldEnv[key];
-            }
-        }
         globalThis.fetch = oldFetch;
         resetCopyTradingState();
     }
@@ -411,19 +396,8 @@ function runLegacyProposalHashFallbackTest() {
 
 async function runProposalHashRecoveryFromSignalTest() {
     resetCopyTradingState();
-    const envKeys = [
-        'COPY_TRADING_SOURCE_USER',
-        'COPY_TRADING_MARKET',
-        'COPY_TRADING_YES_TOKEN_ID',
-        'COPY_TRADING_NO_TOKEN_ID',
-    ];
-    const oldEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
     const oldFetch = globalThis.fetch;
-
-    process.env.COPY_TRADING_SOURCE_USER = TEST_SOURCE_USER;
-    process.env.COPY_TRADING_MARKET = 'test-market';
-    process.env.COPY_TRADING_YES_TOKEN_ID = YES_TOKEN_ID;
-    process.env.COPY_TRADING_NO_TOKEN_ID = NO_TOKEN_ID;
+    const config = buildCopyTradingConfig();
 
     try {
         globalThis.fetch = async () => ({
@@ -440,10 +414,6 @@ async function runProposalHashRecoveryFromSignalTest() {
             },
         });
 
-        const config = {
-            commitmentSafe: TEST_SAFE,
-            polymarketConditionalTokens: '0x4d97dcd97ec945f40cf65f87097ace5ea0476045',
-        };
         const publicClient = {
             async readContract({ args }) {
                 if (args.length === 1) return 1_000_000n;
@@ -510,13 +480,6 @@ async function runProposalHashRecoveryFromSignalTest() {
         assert.equal(state.activeSourceTradeId, null);
         assert.equal(state.seenSourceTradeId, 'trade-1');
     } finally {
-        for (const key of envKeys) {
-            if (oldEnv[key] === undefined) {
-                delete process.env[key];
-            } else {
-                process.env[key] = oldEnv[key];
-            }
-        }
         globalThis.fetch = oldFetch;
         resetCopyTradingState();
     }
@@ -524,19 +487,10 @@ async function runProposalHashRecoveryFromSignalTest() {
 
 async function runProposalHashRecoveryFromSignalUsesFundingWalletTest() {
     resetCopyTradingState();
-    const envKeys = [
-        'COPY_TRADING_SOURCE_USER',
-        'COPY_TRADING_MARKET',
-        'COPY_TRADING_YES_TOKEN_ID',
-        'COPY_TRADING_NO_TOKEN_ID',
-    ];
-    const oldEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
     const oldFetch = globalThis.fetch;
-
-    process.env.COPY_TRADING_SOURCE_USER = TEST_SOURCE_USER;
-    process.env.COPY_TRADING_MARKET = 'test-market';
-    process.env.COPY_TRADING_YES_TOKEN_ID = YES_TOKEN_ID;
-    process.env.COPY_TRADING_NO_TOKEN_ID = NO_TOKEN_ID;
+    const config = buildCopyTradingConfig({
+        polymarketClobAddress: TEST_CLOB_PROXY,
+    });
 
     try {
         globalThis.fetch = async () => ({
@@ -553,11 +507,6 @@ async function runProposalHashRecoveryFromSignalUsesFundingWalletTest() {
             },
         });
 
-        const config = {
-            commitmentSafe: TEST_SAFE,
-            polymarketConditionalTokens: '0x4d97dcd97ec945f40cf65f87097ace5ea0476045',
-            polymarketClobAddress: TEST_CLOB_PROXY,
-        };
         const publicClient = {
             async readContract({ args }) {
                 if (args.length === 1) return 1_000_000n;
@@ -647,13 +596,6 @@ async function runProposalHashRecoveryFromSignalUsesFundingWalletTest() {
         assert.equal(state.activeSourceTradeId, null);
         assert.equal(state.seenSourceTradeId, 'trade-1');
     } finally {
-        for (const key of envKeys) {
-            if (oldEnv[key] === undefined) {
-                delete process.env[key];
-            } else {
-                process.env[key] = oldEnv[key];
-            }
-        }
         globalThis.fetch = oldFetch;
         resetCopyTradingState();
     }
@@ -661,19 +603,8 @@ async function runProposalHashRecoveryFromSignalUsesFundingWalletTest() {
 
 async function runRevertedSubmissionClearsPendingTest() {
     resetCopyTradingState();
-    const envKeys = [
-        'COPY_TRADING_SOURCE_USER',
-        'COPY_TRADING_MARKET',
-        'COPY_TRADING_YES_TOKEN_ID',
-        'COPY_TRADING_NO_TOKEN_ID',
-    ];
-    const oldEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
     const oldFetch = globalThis.fetch;
-
-    process.env.COPY_TRADING_SOURCE_USER = TEST_SOURCE_USER;
-    process.env.COPY_TRADING_MARKET = 'test-market';
-    process.env.COPY_TRADING_YES_TOKEN_ID = YES_TOKEN_ID;
-    process.env.COPY_TRADING_NO_TOKEN_ID = NO_TOKEN_ID;
+    const config = buildCopyTradingConfig();
 
     try {
         globalThis.fetch = async () => ({
@@ -690,10 +621,6 @@ async function runRevertedSubmissionClearsPendingTest() {
             },
         });
 
-        const config = {
-            commitmentSafe: TEST_SAFE,
-            polymarketConditionalTokens: '0x4d97dcd97ec945f40cf65f87097ace5ea0476045',
-        };
         const publicClient = {
             async readContract({ args }) {
                 if (args.length === 1) return 1_000_000n;
@@ -770,13 +697,6 @@ async function runRevertedSubmissionClearsPendingTest() {
 
         assert.equal(reimbursementValidated.length, 1);
     } finally {
-        for (const key of envKeys) {
-            if (oldEnv[key] === undefined) {
-                delete process.env[key];
-            } else {
-                process.env[key] = oldEnv[key];
-            }
-        }
         globalThis.fetch = oldFetch;
         resetCopyTradingState();
     }
@@ -784,22 +704,15 @@ async function runRevertedSubmissionClearsPendingTest() {
 
 async function runOrderFillConfirmationGatesDepositTest() {
     resetCopyTradingState();
-    const envKeys = [
-        'COPY_TRADING_SOURCE_USER',
-        'COPY_TRADING_MARKET',
-        'COPY_TRADING_YES_TOKEN_ID',
-        'COPY_TRADING_NO_TOKEN_ID',
-    ];
-    const oldEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
     const oldFetch = globalThis.fetch;
-
-    process.env.COPY_TRADING_SOURCE_USER = TEST_SOURCE_USER;
-    process.env.COPY_TRADING_MARKET = 'test-market';
-    process.env.COPY_TRADING_YES_TOKEN_ID = YES_TOKEN_ID;
-    process.env.COPY_TRADING_NO_TOKEN_ID = NO_TOKEN_ID;
+    const config = buildCopyTradingConfig({
+        polymarketClobHost: 'https://clob.polymarket.com',
+        polymarketClobApiKey: 'api-key',
+        polymarketClobApiSecret: Buffer.from('test-secret').toString('base64'),
+        polymarketClobApiPassphrase: 'pass',
+    });
 
     try {
-        const apiSecret = Buffer.from('test-secret').toString('base64');
         globalThis.fetch = async (url) => {
             const asText = String(url);
             if (asText.includes('data-api.polymarket.com/activity')) {
@@ -858,15 +771,6 @@ async function runOrderFillConfirmationGatesDepositTest() {
             }
             throw new Error(`Unexpected fetch URL in test: ${asText}`);
         };
-
-        const config = {
-            commitmentSafe: TEST_SAFE,
-            polymarketConditionalTokens: '0x4d97dcd97ec945f40cf65f87097ace5ea0476045',
-            polymarketClobHost: 'https://clob.polymarket.com',
-            polymarketClobApiKey: 'api-key',
-            polymarketClobApiSecret: apiSecret,
-            polymarketClobApiPassphrase: 'pass',
-        };
         const publicClient = {
             async readContract({ args }) {
                 if (args.length === 1) return 1_000_000n;
@@ -908,13 +812,6 @@ async function runOrderFillConfirmationGatesDepositTest() {
         assert.equal(state.copyOrderFilled, true);
         assert.equal(state.copyOrderStatus, 'FILLED');
     } finally {
-        for (const key of envKeys) {
-            if (oldEnv[key] === undefined) {
-                delete process.env[key];
-            } else {
-                process.env[key] = oldEnv[key];
-            }
-        }
         globalThis.fetch = oldFetch;
         resetCopyTradingState();
     }
@@ -922,19 +819,8 @@ async function runOrderFillConfirmationGatesDepositTest() {
 
 async function runMissingOrderIdDoesNotAdvanceOrderStateTest() {
     resetCopyTradingState();
-    const envKeys = [
-        'COPY_TRADING_SOURCE_USER',
-        'COPY_TRADING_MARKET',
-        'COPY_TRADING_YES_TOKEN_ID',
-        'COPY_TRADING_NO_TOKEN_ID',
-    ];
-    const oldEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
     const oldFetch = globalThis.fetch;
-
-    process.env.COPY_TRADING_SOURCE_USER = TEST_SOURCE_USER;
-    process.env.COPY_TRADING_MARKET = 'test-market';
-    process.env.COPY_TRADING_YES_TOKEN_ID = YES_TOKEN_ID;
-    process.env.COPY_TRADING_NO_TOKEN_ID = NO_TOKEN_ID;
+    const config = buildCopyTradingConfig();
 
     try {
         globalThis.fetch = async () => ({
@@ -951,10 +837,6 @@ async function runMissingOrderIdDoesNotAdvanceOrderStateTest() {
             },
         });
 
-        const config = {
-            commitmentSafe: TEST_SAFE,
-            polymarketConditionalTokens: '0x4d97dcd97ec945f40cf65f87097ace5ea0476045',
-        };
         const publicClient = {
             async readContract({ args }) {
                 if (args.length === 1) return 1_000_000n;
@@ -1041,13 +923,6 @@ async function runMissingOrderIdDoesNotAdvanceOrderStateTest() {
         });
         assert.equal(orderValidated.length, 1);
     } finally {
-        for (const key of envKeys) {
-            if (oldEnv[key] === undefined) {
-                delete process.env[key];
-            } else {
-                process.env[key] = oldEnv[key];
-            }
-        }
         globalThis.fetch = oldFetch;
         resetCopyTradingState();
     }
@@ -1055,19 +930,8 @@ async function runMissingOrderIdDoesNotAdvanceOrderStateTest() {
 
 async function runSubmissionWithoutHashesDoesNotWedgeTest() {
     resetCopyTradingState();
-    const envKeys = [
-        'COPY_TRADING_SOURCE_USER',
-        'COPY_TRADING_MARKET',
-        'COPY_TRADING_YES_TOKEN_ID',
-        'COPY_TRADING_NO_TOKEN_ID',
-    ];
-    const oldEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
     const oldFetch = globalThis.fetch;
-
-    process.env.COPY_TRADING_SOURCE_USER = TEST_SOURCE_USER;
-    process.env.COPY_TRADING_MARKET = 'test-market';
-    process.env.COPY_TRADING_YES_TOKEN_ID = YES_TOKEN_ID;
-    process.env.COPY_TRADING_NO_TOKEN_ID = NO_TOKEN_ID;
+    const config = buildCopyTradingConfig();
 
     try {
         globalThis.fetch = async () => ({
@@ -1084,10 +948,6 @@ async function runSubmissionWithoutHashesDoesNotWedgeTest() {
             },
         });
 
-        const config = {
-            commitmentSafe: TEST_SAFE,
-            polymarketConditionalTokens: '0x4d97dcd97ec945f40cf65f87097ace5ea0476045',
-        };
         const publicClient = {
             async readContract({ args }) {
                 if (args.length === 1) return 1_000_000n;
@@ -1151,13 +1011,6 @@ async function runSubmissionWithoutHashesDoesNotWedgeTest() {
 
         assert.equal(reimbursementValidated.length, 1);
     } finally {
-        for (const key of envKeys) {
-            if (oldEnv[key] === undefined) {
-                delete process.env[key];
-            } else {
-                process.env[key] = oldEnv[key];
-            }
-        }
         globalThis.fetch = oldFetch;
         resetCopyTradingState();
     }
@@ -1165,19 +1018,8 @@ async function runSubmissionWithoutHashesDoesNotWedgeTest() {
 
 async function runFetchLatestBuyTradeTest() {
     resetCopyTradingState();
-    const envKeys = [
-        'COPY_TRADING_SOURCE_USER',
-        'COPY_TRADING_MARKET',
-        'COPY_TRADING_YES_TOKEN_ID',
-        'COPY_TRADING_NO_TOKEN_ID',
-    ];
-    const oldEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
     const oldFetch = globalThis.fetch;
-
-    process.env.COPY_TRADING_SOURCE_USER = TEST_SOURCE_USER;
-    process.env.COPY_TRADING_MARKET = 'test-market';
-    process.env.COPY_TRADING_YES_TOKEN_ID = YES_TOKEN_ID;
-    process.env.COPY_TRADING_NO_TOKEN_ID = NO_TOKEN_ID;
+    const config = buildCopyTradingConfig();
 
     try {
         globalThis.fetch = async () => ({
@@ -1209,10 +1051,7 @@ async function runFetchLatestBuyTradeTest() {
                     return 0n;
                 },
             },
-            config: {
-                commitmentSafe: TEST_SAFE,
-                polymarketConditionalTokens: '0x4d97dcd97ec945f40cf65f87097ace5ea0476045',
-            },
+            config,
             account: { address: TEST_ACCOUNT },
             onchainPendingProposal: false,
         });
@@ -1224,13 +1063,6 @@ async function runFetchLatestBuyTradeTest() {
         const copySignal = outSignals.find((signal) => signal.kind === 'copyTradingState');
         assert.equal(copySignal.latestObservedTrade.id, 'trade-buy');
     } finally {
-        for (const key of envKeys) {
-            if (oldEnv[key] === undefined) {
-                delete process.env[key];
-            } else {
-                process.env[key] = oldEnv[key];
-            }
-        }
         globalThis.fetch = oldFetch;
         resetCopyTradingState();
     }
@@ -1238,19 +1070,10 @@ async function runFetchLatestBuyTradeTest() {
 
 async function runTokenBalancesUseClobAddressTest() {
     resetCopyTradingState();
-    const envKeys = [
-        'COPY_TRADING_SOURCE_USER',
-        'COPY_TRADING_MARKET',
-        'COPY_TRADING_YES_TOKEN_ID',
-        'COPY_TRADING_NO_TOKEN_ID',
-    ];
-    const oldEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
     const oldFetch = globalThis.fetch;
-
-    process.env.COPY_TRADING_SOURCE_USER = TEST_SOURCE_USER;
-    process.env.COPY_TRADING_MARKET = 'test-market';
-    process.env.COPY_TRADING_YES_TOKEN_ID = YES_TOKEN_ID;
-    process.env.COPY_TRADING_NO_TOKEN_ID = NO_TOKEN_ID;
+    const config = buildCopyTradingConfig({
+        polymarketClobAddress: TEST_CLOB_PROXY,
+    });
 
     try {
         globalThis.fetch = async () => ({
@@ -1278,11 +1101,7 @@ async function runTokenBalancesUseClobAddressTest() {
                     return 1n;
                 },
             },
-            config: {
-                commitmentSafe: TEST_SAFE,
-                polymarketConditionalTokens: '0x4d97dcd97ec945f40cf65f87097ace5ea0476045',
-                polymarketClobAddress: TEST_CLOB_PROXY,
-            },
+            config,
             account: { address: TEST_ACCOUNT },
             onchainPendingProposal: false,
         });
@@ -1291,13 +1110,6 @@ async function runTokenBalancesUseClobAddressTest() {
         assert.equal(erc1155BalanceCallAddresses[0], TEST_CLOB_PROXY.toLowerCase());
         assert.equal(erc1155BalanceCallAddresses[1], TEST_CLOB_PROXY.toLowerCase());
     } finally {
-        for (const key of envKeys) {
-            if (oldEnv[key] === undefined) {
-                delete process.env[key];
-            } else {
-                process.env[key] = oldEnv[key];
-            }
-        }
         globalThis.fetch = oldFetch;
         resetCopyTradingState();
     }
@@ -1305,22 +1117,18 @@ async function runTokenBalancesUseClobAddressTest() {
 
 async function runTokenBalancesUseResolvedRelayerProxyTest() {
     resetCopyTradingState();
-    const envKeys = [
-        'COPY_TRADING_SOURCE_USER',
-        'COPY_TRADING_MARKET',
-        'COPY_TRADING_YES_TOKEN_ID',
-        'COPY_TRADING_NO_TOKEN_ID',
-    ];
-    const oldEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
     const oldFetch = globalThis.fetch;
-
-    process.env.COPY_TRADING_SOURCE_USER = TEST_SOURCE_USER;
-    process.env.COPY_TRADING_MARKET = 'test-market';
-    process.env.COPY_TRADING_YES_TOKEN_ID = YES_TOKEN_ID;
-    process.env.COPY_TRADING_NO_TOKEN_ID = NO_TOKEN_ID;
+    const config = buildCopyTradingConfig({
+        polymarketRelayerEnabled: true,
+        polymarketRelayerHost: 'https://relayer-v2.polymarket.com',
+        polymarketRelayerTxType: 'SAFE',
+        polymarketClobAddress: TEST_RELAYER_PROXY,
+        polymarketBuilderApiKey: 'builder-key',
+        polymarketBuilderSecret: Buffer.from('test-builder-secret').toString('base64'),
+        polymarketBuilderPassphrase: 'builder-passphrase',
+    });
 
     try {
-        const builderSecret = Buffer.from('test-builder-secret').toString('base64');
         globalThis.fetch = async (url) => {
             const asText = String(url);
             if (asText.includes('data-api.polymarket.com/activity')) {
@@ -1375,17 +1183,7 @@ async function runTokenBalancesUseResolvedRelayerProxyTest() {
                     return 1n;
                 },
             },
-            config: {
-                commitmentSafe: TEST_SAFE,
-                polymarketConditionalTokens: '0x4d97dcd97ec945f40cf65f87097ace5ea0476045',
-                polymarketRelayerEnabled: true,
-                polymarketRelayerHost: 'https://relayer-v2.polymarket.com',
-                polymarketRelayerTxType: 'SAFE',
-                polymarketClobAddress: TEST_RELAYER_PROXY,
-                polymarketBuilderApiKey: 'builder-key',
-                polymarketBuilderSecret: builderSecret,
-                polymarketBuilderPassphrase: 'builder-passphrase',
-            },
+            config,
             account: { address: TEST_ACCOUNT },
             onchainPendingProposal: false,
         });
@@ -1399,13 +1197,6 @@ async function runTokenBalancesUseResolvedRelayerProxyTest() {
         assert.equal(copySignal.walletAlignmentError, null);
         assert.equal(copySignal.state.reimbursementRecipientAddress, TEST_RELAYER_PROXY.toLowerCase());
     } finally {
-        for (const key of envKeys) {
-            if (oldEnv[key] === undefined) {
-                delete process.env[key];
-            } else {
-                process.env[key] = oldEnv[key];
-            }
-        }
         globalThis.fetch = oldFetch;
         resetCopyTradingState();
     }
@@ -1413,22 +1204,19 @@ async function runTokenBalancesUseResolvedRelayerProxyTest() {
 
 async function runRelayerWalletMismatchIsBlockedTest() {
     resetCopyTradingState();
-    const envKeys = [
-        'COPY_TRADING_SOURCE_USER',
-        'COPY_TRADING_MARKET',
-        'COPY_TRADING_YES_TOKEN_ID',
-        'COPY_TRADING_NO_TOKEN_ID',
-    ];
-    const oldEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
     const oldFetch = globalThis.fetch;
-
-    process.env.COPY_TRADING_SOURCE_USER = TEST_SOURCE_USER;
-    process.env.COPY_TRADING_MARKET = 'test-market';
-    process.env.COPY_TRADING_YES_TOKEN_ID = YES_TOKEN_ID;
-    process.env.COPY_TRADING_NO_TOKEN_ID = NO_TOKEN_ID;
+    const config = buildCopyTradingConfig({
+        polymarketRelayerEnabled: true,
+        polymarketRelayerHost: 'https://relayer-v2.polymarket.com',
+        polymarketRelayerTxType: 'SAFE',
+        polymarketRelayerFromAddress: TEST_RELAYER_PROXY,
+        polymarketClobAddress: TEST_CLOB_PROXY,
+        polymarketBuilderApiKey: 'builder-key',
+        polymarketBuilderSecret: Buffer.from('test-builder-secret').toString('base64'),
+        polymarketBuilderPassphrase: 'builder-passphrase',
+    });
 
     try {
-        const builderSecret = Buffer.from('test-builder-secret').toString('base64');
         globalThis.fetch = async (url) => {
             const asText = String(url);
             if (asText.includes('data-api.polymarket.com/activity')) {
@@ -1481,18 +1269,7 @@ async function runRelayerWalletMismatchIsBlockedTest() {
                     return 1n;
                 },
             },
-            config: {
-                commitmentSafe: TEST_SAFE,
-                polymarketConditionalTokens: '0x4d97dcd97ec945f40cf65f87097ace5ea0476045',
-                polymarketRelayerEnabled: true,
-                polymarketRelayerHost: 'https://relayer-v2.polymarket.com',
-                polymarketRelayerTxType: 'SAFE',
-                polymarketRelayerFromAddress: TEST_RELAYER_PROXY,
-                polymarketClobAddress: TEST_CLOB_PROXY,
-                polymarketBuilderApiKey: 'builder-key',
-                polymarketBuilderSecret: builderSecret,
-                polymarketBuilderPassphrase: 'builder-passphrase',
-            },
+            config,
             account: { address: TEST_ACCOUNT },
             onchainPendingProposal: false,
         });
@@ -1556,13 +1333,6 @@ async function runRelayerWalletMismatchIsBlockedTest() {
         assert.equal(mixedValidated.length, 1);
         assert.equal(mixedValidated[0].name, 'dispute_assertion');
     } finally {
-        for (const key of envKeys) {
-            if (oldEnv[key] === undefined) {
-                delete process.env[key];
-            } else {
-                process.env[key] = oldEnv[key];
-            }
-        }
         globalThis.fetch = oldFetch;
         resetCopyTradingState();
     }

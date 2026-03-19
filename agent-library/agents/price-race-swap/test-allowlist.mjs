@@ -230,7 +230,6 @@ async function run() {
     );
 
     resetSingleFireState();
-    process.env.OG_MODULE = '0x1234000000000000000000000000000000000000';
     await reconcileProposalSubmission({
         publicClient: {
             getBlockNumber: async () => 100n,
@@ -243,6 +242,7 @@ async function run() {
                 },
             ],
         },
+        ogModule: '0x1234000000000000000000000000000000000000',
     });
     assert.equal(getSingleFireState().proposalSubmitted, true);
 
