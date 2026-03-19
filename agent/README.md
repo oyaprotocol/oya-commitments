@@ -486,7 +486,7 @@ The local testnet harness stores untracked session state under `agent/.state/har
 - `overlay.json` for ephemeral config overrides layered above the tracked module config
 - `deployment.json` for the most recent commitment deployment discovered or created by the harness
 - `roles.json` for deterministic local dev roles (`deployer`, `agent`, `depositor`)
-- `pids.json` plus `anvil.log` / `agent.log` for local process supervision
+- `pids.json` plus `anvil.log` / `agent.log` / `ipfs.log` for local process supervision
 
 Phase 5 commands:
 
@@ -504,7 +504,7 @@ node agent/scripts/testnet-harness.mjs status --module=default --profile=local-m
 node agent/scripts/testnet-harness.mjs down --module=default --profile=local-mock
 ```
 
-Available built-in profiles are `local-mock`, `fork-sepolia`, and `fork-polygon`. Fork profiles expect their RPC URLs in `SEPOLIA_RPC_URL` or `POLYGON_RPC_URL`.
+Available built-in profiles are `local-mock`, `fork-sepolia`, `fork-polygon`, and `remote-sepolia`. Fork and remote Sepolia profiles expect `SEPOLIA_RPC_URL`; Polygon fork expects `POLYGON_RPC_URL`.
 
 For local harness deployment, you can optionally add non-secret defaults under `harness` in the module config:
 
@@ -528,6 +528,8 @@ For local harness deployment, you can optionally add non-secret defaults under `
 
 `agent-up` starts the runner in the background with the harness-managed deterministic `agent` key and records it in `pids.json`; `down` now stops both the detached runner and Anvil. `run-agent` remains the foreground option.
 
+When `ipfsEnabled=true` and `ipfsApiUrl` points to localhost, the harness now health-checks the Kubo API and starts a session-local `ipfs daemon` automatically if needed. It keeps the repo under the harness session directory and records the daemon in `pids.json`. Remote IPFS URLs are never started or stopped by the harness.
+
 For one-command scenarios, add an optional `harness.mjs` next to the agent module. The harness loader will call `runSmokeScenario(ctx)` when present and fall back to a generic deploy + agent-start smoke when absent.
 
 For a permanent short-name message API smoke target, use `signed-message-smoke`:
@@ -539,6 +541,19 @@ node agent/scripts/testnet-harness.mjs down --module=signed-message-smoke --prof
 ```
 
 That module ships with deterministic no-op decision logic plus `messageApi` and harness defaults in its own `agent-library/agents/signed-message-smoke/config.json`, along with a module-local `harness.mjs` smoke scenario, so local harness tests can use the short module name without ad hoc fixture paths.
+
+For remote Sepolia smoke runs, the harness uses env-backed role keys instead of deterministic local keys. Supported secret env fallbacks are:
+- deployer: `HARNESS_DEPLOYER_PRIVATE_KEY` or `DEPLOYER_PK`
+- agent: `HARNESS_AGENT_PRIVATE_KEY` or `PRIVATE_KEY`
+- depositor/message signer: `HARNESS_DEPOSITOR_PRIVATE_KEY` or `MESSAGE_API_SIGNER_PRIVATE_KEY`
+
+Example remote smoke command:
+
+```bash
+node agent/scripts/testnet-harness.mjs smoke --module=signed-message-smoke --profile=remote-sepolia
+```
+
+For remote deployment, the selected module still needs enough non-secret `harness.deployment` config for Sepolia, especially `collateral` and any chain-specific Safe/OG overrides required by that network.
 
 You can validate a module quickly:
 

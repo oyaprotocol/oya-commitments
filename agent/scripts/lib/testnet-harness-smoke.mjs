@@ -110,7 +110,7 @@ async function createSmokeContext({
             agentRef,
             sessionPaths: runtime.sessionPaths,
             runtimeContext,
-            rpcUrl: runtime.anvilRecord.rpcUrl,
+            rpcUrl: runtime.rpcUrl,
             signerRole: {
                 ...signerRole,
                 name: 'agent',
@@ -126,7 +126,7 @@ async function createSmokeContext({
 
     function getHarnessClients() {
         return createHarnessClients({
-            rpcUrl: runtime.anvilRecord.rpcUrl,
+            rpcUrl: runtime.rpcUrl,
             chainId: runtime.profile.chainId,
             rolesData: runtime.rolesData,
         });
@@ -241,7 +241,7 @@ async function createSmokeContext({
             return await seedHarnessErc20FromHolder({
                 publicClient: harnessClients.publicClient,
                 testClient: harnessClients.testClient,
-                rpcUrl: runtime.anvilRecord.rpcUrl,
+                rpcUrl: runtime.rpcUrl,
                 token,
                 holder,
                 recipient: recipientRole.address,

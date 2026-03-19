@@ -11,7 +11,7 @@ import {
     stopHarnessAnvil,
 } from './lib/testnet-harness-anvil.mjs';
 import { resolveHarnessProfile } from './lib/testnet-harness-profiles.mjs';
-import { deriveHarnessRoles } from './lib/testnet-harness-roles.mjs';
+import { deriveHarnessRoles, resolveHarnessRoles } from './lib/testnet-harness-roles.mjs';
 import { ensureHarnessSession } from './lib/testnet-harness-session.mjs';
 
 const EXPECTED_DEPLOYER = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
@@ -37,12 +37,40 @@ async function run() {
     });
     assert.equal(forkProfile.forkConfigured, true);
     assert.equal(forkProfile.forkRpcEnv, 'SEPOLIA_RPC_URL');
+    assert.equal(forkProfile.rpcConfigured, true);
+    assert.equal(forkProfile.managesLocalNode, true);
+
+    const remoteProfile = resolveHarnessProfile('remote-sepolia', {
+        env: {
+            SEPOLIA_RPC_URL: 'https://sepolia.example.invalid',
+        },
+    });
+    assert.equal(remoteProfile.mode, 'remote');
+    assert.equal(remoteProfile.rpcConfigured, true);
+    assert.equal(remoteProfile.forkConfigured, false);
+    assert.equal(remoteProfile.managesLocalNode, false);
+    assert.equal(remoteProfile.rpcUrl, 'https://sepolia.example.invalid');
 
     const roles = deriveHarnessRoles();
     assert.equal(roles.roles.deployer.address, EXPECTED_DEPLOYER);
     assert.equal(roles.roles.agent.address, EXPECTED_AGENT);
     assert.equal(roles.roles.depositor.address, EXPECTED_DEPOSITOR);
     assert.match(roles.roles.deployer.privateKey, /^0x[0-9a-f]{64}$/i);
+
+    const remoteRoles = resolveHarnessRoles({
+        profile: remoteProfile,
+        env: {
+            HARNESS_DEPLOYER_PRIVATE_KEY:
+                '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
+            HARNESS_AGENT_PRIVATE_KEY:
+                '0x59c6995e998f97a5a004497e5daef8c35c4a4e31bcf4f5b1f9955aa2d4e8c7f0',
+            HARNESS_DEPOSITOR_PRIVATE_KEY:
+                '0x5de4111afa1a4b94908f83103eec640f15b10eff2d3447d1f8e8a0d41c6d4f74',
+        },
+    });
+    assert.equal(remoteRoles.mnemonicSource, 'env');
+    assert.match(remoteRoles.roles.deployer.address, /^0x[0-9a-f]{40}$/i);
+    assert.equal(remoteRoles.roles.deployer.sourceEnv, 'HARNESS_DEPLOYER_PRIVATE_KEY');
 
     const anvilBin = resolveAnvilExecutable(process.env);
     const version = spawnSync(anvilBin, ['--version'], {
