@@ -149,10 +149,14 @@ Object.assign(
     })
 );
 if (!config.commitmentSafe) {
-    throw new Error('Missing agent config.json commitmentSafe for the active chain.');
+    throw new Error(
+        'Missing commitmentSafe in the active agent config stack (config.json/config.local.json/overlay). Legacy COMMITMENT_SAFE env fallback has been removed; migrate it into module config.'
+    );
 }
 if (!config.ogModule) {
-    throw new Error('Missing agent config.json ogModule for the active chain.');
+    throw new Error(
+        'Missing ogModule in the active agent config stack (config.json/config.local.json/overlay). Legacy OG_MODULE env fallback has been removed; migrate it into module config.'
+    );
 }
 if (config.messageApiEnabled) {
     messageInbox = createMessageInbox({
