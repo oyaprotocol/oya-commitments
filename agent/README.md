@@ -451,6 +451,12 @@ The config stack is loaded and merged like this:
 - if the file is missing, or those keys are absent or `null`, the runner uses built-in defaults for optional fields and requires config values for commitment-specific addresses like `commitmentSafe` and `ogModule`
 - secrets remain env-only: signer credentials, `OPENAI_API_KEY`, `MESSAGE_API_KEYS_JSON`, Polymarket API credentials, `IPFS_HEADERS_JSON` auth headers, and similar bearer/API keys
 
+If you still have legacy non-secret settings only in env, migrate them once into `config.local.json` with:
+
+```bash
+node agent/scripts/migrate-agent-config-from-env.mjs --module=<agent-name> --chain-id=<chain-id>
+```
+
 Example:
 
 ```json
