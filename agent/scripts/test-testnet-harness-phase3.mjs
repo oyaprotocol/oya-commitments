@@ -45,16 +45,15 @@ function commandAvailable(command) {
     return true;
 }
 
-async function createTempModule() {
+async function createTempModule({
+    config = {},
+    commitmentText = 'The agent watching this commitment should log and monitor deposits for testing.\n',
+} = {}) {
     const tempRoot = await mkdtemp(path.join(repoRoot, 'agent/.state/harness-phase3-module-'));
     const moduleDir = path.join(tempRoot, 'fixture-agent');
     await mkdir(moduleDir, { recursive: true });
     await writeFile(path.join(moduleDir, 'agent.js'), 'export {};\n', 'utf8');
-    await writeFile(
-        path.join(moduleDir, 'commitment.txt'),
-        'The agent watching this commitment should log and monitor deposits for testing.\n',
-        'utf8'
-    );
+    await writeFile(path.join(moduleDir, 'commitment.txt'), commitmentText, 'utf8');
     await writeFile(
         path.join(moduleDir, 'config.json'),
         `${JSON.stringify(
@@ -66,11 +65,7 @@ async function createTempModule() {
                     port: 9911,
                     requireSignerAllowlist: false,
                 },
-                harness: {
-                    deployment: {
-                        bondAmount: '1',
-                    },
-                },
+                ...config,
             },
             null,
             2
@@ -130,6 +125,7 @@ async function run() {
         assert.match(deployResult.deployment.commitmentSafe, /^0x[0-9a-f]{40}$/i);
         assert.match(deployResult.deployment.ogModule, /^0x[0-9a-f]{40}$/i);
         assert.ok(deployResult.deployment.mockDependencies);
+        assert.equal(deployResult.deployment.deploymentConfig.bondAmount, '1');
 
         const reusedResult = await deployHarnessCommitment({
             repoRootPath: repoRoot,
@@ -228,6 +224,74 @@ async function run() {
             profile: 'local-mock',
         });
         await rm(fixture.tempRoot, { recursive: true, force: true });
+    }
+
+    const customCollateralFixture = await createTempModule({
+        config: {
+            harness: {
+                deployment: {
+                    collateral: '0x1234567890123456789012345678901234567890',
+                },
+            },
+        },
+    });
+    const customAgentRef = customCollateralFixture.agentPath;
+    const customSessionPaths = await ensureHarnessSession({
+        repoRootPath: repoRoot,
+        agentRef: customAgentRef,
+        profile: 'local-mock',
+    });
+
+    await writeHarnessJson(customSessionPaths.files.overlay, {});
+    await writeHarnessJson(customSessionPaths.files.roles, roles);
+
+    let customAnvilRecord;
+    try {
+        customAnvilRecord = await startHarnessAnvil({
+            profile: localProfile,
+            sessionPaths: customSessionPaths,
+            env: process.env,
+        });
+
+        const customDeployResult = await deployHarnessCommitment({
+            repoRootPath: repoRoot,
+            agentRef: customAgentRef,
+            profileName: 'local-mock',
+            sessionPaths: customSessionPaths,
+            rpcUrl: customAnvilRecord.rpcUrl,
+            deployerPrivateKey: roles.roles.deployer.privateKey,
+            env: process.env,
+        });
+
+        assert.equal(
+            customDeployResult.deployment.deploymentConfig.collateral,
+            '0x1234567890123456789012345678901234567890'
+        );
+        assert.equal(customDeployResult.deployment.deploymentConfig.bondAmount, '1');
+        assert.notEqual(
+            customDeployResult.deployment.mockDependencies?.collateralToken,
+            '0x1234567890123456789012345678901234567890'
+        );
+
+        const customOverlay = await readHarnessJson(customSessionPaths.files.overlay);
+        assert.equal(
+            customOverlay.byChain['31337'].defaultDepositAsset,
+            '0x1234567890123456789012345678901234567890'
+        );
+        assert.equal(
+            customOverlay.byChain['31337'].harness.deployment.collateral,
+            '0x1234567890123456789012345678901234567890'
+        );
+    } finally {
+        if (customAnvilRecord) {
+            await stopHarnessAnvil(customAnvilRecord);
+        }
+        await resetHarnessSession({
+            repoRootPath: repoRoot,
+            agentRef: customAgentRef,
+            profile: 'local-mock',
+        });
+        await rm(customCollateralFixture.tempRoot, { recursive: true, force: true });
     }
 
     console.log('ok');

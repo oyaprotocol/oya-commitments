@@ -218,6 +218,9 @@ const IPFS_DEFAULTS = Object.freeze({
     ipfsRetryDelayMs: 250,
 });
 
+const DEFAULT_POLYMARKET_CONDITIONAL_TOKENS =
+    '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
+
 const MESSAGE_API_ENV_OVERRIDES = Symbol('messageApiEnvOverrides');
 const IPFS_ENV_OVERRIDES = Symbol('ipfsEnvOverrides');
 
@@ -535,7 +538,7 @@ function buildConfig() {
             : undefined,
         polymarketConditionalTokens: process.env.POLYMARKET_CONDITIONAL_TOKENS
             ? getAddress(process.env.POLYMARKET_CONDITIONAL_TOKENS)
-            : getAddress('0x4D97DCd97eC945f40cF65F87097ACe5EA0476045'),
+            : getAddress(DEFAULT_POLYMARKET_CONDITIONAL_TOKENS),
         polymarketExchange: process.env.POLYMARKET_EXCHANGE
             ? getAddress(process.env.POLYMARKET_EXCHANGE)
             : undefined,
@@ -645,6 +648,7 @@ function buildConfig() {
 }
 
 export {
+    DEFAULT_POLYMARKET_CONDITIONAL_TOKENS,
     buildConfig,
     IPFS_ENV_OVERRIDES,
     MESSAGE_API_ENV_OVERRIDES,
