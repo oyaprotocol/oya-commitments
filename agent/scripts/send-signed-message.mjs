@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { resolveAgentRuntimeConfig } from '../src/lib/agent-config.js';
+import {
+    resolveAgentRuntimeConfig,
+    resolveConfiguredChainId,
+} from '../src/lib/agent-config.js';
 import { privateKeyToAccount } from 'viem/accounts';
 import { buildSignedMessagePayload } from '../src/lib/message-signing.js';
 import {
@@ -98,21 +101,6 @@ function formatBaseUrl({ scheme, host, port, pathname = '', search = '' }) {
     return `${scheme}://${authorityHost}:${port}${normalizedPath}${search}`;
 }
 
-function inferRuntimeChainId(rawAgentConfig, explicitChainIdRaw) {
-    if (explicitChainIdRaw !== null && explicitChainIdRaw !== undefined && explicitChainIdRaw !== '') {
-        return parseInteger(explicitChainIdRaw, 'chainId');
-    }
-    const byChain = rawAgentConfig?.byChain;
-    if (!byChain || typeof byChain !== 'object' || Array.isArray(byChain)) {
-        return undefined;
-    }
-    const keys = Object.keys(byChain);
-    if (keys.length !== 1) {
-        return undefined;
-    }
-    return parseInteger(keys[0], 'chainId');
-}
-
 async function resolveMessageApiConfigForAgent({
     agentRef,
     chainId,
@@ -128,10 +116,14 @@ async function resolveMessageApiConfigForAgent({
         env,
     });
     const agentConfigFile = agentConfigStack;
-    const runtimeChainId = inferRuntimeChainId(agentConfigFile.raw, chainId);
+    const runtimeChainId = resolveConfiguredChainId({
+        agentConfigFile,
+        explicitChainId: chainId,
+    });
 
     const runtimeConfig = resolveAgentRuntimeConfig({
         baseConfig: {
+            chainId: runtimeChainId,
             commitmentSafe: undefined,
             ogModule: undefined,
             watchAssets: [],
@@ -166,16 +158,12 @@ async function resolveMessageApiConfigForAgent({
     };
 }
 
-async function buildBaseUrl({
+async function resolveMessageApiTarget({
     argv = process.argv,
     env = process.env,
     repoRootPath = repoRoot,
 } = {}) {
     const explicit = getArgValue('--url=', argv);
-    if (explicit) {
-        return normalizeBaseUrl(explicit);
-    }
-
     const explicitHost = getArgValue('--host=', argv);
     const explicitPortRaw = getArgValue('--port=', argv);
     const explicitPort =
@@ -183,7 +171,7 @@ async function buildBaseUrl({
     const explicitScheme = getArgValue('--scheme=', argv);
 
     const agentRef = resolveAgentRef({ argv, env });
-    const chainId = getArgValue('--chain-id=', argv) ?? env.MESSAGE_API_CHAIN_ID ?? undefined;
+    const chainId = getArgValue('--chain-id=', argv) ?? undefined;
     const runtimeConfig = await resolveMessageApiConfigForAgent({
         agentRef,
         chainId,
@@ -197,12 +185,30 @@ async function buildBaseUrl({
         port: runtimeConfig.messageApiPort,
     };
 
-    return formatBaseUrl({
-        ...baseParts,
-        scheme: explicitScheme ?? baseParts.scheme,
-        host: explicitHost ?? baseParts.host,
-        port: explicitPort ?? baseParts.port,
+    return {
+        baseUrl: explicit
+            ? normalizeBaseUrl(explicit)
+            : formatBaseUrl({
+                  ...baseParts,
+                  scheme: explicitScheme ?? baseParts.scheme,
+                  host: explicitHost ?? baseParts.host,
+                  port: explicitPort ?? baseParts.port,
+              }),
+        chainId: runtimeConfig.chainId,
+    };
+}
+
+async function buildBaseUrl({
+    argv = process.argv,
+    env = process.env,
+    repoRootPath = repoRoot,
+} = {}) {
+    const target = await resolveMessageApiTarget({
+        argv,
+        env,
+        repoRootPath,
     });
+    return target.baseUrl;
 }
 
 function printUsage() {
@@ -219,7 +225,7 @@ Optional:
   --port=<int>                         Used if --url is omitted; overrides module config port
   --scheme=<http|https>                Used if --url is omitted (default http)
   --module=<agent-ref>                 Agent module whose config.json should supply messageApi host/port
-  --chain-id=<int>                     Optional chain id for selecting byChain.messageApi overrides
+  --chain-id=<int>                     Optional assertion; must match the module config's selected chain when provided
   --bearer-token=<string>              Optional bearer token (or MESSAGE_API_BEARER_TOKEN)
   --command=<string>                   Optional command field
   --args-json='<json-object>'          Optional args object
@@ -249,7 +255,7 @@ async function main() {
     );
     const account = privateKeyToAccount(normalizedPrivateKey);
 
-    const baseUrl = await buildBaseUrl();
+    const { baseUrl, chainId } = await resolveMessageApiTarget();
     const bearerToken =
         getArgValue('--bearer-token=') ?? process.env.MESSAGE_API_BEARER_TOKEN ?? undefined;
     const command = getArgValue('--command=') ?? undefined;
@@ -271,6 +277,7 @@ async function main() {
 
     const payload = buildSignedMessagePayload({
         address: account.address,
+        chainId,
         timestampMs,
         text,
         command,
@@ -283,6 +290,7 @@ async function main() {
 
     const body = {
         text,
+        ...(chainId !== undefined ? { chainId } : {}),
         requestId,
         auth: {
             type: 'eip191',
@@ -368,4 +376,9 @@ if (isDirectScriptExecution(import.meta.url)) {
     });
 }
 
-export { buildBaseUrl, resolveMessageApiConfigForAgent, resolveAgentModulePath };
+export {
+    buildBaseUrl,
+    resolveMessageApiConfigForAgent,
+    resolveMessageApiTarget,
+    resolveAgentModulePath,
+};

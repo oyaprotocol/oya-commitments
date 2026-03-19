@@ -7,6 +7,7 @@ import { buildConfig } from '../src/lib/config.js';
 import {
     loadAgentConfigFile,
     loadAgentConfigStack,
+    resolveConfiguredChainId,
     resolveAgentRuntimeConfig,
 } from '../src/lib/agent-config.js';
 
@@ -141,6 +142,7 @@ async function run() {
         messageApiIdempotencyTtlSeconds: 86400,
         messageApiRateLimitPerMinute: 30,
         messageApiRateLimitBurst: 10,
+        chainId: undefined,
     };
 
     const missingFile = await loadAgentConfigFile(missingPath);
@@ -162,6 +164,7 @@ async function run() {
         JSON.stringify(
             {
                 policyName: 'fast-withdraw',
+                chainId: 11155111,
                 commitmentSafe: FILE_SAFE,
                 watchAssets: [FILE_ERC20],
                 pollIntervalMs: 15_000,
@@ -276,6 +279,8 @@ async function run() {
         },
     ]);
     assert.equal(resolved.agentConfig.policyName, 'fast-withdraw');
+    assert.equal(resolved.chainId, 11155111);
+    assert.equal(resolved.agentConfig.chainId, 11155111);
     assert.equal(resolved.agentConfig.fillConfirmationThreshold, 5);
     assert.equal(resolved.commitmentSafe, FILE_SAFE);
     assert.equal(resolved.ogModule, FILE_OG);
@@ -431,6 +436,7 @@ async function run() {
         agentConfigFile: stackedAgentConfig,
         chainId: 11155111,
     });
+    assert.equal(stackedResolved.chainId, 11155111);
     assert.equal(stackedResolved.pollIntervalMs, 21_000);
     assert.equal(stackedResolved.proposeEnabled, false);
     assert.equal(stackedResolved.defaultDepositAmountWei, 7654321n);
@@ -520,6 +526,68 @@ async function run() {
                 chainId: 11155111,
             }),
         /field "byChain" must be a JSON object/
+    );
+
+    await writeFile(
+        configPath,
+        JSON.stringify(
+            {
+                byChain: {
+                    '11155111': {
+                        messageApi: {
+                            port: 9898,
+                        },
+                    },
+                    '137': {
+                        messageApi: {
+                            port: 9000,
+                        },
+                    },
+                },
+            },
+            null,
+            2
+        ),
+        'utf8'
+    );
+    const ambiguousChainFile = await loadAgentConfigFile(configPath);
+    assert.throws(
+        () => resolveConfiguredChainId({ agentConfigFile: ambiguousChainFile }),
+        /defines multiple byChain entries .* but no top-level chainId/
+    );
+
+    await writeFile(
+        configPath,
+        JSON.stringify(
+            {
+                chainId: 11155111,
+                byChain: {
+                    '11155111': {
+                        messageApi: {
+                            port: 9898,
+                        },
+                    },
+                    '137': {
+                        messageApi: {
+                            port: 9000,
+                        },
+                    },
+                },
+            },
+            null,
+            2
+        ),
+        'utf8'
+    );
+    const configuredChainFile = await loadAgentConfigFile(configPath);
+    assert.equal(resolveConfiguredChainId({ agentConfigFile: configuredChainFile }), 11155111);
+    assert.throws(
+        () =>
+            resolveConfiguredChainId({
+                agentConfigFile: configuredChainFile,
+                explicitChainId: 137,
+            }),
+        /selects chainId 11155111, but received conflicting chainId 137/
     );
 
     console.log('[test] agent config file OK');

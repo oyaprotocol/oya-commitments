@@ -3,6 +3,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
+import { listDeprecatedConfigEnvVars } from '../src/lib/config.js';
 import { sendHarnessSignedMessage } from './lib/testnet-harness-actions.mjs';
 import { deployHarnessCommitment } from './lib/testnet-harness-deploy.mjs';
 import {
@@ -124,6 +125,7 @@ async function run() {
     });
 
     await writeHarnessJson(sessionPaths.files.overlay, {
+        chainId: localProfile.chainId,
         messageApi: {
             port: messageApiPort,
         },
@@ -150,16 +152,21 @@ async function run() {
             env: process.env,
         });
 
+        const runnerEnv = {
+            ...process.env,
+            RPC_URL: anvilRecord.rpcUrl,
+            SIGNER_TYPE: 'env',
+            PRIVATE_KEY: roles.roles.agent.privateKey,
+            AGENT_MODULE: agentRef,
+            AGENT_CONFIG_OVERLAY_PATH: sessionPaths.files.overlay,
+        };
+        for (const key of listDeprecatedConfigEnvVars({ agentModuleName: agentRef })) {
+            runnerEnv[key] = '';
+        }
+
         runner = spawn('node', ['agent/src/index.js'], {
             cwd: repoRoot,
-            env: {
-                ...process.env,
-                RPC_URL: anvilRecord.rpcUrl,
-                SIGNER_TYPE: 'env',
-                PRIVATE_KEY: roles.roles.agent.privateKey,
-                AGENT_MODULE: agentRef,
-                AGENT_CONFIG_OVERLAY_PATH: sessionPaths.files.overlay,
-            },
+            env: runnerEnv,
             stdio: ['ignore', 'pipe', 'pipe'],
         });
         runner.stdout?.on('data', (chunk) => {

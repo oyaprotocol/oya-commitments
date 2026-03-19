@@ -45,14 +45,19 @@ async function ensureManagedHarnessRuntime({
     env = process.env,
     cwd,
 }) {
+    const profile = resolveHarnessProfile(profileName, { env });
     const sessionPaths = await ensureHarnessSession({
         repoRootPath,
         agentRef,
         profile: profileName,
     });
-    await ensureHarnessOverlayFile(sessionPaths);
-
-    const profile = resolveHarnessProfile(profileName, { env });
+    const overlay = await ensureHarnessOverlayFile(sessionPaths);
+    if (overlay?.chainId !== profile.chainId) {
+        await writeHarnessJson(sessionPaths.files.overlay, {
+            ...(overlay ?? {}),
+            chainId: profile.chainId,
+        });
+    }
     const roles = resolveHarnessRoles({ profile, env });
     const existingRoles = await readHarnessJson(sessionPaths.files.roles);
     if (existingRoles === null || profile.mode === 'remote') {

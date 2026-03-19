@@ -38,6 +38,7 @@ async function authenticateSignedRequest({
     signerAllowlist,
     requireSignerAllowlist,
     signatureMaxAgeSeconds,
+    expectedChainId,
     nowMs,
 }) {
     if (!body?.auth) {
@@ -71,6 +72,22 @@ async function authenticateSignedRequest({
             message: 'requestId is required when using signed auth.',
         };
     }
+    if (expectedChainId !== undefined) {
+        if (!Number.isInteger(body.chainId) || body.chainId < 1) {
+            return {
+                ok: false,
+                statusCode: 400,
+                message: `chainId is required and must equal ${expectedChainId}.`,
+            };
+        }
+        if (body.chainId !== expectedChainId) {
+            return {
+                ok: false,
+                statusCode: 400,
+                message: `chainId must equal ${expectedChainId}.`,
+            };
+        }
+    }
 
     let declaredAddress;
     try {
@@ -103,6 +120,7 @@ async function authenticateSignedRequest({
 
     const payload = buildSignedMessagePayload({
         address: declaredAddress,
+        chainId: body.chainId,
         timestampMs: auth.timestampMs,
         text: body.text,
         command: body.command,
@@ -175,6 +193,7 @@ function validateMessageBody(body) {
 
     const allowedFields = new Set([
         'text',
+        'chainId',
         'command',
         'args',
         'metadata',
@@ -190,6 +209,9 @@ function validateMessageBody(body) {
 
     if (typeof body.text !== 'string') {
         return { ok: false, message: 'text is required and must be a string.' };
+    }
+    if (body.chainId !== undefined && (!Number.isInteger(body.chainId) || body.chainId < 1)) {
+        return { ok: false, message: 'chainId must be a positive integer when provided.' };
     }
     if (body.command !== undefined && typeof body.command !== 'string') {
         return { ok: false, message: 'command must be a string when provided.' };
@@ -242,6 +264,10 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
     );
     const requireSignerAllowlist = config.messageApiRequireSignerAllowlist !== false;
     const signatureMaxAgeSeconds = Number(config.messageApiSignatureMaxAgeSeconds ?? 300);
+    const expectedChainId =
+        config.chainId === undefined || config.chainId === null
+            ? undefined
+            : Number(config.chainId);
     if (requireSignerAllowlist && signerAllowlist.size === 0) {
         throw new Error(
             'Message API requires messageApi.signerAllowlist when messageApi.requireSignerAllowlist=true. MESSAGE_API_KEYS_JSON is optional additional bearer gating.'
@@ -374,6 +400,7 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
                 signerAllowlist,
                 requireSignerAllowlist,
                 signatureMaxAgeSeconds,
+                expectedChainId,
                 nowMs,
             });
             if (!signedAuth?.ok) {
@@ -403,6 +430,7 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
 
             const result = inbox.submitMessage({
                 text: body.text,
+                chainId: body.chainId,
                 command: body.command,
                 args: body.args,
                 metadata: body.metadata,

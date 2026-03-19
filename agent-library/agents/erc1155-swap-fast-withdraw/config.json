@@ -1,4 +1,5 @@
 {
+  "chainId": 11155111,
   "policyName": "erc1155-swap-fast-withdraw",
   "pollIntervalMs": 1000,
   "paymentTokenSymbol": "USDC",
