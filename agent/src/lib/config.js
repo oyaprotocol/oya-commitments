@@ -253,13 +253,8 @@ function resolveIpfsEnvConfig({ enabled, envOverrides = {} } = {}) {
     };
 }
 
-function buildConfig() {
-    const rpcUrl = mustGetEnv('RPC_URL');
-
-    const messageApiEnvOverrides = collectMessageApiEnvOverrides();
-    const ipfsEnvOverrides = collectIpfsEnvOverrides();
-
-    const config = {
+function createDefaultRuntimeConfig({ env = process.env, rpcUrl } = {}) {
+    return {
         rpcUrl,
         commitmentSafe: undefined,
         ogModule: undefined,
@@ -272,7 +267,7 @@ function buildConfig() {
         defaultDepositAsset: undefined,
         defaultDepositAmountWei: undefined,
         bondSpender: 'og',
-        openAiApiKey: process.env.OPENAI_API_KEY,
+        openAiApiKey: env.OPENAI_API_KEY,
         openAiModel: 'gpt-4.1-mini',
         openAiBaseUrl: 'https://api.openai.com/v1',
         openAiRequestTimeoutMs: 60_000,
@@ -285,7 +280,7 @@ function buildConfig() {
         disputeRetryMs: 60_000,
         proposalHashResolveTimeoutMs: 15_000,
         proposalHashResolvePollIntervalMs: 1_500,
-        agentModule: process.env.AGENT_MODULE,
+        agentModule: env.AGENT_MODULE,
         chainlinkPriceFeed: undefined,
         polymarketConditionalTokens: getAddress(DEFAULT_POLYMARKET_CONDITIONAL_TOKENS),
         polymarketExchange: undefined,
@@ -293,9 +288,9 @@ function buildConfig() {
         polymarketClobHost: 'https://clob.polymarket.com',
         polymarketClobAddress: undefined,
         polymarketClobSignatureType: undefined,
-        polymarketClobApiKey: process.env.POLYMARKET_CLOB_API_KEY,
-        polymarketClobApiSecret: process.env.POLYMARKET_CLOB_API_SECRET,
-        polymarketClobApiPassphrase: process.env.POLYMARKET_CLOB_API_PASSPHRASE,
+        polymarketClobApiKey: env.POLYMARKET_CLOB_API_KEY,
+        polymarketClobApiSecret: env.POLYMARKET_CLOB_API_SECRET,
+        polymarketClobApiPassphrase: env.POLYMARKET_CLOB_API_PASSPHRASE,
         polymarketClobRequestTimeoutMs: 15_000,
         polymarketClobMaxRetries: 1,
         polymarketClobRetryDelayMs: 250,
@@ -311,15 +306,15 @@ function buildConfig() {
         polymarketRelayerRequestTimeoutMs: 15_000,
         polymarketRelayerPollIntervalMs: 2_000,
         polymarketRelayerPollTimeoutMs: 120_000,
-        polymarketApiKey: process.env.POLYMARKET_API_KEY,
-        polymarketApiSecret: process.env.POLYMARKET_API_SECRET,
-        polymarketApiPassphrase: process.env.POLYMARKET_API_PASSPHRASE,
+        polymarketApiKey: env.POLYMARKET_API_KEY,
+        polymarketApiSecret: env.POLYMARKET_API_SECRET,
+        polymarketApiPassphrase: env.POLYMARKET_API_PASSPHRASE,
         polymarketBuilderApiKey:
-            process.env.POLYMARKET_BUILDER_API_KEY ?? process.env.POLYMARKET_API_KEY,
+            env.POLYMARKET_BUILDER_API_KEY ?? env.POLYMARKET_API_KEY,
         polymarketBuilderSecret:
-            process.env.POLYMARKET_BUILDER_SECRET ?? process.env.POLYMARKET_API_SECRET,
+            env.POLYMARKET_BUILDER_SECRET ?? env.POLYMARKET_API_SECRET,
         polymarketBuilderPassphrase:
-            process.env.POLYMARKET_BUILDER_PASSPHRASE ?? process.env.POLYMARKET_API_PASSPHRASE,
+            env.POLYMARKET_BUILDER_PASSPHRASE ?? env.POLYMARKET_API_PASSPHRASE,
         uniswapV3Factory: undefined,
         uniswapV3Quoter: undefined,
         uniswapV3FeeTiers: [500, 3000, 10000],
@@ -328,6 +323,15 @@ function buildConfig() {
         ipfsEnabled: false,
         ...IPFS_DEFAULTS,
     };
+}
+
+function buildConfig() {
+    const rpcUrl = mustGetEnv('RPC_URL');
+
+    const messageApiEnvOverrides = collectMessageApiEnvOverrides();
+    const ipfsEnvOverrides = collectIpfsEnvOverrides();
+
+    const config = createDefaultRuntimeConfig({ rpcUrl });
 
     Object.defineProperty(config, MESSAGE_API_ENV_OVERRIDES, {
         value: messageApiEnvOverrides,
@@ -342,6 +346,7 @@ function buildConfig() {
 }
 
 export {
+    createDefaultRuntimeConfig,
     DEFAULT_POLYMARKET_CONDITIONAL_TOKENS,
     buildConfig,
     IPFS_ENV_OVERRIDES,
