@@ -16,6 +16,11 @@ import {
     stopHarnessAnvil,
 } from './lib/testnet-harness-anvil.mjs';
 import {
+    getAgentRuntimeStatus,
+    startHarnessAgent,
+    stopHarnessAgent,
+} from './lib/testnet-harness-agent.mjs';
+import {
     createHarnessClients,
     loadRoleRecord,
     mintHarnessErc20,
@@ -28,6 +33,7 @@ import { deployHarnessCommitment } from './lib/testnet-harness-deploy.mjs';
 import { listHarnessProfiles, resolveHarnessProfile } from './lib/testnet-harness-profiles.mjs';
 import { deriveHarnessRoles } from './lib/testnet-harness-roles.mjs';
 import { resolveHarnessRuntimeContext } from './lib/testnet-harness-runtime.mjs';
+import { runHarnessSmokeScenario } from './lib/testnet-harness-smoke.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -52,7 +58,9 @@ function printUsage() {
   node agent/scripts/testnet-harness.mjs init --module=<agent-ref> --profile=<name>
   node agent/scripts/testnet-harness.mjs up --module=<agent-ref> --profile=<name> [--port=<int>]
   node agent/scripts/testnet-harness.mjs deploy --module=<agent-ref> --profile=<name> [--force]
+  node agent/scripts/testnet-harness.mjs agent-up --module=<agent-ref> --profile=<name> [--port=<int>] [--force]
   node agent/scripts/testnet-harness.mjs run-agent --module=<agent-ref> --profile=<name> [--port=<int>] [--force]
+  node agent/scripts/testnet-harness.mjs smoke --module=<agent-ref> --profile=<name> [--port=<int>] [--force]
   node agent/scripts/testnet-harness.mjs status --module=<agent-ref> --profile=<name>
   node agent/scripts/testnet-harness.mjs seed-erc20 --module=<agent-ref> --profile=<name> --token=<address> --amount-wei=<int> [--role=<name>] [--holder=<address>|--mint]
   node agent/scripts/testnet-harness.mjs deposit --module=<agent-ref> --profile=<name> [--role=<name>] [--asset=<address|native>] [--amount-wei=<int>]
@@ -63,7 +71,7 @@ function printUsage() {
 Available profiles: ${profiles}
 
 Phase 2 manages session state, deterministic local roles, and Anvil supervision.
-Phase 4 adds short-name smoke-module workflows, including run-agent.`);
+Phase 5 adds background agent supervision and one-command smoke scenarios.`);
 }
 
 function resolveCommand(argv = process.argv) {
@@ -189,6 +197,7 @@ async function buildStatusPayload({ agentRef, profileName }) {
     const config = await resolveConfigSummary(agentRef, sessionStatus.files.overlay);
     const profile = resolveHarnessProfile(profileName, { env: process.env });
     const anvilStatus = await getAnvilRuntimeStatus(sessionStatus.data.pids?.anvil);
+    const agentStatus = await getAgentRuntimeStatus(sessionStatus.data.pids?.agent);
 
     return {
         module: agentRef,
@@ -205,6 +214,7 @@ async function buildStatusPayload({ agentRef, profileName }) {
         data: sanitizeStatusData(sessionStatus.data),
         runtime: {
             anvil: anvilStatus,
+            agent: agentStatus,
         },
         config,
     };
@@ -284,8 +294,19 @@ async function handleUp({ agentRef, profileName, port }) {
 
 async function handleDeploy({ agentRef, profileName, port, force }) {
     const runtime = await ensureHarnessRuntime({ agentRef, profileName, port });
+    const result = await ensureHarnessDeployment({
+        runtime,
+        agentRef,
+        profileName,
+        force,
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+}
+
+async function ensureHarnessDeployment({ runtime, agentRef, profileName, force }) {
     const deployerRole = loadRoleRecord(runtime.rolesData, 'deployer');
-    const result = await deployHarnessCommitment({
+    return await deployHarnessCommitment({
         repoRootPath: repoRoot,
         agentRef,
         profileName,
@@ -295,8 +316,6 @@ async function handleDeploy({ agentRef, profileName, port, force }) {
         force,
         env: process.env,
     });
-
-    console.log(JSON.stringify(result, null, 2));
 }
 
 async function handleRunAgent({ agentRef, profileName, port, force }) {
@@ -309,25 +328,32 @@ async function handleRunAgent({ agentRef, profileName, port, force }) {
         env: process.env,
     });
 
+    const existingPids = (await readHarnessJson(runtime.sessionPaths.files.pids)) ?? {};
+    const existingAgentStatus = await getAgentRuntimeStatus(existingPids.agent);
+    if (existingAgentStatus.running) {
+        throw new Error(
+            'A background harness agent is already running for this module/profile. Stop it with "down" before using run-agent.'
+        );
+    }
+
     if (!runtimeContext.runtimeConfig.commitmentSafe || !runtimeContext.runtimeConfig.ogModule || force) {
-        const deployerRole = loadRoleRecord(runtime.rolesData, 'deployer');
-        await deployHarnessCommitment({
-            repoRootPath: repoRoot,
+        await ensureHarnessDeployment({
+            runtime,
             agentRef,
             profileName,
-            sessionPaths: runtime.sessionPaths,
-            rpcUrl: runtime.anvilRecord.rpcUrl,
-            deployerPrivateKey: deployerRole.privateKey,
             force,
-            env: process.env,
         });
     }
+
+    const agentRole = loadRoleRecord(runtime.rolesData, 'agent');
 
     const child = spawn('node', ['agent/src/index.js'], {
         cwd: repoRoot,
         env: {
             ...process.env,
             RPC_URL: runtime.anvilRecord.rpcUrl,
+            SIGNER_TYPE: 'env',
+            PRIVATE_KEY: agentRole.privateKey,
             AGENT_MODULE: agentRef,
             AGENT_CONFIG_OVERLAY_PATH: runtime.sessionPaths.files.overlay,
         },
@@ -347,6 +373,107 @@ async function handleRunAgent({ agentRef, profileName, port, force }) {
     if (result.code !== 0) {
         process.exitCode = result.code ?? 1;
     }
+}
+
+async function handleAgentUp({ agentRef, profileName, port, force }) {
+    const runtime = await ensureHarnessRuntime({ agentRef, profileName, port });
+    let currentPids = (await readHarnessJson(runtime.sessionPaths.files.pids)) ?? {};
+    const currentAgentStatus = await getAgentRuntimeStatus(currentPids.agent);
+
+    if (force && currentPids.agent) {
+        await stopHarnessAgent(currentPids.agent);
+        delete currentPids.agent;
+        await writeHarnessJson(runtime.sessionPaths.files.pids, currentPids);
+    }
+
+    const runtimeContextBeforeDeploy = await resolveHarnessRuntimeContext({
+        repoRootPath: repoRoot,
+        agentRef,
+        profileName,
+        overlayPath: runtime.sessionPaths.files.overlay,
+        env: process.env,
+    });
+
+    if (!runtimeContextBeforeDeploy.runtimeConfig.commitmentSafe || !runtimeContextBeforeDeploy.runtimeConfig.ogModule || force) {
+        await ensureHarnessDeployment({
+            runtime,
+            agentRef,
+            profileName,
+            force,
+        });
+    }
+
+    if (!force && currentAgentStatus.running) {
+        console.log(
+            JSON.stringify(
+                {
+                    started: false,
+                    alreadyRunning: true,
+                    agent: currentPids.agent,
+                },
+                null,
+                2
+            )
+        );
+        return;
+    }
+
+    const runtimeContext = await resolveHarnessRuntimeContext({
+        repoRootPath: repoRoot,
+        agentRef,
+        profileName,
+        overlayPath: runtime.sessionPaths.files.overlay,
+        env: process.env,
+    });
+    const agentRole = loadRoleRecord(runtime.rolesData, 'agent');
+    const agentRecord = await startHarnessAgent({
+        repoRootPath: repoRoot,
+        agentRef,
+        sessionPaths: runtime.sessionPaths,
+        runtimeContext,
+        rpcUrl: runtime.anvilRecord.rpcUrl,
+        signerRole: {
+            ...agentRole,
+            name: 'agent',
+        },
+        env: process.env,
+    });
+    await writeHarnessJson(runtime.sessionPaths.files.pids, {
+        ...(await readHarnessJson(runtime.sessionPaths.files.pids)),
+        agent: agentRecord,
+    });
+
+    console.log(
+        JSON.stringify(
+            {
+                started: true,
+                alreadyRunning: false,
+                agent: agentRecord,
+            },
+            null,
+            2
+        )
+    );
+}
+
+async function handleSmoke({ agentRef, profileName, port, force }) {
+    const runtime = await ensureHarnessRuntime({ agentRef, profileName, port });
+    const result = await runHarnessSmokeScenario({
+        repoRootPath: repoRoot,
+        agentRef,
+        profileName,
+        runtime,
+        ensureDeployment: async ({ force: deployForce } = {}) =>
+            await ensureHarnessDeployment({
+                runtime,
+                agentRef,
+                profileName,
+                force: Boolean(deployForce),
+            }),
+        force,
+    });
+
+    console.log(JSON.stringify(result, null, 2));
 }
 
 async function handleSeedErc20({
@@ -519,7 +646,7 @@ async function handleDown({ agentRef, profileName }) {
         profile: profileName,
     });
     const existingPids = sessionStatus.data.pids ?? {};
-    if (!sessionStatus.exists && !existingPids.anvil) {
+    if (!sessionStatus.exists && !existingPids.anvil && !existingPids.agent) {
         console.log(
             JSON.stringify(
                 {
@@ -536,8 +663,10 @@ async function handleDown({ agentRef, profileName }) {
         return;
     }
 
+    const agentStopResult = await stopHarnessAgent(existingPids.agent);
     const stopResult = await stopHarnessAnvil(existingPids.anvil);
     const nextPids = { ...existingPids };
+    delete nextPids.agent;
     delete nextPids.anvil;
     if (sessionStatus.exists || Object.keys(nextPids).length > 0) {
         await writeHarnessJson(sessionStatus.files.pids, nextPids);
@@ -550,6 +679,8 @@ async function handleDown({ agentRef, profileName }) {
                 profile: profileName,
                 stopped: stopResult.stopped,
                 alreadyStopped: stopResult.alreadyStopped ?? false,
+                agentStopped: agentStopResult.stopped,
+                agentAlreadyStopped: agentStopResult.alreadyStopped ?? false,
                 sessionDir: sessionStatus.sessionDir,
             },
             null,
@@ -565,6 +696,9 @@ async function handleReset({ agentRef, profileName }) {
         profile: profileName,
     });
     const existingPids = sessionStatus.data.pids ?? {};
+    if (existingPids.agent) {
+        await stopHarnessAgent(existingPids.agent);
+    }
     if (existingPids.anvil) {
         await stopHarnessAnvil(existingPids.anvil);
     }
@@ -627,8 +761,16 @@ async function main() {
         await handleDeploy({ agentRef, profileName, port, force });
         return;
     }
+    if (command === 'agent-up') {
+        await handleAgentUp({ agentRef, profileName, port, force });
+        return;
+    }
     if (command === 'run-agent') {
         await handleRunAgent({ agentRef, profileName, port, force });
+        return;
+    }
+    if (command === 'smoke') {
+        await handleSmoke({ agentRef, profileName, port, force });
         return;
     }
     if (command === 'status') {
@@ -685,7 +827,7 @@ async function main() {
     }
 
     throw new Error(
-        `Unsupported command "${command}". Phase 4 supports: init, up, deploy, run-agent, status, seed-erc20, deposit, message, down, reset.`
+        `Unsupported command "${command}". Phase 5 supports: init, up, deploy, agent-up, run-agent, smoke, status, seed-erc20, deposit, message, down, reset.`
     );
 }
 

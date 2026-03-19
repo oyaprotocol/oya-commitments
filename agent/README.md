@@ -486,15 +486,17 @@ The local testnet harness stores untracked session state under `agent/.state/har
 - `overlay.json` for ephemeral config overrides layered above the tracked module config
 - `deployment.json` for the most recent commitment deployment discovered or created by the harness
 - `roles.json` for deterministic local dev roles (`deployer`, `agent`, `depositor`)
-- `pids.json` plus `anvil.log` for local process supervision
+- `pids.json` plus `anvil.log` / `agent.log` for local process supervision
 
-Phase 4 commands:
+Phase 5 commands:
 
 ```bash
 node agent/scripts/testnet-harness.mjs init --module=default --profile=local-mock
 node agent/scripts/testnet-harness.mjs up --module=default --profile=local-mock
 node agent/scripts/testnet-harness.mjs deploy --module=default --profile=local-mock
+node agent/scripts/testnet-harness.mjs agent-up --module=default --profile=local-mock
 node agent/scripts/testnet-harness.mjs run-agent --module=default --profile=local-mock
+node agent/scripts/testnet-harness.mjs smoke --module=default --profile=local-mock
 node agent/scripts/testnet-harness.mjs seed-erc20 --module=default --profile=local-mock --token=0x... --amount-wei=1000000 --mint
 node agent/scripts/testnet-harness.mjs deposit --module=default --profile=local-mock --amount-wei=1000000
 node agent/scripts/testnet-harness.mjs message --module=default --profile=local-mock --text="Test signed instruction" --dry-run
@@ -524,15 +526,19 @@ For local harness deployment, you can optionally add non-secret defaults under `
 
 `local-mock` can auto-deploy mock Safe/OG dependencies and a mock collateral token. Fork profiles reuse configured dependency addresses when present, and otherwise expect `harness.deployment` to provide the non-secret deployment inputs.
 
+`agent-up` starts the runner in the background with the harness-managed deterministic `agent` key and records it in `pids.json`; `down` now stops both the detached runner and Anvil. `run-agent` remains the foreground option.
+
+For one-command scenarios, add an optional `harness.mjs` next to the agent module. The harness loader will call `runSmokeScenario(ctx)` when present and fall back to a generic deploy + agent-start smoke when absent.
+
 For a permanent short-name message API smoke target, use `signed-message-smoke`:
 
 ```bash
-node agent/scripts/testnet-harness.mjs up --module=signed-message-smoke --profile=local-mock
-node agent/scripts/testnet-harness.mjs run-agent --module=signed-message-smoke --profile=local-mock
-node agent/scripts/testnet-harness.mjs message --module=signed-message-smoke --profile=local-mock --text="Signed message API smoke test"
+node agent/scripts/testnet-harness.mjs smoke --module=signed-message-smoke --profile=local-mock
+node agent/scripts/testnet-harness.mjs status --module=signed-message-smoke --profile=local-mock
+node agent/scripts/testnet-harness.mjs down --module=signed-message-smoke --profile=local-mock
 ```
 
-That module ships with deterministic no-op decision logic plus `messageApi` and harness defaults in its own `agent-library/agents/signed-message-smoke/config.json`, so local harness tests can use the short module name without ad hoc fixture paths.
+That module ships with deterministic no-op decision logic plus `messageApi` and harness defaults in its own `agent-library/agents/signed-message-smoke/config.json`, along with a module-local `harness.mjs` smoke scenario, so local harness tests can use the short module name without ad hoc fixture paths.
 
 You can validate a module quickly:
 
