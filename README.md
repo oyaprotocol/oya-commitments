@@ -26,10 +26,30 @@ forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimis
   --private-key <your_private_key>
 ```
 
+## Build An Agentic Commitment
+
+The fastest path to a new commitment/agent combo is:
+1. Copy `agent-library/agents/default/` to `agent-library/agents/<agent-name>/`.
+2. Write the commitment rules in `agent-library/agents/<agent-name>/commitment.txt`.
+3. Implement commitment-specific behavior in `agent-library/agents/<agent-name>/agent.js`.
+4. Put non-secret runtime settings in `agent-library/agents/<agent-name>/config.json`.
+5. Keep only secrets in `agent/.env`.
+6. Validate and smoke test locally:
+
+```bash
+node agent/scripts/validate-agent.mjs --module=<agent-name>
+node agent/scripts/testnet-harness.mjs smoke --module=<agent-name> --profile=local-mock
+node agent/scripts/testnet-harness.mjs down --module=<agent-name> --profile=local-mock
+```
+
+The detailed workflow for module structure, `config.json`, and local/remote harness profiles is in `agent/README.md` and `agent-library/README.md`.
+
 ## Documentation
 
 - Contribution workflow and policy: `CONTRIBUTING.md`
 - Skill for new agent/commitment combos: `skills/add-agent-commitment/SKILL.md`
+- Agent module layout and new-commitment workflow: `agent-library/README.md`
+- Runner config, message API, and harness usage: `agent/README.md`
 - Deployment and configuration: `docs/deployment.md`
 - Signer options and `with-signer` helper: `docs/signers.md`
 - Offchain agent usage: `docs/agent.md`
