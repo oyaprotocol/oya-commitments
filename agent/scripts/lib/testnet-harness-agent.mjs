@@ -7,6 +7,11 @@ import { isProcessRunning } from './testnet-harness-anvil.mjs';
 const DEFAULT_AGENT_START_TIMEOUT_MS = 20_000;
 const DEFAULT_AGENT_STOP_TIMEOUT_MS = 5_000;
 
+function formatMessageApiBaseUrl(host, port) {
+    const authorityHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+    return `http://${authorityHost}:${port}`;
+}
+
 function resolveNodeExecutable(env = process.env) {
     const candidate = typeof env?.NODE_BIN === 'string' ? env.NODE_BIN.trim() : '';
     return candidate || 'node';
@@ -239,7 +244,10 @@ async function startHarnessAgent({
                   enabled: true,
                   host: runtimeContext.runtimeConfig.messageApiHost,
                   port: runtimeContext.runtimeConfig.messageApiPort,
-                  baseUrl: `http://${runtimeContext.runtimeConfig.messageApiHost}:${runtimeContext.runtimeConfig.messageApiPort}`,
+                  baseUrl: formatMessageApiBaseUrl(
+                      runtimeContext.runtimeConfig.messageApiHost,
+                      runtimeContext.runtimeConfig.messageApiPort
+                  ),
               }
             : {
                   enabled: false,
@@ -314,6 +322,7 @@ async function stopHarnessAgent(record, { timeoutMs = DEFAULT_AGENT_STOP_TIMEOUT
 export {
     DEFAULT_AGENT_START_TIMEOUT_MS,
     DEFAULT_AGENT_STOP_TIMEOUT_MS,
+    formatMessageApiBaseUrl,
     getAgentRuntimeStatus,
     pollMessageApiHealth,
     readLogTail,
