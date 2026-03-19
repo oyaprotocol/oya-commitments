@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { buildConfig } from '../src/lib/config.js';
+import { resolveAgentRuntimeConfig } from '../src/lib/agent-config.js';
 
 const REQUIRED_BASE_ENV = {
     RPC_URL: 'http://127.0.0.1:8545',
@@ -97,6 +98,69 @@ async function run() {
             assert.equal(config.ipfsRequestTimeoutMs, 5000);
             assert.equal(config.ipfsMaxRetries, 2);
             assert.equal(config.ipfsRetryDelayMs, 10);
+        }
+    );
+
+    withManagedEnv(
+        {
+            IPFS_ENABLED: undefined,
+            IPFS_API_URL: 'https://ipfs.config-env.example',
+            IPFS_HEADERS_JSON: '{"Authorization":"Bearer config-token"}',
+            IPFS_REQUEST_TIMEOUT_MS: '5001',
+            IPFS_MAX_RETRIES: '3',
+            IPFS_RETRY_DELAY_MS: '11',
+        },
+        () => {
+            const config = buildConfig();
+            Object.assign(
+                config,
+                resolveAgentRuntimeConfig({
+                    baseConfig: config,
+                    agentConfigFile: {
+                        raw: {
+                            ipfsEnabled: true,
+                        },
+                    },
+                    chainId: 11155111,
+                })
+            );
+            assert.equal(config.ipfsEnabled, true);
+            assert.equal(config.ipfsApiUrl, 'https://ipfs.config-env.example');
+            assert.deepEqual(config.ipfsHeaders, {
+                Authorization: 'Bearer config-token',
+            });
+            assert.equal(config.ipfsRequestTimeoutMs, 5001);
+            assert.equal(config.ipfsMaxRetries, 3);
+            assert.equal(config.ipfsRetryDelayMs, 11);
+        }
+    );
+
+    withManagedEnv(
+        {
+            IPFS_ENABLED: undefined,
+            IPFS_API_URL: ' not a valid host ',
+            IPFS_HEADERS_JSON: '{"Authorization":"Bearer config-token"}',
+        },
+        () => {
+            const config = buildConfig();
+            Object.assign(
+                config,
+                resolveAgentRuntimeConfig({
+                    baseConfig: config,
+                    agentConfigFile: {
+                        raw: {
+                            ipfsEnabled: true,
+                            ipfsApiUrl: 'https://ipfs.config.example',
+                        },
+                    },
+                    chainId: 11155111,
+                })
+            );
+            assert.equal(config.ipfsEnabled, true);
+            assert.equal(config.ipfsApiUrl, 'https://ipfs.config.example');
+            assert.deepEqual(config.ipfsHeaders, {
+                Authorization: 'Bearer config-token',
+            });
         }
     );
 
