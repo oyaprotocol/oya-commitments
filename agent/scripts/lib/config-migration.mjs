@@ -1,4 +1,5 @@
 import { getAddress } from 'viem';
+import { normalizeAgentName } from './cli-runtime.mjs';
 
 function hasText(value) {
     return typeof value === 'string' && value.trim() !== '';
@@ -246,6 +247,7 @@ function buildDeterministicDcaPatch(env) {
 }
 
 function buildConfigMigrationPatch({ env = process.env, moduleName, chainId } = {}) {
+    const normalizedModuleName = normalizeAgentName(moduleName);
     const patch = {};
 
     assignIfDefined(patch, 'commitmentSafe', parseAddress(env.COMMITMENT_SAFE, 'COMMITMENT_SAFE'));
@@ -432,7 +434,7 @@ function buildConfigMigrationPatch({ env = process.env, moduleName, chainId } = 
         patch.copyTrading = copyTrading;
     }
 
-    if (moduleName === 'deterministic-dca-agent') {
+    if (normalizedModuleName === 'deterministic-dca-agent') {
         Object.assign(patch, buildDeterministicDcaPatch(env));
     }
 

@@ -98,6 +98,18 @@ async function run() {
         pollIntervalMs: 15000,
     });
 
+    const deterministicDcaPathPatch = buildConfigMigrationPatch({
+        moduleName: 'agent-library/agents/deterministic-dca-agent/agent.js',
+        env: {
+            DETERMINISTIC_DCA_POLICY_PRESET: 'mainnet',
+            DETERMINISTIC_DCA_LOG_CHUNK_SIZE: '5000',
+        },
+    });
+    assert.deepEqual(deterministicDcaPathPatch, {
+        deterministicDcaPolicyPreset: 'mainnet',
+        deterministicDcaLogChunkSize: '5000',
+    });
+
     console.log('[test] config migration OK');
 }
 
