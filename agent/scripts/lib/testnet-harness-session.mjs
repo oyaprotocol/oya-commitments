@@ -66,6 +66,27 @@ async function writeHarnessJson(filePath, value) {
     await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
+async function ensureHarnessJson(filePath, fallbackValue) {
+    const existing = await readHarnessJson(filePath);
+    if (existing !== null) {
+        return existing;
+    }
+    await writeHarnessJson(filePath, fallbackValue);
+    return fallbackValue;
+}
+
+async function ensureHarnessOverlayFile(sessionPaths) {
+    return await ensureHarnessJson(sessionPaths.files.overlay, {});
+}
+
+async function readHarnessPids(sessionPaths) {
+    return (await readHarnessJson(sessionPaths.files.pids)) ?? {};
+}
+
+async function writeHarnessPids(sessionPaths, value) {
+    await writeHarnessJson(sessionPaths.files.pids, value);
+}
+
 async function resetHarnessSession({ repoRootPath, agentRef, profile }) {
     const sessionPaths = getHarnessSessionPaths({ repoRootPath, agentRef, profile });
     await rm(sessionPaths.sessionDir, { recursive: true, force: true });
@@ -102,11 +123,15 @@ async function readHarnessSessionStatus({ repoRootPath, agentRef, profile }) {
 }
 
 export {
+    ensureHarnessJson,
+    ensureHarnessOverlayFile,
     ensureHarnessSession,
     getHarnessSessionPaths,
+    readHarnessPids,
     readHarnessJson,
     readHarnessSessionStatus,
     resetHarnessSession,
     sanitizeSessionSegment,
+    writeHarnessPids,
     writeHarnessJson,
 };

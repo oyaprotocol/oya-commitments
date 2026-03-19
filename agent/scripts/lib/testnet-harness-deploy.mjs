@@ -2,6 +2,7 @@ import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { createPublicClient, getAddress, http } from 'viem';
+import { buildHarnessRuntimeEnv } from './testnet-harness-context.mjs';
 import { resolveHarnessRuntimeContext } from './testnet-harness-runtime.mjs';
 import { readHarnessJson, writeHarnessJson } from './testnet-harness-session.mjs';
 
@@ -266,7 +267,10 @@ async function deployHarnessCommitment({
         agentRef,
         profileName,
         overlayPath: sessionPaths.files.overlay,
-        env,
+        env: buildHarnessRuntimeEnv({
+            env,
+            rpcUrl,
+        }),
     });
     const deploymentConfig = parseDeploymentConfig(runtimeContext);
     if (!runtimeContext.commitmentText) {
