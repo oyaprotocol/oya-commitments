@@ -60,17 +60,18 @@ async function run() {
     const remoteRoles = resolveHarnessRoles({
         profile: remoteProfile,
         env: {
-            HARNESS_DEPLOYER_PRIVATE_KEY:
+            PRIVATE_KEY:
                 '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
-            HARNESS_AGENT_PRIVATE_KEY:
-                '0x59c6995e998f97a5a004497e5daef8c35c4a4e31bcf4f5b1f9955aa2d4e8c7f0',
-            HARNESS_DEPOSITOR_PRIVATE_KEY:
+            MESSAGE_API_SIGNER_PRIVATE_KEY:
                 '0x5de4111afa1a4b94908f83103eec640f15b10eff2d3447d1f8e8a0d41c6d4f74',
         },
     });
     assert.equal(remoteRoles.mnemonicSource, 'env');
     assert.match(remoteRoles.roles.deployer.address, /^0x[0-9a-f]{40}$/i);
-    assert.equal(remoteRoles.roles.deployer.sourceEnv, 'HARNESS_DEPLOYER_PRIVATE_KEY');
+    assert.equal(remoteRoles.roles.deployer.sourceEnv, 'PRIVATE_KEY');
+    assert.equal(remoteRoles.roles.agent.sourceEnv, 'PRIVATE_KEY');
+    assert.equal(remoteRoles.roles.deployer.address, remoteRoles.roles.agent.address);
+    assert.equal(remoteRoles.roles.depositor.sourceEnv, 'MESSAGE_API_SIGNER_PRIVATE_KEY');
 
     const anvilBin = resolveAnvilExecutable(process.env);
     const version = spawnSync(anvilBin, ['--version'], {
