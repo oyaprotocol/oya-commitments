@@ -1,11 +1,3 @@
-import dotenv from 'dotenv';
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { createPublicClient, http } from 'viem';
-import { loadAgentConfigStack, resolveAgentRuntimeConfig } from './lib/agent-config.js';
-import { buildConfig } from './lib/config.js';
-import { createSignerClient } from './lib/signer.js';
 import {
     loadOgContext,
     loadOptimisticGovernorDefaults,
@@ -20,9 +12,6 @@ import {
 import { callAgent, explainToolCalls, parseToolArguments } from './lib/llm.js';
 import { executeToolCalls, hasCommittedToolSideEffects, toolDefinitions } from './lib/tools.js';
 import { makeDeposit, postBondAndDispute, postBondAndPropose } from './lib/tx.js';
-import { extractTimelockTriggers } from './lib/timelock.js';
-import { collectPriceTriggerSignals } from './lib/uniswapV3Price.js';
-import { createMessageInbox } from './lib/message-inbox.js';
 import { createMessageApiServer } from './lib/message-api.js';
 import { processQueuedUserMessages } from './lib/message-loop.js';
 import {
@@ -30,38 +19,39 @@ import {
     evaluateToolOutputsDecisionStatus,
     hasDeterministicDecisionEngine,
     isRetryableDecisionError,
-    validateMessageApiDecisionEngine,
 } from './lib/decision-support.js';
+import { initializeAgentRuntime } from './lib/runtime-bootstrap.js';
+import { createSignalPreparationRuntime } from './lib/signal-prep.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const repoRoot = path.resolve(__dirname, '../..');
+const {
+    config,
+    publicClient,
+    account,
+    walletClient,
+    agentAddress,
+    agentModule,
+    commitmentText,
+    trackedAssets,
+    messageInbox,
+    pollingOptions,
+} = await initializeAgentRuntime();
 
-dotenv.config();
-dotenv.config({ path: path.resolve(repoRoot, 'agent/.env') });
-
-const config = buildConfig();
-const publicClient = createPublicClient({ transport: http(config.rpcUrl) });
-const { account, walletClient } = await createSignerClient({ rpcUrl: config.rpcUrl });
-const agentAddress = account.address;
-
-const trackedAssets = new Set();
 let lastCheckedBlock = config.startBlock;
 let lastProposalCheckedBlock = config.startBlock;
 let lastNativeBalance;
 let lastAssetBalances = new Map();
 let ogContext;
 const proposalsByHash = new Map();
-const depositHistory = [];
-const blockTimestampCache = new Map();
-const timelockTriggers = new Map();
-const priceTriggerState = new Map();
-const tokenMetaCache = new Map();
-const poolMetaCache = new Map();
-const resolvedPoolCache = new Map();
 const LOOP_PHASE_WARN_INTERVAL_MS = 15_000;
-let messageInbox = null;
 let messageApiServer;
+const signalPreparation = createSignalPreparationRuntime({
+    agentModule,
+    publicClient,
+    config,
+    account,
+    commitmentText,
+    trackedAssets,
+});
 
 function formatLoopPhaseContext(context) {
     if (!context || typeof context !== 'object') {
@@ -113,147 +103,6 @@ async function runLoopPhase(name, work, { warnIntervalMs = LOOP_PHASE_WARN_INTER
             clearInterval(timer);
         }
     }
-}
-
-async function loadAgentModule() {
-    const agentRef = config.agentModule ?? 'default';
-    const modulePath = agentRef.includes('/')
-        ? agentRef
-        : `agent-library/agents/${agentRef}/agent.js`;
-    const resolvedPath = path.resolve(repoRoot, modulePath);
-    const moduleUrl = pathToFileURL(resolvedPath).href;
-    const agentModule = await import(moduleUrl);
-
-    const commitmentPath = path.join(path.dirname(resolvedPath), 'commitment.txt');
-    let commitmentText = '';
-    try {
-        commitmentText = (await readFile(commitmentPath, 'utf8')).trim();
-    } catch (error) {
-        console.warn('[agent] Missing commitment.txt next to agent module:', commitmentPath);
-    }
-
-    const agentConfigPath = path.join(path.dirname(resolvedPath), 'config.json');
-    const agentConfigFile = await loadAgentConfigStack(agentConfigPath);
-
-    return { agentModule, commitmentText, agentConfigFile };
-}
-
-const { agentModule, commitmentText, agentConfigFile } = await loadAgentModule();
-const runtimeChainId = await publicClient.getChainId();
-Object.assign(
-    config,
-    resolveAgentRuntimeConfig({
-        baseConfig: config,
-        agentConfigFile,
-        chainId: runtimeChainId,
-    })
-);
-if (!config.commitmentSafe) {
-    throw new Error(
-        'Missing commitmentSafe in the active agent config stack (config.json/config.local.json/overlay). Legacy COMMITMENT_SAFE env fallback has been removed; migrate it into module config.'
-    );
-}
-if (!config.ogModule) {
-    throw new Error(
-        'Missing ogModule in the active agent config stack (config.json/config.local.json/overlay). Legacy OG_MODULE env fallback has been removed; migrate it into module config.'
-    );
-}
-if (config.messageApiEnabled) {
-    messageInbox = createMessageInbox({
-        queueLimit: config.messageApiQueueLimit,
-        defaultTtlSeconds: config.messageApiDefaultTtlSeconds,
-        minTtlSeconds: config.messageApiMinTtlSeconds,
-        maxTtlSeconds: config.messageApiMaxTtlSeconds,
-        idempotencyTtlSeconds: config.messageApiIdempotencyTtlSeconds,
-        signedReplayWindowSeconds: config.messageApiSignatureMaxAgeSeconds,
-        maxTextLength: config.messageApiMaxTextLength,
-        rateLimitPerMinute: config.messageApiRateLimitPerMinute,
-        rateLimitBurst: config.messageApiRateLimitBurst,
-    });
-}
-for (const asset of config.watchAssets) {
-    trackedAssets.add(String(asset).toLowerCase());
-}
-validateMessageApiDecisionEngine({ config, agentModule });
-const pollingOptions = (() => {
-    if (typeof agentModule?.getPollingOptions !== 'function') {
-        return {};
-    }
-    try {
-        return agentModule.getPollingOptions({ commitmentText }) ?? {};
-    } catch (error) {
-        console.warn('[agent] getPollingOptions() failed; using defaults.');
-        return {};
-    }
-})();
-
-async function getBlockTimestampMs(blockNumber) {
-    if (!blockNumber) return undefined;
-    const key = blockNumber.toString();
-    if (blockTimestampCache.has(key)) {
-        return blockTimestampCache.get(key);
-    }
-    const block = await publicClient.getBlock({ blockNumber });
-    const timestampMs = Number(block.timestamp) * 1000;
-    blockTimestampCache.set(key, timestampMs);
-    return timestampMs;
-}
-
-function updateTimelockSchedule({ rulesText }) {
-    const triggers = extractTimelockTriggers({
-        rulesText,
-        deposits: depositHistory,
-    });
-
-    for (const trigger of triggers) {
-        if (!timelockTriggers.has(trigger.id)) {
-            timelockTriggers.set(trigger.id, { ...trigger, fired: false });
-        }
-    }
-}
-
-function collectDueTimelocks(nowMs) {
-    const due = [];
-    for (const trigger of timelockTriggers.values()) {
-        if (trigger.fired) continue;
-        if (trigger.timestampMs <= nowMs) {
-            due.push(trigger);
-        }
-    }
-    return due;
-}
-
-function markTimelocksFired(triggers) {
-    for (const trigger of triggers) {
-        const existing = timelockTriggers.get(trigger.id);
-        if (existing) {
-            existing.fired = true;
-        }
-    }
-}
-
-async function getActivePriceTriggers({ rulesText }) {
-    if (typeof agentModule?.getPriceTriggers === 'function') {
-        try {
-            const parsed = await agentModule.getPriceTriggers({
-                commitmentText: rulesText,
-                config,
-            });
-            if (Array.isArray(parsed)) {
-                return parsed;
-            }
-            console.warn('[agent] getPriceTriggers() returned non-array; ignoring.');
-            return [];
-        } catch (error) {
-            console.warn(
-                '[agent] getPriceTriggers() failed; skipping price triggers:',
-                error?.message ?? error
-            );
-            return [];
-        }
-    }
-
-    return [];
 }
 
 async function processAgentToolCalls({
@@ -522,34 +371,6 @@ async function decideOnSignals(signals, { onchainPendingProposal = false } = {})
     return DECISION_STATUS.NO_ACTION;
 }
 
-async function prepareSignalsForDecision(
-    signals,
-    { nowMs, latestBlock, onchainPendingProposal }
-) {
-    let signalsToProcess = signals;
-    if (agentModule?.augmentSignals) {
-        signalsToProcess = agentModule.augmentSignals(signalsToProcess, {
-            nowMs,
-            latestBlock,
-        });
-    }
-    if (agentModule?.enrichSignals) {
-        try {
-            signalsToProcess = await agentModule.enrichSignals(signalsToProcess, {
-                publicClient,
-                config,
-                account,
-                onchainPendingProposal,
-                nowMs,
-                latestBlock,
-            });
-        } catch (error) {
-            console.error('[agent] Failed to enrich signals:', error);
-        }
-    }
-    return Array.isArray(signalsToProcess) ? signalsToProcess : [];
-}
-
 async function agentLoop() {
     try {
         const queuedMessageCountAtLoopStart = messageInbox?.getQueueDepth?.() ?? 0;
@@ -561,11 +382,7 @@ async function agentLoop() {
         }
 
         const triggerSeedRulesText = ogContext?.rules ?? commitmentText ?? '';
-        const triggerSeed = await getActivePriceTriggers({ rulesText: triggerSeedRulesText });
-        for (const trigger of triggerSeed) {
-            if (trigger?.baseToken) trackedAssets.add(String(trigger.baseToken).toLowerCase());
-            if (trigger?.quoteToken) trackedAssets.add(String(trigger.quoteToken).toLowerCase());
-        }
+        await signalPreparation.seedTrackedAssetsFromRules({ rulesText: triggerSeedRulesText });
 
         const { latestBlock, latestBlockData } = await runLoopPhase(
             'load_head_block',
@@ -615,14 +432,7 @@ async function agentLoop() {
         lastCheckedBlock = nextCheckedBlock;
         lastNativeBalance = nextNative;
         lastAssetBalances = nextAssetBalances ?? lastAssetBalances;
-
-        for (const deposit of deposits) {
-            const timestampMs = await getBlockTimestampMs(deposit.blockNumber);
-            depositHistory.push({
-                ...deposit,
-                timestampMs,
-            });
-        }
+        await signalPreparation.recordDeposits(deposits);
 
         const {
             newProposals,
@@ -691,21 +501,15 @@ async function agentLoop() {
         );
 
         const rulesText = ogContext?.rules ?? commitmentText ?? '';
-        updateTimelockSchedule({ rulesText });
-        const dueTimelocks = collectDueTimelocks(nowMs);
-        const activePriceTriggers = await getActivePriceTriggers({ rulesText });
+        signalPreparation.updateTimelockSchedule({ rulesText });
+        const dueTimelocks = signalPreparation.collectDueTimelocks(nowMs);
+        const activePriceTriggers = await signalPreparation.getActivePriceTriggers({ rulesText });
         const duePriceSignals = await runLoopPhase(
             'collect_price_trigger_signals',
             async () =>
-                collectPriceTriggerSignals({
-                    publicClient,
-                    config,
+                signalPreparation.collectPriceSignals({
                     triggers: activePriceTriggers,
                     nowMs,
-                    triggerState: priceTriggerState,
-                    tokenMetaCache,
-                    poolMetaCache,
-                    resolvedPoolCache,
                 }),
             {
                 logStart: noisyLoop && activePriceTriggers.length > 0,
@@ -747,7 +551,7 @@ async function agentLoop() {
             const signalsToProcess = await runLoopPhase(
                 'prepare_base_signals',
                 async () =>
-                    prepareSignalsForDecision(baseSignals, {
+                    signalPreparation.prepareSignalsForDecision(baseSignals, {
                         nowMs,
                         latestBlock,
                         onchainPendingProposal,
@@ -777,7 +581,7 @@ async function agentLoop() {
                 );
             }
             if (decisionStatus === DECISION_STATUS.HANDLED && dueTimelocks.length > 0) {
-                markTimelocksFired(dueTimelocks);
+                signalPreparation.markTimelocksFired(dueTimelocks);
             }
         }
 
@@ -791,7 +595,7 @@ async function agentLoop() {
                     nowMs,
                     latestBlock,
                     onchainPendingProposal,
-                    prepareSignals: prepareSignalsForDecision,
+                    prepareSignals: signalPreparation.prepareSignalsForDecision,
                     decideOnSignals,
                 }),
             {
