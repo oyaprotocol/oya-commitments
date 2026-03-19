@@ -128,7 +128,10 @@ async function resolveHarnessRuntimeContext({
         env,
     });
     const runtimeConfig = resolveAgentRuntimeConfig({
-        baseConfig: createHarnessBaseConfig({ env }),
+        baseConfig: {
+            ...createHarnessBaseConfig({ env }),
+            rpcUrl: env.RPC_URL ?? profile.rpcUrl ?? 'http://127.0.0.1:8545',
+        },
         agentConfigFile: configStack,
         chainId: profile.chainId,
     });

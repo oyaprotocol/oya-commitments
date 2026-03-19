@@ -21,6 +21,11 @@ import {
     stopHarnessAgent,
 } from './lib/testnet-harness-agent.mjs';
 import {
+    ensureHarnessIpfs,
+    getIpfsRuntimeStatus,
+    stopHarnessIpfs,
+} from './lib/testnet-harness-ipfs.mjs';
+import {
     createHarnessClients,
     loadRoleRecord,
     mintHarnessErc20,
@@ -31,7 +36,7 @@ import {
 } from './lib/testnet-harness-actions.mjs';
 import { deployHarnessCommitment } from './lib/testnet-harness-deploy.mjs';
 import { listHarnessProfiles, resolveHarnessProfile } from './lib/testnet-harness-profiles.mjs';
-import { deriveHarnessRoles } from './lib/testnet-harness-roles.mjs';
+import { resolveHarnessRoles } from './lib/testnet-harness-roles.mjs';
 import { resolveHarnessRuntimeContext } from './lib/testnet-harness-runtime.mjs';
 import { runHarnessSmokeScenario } from './lib/testnet-harness-smoke.mjs';
 
@@ -196,8 +201,25 @@ async function buildStatusPayload({ agentRef, profileName }) {
     });
     const config = await resolveConfigSummary(agentRef, sessionStatus.files.overlay);
     const profile = resolveHarnessProfile(profileName, { env: process.env });
+    const runtimeContext = await resolveHarnessRuntimeContext({
+        repoRootPath: repoRoot,
+        agentRef,
+        profileName,
+        overlayPath: sessionStatus.files.overlay,
+        env: {
+            ...process.env,
+            ...(sessionStatus.data.pids?.anvil?.rpcUrl
+                ? { RPC_URL: sessionStatus.data.pids.anvil.rpcUrl }
+                : profile.rpcUrl
+                  ? { RPC_URL: profile.rpcUrl }
+                  : {}),
+        },
+    });
     const anvilStatus = await getAnvilRuntimeStatus(sessionStatus.data.pids?.anvil);
     const agentStatus = await getAgentRuntimeStatus(sessionStatus.data.pids?.agent);
+    const ipfsStatus = await getIpfsRuntimeStatus(sessionStatus.data.pids?.ipfs, {
+        runtimeConfig: runtimeContext.runtimeConfig,
+    });
 
     return {
         module: agentRef,
@@ -205,16 +227,26 @@ async function buildStatusPayload({ agentRef, profileName }) {
             name: profile.name,
             mode: profile.mode,
             chainId: profile.chainId,
+            rpcEnv: profile.rpcEnv,
             forkRpcEnv: profile.forkRpcEnv,
+            managesLocalNode: profile.managesLocalNode,
+            rpcConfigured: profile.rpcConfigured,
             forkConfigured: profile.forkConfigured,
+            rpcUrl: profile.rpcUrl,
         },
         sessionDir: sessionStatus.sessionDir,
         exists: sessionStatus.exists,
         files: sessionStatus.fileStatuses,
         data: sanitizeStatusData(sessionStatus.data),
         runtime: {
+            rpc: {
+                url: runtimeContext.runtimeConfig.rpcUrl,
+                chainId: runtimeContext.profile.chainId,
+                mode: profile.mode,
+            },
             anvil: anvilStatus,
             agent: agentStatus,
+            ipfs: ipfsStatus,
         },
         config,
     };
@@ -241,39 +273,73 @@ async function ensureHarnessRuntime({ agentRef, profileName, port }) {
     await ensureOverlayFile(sessionPaths);
 
     const profile = resolveHarnessProfile(profileName, { env: process.env });
-    const roles = deriveHarnessRoles();
+    const roles = resolveHarnessRoles({ profile, env: process.env });
     const existingRoles = await readHarnessJson(sessionPaths.files.roles);
-    if (existingRoles === null) {
+    if (existingRoles === null || profile.mode === 'remote') {
         await writeHarnessJson(sessionPaths.files.roles, roles);
     }
 
     const existingPids = (await readHarnessJson(sessionPaths.files.pids)) ?? {};
+    const nextPids = { ...existingPids };
+
     const existingAnvilStatus = await getAnvilRuntimeStatus(existingPids.anvil);
-    if (!existingAnvilStatus.running && existingAnvilStatus.pidAlive && existingPids.anvil) {
+    if (!profile.managesLocalNode && existingPids.anvil) {
         await stopHarnessAnvil(existingPids.anvil);
+        delete nextPids.anvil;
+    } else if (!existingAnvilStatus.running && existingAnvilStatus.pidAlive && existingPids.anvil) {
+        await stopHarnessAnvil(existingPids.anvil);
+        delete nextPids.anvil;
     }
 
-    let anvilRecord = existingPids.anvil;
-    if (!existingAnvilStatus.running) {
-        anvilRecord = await startHarnessAnvil({
-            profile,
-            sessionPaths,
-            env: process.env,
-            port,
-        });
-        await writeHarnessJson(sessionPaths.files.pids, {
-            ...existingPids,
-            anvil: anvilRecord,
-        });
+    let anvilRecord = nextPids.anvil;
+    let rpcUrl = profile.rpcUrl;
+    if (profile.managesLocalNode) {
+        if (!existingAnvilStatus.running) {
+            anvilRecord = await startHarnessAnvil({
+                profile,
+                sessionPaths,
+                env: process.env,
+                port,
+            });
+            nextPids.anvil = anvilRecord;
+        }
+        rpcUrl = anvilRecord.rpcUrl;
     }
 
     const rolesData = (await readHarnessJson(sessionPaths.files.roles)) ?? roles;
+    const runtimeContext = await resolveHarnessRuntimeContext({
+        repoRootPath: repoRoot,
+        agentRef,
+        profileName,
+        overlayPath: sessionPaths.files.overlay,
+        env: {
+            ...process.env,
+            RPC_URL: rpcUrl,
+        },
+    });
+
+    if (runtimeContext.runtimeConfig.ipfsEnabled !== true && nextPids.ipfs) {
+        await stopHarnessIpfs(nextPids.ipfs);
+        delete nextPids.ipfs;
+    } else if (runtimeContext.runtimeConfig.ipfsEnabled === true) {
+        nextPids.ipfs = await ensureHarnessIpfs({
+            sessionPaths,
+            runtimeConfig: runtimeContext.runtimeConfig,
+            existingRecord: nextPids.ipfs,
+            env: process.env,
+            cwd: repoRoot,
+        });
+    }
+
+    await writeHarnessJson(sessionPaths.files.pids, nextPids);
 
     return {
         sessionPaths,
         profile,
         anvilRecord,
+        rpcUrl,
         rolesData,
+        runtimeContext,
     };
 }
 
@@ -311,7 +377,7 @@ async function ensureHarnessDeployment({ runtime, agentRef, profileName, force }
         agentRef,
         profileName,
         sessionPaths: runtime.sessionPaths,
-        rpcUrl: runtime.anvilRecord.rpcUrl,
+        rpcUrl: runtime.rpcUrl,
         deployerPrivateKey: deployerRole.privateKey,
         force,
         env: process.env,
@@ -351,7 +417,7 @@ async function handleRunAgent({ agentRef, profileName, port, force }) {
         cwd: repoRoot,
         env: {
             ...process.env,
-            RPC_URL: runtime.anvilRecord.rpcUrl,
+            RPC_URL: runtime.rpcUrl,
             SIGNER_TYPE: 'env',
             PRIVATE_KEY: agentRole.privateKey,
             AGENT_MODULE: agentRef,
@@ -431,7 +497,7 @@ async function handleAgentUp({ agentRef, profileName, port, force }) {
         agentRef,
         sessionPaths: runtime.sessionPaths,
         runtimeContext,
-        rpcUrl: runtime.anvilRecord.rpcUrl,
+        rpcUrl: runtime.rpcUrl,
         signerRole: {
             ...agentRole,
             name: 'agent',
@@ -495,7 +561,7 @@ async function handleSeedErc20({
 
     const runtime = await ensureHarnessRuntime({ agentRef, profileName, port });
     const harnessClients = createHarnessClients({
-        rpcUrl: runtime.anvilRecord.rpcUrl,
+        rpcUrl: runtime.rpcUrl,
         chainId: runtime.profile.chainId,
         rolesData: runtime.rolesData,
     });
@@ -516,6 +582,9 @@ async function handleSeedErc20({
             publicClient: harnessClients.publicClient,
         });
     } else {
+        if (runtime.profile.mode === 'remote') {
+            throw new Error('seed-erc20 with --holder is only supported on local/fork profiles.');
+        }
         const runtimeContext = await resolveHarnessRuntimeContext({
             repoRootPath: repoRoot,
             agentRef,
@@ -534,7 +603,7 @@ async function handleSeedErc20({
         result = await seedHarnessErc20FromHolder({
             publicClient: harnessClients.publicClient,
             testClient: harnessClients.testClient,
-            rpcUrl: runtime.anvilRecord.rpcUrl,
+            rpcUrl: runtime.rpcUrl,
             token,
             holder: sourceHolder,
             recipient: recipientRole.address,
@@ -590,7 +659,7 @@ async function handleDeposit({ agentRef, profileName, port, roleName, asset, amo
     }
 
     const harnessClients = createHarnessClients({
-        rpcUrl: runtime.anvilRecord.rpcUrl,
+        rpcUrl: runtime.rpcUrl,
         chainId: runtime.profile.chainId,
         rolesData: runtime.rolesData,
     });
@@ -646,7 +715,7 @@ async function handleDown({ agentRef, profileName }) {
         profile: profileName,
     });
     const existingPids = sessionStatus.data.pids ?? {};
-    if (!sessionStatus.exists && !existingPids.anvil && !existingPids.agent) {
+    if (!sessionStatus.exists && !existingPids.anvil && !existingPids.agent && !existingPids.ipfs) {
         console.log(
             JSON.stringify(
                 {
@@ -664,9 +733,11 @@ async function handleDown({ agentRef, profileName }) {
     }
 
     const agentStopResult = await stopHarnessAgent(existingPids.agent);
+    const ipfsStopResult = await stopHarnessIpfs(existingPids.ipfs);
     const stopResult = await stopHarnessAnvil(existingPids.anvil);
     const nextPids = { ...existingPids };
     delete nextPids.agent;
+    delete nextPids.ipfs;
     delete nextPids.anvil;
     if (sessionStatus.exists || Object.keys(nextPids).length > 0) {
         await writeHarnessJson(sessionStatus.files.pids, nextPids);
@@ -681,6 +752,8 @@ async function handleDown({ agentRef, profileName }) {
                 alreadyStopped: stopResult.alreadyStopped ?? false,
                 agentStopped: agentStopResult.stopped,
                 agentAlreadyStopped: agentStopResult.alreadyStopped ?? false,
+                ipfsStopped: ipfsStopResult.stopped,
+                ipfsAlreadyStopped: ipfsStopResult.alreadyStopped ?? false,
                 sessionDir: sessionStatus.sessionDir,
             },
             null,
@@ -698,6 +771,9 @@ async function handleReset({ agentRef, profileName }) {
     const existingPids = sessionStatus.data.pids ?? {};
     if (existingPids.agent) {
         await stopHarnessAgent(existingPids.agent);
+    }
+    if (existingPids.ipfs) {
+        await stopHarnessIpfs(existingPids.ipfs);
     }
     if (existingPids.anvil) {
         await stopHarnessAnvil(existingPids.anvil);
