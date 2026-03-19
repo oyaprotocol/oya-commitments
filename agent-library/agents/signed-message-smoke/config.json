@@ -6,9 +6,30 @@
     "port": 9888,
     "requireSignerAllowlist": false
   },
+  "defaultDepositAsset": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+  "defaultDepositAmountWei": "1000000",
   "harness": {
     "deployment": {
       "bondAmount": "1"
+    }
+  },
+  "byChain": {
+    "11155111": {
+      "watchAssets": [
+        "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
+      ],
+      "harness": {
+        "deployment": {
+          "collateral": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+          "safeSingleton": "0x41675C099F32341bf84BFc5382aF534df5C7461a",
+          "safeProxyFactory": "0xC22834581EbC8527d974F8a1c97E1bEA4EF910BC",
+          "safeFallbackHandler": "0x017062a1dE2FE6b99BE3d9d37841FeD19F573804",
+          "ogMasterCopy": "0x40153DdFAd90C49dbE3F5c9F96f2a5B25ec67461",
+          "bondAmount": "250000000",
+          "safeSaltNonce": "42001",
+          "ogSaltNonce": "42001"
+        }
+      }
     }
   }
 }

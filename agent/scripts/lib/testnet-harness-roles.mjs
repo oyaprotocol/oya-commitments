@@ -52,7 +52,7 @@ function normalizePrivateKey(value, label) {
 function deriveHarnessRolesFromEnv({
     env = process.env,
     roleEnvMap = {
-        deployer: ['HARNESS_DEPLOYER_PRIVATE_KEY', 'DEPLOYER_PK'],
+        deployer: ['HARNESS_DEPLOYER_PRIVATE_KEY', 'PRIVATE_KEY', 'DEPLOYER_PK'],
         agent: ['HARNESS_AGENT_PRIVATE_KEY', 'PRIVATE_KEY'],
         depositor: ['HARNESS_DEPOSITOR_PRIVATE_KEY', 'MESSAGE_API_SIGNER_PRIVATE_KEY'],
     },
