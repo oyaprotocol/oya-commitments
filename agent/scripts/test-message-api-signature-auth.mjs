@@ -89,21 +89,67 @@ async function main() {
         assert.equal(queued[0].chainId, 11155111);
         inbox.ackBatch(queued.map((message) => message.messageId));
 
+        const missingChainIdTimestampMs = Date.now();
+        const missingChainIdBody = {
+            text: 'Missing chain id',
+            requestId: 'sig-missing-chain-id',
+        };
+        const missingChainIdPayload = buildSignedMessagePayload({
+            address: account.address,
+            timestampMs: missingChainIdTimestampMs,
+            ...missingChainIdBody,
+        });
+        const missingChainIdSignature = await account.signMessage({
+            message: missingChainIdPayload,
+        });
         const missingChainId = await fetch(`${baseUrl}/v1/messages`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                text: 'Missing chain id',
-                requestId: 'sig-missing-chain-id',
+                ...missingChainIdBody,
                 auth: {
                     type: 'eip191',
                     address: account.address,
-                    timestampMs,
-                    signature,
+                    timestampMs: missingChainIdTimestampMs,
+                    signature: missingChainIdSignature,
                 },
             }),
         });
-        assert.equal(missingChainId.status, 400);
+        assert.equal(missingChainId.status, 202);
+        const queuedMissingChainId = inbox.takeBatch({ maxItems: 1 });
+        assert.equal(queuedMissingChainId.length, 1);
+        assert.equal(queuedMissingChainId[0].requestId, missingChainIdBody.requestId);
+        assert.equal(queuedMissingChainId[0].chainId, undefined);
+        inbox.ackBatch(queuedMissingChainId.map((message) => message.messageId));
+
+        const wrongChainIdTimestampMs = Date.now();
+        const wrongChainIdBody = {
+            text: 'Wrong chain id',
+            requestId: 'sig-wrong-chain-id',
+        };
+        const wrongChainIdPayload = buildSignedMessagePayload({
+            address: account.address,
+            timestampMs: wrongChainIdTimestampMs,
+            ...wrongChainIdBody,
+        });
+        const wrongChainIdSignature = await account.signMessage({
+            message: wrongChainIdPayload,
+        });
+        const wrongChainId = await fetch(`${baseUrl}/v1/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ...wrongChainIdBody,
+                chainId: 1,
+                auth: {
+                    type: 'eip191',
+                    address: account.address,
+                    timestampMs: wrongChainIdTimestampMs,
+                    signature: wrongChainIdSignature,
+                },
+            }),
+        });
+        assert.equal(wrongChainId.status, 400);
 
         // Signed request IDs remain replay-locked beyond message expiry.
         const shortTtlTimestampMs = Date.now();

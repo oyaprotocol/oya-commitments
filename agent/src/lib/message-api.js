@@ -72,14 +72,7 @@ async function authenticateSignedRequest({
             message: 'requestId is required when using signed auth.',
         };
     }
-    if (expectedChainId !== undefined) {
-        if (!Number.isInteger(body.chainId) || body.chainId < 1) {
-            return {
-                ok: false,
-                statusCode: 400,
-                message: `chainId is required and must equal ${expectedChainId}.`,
-            };
-        }
+    if (expectedChainId !== undefined && body.chainId !== undefined) {
         if (body.chainId !== expectedChainId) {
             return {
                 ok: false,
@@ -120,7 +113,6 @@ async function authenticateSignedRequest({
 
     const payload = buildSignedMessagePayload({
         address: declaredAddress,
-        chainId: body.chainId,
         timestampMs: auth.timestampMs,
         text: body.text,
         command: body.command,

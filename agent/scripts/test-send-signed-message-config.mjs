@@ -22,16 +22,6 @@ async function createAgentModule(repoRootPath, name, config, localConfig) {
     }
 }
 
-async function withMockFetch(mockFetch, fn) {
-    const previousFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch;
-    try {
-        return await fn();
-    } finally {
-        globalThis.fetch = previousFetch;
-    }
-}
-
 async function run() {
     const repoRootPath = await mkdtemp(path.join(os.tmpdir(), 'send-signed-message-'));
 
@@ -65,12 +55,6 @@ async function run() {
 
     await createAgentModule(repoRootPath, 'blank', {
         policyName: 'blank',
-    });
-    await createAgentModule(repoRootPath, 'rpc-chain', {
-        messageApi: {
-            host: 'rpc-host.local',
-            port: 9001,
-        },
     });
 
     const overlayPath = path.join(repoRootPath, 'overlay.json');
@@ -111,6 +95,27 @@ async function run() {
         }),
         'http://local-host.local:9898'
     );
+
+    const directUrlTarget = await resolveMessageApiTarget({
+        argv: ['node', 'send-signed-message.mjs', '--url=http://cli-host:9555'],
+        env: {},
+        repoRootPath,
+    });
+    assert.equal(directUrlTarget.baseUrl, 'http://cli-host:9555');
+    assert.equal(directUrlTarget.chainId, undefined);
+
+    const directUrlWithChainTarget = await resolveMessageApiTarget({
+        argv: [
+            'node',
+            'send-signed-message.mjs',
+            '--url=http://cli-host:9555',
+            '--chain-id=11155111',
+        ],
+        env: {},
+        repoRootPath,
+    });
+    assert.equal(directUrlWithChainTarget.baseUrl, 'http://cli-host:9555');
+    assert.equal(directUrlWithChainTarget.chainId, 11155111);
 
     const singleChainTarget = await resolveMessageApiTarget({
         argv: ['node', 'send-signed-message.mjs', '--module=single-chain'],
@@ -178,15 +183,28 @@ async function run() {
             buildBaseUrl({
                 argv: [
                     'node',
-                    'send-signed-message.mjs',
-                    '--module=ambiguous',
-                    '--chain-id=11155111',
-                ],
-                env: {},
-                repoRootPath,
+                'send-signed-message.mjs',
+                '--module=ambiguous',
+                '--chain-id=11155111',
+            ],
+            env: {},
+            repoRootPath,
             }),
         /defines multiple byChain entries .* but no top-level chainId/
     );
+
+    const ambiguousDirectUrlTarget = await resolveMessageApiTarget({
+        argv: [
+            'node',
+            'send-signed-message.mjs',
+            '--module=ambiguous',
+            '--url=http://explicit-host:9555',
+        ],
+        env: {},
+        repoRootPath,
+    });
+    assert.equal(ambiguousDirectUrlTarget.baseUrl, 'http://explicit-host:9555');
+    assert.equal(ambiguousDirectUrlTarget.chainId, undefined);
 
     assert.equal(
         await buildBaseUrl({
@@ -226,33 +244,6 @@ async function run() {
         }),
         'http://127.0.0.1:8787'
     );
-
-    await withMockFetch(async (input, init) => {
-        assert.equal(String(input), 'http://rpc.mock.local/');
-        const body = JSON.parse(String(init?.body ?? '{}'));
-        assert.equal(body.method, 'eth_chainId');
-        return new Response(
-            JSON.stringify({
-                jsonrpc: '2.0',
-                id: body.id ?? 1,
-                result: '0x7a69',
-            }),
-            {
-                status: 200,
-                headers: { 'Content-Type': 'application/json' },
-            }
-        );
-    }, async () => {
-        const rpcChainTarget = await resolveMessageApiTarget({
-            argv: ['node', 'send-signed-message.mjs', '--module=rpc-chain'],
-            env: {
-                RPC_URL: 'http://rpc.mock.local',
-            },
-            repoRootPath,
-        });
-        assert.equal(rpcChainTarget.baseUrl, 'http://rpc-host.local:9001');
-        assert.equal(rpcChainTarget.chainId, 31337);
-    });
 
     console.log('ok');
 }

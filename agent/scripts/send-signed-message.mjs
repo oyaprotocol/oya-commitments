@@ -3,7 +3,6 @@ import {
     resolveAgentRuntimeConfig,
     resolveConfiguredChainId,
 } from '../src/lib/agent-config.js';
-import { createPublicClient, http } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { buildSignedMessagePayload } from '../src/lib/message-signing.js';
 import {
@@ -102,18 +101,6 @@ function formatBaseUrl({ scheme, host, port, pathname = '', search = '' }) {
     return `${scheme}://${authorityHost}:${port}${normalizedPath}${search}`;
 }
 
-async function resolveRpcChainId(env = process.env) {
-    const rpcUrl =
-        typeof env?.RPC_URL === 'string' && env.RPC_URL.trim() ? env.RPC_URL.trim() : null;
-    if (!rpcUrl) {
-        return undefined;
-    }
-    const publicClient = createPublicClient({
-        transport: http(rpcUrl),
-    });
-    return await publicClient.getChainId();
-}
-
 async function resolveMessageApiConfigForAgent({
     agentRef,
     chainId,
@@ -129,12 +116,10 @@ async function resolveMessageApiConfigForAgent({
         env,
     });
     const agentConfigFile = agentConfigStack;
-    const configuredChainId = resolveConfiguredChainId({
+    const runtimeChainId = resolveConfiguredChainId({
         agentConfigFile,
         explicitChainId: chainId,
     });
-    const runtimeChainId =
-        configuredChainId ?? (await resolveRpcChainId(env));
 
     const runtimeConfig = resolveAgentRuntimeConfig({
         baseConfig: {
@@ -179,6 +164,16 @@ async function resolveMessageApiTarget({
     repoRootPath = repoRoot,
 } = {}) {
     const explicit = getArgValue('--url=', argv);
+    const explicitChainIdRaw = getArgValue('--chain-id=', argv);
+    const explicitChainId =
+        explicitChainIdRaw === null ? undefined : parseInteger(explicitChainIdRaw, 'chainId');
+    if (explicit) {
+        return {
+            baseUrl: normalizeBaseUrl(explicit),
+            chainId: explicitChainId,
+        };
+    }
+
     const explicitHost = getArgValue('--host=', argv);
     const explicitPortRaw = getArgValue('--port=', argv);
     const explicitPort =
@@ -186,10 +181,9 @@ async function resolveMessageApiTarget({
     const explicitScheme = getArgValue('--scheme=', argv);
 
     const agentRef = resolveAgentRef({ argv, env });
-    const chainId = getArgValue('--chain-id=', argv) ?? undefined;
     const runtimeConfig = await resolveMessageApiConfigForAgent({
         agentRef,
-        chainId,
+        chainId: explicitChainId,
         repoRootPath,
         env,
     });
