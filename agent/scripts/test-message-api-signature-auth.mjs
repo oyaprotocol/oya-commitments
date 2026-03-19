@@ -22,6 +22,7 @@ async function main() {
     const otherAccount = privateKeyToAccount(`0x${'2'.repeat(64)}`);
     const inbox = buildInbox();
     const config = {
+        chainId: 11155111,
         messageApiHost: '127.0.0.1',
         messageApiPort: 0,
         messageApiKeys: {},
@@ -44,6 +45,7 @@ async function main() {
     try {
         const timestampMs = Date.now();
         const signedBody = {
+            chainId: 11155111,
             text: 'Pause proposals for 2 hours',
             command: 'pause_proposals',
             args: { hours: 2 },
@@ -84,11 +86,29 @@ async function main() {
         assert.equal(queued[0].sender.signature, signature);
         assert.equal(queued[0].requestId, signedBody.requestId);
         assert.equal(queued[0].deadline, signedBody.deadline);
+        assert.equal(queued[0].chainId, 11155111);
         inbox.ackBatch(queued.map((message) => message.messageId));
+
+        const missingChainId = await fetch(`${baseUrl}/v1/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                text: 'Missing chain id',
+                requestId: 'sig-missing-chain-id',
+                auth: {
+                    type: 'eip191',
+                    address: account.address,
+                    timestampMs,
+                    signature,
+                },
+            }),
+        });
+        assert.equal(missingChainId.status, 400);
 
         // Signed request IDs remain replay-locked beyond message expiry.
         const shortTtlTimestampMs = Date.now();
         const shortTtlBody = {
+            chainId: 11155111,
             text: 'Short TTL signed command',
             requestId: 'sig-short-ttl',
             deadline: shortTtlTimestampMs + 2_000,
@@ -196,6 +216,7 @@ async function main() {
         // Unknown signers should still be rejected when allowlist mode is enabled.
         const otherTimestampMs = Date.now();
         const otherRequestBody = {
+            chainId: 11155111,
             text: 'Open a trade',
             requestId: 'sig-other-signer',
         };
@@ -225,6 +246,7 @@ async function main() {
 
     const openInbox = buildInbox();
     const openConfig = {
+        chainId: 11155111,
         messageApiHost: '127.0.0.1',
         messageApiPort: 0,
         messageApiKeys: {},
@@ -246,6 +268,7 @@ async function main() {
     try {
         const timestampMs = Date.now();
         const openBody = {
+            chainId: 11155111,
             text: 'Open a YES trade with 5 USDC',
             requestId: 'sig-open-mode',
         };

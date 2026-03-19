@@ -36,7 +36,7 @@ Moves non-secret legacy env config into module-local JSON config.
 
 Defaults:
   --module     AGENT_MODULE or "default"
-  --chain-id   CHAIN_ID when set; otherwise writes top-level config
+  --chain-id   CHAIN_ID when set; writes top-level chainId plus byChain overrides
   --out        <module-dir>/config.local.json
 `);
 }

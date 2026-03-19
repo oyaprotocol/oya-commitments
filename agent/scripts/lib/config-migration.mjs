@@ -442,9 +442,16 @@ function buildConfigMigrationPatch({ env = process.env, moduleName, chainId } = 
         return patch;
     }
 
+    if (Object.keys(patch).length === 0) {
+        return patch;
+    }
+
+    const normalizedChainId = parseInteger(chainId, 'CHAIN_ID', { min: 1 });
+
     return {
+        chainId: normalizedChainId,
         byChain: {
-            [String(chainId)]: patch,
+            [String(normalizedChainId)]: patch,
         },
     };
 }

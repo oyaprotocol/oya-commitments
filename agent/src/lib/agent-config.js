@@ -75,6 +75,10 @@ function parseIntegerValue(value, label, { min = undefined, max = undefined } = 
     return parsed;
 }
 
+function parseChainIdValue(value, label) {
+    return parseIntegerValue(value, label, { min: 1 });
+}
+
 function parseBigIntValue(value, label, { min = undefined, max = undefined } = {}) {
     let parsed;
     try {
@@ -628,11 +632,78 @@ async function loadAgentConfigStack(
     };
 }
 
+function resolveConfiguredChainId({ agentConfigFile, explicitChainId } = {}) {
+    const normalizedExplicitChainId =
+        explicitChainId === undefined || explicitChainId === null || explicitChainId === ''
+            ? undefined
+            : parseChainIdValue(explicitChainId, 'chainId');
+    const rawAgentConfig = agentConfigFile?.raw;
+    if (!rawAgentConfig) {
+        return normalizedExplicitChainId;
+    }
+
+    const configSourceLabel = agentConfigFile?.sourceLabel ?? agentConfigFile?.path ?? 'agent config';
+    const { byChain } = rawAgentConfig;
+    if (byChain !== undefined && (!byChain || typeof byChain !== 'object' || Array.isArray(byChain))) {
+        throw new Error(`${configSourceLabel} field "byChain" must be a JSON object`);
+    }
+
+    const configuredChainId =
+        rawAgentConfig.chainId === undefined || rawAgentConfig.chainId === null
+            ? undefined
+            : parseChainIdValue(rawAgentConfig.chainId, `${configSourceLabel} field "chainId"`);
+    const byChainKeys = byChain ? Object.keys(byChain) : [];
+
+    if (configuredChainId !== undefined) {
+        if (
+            normalizedExplicitChainId !== undefined &&
+            normalizedExplicitChainId !== configuredChainId
+        ) {
+            throw new Error(
+                `${configSourceLabel} selects chainId ${configuredChainId}, but received conflicting chainId ${normalizedExplicitChainId}.`
+            );
+        }
+        return configuredChainId;
+    }
+
+    if (byChainKeys.length === 0) {
+        return normalizedExplicitChainId;
+    }
+
+    if (byChainKeys.length === 1) {
+        const inferredChainId = parseChainIdValue(
+            byChainKeys[0],
+            `${configSourceLabel} field "byChain" key`
+        );
+        if (
+            normalizedExplicitChainId !== undefined &&
+            normalizedExplicitChainId !== inferredChainId
+        ) {
+            throw new Error(
+                `${configSourceLabel} infers chainId ${inferredChainId} from byChain, but received conflicting chainId ${normalizedExplicitChainId}.`
+            );
+        }
+        return inferredChainId;
+    }
+
+    throw new Error(
+        `${configSourceLabel} defines multiple byChain entries (${byChainKeys.join(
+            ', '
+        )}) but no top-level chainId. Add "chainId" to the agent config to choose the active chain.`
+    );
+}
+
 function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
+    const resolvedChainId =
+        resolveConfiguredChainId({
+            agentConfigFile,
+            explicitChainId: chainId,
+        }) ?? baseConfig.chainId;
     const rawAgentConfig = agentConfigFile?.raw;
     if (!rawAgentConfig) {
         return {
             agentConfig: {},
+            chainId: resolvedChainId,
             ...pickRuntimeFields(baseConfig, CORE_RUNTIME_FIELD_DEFINITIONS),
             ...pickRuntimeFields(baseConfig, SHARED_RUNTIME_FIELD_DEFINITIONS),
             ipfsHeaders: baseConfig.ipfsHeaders,
@@ -648,8 +719,8 @@ function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
         throw new Error(`${configSourceLabel} field "byChain" must be a JSON object`);
     }
 
-    const chainKey = String(chainId);
-    const chainOverrides = byChain?.[chainKey];
+    const chainKey = resolvedChainId === undefined ? undefined : String(resolvedChainId);
+    const chainOverrides = chainKey === undefined ? undefined : byChain?.[chainKey];
     if (
         chainOverrides !== undefined &&
         (!chainOverrides || typeof chainOverrides !== 'object' || Array.isArray(chainOverrides))
@@ -658,6 +729,9 @@ function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
     }
 
     const resolvedAgentConfig = mergeConfigObjects(sharedConfig, chainOverrides ?? {});
+    if (resolvedChainId !== undefined) {
+        resolvedAgentConfig.chainId = resolvedChainId;
+    }
     const sharedMessageApi = parseMessageApiOverride(
         sharedConfig.messageApi,
         `${configSourceLabel} field "messageApi"`
@@ -733,6 +807,7 @@ function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
 
     return {
         agentConfig: resolvedAgentConfig,
+        chainId: resolvedChainId,
         ...coreRuntimeConfig,
         ...sharedRuntimeConfig,
         ipfsHeaders: runtimeBaseConfig.ipfsHeaders,
@@ -743,6 +818,7 @@ function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
 export {
     loadAgentConfigFile,
     loadAgentConfigStack,
+    resolveConfiguredChainId,
     resolveAgentConfigLayerPaths,
     resolveAgentRuntimeConfig,
 };

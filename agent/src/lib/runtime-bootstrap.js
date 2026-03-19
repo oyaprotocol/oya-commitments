@@ -3,8 +3,12 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createPublicClient, http } from 'viem';
-import { loadAgentConfigStack, resolveAgentRuntimeConfig } from './agent-config.js';
-import { buildConfig } from './config.js';
+import {
+    loadAgentConfigStack,
+    resolveAgentRuntimeConfig,
+    resolveConfiguredChainId,
+} from './agent-config.js';
+import { assertNoDeprecatedConfigEnvVars, buildConfig } from './config.js';
 import {
     validateMessageApiDecisionEngine,
 } from './decision-support.js';
@@ -14,6 +18,17 @@ import { createSignerClient } from './signer.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '../../..');
+
+function normalizeAgentModuleName(agentRef) {
+    if (!agentRef) {
+        return 'default';
+    }
+    if (!agentRef.includes('/')) {
+        return agentRef;
+    }
+    const trimmed = agentRef.endsWith('.js') ? path.dirname(agentRef) : agentRef;
+    return path.basename(trimmed);
+}
 
 function loadRuntimeEnv() {
     dotenv.config();
@@ -79,21 +94,32 @@ export async function initializeAgentRuntime() {
     loadRuntimeEnv();
 
     const config = buildConfig();
+    const agentRef = config.agentModule ?? 'default';
+    assertNoDeprecatedConfigEnvVars({
+        env: process.env,
+        agentModuleName: normalizeAgentModuleName(agentRef),
+    });
+
     const publicClient = createPublicClient({ transport: http(config.rpcUrl) });
     const { account, walletClient } = await createSignerClient({ rpcUrl: config.rpcUrl });
     const agentAddress = account.address;
-    const agentRef = config.agentModule ?? 'default';
     const { agentModule, commitmentText, agentConfigFile } = await loadAgentModule({
         agentModuleRef: agentRef,
     });
     const runtimeChainId = await publicClient.getChainId();
+    const configuredChainId = resolveConfiguredChainId({ agentConfigFile });
+    if (configuredChainId !== undefined && configuredChainId !== runtimeChainId) {
+        throw new Error(
+            `Active agent config selects chainId ${configuredChainId}, but RPC_URL is connected to chainId ${runtimeChainId}. Update the module config stack or RPC_URL so they match.`
+        );
+    }
 
     Object.assign(
         config,
         resolveAgentRuntimeConfig({
             baseConfig: config,
             agentConfigFile,
-            chainId: runtimeChainId,
+            chainId: configuredChainId ?? runtimeChainId,
         })
     );
 

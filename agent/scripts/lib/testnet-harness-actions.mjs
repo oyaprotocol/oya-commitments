@@ -2,7 +2,7 @@ import { createPublicClient, createTestClient, createWalletClient, erc20Abi, get
 import { privateKeyToAccount } from 'viem/accounts';
 import { buildSignedMessagePayload } from '../../src/lib/message-signing.js';
 import { makeDeposit, makeTransfer } from '../../src/lib/tx.js';
-import { buildBaseUrl } from '../send-signed-message.mjs';
+import { resolveMessageApiTarget } from '../send-signed-message.mjs';
 
 const mintableErc20Abi = parseAbi([
     'function mint(address to, uint256 amount)',
@@ -186,7 +186,7 @@ async function sendHarnessSignedMessage({
 }) {
     const account = privateKeyToAccount(role.privateKey);
     const timestampMs = Date.now();
-    const baseUrl = await buildBaseUrl({
+    const { baseUrl, chainId } = await resolveMessageApiTarget({
         argv: [
             'node',
             'send-signed-message.mjs',
@@ -203,6 +203,7 @@ async function sendHarnessSignedMessage({
     const normalizedRequestId = requestId ?? `harness-${Date.now()}`;
     const payload = buildSignedMessagePayload({
         address: account.address,
+        chainId,
         timestampMs,
         text,
         command,
@@ -214,6 +215,7 @@ async function sendHarnessSignedMessage({
     const signature = await account.signMessage({ message: payload });
     const body = {
         text,
+        ...(chainId !== undefined ? { chainId } : {}),
         requestId: normalizedRequestId,
         auth: {
             type: 'eip191',

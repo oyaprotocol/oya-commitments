@@ -21,6 +21,7 @@ async function run() {
     });
 
     assert.deepEqual(patch, {
+        chainId: 11155111,
         byChain: {
             '11155111': {
                 commitmentSafe: '0x1111111111111111111111111111111111111111',
@@ -59,6 +60,7 @@ async function run() {
         patch
     );
     assert.deepEqual(merged, {
+        chainId: 11155111,
         byChain: {
             '11155111': {
                 commitmentSafe: '0x1111111111111111111111111111111111111111',

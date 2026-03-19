@@ -121,6 +121,7 @@ function createMessageInbox(options = {}) {
 
     function normalizePayload({
         text,
+        chainId,
         command,
         args,
         metadata,
@@ -174,6 +175,18 @@ function createMessageInbox(options = {}) {
                 code: 'invalid_request',
                 message: 'metadata must be an object when provided.',
             };
+        }
+
+        let normalizedChainId;
+        if (chainId !== undefined) {
+            normalizedChainId = Number(chainId);
+            if (!Number.isInteger(normalizedChainId) || normalizedChainId < 1) {
+                return {
+                    ok: false,
+                    code: 'invalid_request',
+                    message: 'chainId must be a positive integer when provided.',
+                };
+            }
         }
 
         let normalizedDeadline;
@@ -238,6 +251,7 @@ function createMessageInbox(options = {}) {
                 messageId,
                 requestId: normalizedRequestId,
                 text: normalizedText,
+                chainId: normalizedChainId,
                 command: command === undefined ? undefined : command.trim(),
                 args: args === undefined ? undefined : args,
                 metadata: metadata === undefined ? undefined : metadata,
@@ -257,6 +271,7 @@ function createMessageInbox(options = {}) {
 
     function submitMessage({
         text,
+        chainId,
         command,
         args,
         metadata,
@@ -292,6 +307,7 @@ function createMessageInbox(options = {}) {
 
         const normalized = normalizePayload({
             text,
+            chainId,
             command,
             args,
             metadata,

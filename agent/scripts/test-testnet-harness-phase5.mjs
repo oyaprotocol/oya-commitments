@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { listDeprecatedConfigEnvVars } from '../src/lib/config.js';
 import { resolveAnvilExecutable } from './lib/testnet-harness-anvil.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -24,9 +25,18 @@ function commandAvailable(command) {
 }
 
 function runHarnessCommand(args) {
+    const env = {
+        ...process.env,
+    };
+    for (const key of listDeprecatedConfigEnvVars({
+        agentModuleName: 'signed-message-smoke',
+    })) {
+        env[key] = '';
+    }
     const result = spawnSync('node', ['agent/scripts/testnet-harness.mjs', ...args], {
         cwd: repoRoot,
         encoding: 'utf8',
+        env,
     });
     if (result.status !== 0) {
         throw new Error(

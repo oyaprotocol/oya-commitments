@@ -210,6 +210,92 @@ const DEFAULT_POLYMARKET_CONDITIONAL_TOKENS =
 
 const MESSAGE_API_ENV_OVERRIDES = Symbol('messageApiEnvOverrides');
 const IPFS_ENV_OVERRIDES = Symbol('ipfsEnvOverrides');
+const DEPRECATED_SHARED_CONFIG_ENV_VARS = Object.freeze([
+    'CHAIN_ID',
+    'COMMITMENT_SAFE',
+    'OG_MODULE',
+    'WATCH_ASSETS',
+    'WATCH_ERC1155_ASSETS_JSON',
+    'POLL_INTERVAL_MS',
+    'LOG_CHUNK_SIZE',
+    'START_BLOCK',
+    'WATCH_NATIVE_BALANCE',
+    'DEFAULT_DEPOSIT_ASSET',
+    'DEFAULT_DEPOSIT_AMOUNT_WEI',
+    'BOND_SPENDER',
+    'OPENAI_MODEL',
+    'OPENAI_BASE_URL',
+    'OPENAI_REQUEST_TIMEOUT_MS',
+    'ALLOW_PROPOSE_ON_SIMULATION_FAIL',
+    'PROPOSE_GAS_LIMIT',
+    'EXECUTE_RETRY_MS',
+    'EXECUTE_PENDING_TX_TIMEOUT_MS',
+    'PROPOSE_ENABLED',
+    'DISPUTE_ENABLED',
+    'DISPUTE_RETRY_MS',
+    'PROPOSAL_HASH_RESOLVE_TIMEOUT_MS',
+    'PROPOSAL_HASH_RESOLVE_POLL_INTERVAL_MS',
+    'CHAINLINK_PRICE_FEED',
+    'POLYMARKET_CONDITIONAL_TOKENS',
+    'POLYMARKET_EXCHANGE',
+    'POLYMARKET_CLOB_ENABLED',
+    'POLYMARKET_CLOB_HOST',
+    'POLYMARKET_CLOB_ADDRESS',
+    'POLYMARKET_CLOB_SIGNATURE_TYPE',
+    'POLYMARKET_CLOB_REQUEST_TIMEOUT_MS',
+    'POLYMARKET_CLOB_MAX_RETRIES',
+    'POLYMARKET_CLOB_RETRY_DELAY_MS',
+    'POLYMARKET_RELAYER_ENABLED',
+    'POLYMARKET_RELAYER_HOST',
+    'POLYMARKET_RELAYER_TX_TYPE',
+    'POLYMARKET_RELAYER_FROM_ADDRESS',
+    'POLYMARKET_RELAYER_SAFE_FACTORY',
+    'POLYMARKET_RELAYER_PROXY_FACTORY',
+    'POLYMARKET_RELAYER_RESOLVE_PROXY_ADDRESS',
+    'POLYMARKET_RELAYER_AUTO_DEPLOY_PROXY',
+    'POLYMARKET_RELAYER_CHAIN_ID',
+    'POLYMARKET_RELAYER_REQUEST_TIMEOUT_MS',
+    'POLYMARKET_RELAYER_POLL_INTERVAL_MS',
+    'POLYMARKET_RELAYER_POLL_TIMEOUT_MS',
+    'UNISWAP_V3_FACTORY',
+    'UNISWAP_V3_QUOTER',
+    'UNISWAP_V3_FEE_TIERS',
+    'IPFS_ENABLED',
+    'IPFS_API_URL',
+    'IPFS_REQUEST_TIMEOUT_MS',
+    'IPFS_MAX_RETRIES',
+    'IPFS_RETRY_DELAY_MS',
+    'MESSAGE_API_ENABLED',
+    'MESSAGE_API_HOST',
+    'MESSAGE_API_PORT',
+    'MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST',
+    'MESSAGE_API_SIGNER_ALLOWLIST',
+    'MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS',
+    'MESSAGE_API_MAX_BODY_BYTES',
+    'MESSAGE_API_MAX_TEXT_LENGTH',
+    'MESSAGE_API_QUEUE_LIMIT',
+    'MESSAGE_API_BATCH_SIZE',
+    'MESSAGE_API_DEFAULT_TTL_SECONDS',
+    'MESSAGE_API_MIN_TTL_SECONDS',
+    'MESSAGE_API_MAX_TTL_SECONDS',
+    'MESSAGE_API_IDEMPOTENCY_TTL_SECONDS',
+    'MESSAGE_API_RATE_LIMIT_PER_MINUTE',
+    'MESSAGE_API_RATE_LIMIT_BURST',
+]);
+const DEPRECATED_AGENT_CONFIG_ENV_VARS = Object.freeze({
+    'copy-trading': Object.freeze([
+        'COPY_TRADING_SOURCE_USER',
+        'COPY_TRADING_MARKET',
+        'COPY_TRADING_YES_TOKEN_ID',
+        'COPY_TRADING_NO_TOKEN_ID',
+        'COPY_TRADING_COLLATERAL_TOKEN',
+        'COPY_TRADING_CTF_CONTRACT',
+    ]),
+    'deterministic-dca-agent': Object.freeze([
+        'DETERMINISTIC_DCA_POLICY_PRESET',
+        'DETERMINISTIC_DCA_LOG_CHUNK_SIZE',
+    ]),
+});
 
 function collectMessageApiEnvOverrides(env = process.env) {
     return {
@@ -253,9 +339,47 @@ function resolveIpfsEnvConfig({ enabled, envOverrides = {} } = {}) {
     };
 }
 
+function hasConfiguredEnvValue(value) {
+    return value !== undefined && value !== null && String(value).trim() !== '';
+}
+
+function findDeprecatedConfigEnvVars({ env = process.env, agentModuleName } = {}) {
+    const names = [
+        ...DEPRECATED_SHARED_CONFIG_ENV_VARS,
+        ...(DEPRECATED_AGENT_CONFIG_ENV_VARS[agentModuleName] ?? []),
+    ];
+    return names.filter((name) => hasConfiguredEnvValue(env[name]));
+}
+
+function listDeprecatedConfigEnvVars({ agentModuleName } = {}) {
+    return [
+        ...DEPRECATED_SHARED_CONFIG_ENV_VARS,
+        ...(DEPRECATED_AGENT_CONFIG_ENV_VARS[agentModuleName] ?? []),
+    ];
+}
+
+function assertNoDeprecatedConfigEnvVars({ env = process.env, agentModuleName } = {}) {
+    const names = findDeprecatedConfigEnvVars({ env, agentModuleName });
+    if (names.length === 0) {
+        return;
+    }
+
+    const scopeLabel = agentModuleName
+        ? ` for agent "${agentModuleName}"`
+        : '';
+    throw new Error(
+        `Legacy non-secret env config is no longer supported${scopeLabel}. Move these settings into the active agent config stack (config.json/config.local.json/overlay) and remove them from agent/.env: ${names.join(
+            ', '
+        )}. Use node agent/scripts/migrate-agent-config-from-env.mjs --module=${
+            agentModuleName ?? '<agent-name>'
+        } for one-time migration.`
+    );
+}
+
 function createDefaultRuntimeConfig({ env = process.env, rpcUrl } = {}) {
     return {
         rpcUrl,
+        chainId: undefined,
         commitmentSafe: undefined,
         ogModule: undefined,
         pollIntervalMs: 10_000,
@@ -346,10 +470,13 @@ function buildConfig() {
 }
 
 export {
+    assertNoDeprecatedConfigEnvVars,
     createDefaultRuntimeConfig,
     DEFAULT_POLYMARKET_CONDITIONAL_TOKENS,
     buildConfig,
+    findDeprecatedConfigEnvVars,
     IPFS_ENV_OVERRIDES,
+    listDeprecatedConfigEnvVars,
     MESSAGE_API_ENV_OVERRIDES,
     resolveIpfsEnvConfig,
     resolveMessageApiEnvConfig,

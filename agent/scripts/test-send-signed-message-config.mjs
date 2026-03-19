@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
-import { buildBaseUrl } from './send-signed-message.mjs';
+import { buildBaseUrl, resolveMessageApiTarget } from './send-signed-message.mjs';
 
 async function createAgentModule(repoRootPath, name, config, localConfig) {
     const agentDir = path.join(repoRootPath, 'agent-library', 'agents', name);
@@ -29,6 +29,7 @@ async function run() {
         repoRootPath,
         'single-chain',
         {
+            chainId: 11155111,
             messageApi: {
                 host: 'config-host.local',
                 port: 7777,
@@ -95,6 +96,14 @@ async function run() {
         'http://local-host.local:9898'
     );
 
+    const singleChainTarget = await resolveMessageApiTarget({
+        argv: ['node', 'send-signed-message.mjs', '--module=single-chain'],
+        env: {},
+        repoRootPath,
+    });
+    assert.equal(singleChainTarget.baseUrl, 'http://local-host.local:9898');
+    assert.equal(singleChainTarget.chainId, 11155111);
+
     assert.equal(
         await buildBaseUrl({
             argv: ['node', 'send-signed-message.mjs', '--module=single-chain'],
@@ -119,6 +128,48 @@ async function run() {
             repoRootPath,
         }),
         'https://local-host.local:9443'
+    );
+
+    await createAgentModule(repoRootPath, 'ambiguous', {
+        byChain: {
+            '11155111': {
+                messageApi: {
+                    host: 'sepolia-host.local',
+                    port: 9891,
+                },
+            },
+            '137': {
+                messageApi: {
+                    host: 'polygon-host.local',
+                    port: 9892,
+                },
+            },
+        },
+    });
+
+    await assert.rejects(
+        () =>
+            buildBaseUrl({
+                argv: ['node', 'send-signed-message.mjs', '--module=ambiguous'],
+                env: {},
+                repoRootPath,
+            }),
+        /defines multiple byChain entries .* but no top-level chainId/
+    );
+
+    await assert.rejects(
+        () =>
+            buildBaseUrl({
+                argv: [
+                    'node',
+                    'send-signed-message.mjs',
+                    '--module=ambiguous',
+                    '--chain-id=11155111',
+                ],
+                env: {},
+                repoRootPath,
+            }),
+        /defines multiple byChain entries .* but no top-level chainId/
     );
 
     assert.equal(
