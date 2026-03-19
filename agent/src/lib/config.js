@@ -191,26 +191,254 @@ function parseOptionalAddressEnv(raw, envName) {
     }
 }
 
+const MESSAGE_API_DEFAULTS = Object.freeze({
+    messageApiHost: '127.0.0.1',
+    messageApiPort: 8787,
+    messageApiMaxBodyBytes: 8192,
+    messageApiMaxTextLength: 2000,
+    messageApiQueueLimit: 500,
+    messageApiBatchSize: 25,
+    messageApiDefaultTtlSeconds: 3600,
+    messageApiMinTtlSeconds: 30,
+    messageApiMaxTtlSeconds: 86400,
+    messageApiIdempotencyTtlSeconds: 86400,
+    messageApiRateLimitPerMinute: 30,
+    messageApiRateLimitBurst: 10,
+    messageApiRequireSignerAllowlist: true,
+    messageApiSignerAllowlist: [],
+    messageApiSignatureMaxAgeSeconds: 300,
+    messageApiKeys: {},
+});
+
+const IPFS_DEFAULTS = Object.freeze({
+    ipfsApiUrl: 'http://127.0.0.1:5001',
+    ipfsHeaders: {},
+    ipfsRequestTimeoutMs: 15_000,
+    ipfsMaxRetries: 1,
+    ipfsRetryDelayMs: 250,
+});
+
+const MESSAGE_API_ENV_OVERRIDES = Symbol('messageApiEnvOverrides');
+const IPFS_ENV_OVERRIDES = Symbol('ipfsEnvOverrides');
+
+function hasResolvedOverrideValue(override, key) {
+    return (
+        override !== undefined &&
+        override !== null &&
+        Object.prototype.hasOwnProperty.call(override, key) &&
+        override[key] !== undefined &&
+        override[key] !== null
+    );
+}
+
+function collectMessageApiEnvOverrides(env = process.env) {
+    return {
+        host: env.MESSAGE_API_HOST,
+        port: env.MESSAGE_API_PORT,
+        maxBodyBytes: env.MESSAGE_API_MAX_BODY_BYTES,
+        maxTextLength: env.MESSAGE_API_MAX_TEXT_LENGTH,
+        queueLimit: env.MESSAGE_API_QUEUE_LIMIT,
+        batchSize: env.MESSAGE_API_BATCH_SIZE,
+        defaultTtlSeconds: env.MESSAGE_API_DEFAULT_TTL_SECONDS,
+        minTtlSeconds: env.MESSAGE_API_MIN_TTL_SECONDS,
+        maxTtlSeconds: env.MESSAGE_API_MAX_TTL_SECONDS,
+        idempotencyTtlSeconds: env.MESSAGE_API_IDEMPOTENCY_TTL_SECONDS,
+        rateLimitPerMinute: env.MESSAGE_API_RATE_LIMIT_PER_MINUTE,
+        rateLimitBurst: env.MESSAGE_API_RATE_LIMIT_BURST,
+        requireSignerAllowlist: env.MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST,
+        signerAllowlist: env.MESSAGE_API_SIGNER_ALLOWLIST,
+        signatureMaxAgeSeconds: env.MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS,
+        keysJson: env.MESSAGE_API_KEYS_JSON,
+    };
+}
+
+function collectIpfsEnvOverrides(env = process.env) {
+    return {
+        apiUrl: env.IPFS_API_URL,
+        headersJson: env.IPFS_HEADERS_JSON,
+        requestTimeoutMs: env.IPFS_REQUEST_TIMEOUT_MS,
+        maxRetries: env.IPFS_MAX_RETRIES,
+        retryDelayMs: env.IPFS_RETRY_DELAY_MS,
+    };
+}
+
+function resolveMessageApiEnvConfig({ enabled, envOverrides = {}, override = {} } = {}) {
+    if (!enabled) {
+        return {
+            messageApiEnabled: false,
+            ...MESSAGE_API_DEFAULTS,
+        };
+    }
+
+    return {
+        messageApiEnabled: true,
+        messageApiHost: hasResolvedOverrideValue(override, 'host')
+            ? MESSAGE_API_DEFAULTS.messageApiHost
+            : parseHost(envOverrides.host, MESSAGE_API_DEFAULTS.messageApiHost),
+        messageApiPort: hasResolvedOverrideValue(override, 'port')
+            ? MESSAGE_API_DEFAULTS.messageApiPort
+            : parsePositiveInteger(
+                  envOverrides.port,
+                  'MESSAGE_API_PORT',
+                  MESSAGE_API_DEFAULTS.messageApiPort
+              ),
+        messageApiMaxBodyBytes: hasResolvedOverrideValue(override, 'maxBodyBytes')
+            ? MESSAGE_API_DEFAULTS.messageApiMaxBodyBytes
+            : parsePositiveInteger(
+                  envOverrides.maxBodyBytes,
+                  'MESSAGE_API_MAX_BODY_BYTES',
+                  MESSAGE_API_DEFAULTS.messageApiMaxBodyBytes
+              ),
+        messageApiMaxTextLength: hasResolvedOverrideValue(override, 'maxTextLength')
+            ? MESSAGE_API_DEFAULTS.messageApiMaxTextLength
+            : parsePositiveInteger(
+                  envOverrides.maxTextLength,
+                  'MESSAGE_API_MAX_TEXT_LENGTH',
+                  MESSAGE_API_DEFAULTS.messageApiMaxTextLength
+              ),
+        messageApiQueueLimit: hasResolvedOverrideValue(override, 'queueLimit')
+            ? MESSAGE_API_DEFAULTS.messageApiQueueLimit
+            : parsePositiveInteger(
+                  envOverrides.queueLimit,
+                  'MESSAGE_API_QUEUE_LIMIT',
+                  MESSAGE_API_DEFAULTS.messageApiQueueLimit
+              ),
+        messageApiBatchSize: hasResolvedOverrideValue(override, 'batchSize')
+            ? MESSAGE_API_DEFAULTS.messageApiBatchSize
+            : parsePositiveInteger(
+                  envOverrides.batchSize,
+                  'MESSAGE_API_BATCH_SIZE',
+                  MESSAGE_API_DEFAULTS.messageApiBatchSize
+              ),
+        messageApiDefaultTtlSeconds: hasResolvedOverrideValue(override, 'defaultTtlSeconds')
+            ? MESSAGE_API_DEFAULTS.messageApiDefaultTtlSeconds
+            : parsePositiveInteger(
+                  envOverrides.defaultTtlSeconds,
+                  'MESSAGE_API_DEFAULT_TTL_SECONDS',
+                  MESSAGE_API_DEFAULTS.messageApiDefaultTtlSeconds
+              ),
+        messageApiMinTtlSeconds: hasResolvedOverrideValue(override, 'minTtlSeconds')
+            ? MESSAGE_API_DEFAULTS.messageApiMinTtlSeconds
+            : parsePositiveInteger(
+                  envOverrides.minTtlSeconds,
+                  'MESSAGE_API_MIN_TTL_SECONDS',
+                  MESSAGE_API_DEFAULTS.messageApiMinTtlSeconds
+              ),
+        messageApiMaxTtlSeconds: hasResolvedOverrideValue(override, 'maxTtlSeconds')
+            ? MESSAGE_API_DEFAULTS.messageApiMaxTtlSeconds
+            : parsePositiveInteger(
+                  envOverrides.maxTtlSeconds,
+                  'MESSAGE_API_MAX_TTL_SECONDS',
+                  MESSAGE_API_DEFAULTS.messageApiMaxTtlSeconds
+              ),
+        messageApiIdempotencyTtlSeconds: hasResolvedOverrideValue(
+            override,
+            'idempotencyTtlSeconds'
+        )
+            ? MESSAGE_API_DEFAULTS.messageApiIdempotencyTtlSeconds
+            : parsePositiveInteger(
+                  envOverrides.idempotencyTtlSeconds,
+                  'MESSAGE_API_IDEMPOTENCY_TTL_SECONDS',
+                  MESSAGE_API_DEFAULTS.messageApiIdempotencyTtlSeconds
+              ),
+        messageApiRateLimitPerMinute: hasResolvedOverrideValue(override, 'rateLimitPerMinute')
+            ? MESSAGE_API_DEFAULTS.messageApiRateLimitPerMinute
+            : parsePositiveInteger(
+                  envOverrides.rateLimitPerMinute,
+                  'MESSAGE_API_RATE_LIMIT_PER_MINUTE',
+                  MESSAGE_API_DEFAULTS.messageApiRateLimitPerMinute,
+                  { min: 0 }
+              ),
+        messageApiRateLimitBurst: hasResolvedOverrideValue(override, 'rateLimitBurst')
+            ? MESSAGE_API_DEFAULTS.messageApiRateLimitBurst
+            : parsePositiveInteger(
+                  envOverrides.rateLimitBurst,
+                  'MESSAGE_API_RATE_LIMIT_BURST',
+                  MESSAGE_API_DEFAULTS.messageApiRateLimitBurst,
+                  { min: 0 }
+              ),
+        messageApiRequireSignerAllowlist: hasResolvedOverrideValue(
+            override,
+            'requireSignerAllowlist'
+        )
+            ? MESSAGE_API_DEFAULTS.messageApiRequireSignerAllowlist
+            : parseBoolean(
+                  envOverrides.requireSignerAllowlist,
+                  MESSAGE_API_DEFAULTS.messageApiRequireSignerAllowlist
+              ),
+        messageApiSignerAllowlist: hasResolvedOverrideValue(override, 'signerAllowlist')
+            ? MESSAGE_API_DEFAULTS.messageApiSignerAllowlist
+            : parseAddressList(envOverrides.signerAllowlist),
+        messageApiSignatureMaxAgeSeconds: hasResolvedOverrideValue(
+            override,
+            'signatureMaxAgeSeconds'
+        )
+            ? MESSAGE_API_DEFAULTS.messageApiSignatureMaxAgeSeconds
+            : parsePositiveInteger(
+                  envOverrides.signatureMaxAgeSeconds,
+                  'MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS',
+                  MESSAGE_API_DEFAULTS.messageApiSignatureMaxAgeSeconds
+              ),
+        messageApiKeys: parseMessageApiKeys(envOverrides.keysJson),
+    };
+}
+
+function resolveIpfsEnvConfig({ enabled, envOverrides = {}, override = {} } = {}) {
+    if (!enabled) {
+        return {
+            ipfsEnabled: false,
+            ...IPFS_DEFAULTS,
+        };
+    }
+
+    return {
+        ipfsEnabled: true,
+        ipfsApiUrl: hasResolvedOverrideValue(override, 'ipfsApiUrl')
+            ? IPFS_DEFAULTS.ipfsApiUrl
+            : parseHost(envOverrides.apiUrl, IPFS_DEFAULTS.ipfsApiUrl),
+        ipfsHeaders: parseStringMap(envOverrides.headersJson, 'IPFS_HEADERS_JSON'),
+        ipfsRequestTimeoutMs: hasResolvedOverrideValue(override, 'ipfsRequestTimeoutMs')
+            ? IPFS_DEFAULTS.ipfsRequestTimeoutMs
+            : parsePositiveInteger(
+                  envOverrides.requestTimeoutMs,
+                  'IPFS_REQUEST_TIMEOUT_MS',
+                  IPFS_DEFAULTS.ipfsRequestTimeoutMs
+              ),
+        ipfsMaxRetries: hasResolvedOverrideValue(override, 'ipfsMaxRetries')
+            ? IPFS_DEFAULTS.ipfsMaxRetries
+            : parsePositiveInteger(
+                  envOverrides.maxRetries,
+                  'IPFS_MAX_RETRIES',
+                  IPFS_DEFAULTS.ipfsMaxRetries,
+                  { min: 0 }
+              ),
+        ipfsRetryDelayMs: hasResolvedOverrideValue(override, 'ipfsRetryDelayMs')
+            ? IPFS_DEFAULTS.ipfsRetryDelayMs
+            : parsePositiveInteger(
+                  envOverrides.retryDelayMs,
+                  'IPFS_RETRY_DELAY_MS',
+                  IPFS_DEFAULTS.ipfsRetryDelayMs,
+                  { min: 0 }
+              ),
+    };
+}
+
 function buildConfig() {
     const rpcUrl = mustGetEnv('RPC_URL');
     const commitmentSafe = parseOptionalAddressEnv(process.env.COMMITMENT_SAFE, 'COMMITMENT_SAFE');
     const ogModule = parseOptionalAddressEnv(process.env.OG_MODULE, 'OG_MODULE');
 
+    const messageApiEnvOverrides = collectMessageApiEnvOverrides();
     const messageApiEnabled = parseBoolean(process.env.MESSAGE_API_ENABLED, false);
-    const messageApiRequireSignerAllowlist = messageApiEnabled
-        ? parseBoolean(process.env.MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST, true)
-        : true;
-    // Keep optional ingress isolated: malformed keys should only fail when the feature is enabled.
-    const messageApiKeys = messageApiEnabled
-        ? parseMessageApiKeys(process.env.MESSAGE_API_KEYS_JSON)
-        : {};
-    const messageApiSignerAllowlist = messageApiEnabled
-        ? parseAddressList(process.env.MESSAGE_API_SIGNER_ALLOWLIST)
-        : [];
+    const { messageApiEnabled: _resolvedMessageApiEnabled, ...messageApiConfig } =
+        resolveMessageApiEnvConfig({
+            enabled: messageApiEnabled,
+            envOverrides: messageApiEnvOverrides,
+        });
     if (
         messageApiEnabled &&
-        messageApiRequireSignerAllowlist &&
-        messageApiSignerAllowlist.length === 0
+        messageApiConfig.messageApiRequireSignerAllowlist &&
+        messageApiConfig.messageApiSignerAllowlist.length === 0
     ) {
         throw new Error(
             'MESSAGE_API_ENABLED=true with MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST=true requires MESSAGE_API_SIGNER_ALLOWLIST. MESSAGE_API_KEYS_JSON is optional additional bearer gating.'
@@ -218,123 +446,15 @@ function buildConfig() {
     }
     // Keep disabled ingress fully inert: optional MESSAGE_API_* parsing/validation
     // should not abort unrelated agent runs when the API is turned off.
-    const messageApiConfig = messageApiEnabled
-        ? {
-              messageApiHost: parseHost(process.env.MESSAGE_API_HOST, '127.0.0.1'),
-              messageApiPort: parsePositiveInteger(
-                  process.env.MESSAGE_API_PORT,
-                  'MESSAGE_API_PORT',
-                  8787
-              ),
-              messageApiMaxBodyBytes: parsePositiveInteger(
-                  process.env.MESSAGE_API_MAX_BODY_BYTES,
-                  'MESSAGE_API_MAX_BODY_BYTES',
-                  8192
-              ),
-              messageApiMaxTextLength: parsePositiveInteger(
-                  process.env.MESSAGE_API_MAX_TEXT_LENGTH,
-                  'MESSAGE_API_MAX_TEXT_LENGTH',
-                  2000
-              ),
-              messageApiQueueLimit: parsePositiveInteger(
-                  process.env.MESSAGE_API_QUEUE_LIMIT,
-                  'MESSAGE_API_QUEUE_LIMIT',
-                  500
-              ),
-              messageApiBatchSize: parsePositiveInteger(
-                  process.env.MESSAGE_API_BATCH_SIZE,
-                  'MESSAGE_API_BATCH_SIZE',
-                  25
-              ),
-              messageApiDefaultTtlSeconds: parsePositiveInteger(
-                  process.env.MESSAGE_API_DEFAULT_TTL_SECONDS,
-                  'MESSAGE_API_DEFAULT_TTL_SECONDS',
-                  3600
-              ),
-              messageApiMinTtlSeconds: parsePositiveInteger(
-                  process.env.MESSAGE_API_MIN_TTL_SECONDS,
-                  'MESSAGE_API_MIN_TTL_SECONDS',
-                  30
-              ),
-              messageApiMaxTtlSeconds: parsePositiveInteger(
-                  process.env.MESSAGE_API_MAX_TTL_SECONDS,
-                  'MESSAGE_API_MAX_TTL_SECONDS',
-                  86400
-              ),
-              messageApiIdempotencyTtlSeconds: parsePositiveInteger(
-                  process.env.MESSAGE_API_IDEMPOTENCY_TTL_SECONDS,
-                  'MESSAGE_API_IDEMPOTENCY_TTL_SECONDS',
-                  86400
-              ),
-              messageApiRateLimitPerMinute: parsePositiveInteger(
-                  process.env.MESSAGE_API_RATE_LIMIT_PER_MINUTE,
-                  'MESSAGE_API_RATE_LIMIT_PER_MINUTE',
-                  30,
-                  { min: 0 }
-              ),
-              messageApiRateLimitBurst: parsePositiveInteger(
-                  process.env.MESSAGE_API_RATE_LIMIT_BURST,
-                  'MESSAGE_API_RATE_LIMIT_BURST',
-                  10,
-                  { min: 0 }
-              ),
-              messageApiRequireSignerAllowlist,
-              messageApiSignerAllowlist,
-              messageApiSignatureMaxAgeSeconds: parsePositiveInteger(
-                  process.env.MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS,
-                  'MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS',
-                  300
-              ),
-          }
-        : {
-              messageApiHost: '127.0.0.1',
-              messageApiPort: 8787,
-              messageApiMaxBodyBytes: 8192,
-              messageApiMaxTextLength: 2000,
-              messageApiQueueLimit: 500,
-              messageApiBatchSize: 25,
-              messageApiDefaultTtlSeconds: 3600,
-              messageApiMinTtlSeconds: 30,
-              messageApiMaxTtlSeconds: 86400,
-              messageApiIdempotencyTtlSeconds: 86400,
-              messageApiRateLimitPerMinute: 30,
-              messageApiRateLimitBurst: 10,
-              messageApiRequireSignerAllowlist: true,
-              messageApiSignerAllowlist: [],
-              messageApiSignatureMaxAgeSeconds: 300,
-          };
-    const ipfsEnabled = parseBoolean(process.env.IPFS_ENABLED, false);
-    const ipfsConfig = ipfsEnabled
-        ? {
-              ipfsApiUrl: parseHost(process.env.IPFS_API_URL, 'http://127.0.0.1:5001'),
-              ipfsHeaders: parseStringMap(process.env.IPFS_HEADERS_JSON, 'IPFS_HEADERS_JSON'),
-              ipfsRequestTimeoutMs: parsePositiveInteger(
-                  process.env.IPFS_REQUEST_TIMEOUT_MS,
-                  'IPFS_REQUEST_TIMEOUT_MS',
-                  15_000
-              ),
-              ipfsMaxRetries: parsePositiveInteger(
-                  process.env.IPFS_MAX_RETRIES,
-                  'IPFS_MAX_RETRIES',
-                  1,
-                  { min: 0 }
-              ),
-              ipfsRetryDelayMs: parsePositiveInteger(
-                  process.env.IPFS_RETRY_DELAY_MS,
-                  'IPFS_RETRY_DELAY_MS',
-                  250,
-                  { min: 0 }
-              ),
-          }
-        : {
-              ipfsApiUrl: 'http://127.0.0.1:5001',
-              ipfsHeaders: {},
-              ipfsRequestTimeoutMs: 15_000,
-              ipfsMaxRetries: 1,
-              ipfsRetryDelayMs: 250,
-          };
 
-    return {
+    const ipfsEnvOverrides = collectIpfsEnvOverrides();
+    const ipfsEnabled = parseBoolean(process.env.IPFS_ENABLED, false);
+    const { ipfsEnabled: _resolvedIpfsEnabled, ...ipfsConfig } = resolveIpfsEnvConfig({
+        enabled: ipfsEnabled,
+        envOverrides: ipfsEnvOverrides,
+    });
+
+    const config = {
         rpcUrl,
         commitmentSafe,
         ogModule,
@@ -507,11 +627,27 @@ function buildConfig() {
             : undefined,
         uniswapV3FeeTiers: parseFeeTierList(process.env.UNISWAP_V3_FEE_TIERS),
         messageApiEnabled,
-        messageApiKeys,
         ...messageApiConfig,
         ipfsEnabled,
         ...ipfsConfig,
     };
+
+    Object.defineProperty(config, MESSAGE_API_ENV_OVERRIDES, {
+        value: messageApiEnvOverrides,
+        enumerable: false,
+    });
+    Object.defineProperty(config, IPFS_ENV_OVERRIDES, {
+        value: ipfsEnvOverrides,
+        enumerable: false,
+    });
+
+    return config;
 }
 
-export { buildConfig };
+export {
+    buildConfig,
+    IPFS_ENV_OVERRIDES,
+    MESSAGE_API_ENV_OVERRIDES,
+    resolveIpfsEnvConfig,
+    resolveMessageApiEnvConfig,
+};

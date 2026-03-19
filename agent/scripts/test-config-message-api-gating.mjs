@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { buildConfig } from '../src/lib/config.js';
+import { resolveAgentRuntimeConfig } from '../src/lib/agent-config.js';
 
 const REQUIRED_BASE_ENV = {
     RPC_URL: 'http://127.0.0.1:8545',
@@ -13,9 +14,11 @@ const MANAGED_ENV_KEYS = [
     'MESSAGE_API_KEYS_JSON',
     'MESSAGE_API_SIGNER_ALLOWLIST',
     'MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST',
+    'MESSAGE_API_HOST',
     'MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS',
     'MESSAGE_API_PORT',
     'MESSAGE_API_MAX_BODY_BYTES',
+    'MESSAGE_API_BATCH_SIZE',
     'MESSAGE_API_RATE_LIMIT_PER_MINUTE',
 ];
 
@@ -170,6 +173,77 @@ async function run() {
             const config = buildConfig();
             assert.deepEqual(config.messageApiKeys, { ops: 'k_test' });
             assert.equal(config.messageApiSignerAllowlist.length, 1);
+        }
+    );
+
+    // Config-driven enablement should still honor env-backed auth/runtime settings.
+    withManagedEnv(
+        {
+            MESSAGE_API_ENABLED: undefined,
+            MESSAGE_API_HOST: '127.0.0.2',
+            MESSAGE_API_PORT: '9898',
+            MESSAGE_API_BATCH_SIZE: '7',
+            MESSAGE_API_KEYS_JSON: '{"ops":"k_config"}',
+            MESSAGE_API_SIGNER_ALLOWLIST: '0x3333333333333333333333333333333333333333',
+        },
+        () => {
+            const config = buildConfig();
+            Object.assign(
+                config,
+                resolveAgentRuntimeConfig({
+                    baseConfig: config,
+                    agentConfigFile: {
+                        raw: {
+                            messageApi: {
+                                enabled: true,
+                            },
+                        },
+                    },
+                    chainId: 11155111,
+                })
+            );
+            assert.equal(config.messageApiEnabled, true);
+            assert.equal(config.messageApiHost, '127.0.0.2');
+            assert.equal(config.messageApiPort, 9898);
+            assert.equal(config.messageApiBatchSize, 7);
+            assert.deepEqual(config.messageApiKeys, { ops: 'k_config' });
+            assert.deepEqual(config.messageApiSignerAllowlist, [
+                '0x3333333333333333333333333333333333333333',
+            ]);
+        }
+    );
+
+    // Explicit config values should take precedence over malformed ignored env fields.
+    withManagedEnv(
+        {
+            MESSAGE_API_ENABLED: undefined,
+            MESSAGE_API_KEYS_JSON: '{"ops":"k_config"}',
+            MESSAGE_API_SIGNER_ALLOWLIST: 'not-an-address',
+        },
+        () => {
+            const config = buildConfig();
+            Object.assign(
+                config,
+                resolveAgentRuntimeConfig({
+                    baseConfig: config,
+                    agentConfigFile: {
+                        raw: {
+                            messageApi: {
+                                enabled: true,
+                                signerAllowlist: [
+                                    '0x3333333333333333333333333333333333333333',
+                                ],
+                            },
+                        },
+                    },
+                    chainId: 11155111,
+                })
+            );
+            assert.equal(config.messageApiEnabled, true);
+            assert.deepEqual(config.messageApiKeys, { ops: 'k_config' });
+            assert.deepEqual(config.messageApiSignerAllowlist, [
+                '0x3333333333333333333333333333333333333333',
+            ]);
         }
     );
 

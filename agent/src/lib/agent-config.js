@@ -1,6 +1,12 @@
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { getAddress } from 'viem';
+import {
+    IPFS_ENV_OVERRIDES,
+    MESSAGE_API_ENV_OVERRIDES,
+    resolveIpfsEnvConfig,
+    resolveMessageApiEnvConfig,
+} from './config.js';
 
 function hasOwn(object, key) {
     return Object.prototype.hasOwnProperty.call(object, key);
@@ -277,6 +283,10 @@ function pickConfigFields(source, keys) {
         out[key] = source?.[key];
     }
     return out;
+}
+
+function hasExplicitConfigValue(source, key) {
+    return hasOwn(source, key) && source[key] !== undefined && source[key] !== null;
 }
 
 function resolveFieldOverride({ resolvedAgentConfig, baseConfig, key, label, parser }) {
@@ -612,6 +622,7 @@ function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
             watchAssets: baseConfig.watchAssets,
             watchErc1155Assets: baseConfig.watchErc1155Assets,
             ...pickConfigFields(baseConfig, SHARED_RUNTIME_FIELD_KEYS),
+            ipfsHeaders: baseConfig.ipfsHeaders,
             messageApiEnabled: baseConfig.messageApiEnabled,
             messageApiHost: baseConfig.messageApiHost,
             messageApiPort: baseConfig.messageApiPort,
@@ -664,8 +675,60 @@ function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
                   ...(chainMessageApi ?? {}),
               }
             : undefined;
+    const effectiveIpfsEnabled = hasExplicitConfigValue(resolvedAgentConfig, 'ipfsEnabled')
+        ? parseBooleanValue(
+              resolvedAgentConfig.ipfsEnabled,
+              `${configSourceLabel} field "ipfsEnabled"`
+          )
+        : baseConfig.ipfsEnabled;
+    if (hasOwn(resolvedAgentConfig, 'ipfsEnabled')) {
+        resolvedAgentConfig.ipfsEnabled = effectiveIpfsEnabled;
+    }
+    const deferredIpfsBaseConfig =
+        baseConfig[IPFS_ENV_OVERRIDES] === undefined
+            ? { ipfsEnabled: effectiveIpfsEnabled }
+            : resolveIpfsEnvConfig({
+                  enabled: effectiveIpfsEnabled,
+                  envOverrides: baseConfig[IPFS_ENV_OVERRIDES],
+                  override: {
+                      ipfsEnabled: effectiveIpfsEnabled,
+                      ipfsApiUrl: hasExplicitConfigValue(resolvedAgentConfig, 'ipfsApiUrl')
+                          ? resolvedAgentConfig.ipfsApiUrl
+                          : undefined,
+                      ipfsRequestTimeoutMs: hasExplicitConfigValue(
+                          resolvedAgentConfig,
+                          'ipfsRequestTimeoutMs'
+                      )
+                          ? resolvedAgentConfig.ipfsRequestTimeoutMs
+                          : undefined,
+                      ipfsMaxRetries: hasExplicitConfigValue(resolvedAgentConfig, 'ipfsMaxRetries')
+                          ? resolvedAgentConfig.ipfsMaxRetries
+                          : undefined,
+                      ipfsRetryDelayMs: hasExplicitConfigValue(
+                          resolvedAgentConfig,
+                          'ipfsRetryDelayMs'
+                      )
+                          ? resolvedAgentConfig.ipfsRetryDelayMs
+                          : undefined,
+                  },
+              });
+    const runtimeBaseConfig = {
+        ...baseConfig,
+        ...deferredIpfsBaseConfig,
+    };
+    const effectiveMessageApiEnabled = mergedMessageApiOverride?.enabled ?? baseConfig.messageApiEnabled;
+    const deferredMessageApiBaseConfig = {
+        ...runtimeBaseConfig,
+        ...(baseConfig[MESSAGE_API_ENV_OVERRIDES] === undefined
+            ? { messageApiEnabled: effectiveMessageApiEnabled }
+            : resolveMessageApiEnvConfig({
+                  enabled: effectiveMessageApiEnabled,
+                  envOverrides: baseConfig[MESSAGE_API_ENV_OVERRIDES],
+                  override: mergedMessageApiOverride,
+              })),
+    };
     const resolvedMessageApi = resolveMessageApiRuntimeConfig({
-        baseConfig,
+        baseConfig: deferredMessageApiBaseConfig,
         override: mergedMessageApiOverride,
         label: `${configSourceLabel} field "messageApi"`,
     });
@@ -700,7 +763,7 @@ function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
             key,
             resolveFieldOverride({
                 resolvedAgentConfig,
-                baseConfig,
+                baseConfig: runtimeBaseConfig,
                 key,
                 label: `${configSourceLabel} field "${key}"`,
                 parser,
@@ -749,6 +812,7 @@ function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
         watchAssets,
         watchErc1155Assets,
         ...sharedRuntimeConfig,
+        ipfsHeaders: runtimeBaseConfig.ipfsHeaders,
         ...resolvedMessageApi,
     };
 }
