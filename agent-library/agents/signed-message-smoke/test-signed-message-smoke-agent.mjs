@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { getDeterministicToolCalls, getSystemPrompt } from './agent.js';
+import { getHarnessDefinition, runSmokeScenario } from './harness.mjs';
 
 async function run() {
     const prompt = getSystemPrompt({
@@ -24,6 +25,11 @@ async function run() {
         ],
     });
     assert.deepEqual(deterministicCalls, []);
+
+    const harnessDefinition = getHarnessDefinition();
+    assert.equal(harnessDefinition.scenario, 'signed-message-smoke');
+    assert.equal(typeof harnessDefinition.description, 'string');
+    assert.equal(typeof runSmokeScenario, 'function');
 
     console.log('[test] signed-message-smoke prompt OK');
 }

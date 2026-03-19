@@ -4,6 +4,10 @@ Each agent lives under `agent-library/agents/<agent-name>/` and must include:
 - `agent.js`: decision logic and prompt construction.
 - `commitment.txt`: plain language commitment that the agent is designed to serve.
 
+Optional module-local files:
+- `config.json`: non-secret commitment/runtime config for that module.
+- `harness.mjs`: local testnet harness smoke scenario entrypoint used by `node agent/scripts/testnet-harness.mjs smoke --module=<agent-name>`.
+
 The runner loads the agent module via `AGENT_MODULE` (agent name) and reads the adjacent `commitment.txt`.
 
 To add a new agent:
