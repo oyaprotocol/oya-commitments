@@ -1,13 +1,23 @@
 {
   "policyName": "erc1155-swap-fast-withdraw",
+  "pollIntervalMs": 1000,
   "paymentTokenSymbol": "USDC",
   "usdcUnitAmountWei": "1000000",
   "fillConfirmationThreshold": 1,
+  "ipfsEnabled": true,
+  "defaultDepositAmountWei": "1000000",
+  "messageApi": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 9891,
+    "requireSignerAllowlist": false
+  },
   "byChain": {
     "11155111": {
       "authorizedAgent": "0x2967C076182F0303037072670e744e26Ed4A830f",
       "commitmentSafe": "0xbBc8362c8b18FB90395666b27154b2E4c2B2b4A6",
       "ogModule": "0x4EA81968539A7Ca607b8EBf01Bf85e759B552228",
+      "defaultDepositAsset": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
       "watchAssets": [
         "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
       ],
