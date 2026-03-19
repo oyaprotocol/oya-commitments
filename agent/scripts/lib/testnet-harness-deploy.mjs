@@ -303,10 +303,12 @@ async function deployHarnessCommitment({
     };
 
     if (runtimeContext.profile.name === 'local-mock') {
-        effectiveConfig = {
-            bondAmount: effectiveConfig.bondAmount ?? '1',
-            ...effectiveConfig,
-        };
+        if (!effectiveConfig.bondAmount) {
+            effectiveConfig = {
+                ...effectiveConfig,
+                bondAmount: '1',
+            };
+        }
         const missingLocalDeps = [
             !effectiveConfig.safeSingleton,
             !effectiveConfig.safeProxyFactory,
@@ -404,8 +406,8 @@ async function deployHarnessCommitment({
             commitmentSafe: deployment.commitmentSafe,
             ogModule: deployment.ogModule,
             ...(deployment.startBlock ? { startBlock: deployment.startBlock } : {}),
-            ...(!runtimeContext.runtimeConfig.defaultDepositAsset && mockDependencies?.collateralToken
-                ? { defaultDepositAsset: mockDependencies.collateralToken }
+            ...(!runtimeContext.runtimeConfig.defaultDepositAsset && effectiveConfig.collateral
+                ? { defaultDepositAsset: effectiveConfig.collateral }
                 : {}),
         },
     });
@@ -426,7 +428,7 @@ async function deployHarnessCommitment({
                         safeProxyFactory: mockDependencies.safeProxyFactory,
                         safeFallbackHandler: mockDependencies.safeFallbackHandler,
                         ogMasterCopy: mockDependencies.ogMasterCopy,
-                        collateral: mockDependencies.collateralToken,
+                        collateral: effectiveConfig.collateral,
                     },
                 },
             },

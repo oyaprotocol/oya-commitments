@@ -10,6 +10,7 @@ import {
     startHarnessAnvil,
     stopHarnessAnvil,
 } from './lib/testnet-harness-anvil.mjs';
+import { createHarnessBaseConfig } from './lib/testnet-harness-runtime.mjs';
 import { resolveHarnessProfile } from './lib/testnet-harness-profiles.mjs';
 import { deriveHarnessRoles, resolveHarnessRoles } from './lib/testnet-harness-roles.mjs';
 import { ensureHarnessSession } from './lib/testnet-harness-session.mjs';
@@ -50,6 +51,12 @@ async function run() {
     assert.equal(remoteProfile.forkConfigured, false);
     assert.equal(remoteProfile.managesLocalNode, false);
     assert.equal(remoteProfile.rpcUrl, 'https://sepolia.example.invalid');
+
+    const baseConfig = createHarnessBaseConfig({ env: {} });
+    assert.equal(
+        baseConfig.polymarketConditionalTokens,
+        '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045'
+    );
 
     const roles = deriveHarnessRoles();
     assert.equal(roles.roles.deployer.address, EXPECTED_DEPLOYER);

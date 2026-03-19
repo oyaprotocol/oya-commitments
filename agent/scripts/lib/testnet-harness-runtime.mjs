@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
+import { DEFAULT_POLYMARKET_CONDITIONAL_TOKENS } from '../../src/lib/config.js';
 import { loadAgentConfigStack, resolveAgentRuntimeConfig } from '../../src/lib/agent-config.js';
 import { resolveHarnessProfile } from './testnet-harness-profiles.mjs';
 
@@ -32,7 +33,7 @@ function createHarnessBaseConfig({ env = process.env } = {}) {
         proposalHashResolvePollIntervalMs: 1_500,
         agentModule: undefined,
         chainlinkPriceFeed: undefined,
-        polymarketConditionalTokens: undefined,
+        polymarketConditionalTokens: DEFAULT_POLYMARKET_CONDITIONAL_TOKENS,
         polymarketExchange: undefined,
         polymarketClobEnabled: false,
         polymarketClobHost: 'https://clob.polymarket.com',
