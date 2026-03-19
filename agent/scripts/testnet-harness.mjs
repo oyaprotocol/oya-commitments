@@ -1,8 +1,4 @@
-import dotenv from 'dotenv';
-import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import { loadAgentConfigStack } from '../src/lib/agent-config.js';
 import {
     ensureHarnessSession,
     readHarnessJson,
@@ -39,18 +35,17 @@ import { listHarnessProfiles, resolveHarnessProfile } from './lib/testnet-harnes
 import { resolveHarnessRoles } from './lib/testnet-harness-roles.mjs';
 import { resolveHarnessRuntimeContext } from './lib/testnet-harness-runtime.mjs';
 import { runHarnessSmokeScenario } from './lib/testnet-harness-smoke.mjs';
+import {
+    getArgValue,
+    hasFlag,
+    loadAgentConfigForScript,
+    loadScriptEnv,
+    repoRoot,
+    resolveAgentModulePath,
+    resolveAgentRef,
+} from './lib/cli-runtime.mjs';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const repoRoot = path.resolve(__dirname, '../..');
-
-dotenv.config();
-dotenv.config({ path: path.resolve(repoRoot, 'agent/.env') });
-
-function getArgValue(prefix, argv = process.argv) {
-    const arg = argv.find((value) => value.startsWith(prefix));
-    return arg ? arg.slice(prefix.length) : null;
-}
+loadScriptEnv();
 
 function printUsage() {
     const profiles = listHarnessProfiles()
@@ -85,10 +80,6 @@ function resolveCommand(argv = process.argv) {
         return null;
     }
     return command;
-}
-
-function resolveAgentRef(argv = process.argv, env = process.env) {
-    return getArgValue('--module=', argv) ?? env.AGENT_MODULE ?? 'default';
 }
 
 function resolveProfile(argv = process.argv) {
@@ -133,25 +124,15 @@ function parseOptionalInteger(raw, label) {
     return parsed;
 }
 
-function hasFlag(flag, argv = process.argv) {
-    return argv.includes(flag);
-}
-
-function resolveAgentModulePath(agentRef) {
-    const modulePath = agentRef.includes('/')
-        ? agentRef
-        : `agent-library/agents/${agentRef}/agent.js`;
-    return path.isAbsolute(modulePath)
-        ? modulePath
-        : path.resolve(repoRoot, modulePath);
-}
-
 async function resolveConfigSummary(agentRef, sessionOverlayPath) {
-    const resolvedModulePath = resolveAgentModulePath(agentRef);
-    const configPath = path.join(path.dirname(resolvedModulePath), 'config.json');
-    const agentConfigStack = await loadAgentConfigStack(configPath, {
-        overlayPaths: [sessionOverlayPath],
+    const {
+        modulePath: resolvedModulePath,
+        configPath,
+        agentConfigStack,
+    } = await loadAgentConfigForScript(agentRef, {
+        repoRootPath: repoRoot,
         env: process.env,
+        overlayPaths: [sessionOverlayPath],
     });
 
     return {

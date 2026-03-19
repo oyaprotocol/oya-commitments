@@ -1,24 +1,16 @@
-import dotenv from 'dotenv';
 import path from 'node:path';
 import { readFile, writeFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
 import { buildConfigMigrationPatch, mergePlainObjects } from './lib/config-migration.mjs';
+import {
+    getArgValue,
+    hasFlag,
+    loadScriptEnv,
+    repoRoot,
+    resolveAgentDirectory,
+    resolveAgentRef,
+} from './lib/cli-runtime.mjs';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const repoRoot = path.resolve(__dirname, '../..');
-
-dotenv.config();
-dotenv.config({ path: path.resolve(repoRoot, 'agent/.env') });
-
-function getArgValue(prefix) {
-    const arg = process.argv.find((value) => value.startsWith(prefix));
-    return arg ? arg.slice(prefix.length) : null;
-}
-
-function hasFlag(flag) {
-    return process.argv.includes(flag);
-}
+loadScriptEnv();
 
 async function readJsonObject(filePath) {
     try {
@@ -55,10 +47,10 @@ async function main() {
         return;
     }
 
-    const agentRef = getArgValue('--module=') ?? process.env.AGENT_MODULE ?? 'default';
+    const agentRef = getArgValue('--module=') ?? resolveAgentRef();
     const chainId = getArgValue('--chain-id=') ?? process.env.CHAIN_ID ?? undefined;
     const outArg = getArgValue('--out=');
-    const moduleDir = path.resolve(repoRoot, 'agent-library/agents', agentRef);
+    const moduleDir = resolveAgentDirectory(agentRef, { repoRootPath: repoRoot });
     const outputPath = outArg ? path.resolve(outArg) : path.join(moduleDir, 'config.local.json');
 
     const patch = buildConfigMigrationPatch({

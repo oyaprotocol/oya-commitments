@@ -1,26 +1,19 @@
-import dotenv from 'dotenv';
 import { randomUUID } from 'node:crypto';
-import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { loadAgentConfigStack, resolveAgentRuntimeConfig } from '../src/lib/agent-config.js';
+import { resolveAgentRuntimeConfig } from '../src/lib/agent-config.js';
 import { privateKeyToAccount } from 'viem/accounts';
 import { buildSignedMessagePayload } from '../src/lib/message-signing.js';
+import {
+    getArgValue,
+    hasFlag,
+    isDirectScriptExecution,
+    loadAgentConfigForScript,
+    loadScriptEnv,
+    repoRoot,
+    resolveAgentModulePath,
+    resolveAgentRef,
+} from './lib/cli-runtime.mjs';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const repoRoot = path.resolve(__dirname, '../..');
-
-dotenv.config();
-dotenv.config({ path: path.resolve(repoRoot, 'agent/.env') });
-
-function getArgValue(prefix, argv = process.argv) {
-    const arg = argv.find((value) => value.startsWith(prefix));
-    return arg ? arg.slice(prefix.length) : null;
-}
-
-function hasFlag(flag, argv = process.argv) {
-    return argv.includes(flag);
-}
+loadScriptEnv();
 
 function parseInteger(value, label) {
     const parsed = Number(value);
@@ -105,19 +98,6 @@ function formatBaseUrl({ scheme, host, port, pathname = '', search = '' }) {
     return `${scheme}://${authorityHost}:${port}${normalizedPath}${search}`;
 }
 
-function resolveAgentRef(argv = process.argv, env = process.env) {
-    return getArgValue('--module=', argv) ?? env.AGENT_MODULE ?? 'default';
-}
-
-function resolveAgentModulePath(agentRef, repoRootPath = repoRoot) {
-    const modulePath = agentRef.includes('/')
-        ? agentRef
-        : `agent-library/agents/${agentRef}/agent.js`;
-    return path.isAbsolute(modulePath)
-        ? modulePath
-        : path.resolve(repoRootPath, modulePath);
-}
-
 function inferRuntimeChainId(rawAgentConfig, explicitChainIdRaw) {
     if (explicitChainIdRaw !== null && explicitChainIdRaw !== undefined && explicitChainIdRaw !== '') {
         return parseInteger(explicitChainIdRaw, 'chainId');
@@ -139,9 +119,15 @@ async function resolveMessageApiConfigForAgent({
     repoRootPath = repoRoot,
     env = process.env,
 }) {
-    const resolvedModulePath = resolveAgentModulePath(agentRef, repoRootPath);
-    const agentConfigPath = path.join(path.dirname(resolvedModulePath), 'config.json');
-    const agentConfigFile = await loadAgentConfigStack(agentConfigPath, { env });
+    const {
+        modulePath: resolvedModulePath,
+        configPath: agentConfigPath,
+        agentConfigStack,
+    } = await loadAgentConfigForScript(agentRef, {
+        repoRootPath,
+        env,
+    });
+    const agentConfigFile = agentConfigStack;
     const runtimeChainId = inferRuntimeChainId(agentConfigFile.raw, chainId);
 
     const runtimeConfig = resolveAgentRuntimeConfig({
@@ -196,7 +182,7 @@ async function buildBaseUrl({
         explicitPortRaw === null ? undefined : parseInteger(explicitPortRaw, 'port');
     const explicitScheme = getArgValue('--scheme=', argv);
 
-    const agentRef = resolveAgentRef(argv, env);
+    const agentRef = resolveAgentRef({ argv, env });
     const chainId = getArgValue('--chain-id=', argv) ?? env.MESSAGE_API_CHAIN_ID ?? undefined;
     const runtimeConfig = await resolveMessageApiConfigForAgent({
         agentRef,
@@ -375,7 +361,7 @@ async function main() {
     }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isDirectScriptExecution(import.meta.url)) {
     main().catch((error) => {
         console.error('[agent] send signed message failed:', error?.message ?? error);
         process.exit(1);

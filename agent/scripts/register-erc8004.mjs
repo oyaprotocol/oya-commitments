@@ -1,32 +1,20 @@
-import dotenv from 'dotenv';
 import { readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { createPublicClient, createWalletClient, decodeEventLog, http } from 'viem';
+import { createPublicClient, decodeEventLog, http } from 'viem';
 import { getAddress } from 'viem';
 import { createSignerClient } from '../src/lib/signer.js';
+import {
+    getArgValue,
+    loadScriptEnv,
+    normalizeAgentName,
+    repoRoot,
+    resolveAgentDirectory,
+    resolveAgentRef,
+} from './lib/cli-runtime.mjs';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const repoRoot = path.resolve(__dirname, '../..');
-
-dotenv.config();
-dotenv.config({ path: path.resolve(repoRoot, 'agent/.env') });
-
-function getArgValue(prefix) {
-    const arg = process.argv.find((value) => value.startsWith(prefix));
-    return arg ? arg.slice(prefix.length) : null;
-}
+loadScriptEnv();
 
 function formatCaip10(chainId, address) {
     return `eip155:${chainId}:${address.toLowerCase()}`;
-}
-
-function normalizeAgentName(agentRef) {
-    if (!agentRef) return 'default';
-    if (!agentRef.includes('/')) return agentRef;
-    const trimmed = agentRef.endsWith('.js') ? path.dirname(agentRef) : agentRef;
-    return path.basename(trimmed);
 }
 
 const REGISTRY_BY_NETWORK = {
@@ -105,14 +93,13 @@ const identityRegistryAbi = [
 ];
 
 async function main() {
-    const agentRef = getArgValue('--agent=') ?? process.env.AGENT_MODULE ?? 'default';
+    const agentRef =
+        getArgValue('--agent=') ??
+        resolveAgentRef({ flag: '--agent=' });
     const agentName = normalizeAgentName(agentRef);
-    const agentDir = agentRef.includes('/')
-        ? agentRef.endsWith('.js')
-            ? path.dirname(agentRef)
-            : agentRef
-        : `agent-library/agents/${agentName}`;
-    const agentJsonPath = path.resolve(repoRoot, agentDir, 'agent.json');
+    const agentJsonPath = `${resolveAgentDirectory(agentRef, {
+        repoRootPath: repoRoot,
+    })}/agent.json`;
 
     const agentUriArg = getArgValue('--agent-uri=');
     const agentOrg = process.env.AGENT_ORG ?? 'oyaprotocol';
