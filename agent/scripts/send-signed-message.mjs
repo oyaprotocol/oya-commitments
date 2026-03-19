@@ -3,6 +3,7 @@ import {
     resolveAgentRuntimeConfig,
     resolveConfiguredChainId,
 } from '../src/lib/agent-config.js';
+import { createPublicClient, http } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { buildSignedMessagePayload } from '../src/lib/message-signing.js';
 import {
@@ -101,6 +102,18 @@ function formatBaseUrl({ scheme, host, port, pathname = '', search = '' }) {
     return `${scheme}://${authorityHost}:${port}${normalizedPath}${search}`;
 }
 
+async function resolveRpcChainId(env = process.env) {
+    const rpcUrl =
+        typeof env?.RPC_URL === 'string' && env.RPC_URL.trim() ? env.RPC_URL.trim() : null;
+    if (!rpcUrl) {
+        return undefined;
+    }
+    const publicClient = createPublicClient({
+        transport: http(rpcUrl),
+    });
+    return await publicClient.getChainId();
+}
+
 async function resolveMessageApiConfigForAgent({
     agentRef,
     chainId,
@@ -116,10 +129,12 @@ async function resolveMessageApiConfigForAgent({
         env,
     });
     const agentConfigFile = agentConfigStack;
-    const runtimeChainId = resolveConfiguredChainId({
+    const configuredChainId = resolveConfiguredChainId({
         agentConfigFile,
         explicitChainId: chainId,
     });
+    const runtimeChainId =
+        configuredChainId ?? (await resolveRpcChainId(env));
 
     const runtimeConfig = resolveAgentRuntimeConfig({
         baseConfig: {

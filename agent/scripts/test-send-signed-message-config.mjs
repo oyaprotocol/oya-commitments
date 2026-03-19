@@ -22,6 +22,16 @@ async function createAgentModule(repoRootPath, name, config, localConfig) {
     }
 }
 
+async function withMockFetch(mockFetch, fn) {
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = mockFetch;
+    try {
+        return await fn();
+    } finally {
+        globalThis.fetch = previousFetch;
+    }
+}
+
 async function run() {
     const repoRootPath = await mkdtemp(path.join(os.tmpdir(), 'send-signed-message-'));
 
@@ -55,6 +65,12 @@ async function run() {
 
     await createAgentModule(repoRootPath, 'blank', {
         policyName: 'blank',
+    });
+    await createAgentModule(repoRootPath, 'rpc-chain', {
+        messageApi: {
+            host: 'rpc-host.local',
+            port: 9001,
+        },
     });
 
     const overlayPath = path.join(repoRootPath, 'overlay.json');
@@ -210,6 +226,33 @@ async function run() {
         }),
         'http://127.0.0.1:8787'
     );
+
+    await withMockFetch(async (input, init) => {
+        assert.equal(String(input), 'http://rpc.mock.local/');
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        assert.equal(body.method, 'eth_chainId');
+        return new Response(
+            JSON.stringify({
+                jsonrpc: '2.0',
+                id: body.id ?? 1,
+                result: '0x7a69',
+            }),
+            {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+            }
+        );
+    }, async () => {
+        const rpcChainTarget = await resolveMessageApiTarget({
+            argv: ['node', 'send-signed-message.mjs', '--module=rpc-chain'],
+            env: {
+                RPC_URL: 'http://rpc.mock.local',
+            },
+            repoRootPath,
+        });
+        assert.equal(rpcChainTarget.baseUrl, 'http://rpc-host.local:9001');
+        assert.equal(rpcChainTarget.chainId, 31337);
+    });
 
     console.log('ok');
 }
