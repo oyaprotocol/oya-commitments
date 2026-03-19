@@ -203,12 +203,14 @@ If bearer gating is configured, also pass `--bearer-token="<token>"` or set `MES
 
 Enable IPFS artifact publishing when agents need to store signed requests, explanations, or other artifacts offchain and refer to them by CID.
 
-- `IPFS_ENABLED`: Enable the `ipfs_publish` tool (`true`/`false`, default `false`).
-- `IPFS_API_URL`: Base URL for a Kubo-compatible IPFS API (default `http://127.0.0.1:5001`).
-- `IPFS_HEADERS_JSON`: Optional JSON object of extra HTTP headers for the IPFS API, for example `{"Authorization":"Bearer <token>"}`.
-- `IPFS_REQUEST_TIMEOUT_MS`: Optional request timeout (default `15000`).
-- `IPFS_MAX_RETRIES`: Optional retry count for transient IPFS failures (default `1`).
-- `IPFS_RETRY_DELAY_MS`: Optional retry delay in milliseconds (default `250`).
+Configure non-secret IPFS settings in the module `config.json` or `byChain.<chainId>`:
+- `ipfsEnabled`: Enable the `ipfs_publish` tool (`true`/`false`, default `false`).
+- `ipfsApiUrl`: Base URL for a Kubo-compatible IPFS API (default `http://127.0.0.1:5001`).
+- `ipfsRequestTimeoutMs`: Optional request timeout (default `15000`).
+- `ipfsMaxRetries`: Optional retry count for transient IPFS failures (default `1`).
+- `ipfsRetryDelayMs`: Optional retry delay in milliseconds (default `250`).
+
+Keep `IPFS_HEADERS_JSON` in env when it contains auth headers, for example `{"Authorization":"Bearer <token>"}`.
 
 Tool:
 
@@ -258,7 +260,7 @@ The shared tooling supports:
 
 #### Polymarket Environment Variables
 
-Set these when using Polymarket functionality:
+Set these when using Polymarket functionality. Non-secret `polymarket*` fields belong in the module config; env is still used for secrets and remains a fallback for backward compatibility:
 - `POLYMARKET_CONDITIONAL_TOKENS`: Optional CTF contract address override used by CTF actions (default is Polymarket mainnet ConditionalTokens).
 - `POLYMARKET_EXCHANGE`: Optional CTF exchange override for EIP-712 order signing domain.
 - `POLYMARKET_CLOB_ENABLED`: Enable CLOB tools (`true`/`false`, default `false`).
@@ -425,7 +427,7 @@ This tool requires a signer backend that supports `signTypedData`.
 
 ### Propose vs Dispute Modes
 
-Set `PROPOSE_ENABLED` and `DISPUTE_ENABLED` to control behavior:
+Set `proposeEnabled` and `disputeEnabled` in module config, or use the env fallbacks `PROPOSE_ENABLED` and `DISPUTE_ENABLED`, to control behavior:
 - Both true: propose and dispute as needed (default).
 - Only `PROPOSE_ENABLED=true`: propose only, never dispute.
 - Only `DISPUTE_ENABLED=true`: dispute only, never propose.
@@ -482,26 +484,79 @@ Example:
 
 The merged result is exposed to agent modules as `config.agentConfig`, while the resolved active-chain addresses and watchlists still appear at `config.commitmentSafe`, `config.ogModule`, `config.watchAssets`, and `config.watchErc1155Assets`.
 
+#### Building A New Agentic Commitment
+
+Recommended workflow for a new module:
+1. Copy `agent-library/agents/default/` to `agent-library/agents/<agent-name>/`.
+2. Write the plain-language rules in `commitment.txt`.
+3. Implement commitment-specific logic in `agent.js`.
+4. Add `config.json` for non-secret behavior and chain-specific deployment details.
+5. Add `harness.mjs` when the module needs a custom smoke flow beyond generic deploy/start/message/deposit steps.
+6. Keep secrets in `agent/.env` only: signer keys, `OPENAI_API_KEY`, `MESSAGE_API_KEYS_JSON`, authenticated `IPFS_HEADERS_JSON`, Polymarket API credentials, and similar bearer tokens.
+
+Recommended minimal module config shape:
+
+```json
+{
+  "defaultDepositAmountWei": "1000000",
+  "messageApi": {
+    "enabled": true,
+    "requireSignerAllowlist": false
+  },
+  "harness": {
+    "deployment": {
+      "bondAmount": "1000000"
+    }
+  },
+  "byChain": {
+    "11155111": {
+      "commitmentSafe": "0x1111111111111111111111111111111111111111",
+      "ogModule": "0x2222222222222222222222222222222222222222",
+      "startBlock": "8123456"
+    }
+  }
+}
+```
+
+Validate the module before running it:
+
+```bash
+node agent/scripts/validate-agent.mjs --module=<agent-name>
+node agent-library/agents/<agent-name>/test-<agent-name>.mjs
+```
+
 The local testnet harness stores untracked session state under `agent/.state/harness/<module>/<profile>/`, including:
 - `overlay.json` for ephemeral config overrides layered above the tracked module config
 - `deployment.json` for the most recent commitment deployment discovered or created by the harness
 - `roles.json` for deterministic local dev roles (`deployer`, `agent`, `depositor`)
 - `pids.json` plus `anvil.log` / `agent.log` / `ipfs.log` for local process supervision
 
-Phase 5 commands:
+#### Local Harness
+
+The fastest end-to-end loop for a new commitment module is:
 
 ```bash
-node agent/scripts/testnet-harness.mjs init --module=default --profile=local-mock
-node agent/scripts/testnet-harness.mjs up --module=default --profile=local-mock
-node agent/scripts/testnet-harness.mjs deploy --module=default --profile=local-mock
-node agent/scripts/testnet-harness.mjs agent-up --module=default --profile=local-mock
-node agent/scripts/testnet-harness.mjs run-agent --module=default --profile=local-mock
-node agent/scripts/testnet-harness.mjs smoke --module=default --profile=local-mock
-node agent/scripts/testnet-harness.mjs seed-erc20 --module=default --profile=local-mock --token=0x... --amount-wei=1000000 --mint
-node agent/scripts/testnet-harness.mjs deposit --module=default --profile=local-mock --amount-wei=1000000
-node agent/scripts/testnet-harness.mjs message --module=default --profile=local-mock --text="Test signed instruction" --dry-run
-node agent/scripts/testnet-harness.mjs status --module=default --profile=local-mock
-node agent/scripts/testnet-harness.mjs down --module=default --profile=local-mock
+node agent/scripts/testnet-harness.mjs smoke --module=<agent-name> --profile=local-mock
+node agent/scripts/testnet-harness.mjs status --module=<agent-name> --profile=local-mock
+node agent/scripts/testnet-harness.mjs down --module=<agent-name> --profile=local-mock
+```
+
+Use `local-mock` while building the module. It can auto-deploy mock Safe/OG dependencies, default the bond amount to `1` when the module omits it, and align `defaultDepositAsset` with the actual deployed collateral unless the module config already overrides that field.
+
+For step-by-step debugging, the harness also supports:
+
+```bash
+node agent/scripts/testnet-harness.mjs init --module=<agent-name> --profile=local-mock
+node agent/scripts/testnet-harness.mjs up --module=<agent-name> --profile=local-mock
+node agent/scripts/testnet-harness.mjs deploy --module=<agent-name> --profile=local-mock
+node agent/scripts/testnet-harness.mjs agent-up --module=<agent-name> --profile=local-mock
+node agent/scripts/testnet-harness.mjs run-agent --module=<agent-name> --profile=local-mock
+node agent/scripts/testnet-harness.mjs smoke --module=<agent-name> --profile=local-mock
+node agent/scripts/testnet-harness.mjs seed-erc20 --module=<agent-name> --profile=local-mock --token=0x... --amount-wei=1000000 --mint
+node agent/scripts/testnet-harness.mjs deposit --module=<agent-name> --profile=local-mock --amount-wei=1000000
+node agent/scripts/testnet-harness.mjs message --module=<agent-name> --profile=local-mock --text="Test signed instruction" --dry-run
+node agent/scripts/testnet-harness.mjs status --module=<agent-name> --profile=local-mock
+node agent/scripts/testnet-harness.mjs down --module=<agent-name> --profile=local-mock
 ```
 
 Available built-in profiles are `local-mock`, `fork-sepolia`, `fork-polygon`, and `remote-sepolia`. Fork and remote Sepolia profiles expect `SEPOLIA_RPC_URL`; Polygon fork expects `POLYGON_RPC_URL`.
@@ -524,7 +579,7 @@ For local harness deployment, you can optionally add non-secret defaults under `
 }
 ```
 
-`local-mock` can auto-deploy mock Safe/OG dependencies and a mock collateral token. Fork profiles reuse configured dependency addresses when present, and otherwise expect `harness.deployment` to provide the non-secret deployment inputs.
+`local-mock` can auto-deploy mock Safe/OG dependencies. If `harness.deployment.collateral` is omitted, it also provisions a mock collateral token. Fork profiles reuse configured dependency addresses when present, and otherwise expect `harness.deployment` to provide the non-secret deployment inputs.
 
 `agent-up` starts the runner in the background with the harness-managed deterministic `agent` key and records it in `pids.json`; `down` now stops both the detached runner and Anvil. `run-agent` remains the foreground option.
 
@@ -546,6 +601,15 @@ For remote Sepolia smoke runs, the harness uses env-backed role keys instead of 
 - deployer: `HARNESS_DEPLOYER_PRIVATE_KEY` or `DEPLOYER_PK`
 - agent: `HARNESS_AGENT_PRIVATE_KEY` or `PRIVATE_KEY`
 - depositor/message signer: `HARNESS_DEPOSITOR_PRIVATE_KEY` or `MESSAGE_API_SIGNER_PRIVATE_KEY`
+
+The simplest real testnet path is:
+1. make sure the module has Sepolia `byChain.11155111` config for `commitmentSafe` / `ogModule`, or enough `harness.deployment` settings for remote deployment
+2. keep only the private keys and API tokens in `agent/.env`
+3. run:
+
+```bash
+node agent/scripts/testnet-harness.mjs smoke --module=<agent-name> --profile=remote-sepolia
+```
 
 Example remote smoke command:
 
