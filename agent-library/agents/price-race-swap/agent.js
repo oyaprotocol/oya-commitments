@@ -162,7 +162,7 @@ async function reconcileSingleFireFromChain({
     singleFireReconciledOnchain = true;
     if (!publicClient || singleFireState.proposalSubmitted) return;
 
-    const rawOgModule = ogModuleInput ?? config?.ogModule ?? process.env.OG_MODULE;
+    const rawOgModule = ogModuleInput ?? config?.ogModule;
     if (!rawOgModule) return;
 
     let ogModule;
@@ -178,9 +178,7 @@ async function reconcileSingleFireFromChain({
             ? BigInt(startBlock)
             : config?.startBlock !== undefined && config?.startBlock !== null
               ? BigInt(config.startBlock)
-              : process.env.START_BLOCK
-                ? BigInt(process.env.START_BLOCK)
-                : 0n;
+              : 0n;
     const chunkSize = 50_000n;
     let currentTo = latestBlock;
 

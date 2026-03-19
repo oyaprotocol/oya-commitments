@@ -52,7 +52,6 @@ function resolvePolicyPresetName(config) {
     const raw = String(
         config?.agentConfig?.deterministicDcaPolicyPreset ??
             config?.deterministicDcaPolicyPreset ??
-            process.env.DETERMINISTIC_DCA_POLICY_PRESET ??
             ''
     )
         .trim()
@@ -60,7 +59,7 @@ function resolvePolicyPresetName(config) {
     if (!raw) return DEFAULT_POLICY_PRESET;
     if (raw === 'mainnet' || raw === 'testnet') return raw;
     console.warn(
-        `[deterministic-dca-agent] Unsupported DETERMINISTIC_DCA_POLICY_PRESET='${raw}', defaulting to ${DEFAULT_POLICY_PRESET}.`
+        `[deterministic-dca-agent] Unsupported deterministicDcaPolicyPreset='${raw}', defaulting to ${DEFAULT_POLICY_PRESET}.`
     );
     return DEFAULT_POLICY_PRESET;
 }
@@ -120,9 +119,7 @@ function resolveLogChunkSize(config) {
     }
 
     const legacyRaw =
-        config?.agentConfig?.deterministicDcaLogChunkSize ??
-        config?.deterministicDcaLogChunkSize ??
-        process.env.DETERMINISTIC_DCA_LOG_CHUNK_SIZE;
+        config?.agentConfig?.deterministicDcaLogChunkSize ?? config?.deterministicDcaLogChunkSize;
     if (legacyRaw === undefined || legacyRaw === null || String(legacyRaw).trim() === '') {
         return POLICY.logChunkSize;
     }
@@ -135,7 +132,7 @@ function resolveLogChunkSize(config) {
         return parsed;
     } catch {
         console.warn(
-            `[deterministic-dca-agent] Invalid DETERMINISTIC_DCA_LOG_CHUNK_SIZE='${legacyRaw}', using default ${POLICY.logChunkSize.toString()}.`
+            `[deterministic-dca-agent] Invalid deterministicDcaLogChunkSize='${legacyRaw}', using default ${POLICY.logChunkSize.toString()}.`
         );
         return POLICY.logChunkSize;
     }

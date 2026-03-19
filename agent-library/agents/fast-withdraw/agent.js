@@ -869,7 +869,7 @@ async function validateToolCalls({
     for (const call of Array.isArray(toolCalls) ? toolCalls : []) {
         if (call?.name === 'ipfs_publish') {
             if (!config?.ipfsEnabled) {
-                throw new Error('fast-withdraw archival requires IPFS_ENABLED=true.');
+                throw new Error('fast-withdraw archival requires ipfsEnabled=true in module config.');
             }
 
             const args = parseCallArgs(call);

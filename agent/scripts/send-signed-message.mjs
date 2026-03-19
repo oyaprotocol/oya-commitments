@@ -150,18 +150,11 @@ async function resolveMessageApiConfigForAgent({
             ogModule: undefined,
             watchAssets: [],
             watchErc1155Assets: [],
-            messageApiEnabled:
-                env.MESSAGE_API_ENABLED === undefined
-                    ? false
-                    : env.MESSAGE_API_ENABLED.toLowerCase() !== 'false',
-            messageApiHost: env.MESSAGE_API_HOST ?? '127.0.0.1',
-            messageApiPort:
-                env.MESSAGE_API_PORT === undefined ? 8787 : parseInteger(env.MESSAGE_API_PORT, 'port'),
+            messageApiEnabled: false,
+            messageApiHost: '127.0.0.1',
+            messageApiPort: 8787,
             messageApiKeys: {},
-            messageApiRequireSignerAllowlist:
-                env.MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST === undefined
-                    ? true
-                    : env.MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST.toLowerCase() !== 'false',
+            messageApiRequireSignerAllowlist: true,
             messageApiSignerAllowlist: [],
             messageApiSignatureMaxAgeSeconds: 300,
             messageApiMaxBodyBytes: 8192,
@@ -212,31 +205,11 @@ async function buildBaseUrl({
         env,
     });
 
-    let baseParts = null;
-    if (runtimeConfig.hasMessageApiConfig) {
-        baseParts = {
-            scheme: env.MESSAGE_API_SCHEME ?? 'http',
-            host: runtimeConfig.messageApiHost,
-            port: runtimeConfig.messageApiPort,
-        };
-    }
-
-    const envUrl = env.MESSAGE_API_URL;
-    if (!baseParts && envUrl) {
-        if (explicitHost === null && explicitPort === undefined && explicitScheme === null) {
-            return normalizeBaseUrl(envUrl);
-        }
-        baseParts = parseBaseUrlParts(envUrl, 'MESSAGE_API_URL');
-    }
-
-    if (!baseParts) {
-        const envPortRaw = env.MESSAGE_API_PORT ?? '8787';
-        baseParts = {
-            scheme: env.MESSAGE_API_SCHEME ?? 'http',
-            host: env.MESSAGE_API_HOST ?? '127.0.0.1',
-            port: parseInteger(envPortRaw, 'port'),
-        };
-    }
+    const baseParts = {
+        scheme: 'http',
+        host: runtimeConfig.messageApiHost,
+        port: runtimeConfig.messageApiPort,
+    };
 
     return formatBaseUrl({
         ...baseParts,

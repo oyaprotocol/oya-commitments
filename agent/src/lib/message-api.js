@@ -244,7 +244,7 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
     const signatureMaxAgeSeconds = Number(config.messageApiSignatureMaxAgeSeconds ?? 300);
     if (requireSignerAllowlist && signerAllowlist.size === 0) {
         throw new Error(
-            'Message API requires MESSAGE_API_SIGNER_ALLOWLIST when MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST=true. MESSAGE_API_KEYS_JSON is optional additional bearer gating.'
+            'Message API requires messageApi.signerAllowlist when messageApi.requireSignerAllowlist=true. MESSAGE_API_KEYS_JSON is optional additional bearer gating.'
         );
     }
 

@@ -690,27 +690,6 @@ function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
             : resolveIpfsEnvConfig({
                   enabled: effectiveIpfsEnabled,
                   envOverrides: baseConfig[IPFS_ENV_OVERRIDES],
-                  override: {
-                      ipfsEnabled: effectiveIpfsEnabled,
-                      ipfsApiUrl: hasExplicitConfigValue(resolvedAgentConfig, 'ipfsApiUrl')
-                          ? resolvedAgentConfig.ipfsApiUrl
-                          : undefined,
-                      ipfsRequestTimeoutMs: hasExplicitConfigValue(
-                          resolvedAgentConfig,
-                          'ipfsRequestTimeoutMs'
-                      )
-                          ? resolvedAgentConfig.ipfsRequestTimeoutMs
-                          : undefined,
-                      ipfsMaxRetries: hasExplicitConfigValue(resolvedAgentConfig, 'ipfsMaxRetries')
-                          ? resolvedAgentConfig.ipfsMaxRetries
-                          : undefined,
-                      ipfsRetryDelayMs: hasExplicitConfigValue(
-                          resolvedAgentConfig,
-                          'ipfsRetryDelayMs'
-                      )
-                          ? resolvedAgentConfig.ipfsRetryDelayMs
-                          : undefined,
-                  },
               });
     const runtimeBaseConfig = {
         ...baseConfig,
@@ -724,7 +703,6 @@ function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
             : resolveMessageApiEnvConfig({
                   enabled: effectiveMessageApiEnabled,
                   envOverrides: baseConfig[MESSAGE_API_ENV_OVERRIDES],
-                  override: mergedMessageApiOverride,
               })),
     };
     const resolvedMessageApi = resolveMessageApiRuntimeConfig({

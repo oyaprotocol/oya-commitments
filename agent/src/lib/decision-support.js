@@ -91,7 +91,7 @@ function validateMessageApiDecisionEngine({ config, agentModule }) {
     if (hasDeterministicDecisionEngine(agentModule)) return;
     if (hasLlmDecisionEngine(config)) return;
     throw new Error(
-        'MESSAGE_API_ENABLED=true requires OPENAI_API_KEY or agentModule.getDeterministicToolCalls().'
+        'messageApi.enabled requires OPENAI_API_KEY or agentModule.getDeterministicToolCalls().'
     );
 }
 

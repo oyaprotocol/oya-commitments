@@ -946,7 +946,7 @@ async function testSignedRequestRequiresIpfsEnabled() {
                     config,
                     onchainPendingProposal: false,
                 }),
-            /IPFS_ENABLED=true/i
+            /ipfsEnabled=true in module config/i
         );
 
         const state = await getSwapState();
@@ -1001,7 +1001,7 @@ async function testPendingArchiveOrdersRequireIpfsEnabled() {
                     config: configWithoutIpfs,
                     onchainPendingProposal: false,
                 }),
-            /IPFS_ENABLED=true/i
+            /ipfsEnabled=true in module config/i
         );
     });
 }

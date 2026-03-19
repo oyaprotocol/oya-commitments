@@ -1,5 +1,6 @@
 import 'dotenv/config';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -132,10 +133,24 @@ async function main() {
     });
     console.log('[sim] Seeded assertion currency:', seeded.currency);
 
-    process.env.COMMITMENT_SAFE = account.address;
-    process.env.OG_MODULE = og;
-    process.env.WATCH_ASSETS = erc20;
-    process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? '';
+    const overlayDir = await mkdtemp(path.join(os.tmpdir(), 'simulate-dispute-'));
+    const overlayPath = path.join(overlayDir, 'overlay.json');
+    await writeFile(
+        overlayPath,
+        JSON.stringify(
+            {
+                commitmentSafe: account.address,
+                ogModule: og,
+                watchAssets: [erc20],
+            },
+            null,
+            2
+        ),
+        'utf8'
+    );
+
+    process.env.AGENT_MODULE = process.env.AGENT_MODULE ?? 'default';
+    process.env.AGENT_CONFIG_OVERLAY_PATH = overlayPath;
 
     const { postBondAndDispute } = await import('../src/index.js');
 

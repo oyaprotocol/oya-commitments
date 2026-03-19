@@ -11,18 +11,18 @@ import {
 } from '../src/lib/agent-config.js';
 
 const RPC_URL = 'http://127.0.0.1:8545';
-const ENV_ERC20 = '0x1111111111111111111111111111111111111111';
+const BASE_ERC20 = '0x1111111111111111111111111111111111111111';
 const FILE_ERC20 = '0x2222222222222222222222222222222222222222';
 const FILE_CHAIN_ERC20 = '0x3333333333333333333333333333333333333333';
-const ENV_ERC1155 = '0x4444444444444444444444444444444444444444';
+const BASE_ERC1155 = '0x4444444444444444444444444444444444444444';
 const FILE_ERC1155 = '0x5555555555555555555555555555555555555555';
-const ENV_SAFE = '0x6666666666666666666666666666666666666666';
+const BASE_SAFE = '0x6666666666666666666666666666666666666666';
 const FILE_SAFE = '0x7777777777777777777777777777777777777777';
-const ENV_OG = '0x8888888888888888888888888888888888888888';
+const BASE_OG = '0x8888888888888888888888888888888888888888';
 const FILE_OG = '0x9999999999999999999999999999999999999999';
 const FILE_SIGNER = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const CHAIN_SIGNER = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
-const MANAGED_ENV_KEYS = ['RPC_URL', 'COMMITMENT_SAFE', 'OG_MODULE'];
+const MANAGED_ENV_KEYS = ['RPC_URL'];
 
 function withManagedEnv(overrides, fn) {
     const previous = new Map();
@@ -58,34 +58,28 @@ async function run() {
     const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'agent-config-file-'));
     const missingPath = path.join(tmpDir, 'missing-config.json');
 
-    withManagedEnv(
-        {
-            COMMITMENT_SAFE: undefined,
-            OG_MODULE: undefined,
-        },
-        () => {
-            const config = buildConfig();
-            assert.equal(config.commitmentSafe, undefined);
-            assert.equal(config.ogModule, undefined);
-        }
-    );
+    withManagedEnv({}, () => {
+        const config = buildConfig();
+        assert.equal(config.commitmentSafe, undefined);
+        assert.equal(config.ogModule, undefined);
+    });
 
     const baseConfig = {
-        commitmentSafe: ENV_SAFE,
-        ogModule: ENV_OG,
-        watchAssets: [ENV_ERC20],
+        commitmentSafe: BASE_SAFE,
+        ogModule: BASE_OG,
+        watchAssets: [BASE_ERC20],
         watchErc1155Assets: [
             {
-                token: ENV_ERC1155,
+                token: BASE_ERC1155,
                 tokenId: '9',
-                symbol: 'ENV-1155',
+                symbol: 'BASE-1155',
             },
         ],
         pollIntervalMs: 10_000,
         logChunkSize: 5_000n,
         startBlock: 12_345n,
         watchNativeBalance: true,
-        defaultDepositAsset: ENV_ERC20,
+        defaultDepositAsset: BASE_ERC20,
         defaultDepositAmountWei: 777n,
         bondSpender: 'og',
         openAiModel: 'gpt-4.1-mini',
@@ -100,12 +94,12 @@ async function run() {
         disputeRetryMs: 60_000,
         proposalHashResolveTimeoutMs: 15_000,
         proposalHashResolvePollIntervalMs: 1_500,
-        chainlinkPriceFeed: ENV_SAFE,
-        polymarketConditionalTokens: ENV_ERC1155,
-        polymarketExchange: ENV_OG,
+        chainlinkPriceFeed: BASE_SAFE,
+        polymarketConditionalTokens: BASE_ERC1155,
+        polymarketExchange: BASE_OG,
         polymarketClobEnabled: false,
         polymarketClobHost: 'https://clob.base.example',
-        polymarketClobAddress: ENV_SAFE,
+        polymarketClobAddress: BASE_SAFE,
         polymarketClobSignatureType: 'EOA',
         polymarketClobRequestTimeoutMs: 15_000,
         polymarketClobMaxRetries: 1,
@@ -113,17 +107,17 @@ async function run() {
         polymarketRelayerEnabled: false,
         polymarketRelayerHost: 'https://relayer.base.example',
         polymarketRelayerTxType: 'SAFE',
-        polymarketRelayerFromAddress: ENV_SAFE,
-        polymarketRelayerSafeFactory: ENV_OG,
-        polymarketRelayerProxyFactory: ENV_ERC1155,
+        polymarketRelayerFromAddress: BASE_SAFE,
+        polymarketRelayerSafeFactory: BASE_OG,
+        polymarketRelayerProxyFactory: BASE_ERC1155,
         polymarketRelayerResolveProxyAddress: true,
         polymarketRelayerAutoDeployProxy: false,
         polymarketRelayerChainId: 11155111,
         polymarketRelayerRequestTimeoutMs: 15_000,
         polymarketRelayerPollIntervalMs: 2_000,
         polymarketRelayerPollTimeoutMs: 120_000,
-        uniswapV3Factory: ENV_SAFE,
-        uniswapV3Quoter: ENV_OG,
+        uniswapV3Factory: BASE_SAFE,
+        uniswapV3Quoter: BASE_OG,
         uniswapV3FeeTiers: [500, 3000, 10000],
         ipfsEnabled: false,
         ipfsApiUrl: 'http://127.0.0.1:5001',
@@ -156,11 +150,11 @@ async function run() {
         agentConfigFile: missingFile,
         chainId: 11155111,
     });
-    assert.deepEqual(fallbackResolved.watchAssets, [ENV_ERC20]);
+    assert.deepEqual(fallbackResolved.watchAssets, [BASE_ERC20]);
     assert.deepEqual(fallbackResolved.watchErc1155Assets, baseConfig.watchErc1155Assets);
     assert.deepEqual(fallbackResolved.agentConfig, {});
-    assert.equal(fallbackResolved.commitmentSafe, ENV_SAFE);
-    assert.equal(fallbackResolved.ogModule, ENV_OG);
+    assert.equal(fallbackResolved.commitmentSafe, BASE_SAFE);
+    assert.equal(fallbackResolved.ogModule, BASE_OG);
 
     const configPath = path.join(tmpDir, 'config.json');
     await writeFile(
@@ -471,10 +465,10 @@ async function run() {
         agentConfigFile: nullFallbackFile,
         chainId: 11155111,
     });
-    assert.equal(nullFallbackResolved.commitmentSafe, ENV_SAFE);
-    assert.equal(nullFallbackResolved.ogModule, ENV_OG);
-    assert.equal(nullFallbackResolved.agentConfig.commitmentSafe, ENV_SAFE);
-    assert.equal(nullFallbackResolved.agentConfig.ogModule, ENV_OG);
+    assert.equal(nullFallbackResolved.commitmentSafe, BASE_SAFE);
+    assert.equal(nullFallbackResolved.ogModule, BASE_OG);
+    assert.equal(nullFallbackResolved.agentConfig.commitmentSafe, BASE_SAFE);
+    assert.equal(nullFallbackResolved.agentConfig.ogModule, BASE_OG);
     assert.equal(nullFallbackResolved.messageApiEnabled, false);
     assert.equal(nullFallbackResolved.messageApiPort, 8787);
 
