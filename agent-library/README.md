@@ -8,6 +8,7 @@ Each agent lives under `agent-library/agents/<agent-name>/` and must include:
 Optional module-local files:
 - `config.json`: non-secret commitment/runtime config for that module.
 - `config.local.json`: untracked machine-local overrides layered above `config.json`.
+- `migration-notes.md`: module-local notes for moving legacy non-secret env config into the config stack.
 - `harness.mjs`: local testnet harness smoke scenario entrypoint used by `node agent/scripts/testnet-harness.mjs smoke --module=<agent-name>`.
 - `test-*.mjs`: module-local validation and smoke scripts.
 
