@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { stat } from 'node:fs/promises';
+import { setTimeout as delay } from 'node:timers/promises';
 import {
     createHarnessClients,
     loadRoleRecord,
@@ -132,6 +133,33 @@ async function createSmokeContext({
         });
     }
 
+    async function pollUntil(predicate, {
+        timeoutMs = 60_000,
+        intervalMs = 1_000,
+        label = 'condition',
+    } = {}) {
+        const deadline = Date.now() + timeoutMs;
+        let lastResult;
+        while (Date.now() <= deadline) {
+            const agentStatus = await getAgentRuntimeStatus((await readPids()).agent);
+            if (agentStatus.record?.pid && !agentStatus.pidAlive) {
+                const tail = await readLogTail(runtime.sessionPaths.files.agentLog, { maxBytes: 64_000 });
+                throw new Error(
+                    `Agent exited while waiting for ${label}. Recent log output:\n${tail || '<empty>'}`
+                );
+            }
+
+            lastResult = await predicate();
+            if (lastResult) {
+                return lastResult;
+            }
+            await delay(intervalMs);
+        }
+
+        const tail = await readLogTail(runtime.sessionPaths.files.agentLog, { maxBytes: 64_000 });
+        throw new Error(`Timed out waiting for ${label}. Recent log output:\n${tail || '<empty>'}`);
+    }
+
     return {
         agentRef,
         profile: runtime.profile,
@@ -184,6 +212,9 @@ async function createSmokeContext({
             return loadRoleRecord(runtime.rolesData, roleName);
         },
         createHarnessClients: getHarnessClients,
+        async pollUntil(predicate, options = {}) {
+            return await pollUntil(predicate, options);
+        },
         async sendDeposit({ roleName, asset, amountWei }) {
             return await sendHarnessDeposit({
                 runtimeConfig: runtimeContext.runtimeConfig,

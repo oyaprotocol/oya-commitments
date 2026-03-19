@@ -30,12 +30,30 @@ function parseIpfsApiUrl(url) {
 
 function isLoopbackHostname(hostname) {
     const normalized = String(hostname).trim().toLowerCase();
-    return normalized === '127.0.0.1' || normalized === 'localhost' || normalized === '::1';
+    return normalized === '127.0.0.1' || normalized === 'localhost' || normalized === '::1' || normalized === '[::1]';
 }
 
 function isManageableLocalIpfsUrl(url) {
     const parsed = parseIpfsApiUrl(url);
     return isLoopbackHostname(parsed.hostname);
+}
+
+function buildIpfsApiMultiaddr(url) {
+    const parsed = parseIpfsApiUrl(url);
+    const port = Number(parsed.port || (parsed.protocol === 'https:' ? 443 : 80));
+    if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+        throw new Error(`Invalid IPFS API port in URL: ${url}`);
+    }
+
+    const normalizedHostname = parsed.hostname.trim().toLowerCase();
+    if (normalizedHostname === '127.0.0.1' || normalizedHostname === 'localhost') {
+        return `/ip4/127.0.0.1/tcp/${port}`;
+    }
+    if (normalizedHostname === '::1' || normalizedHostname === '[::1]') {
+        return `/ip6/::1/tcp/${port}`;
+    }
+
+    throw new Error(`Unsupported managed IPFS hostname "${parsed.hostname}".`);
 }
 
 async function pollIpfsHealth(baseUrl, timeoutMs = 1_500) {
@@ -112,6 +130,24 @@ async function ensureIpfsRepoInitialized({
     runIpfsCommand({
         command,
         args: ['init', '--profile=test'],
+        env: {
+            ...env,
+            IPFS_PATH: repoPath,
+        },
+        cwd,
+    });
+}
+
+async function configureIpfsRepoApiAddress({
+    command,
+    repoPath,
+    env,
+    cwd,
+    baseUrl,
+}) {
+    runIpfsCommand({
+        command,
+        args: ['config', 'Addresses.API', buildIpfsApiMultiaddr(baseUrl)],
         env: {
             ...env,
             IPFS_PATH: repoPath,
@@ -219,6 +255,13 @@ async function ensureHarnessIpfs({
         env,
         cwd,
     });
+    await configureIpfsRepoApiAddress({
+        command,
+        repoPath,
+        env,
+        cwd,
+        baseUrl,
+    });
 
     await mkdir(sessionPaths.sessionDir, { recursive: true });
     const logFd = openSync(sessionPaths.files.ipfsLog, 'a');
@@ -307,6 +350,8 @@ async function stopHarnessIpfs(record, { timeoutMs = DEFAULT_IPFS_STOP_TIMEOUT_M
 }
 
 export {
+    buildIpfsApiMultiaddr,
+    configureIpfsRepoApiAddress,
     DEFAULT_IPFS_START_TIMEOUT_MS,
     DEFAULT_IPFS_STOP_TIMEOUT_MS,
     ensureHarnessIpfs,
