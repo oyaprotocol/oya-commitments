@@ -97,6 +97,18 @@ contract HarnessMockSafeProxyFactory {
 }
 
 contract HarnessMockOptimisticGovernor {
+    struct Transaction {
+        address to;
+        uint8 operation;
+        uint256 value;
+        bytes data;
+    }
+
+    struct Proposal {
+        Transaction[] transactions;
+        uint256 requestTime;
+    }
+
     struct EscalationManagerSettings {
         bool arbitrateViaEscalationManager;
         bool discardOracle;
@@ -128,6 +140,20 @@ contract HarnessMockOptimisticGovernor {
     bytes32 public identifier;
     uint64 public liveness;
     mapping(bytes32 => bytes32) public assertionIds;
+    mapping(bytes32 => Assertion) internal assertions;
+
+    event TransactionsProposed(
+        address indexed proposer,
+        uint256 indexed proposalTime,
+        bytes32 indexed assertionId,
+        Proposal proposal,
+        bytes32 proposalHash,
+        bytes explanation,
+        string rules,
+        uint256 challengeWindowEnds
+    );
+    event ProposalExecuted(bytes32 indexed proposalHash, bytes32 indexed assertionId);
+    event ProposalDeleted(bytes32 indexed proposalHash, bytes32 indexed assertionId);
 
     function setUp(bytes memory data) external {
         (owner, collateral, bondAmount, rules, identifier, liveness) =
@@ -135,19 +161,80 @@ contract HarnessMockOptimisticGovernor {
         optimisticOracleV3 = address(this);
     }
 
+    function proposeTransactions(Transaction[] calldata transactions, bytes calldata explanation)
+        external
+        returns (bytes32 proposalHash)
+    {
+        proposalHash = keccak256(abi.encode(transactions));
+        bytes32 assertionId = keccak256(
+            abi.encodePacked(proposalHash, msg.sender, block.timestamp, block.number)
+        );
+        assertionIds[proposalHash] = assertionId;
+
+        Assertion storage assertion = assertions[assertionId];
+        assertion.asserter = msg.sender;
+        assertion.assertionTime = uint64(block.timestamp);
+        assertion.settled = false;
+        assertion.currency = collateral;
+        assertion.expirationTime = uint64(block.timestamp) + liveness;
+        assertion.settlementResolution = false;
+        assertion.identifier = identifier;
+        assertion.bond = bondAmount;
+
+        Proposal memory proposal;
+        proposal.requestTime = block.timestamp;
+        proposal.transactions = new Transaction[](transactions.length);
+        for (uint256 i = 0; i < transactions.length; i++) {
+            proposal.transactions[i] = transactions[i];
+        }
+
+        emit TransactionsProposed(
+            msg.sender,
+            block.timestamp,
+            assertionId,
+            proposal,
+            proposalHash,
+            explanation,
+            rules,
+            block.timestamp + liveness
+        );
+    }
+
+    function executeProposal(Transaction[] calldata transactions) external {
+        bytes32 proposalHash = keccak256(abi.encode(transactions));
+        bytes32 assertionId = assertionIds[proposalHash];
+        require(assertionId != bytes32(0), "proposal not found");
+
+        for (uint256 i = 0; i < transactions.length; i++) {
+            require(transactions[i].operation == 0, "operation unsupported");
+            (bool success,) = transactions[i].to.call{value: transactions[i].value}(transactions[i].data);
+            require(success, "transaction failed");
+        }
+
+        assertions[assertionId].settled = true;
+        assertions[assertionId].settlementResolution = true;
+        emit ProposalExecuted(proposalHash, assertionId);
+    }
+
+    function deleteProposal(Transaction[] calldata transactions) external {
+        bytes32 proposalHash = keccak256(abi.encode(transactions));
+        bytes32 assertionId = assertionIds[proposalHash];
+        require(assertionId != bytes32(0), "proposal not found");
+        delete assertionIds[proposalHash];
+        delete assertions[assertionId];
+        emit ProposalDeleted(proposalHash, assertionId);
+    }
+
     function getMinimumBond(address) external pure returns (uint256) {
         return 0;
     }
 
-    function disputeAssertion(bytes32, address) external {}
+    function disputeAssertion(bytes32 assertionId, address disputer) external {
+        assertions[assertionId].disputer = disputer;
+    }
 
-    function getAssertion(bytes32) external view returns (Assertion memory assertion) {
-        assertion.asserter = owner;
-        assertion.currency = collateral;
-        assertion.identifier = identifier;
-        assertion.bond = bondAmount;
-        assertion.assertionTime = uint64(block.timestamp);
-        assertion.expirationTime = uint64(block.timestamp) + liveness;
+    function getAssertion(bytes32 assertionId) external view returns (Assertion memory assertion) {
+        return assertions[assertionId];
     }
 }
 
