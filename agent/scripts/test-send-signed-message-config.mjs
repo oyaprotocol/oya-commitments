@@ -133,6 +133,36 @@ async function run() {
     assert.equal(directUrlWithChainTarget.baseUrl, 'http://cli-host:9555');
     assert.equal(directUrlWithChainTarget.chainId, 11155111);
 
+    const directUrlWithModuleAndChainTarget = await resolveMessageApiTarget({
+        argv: [
+            'node',
+            'send-signed-message.mjs',
+            '--module=single-chain',
+            '--url=http://cli-host:9555',
+            '--chain-id=11155111',
+        ],
+        env: {},
+        repoRootPath,
+    });
+    assert.equal(directUrlWithModuleAndChainTarget.baseUrl, 'http://cli-host:9555');
+    assert.equal(directUrlWithModuleAndChainTarget.chainId, 11155111);
+
+    await assert.rejects(
+        () =>
+            resolveMessageApiTarget({
+                argv: [
+                    'node',
+                    'send-signed-message.mjs',
+                    '--module=single-chain',
+                    '--url=http://cli-host:9555',
+                    '--chain-id=137',
+                ],
+                env: {},
+                repoRootPath,
+            }),
+        /Unable to infer chainId for explicit --url from module "single-chain".*conflicting chainId 137/i
+    );
+
     const singleChainTarget = await resolveMessageApiTarget({
         argv: ['node', 'send-signed-message.mjs', '--module=single-chain'],
         env: {},
