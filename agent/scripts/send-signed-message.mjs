@@ -169,11 +169,16 @@ async function resolveMessageApiTarget({
         explicitChainIdRaw === null ? undefined : parseInteger(explicitChainIdRaw, 'chainId');
     if (explicit) {
         const configuredAgentRef = getArgValue('--module=', argv) ?? env.AGENT_MODULE ?? null;
-        if (explicitChainId !== undefined || !configuredAgentRef) {
+        if (explicitChainId !== undefined) {
             return {
                 baseUrl: normalizeBaseUrl(explicit),
                 chainId: explicitChainId,
             };
+        }
+        if (!configuredAgentRef) {
+            throw new Error(
+                '--url requires --chain-id or --module so the target chain can be inferred for chain-bound agents.'
+            );
         }
 
         try {
@@ -187,13 +192,11 @@ async function resolveMessageApiTarget({
                 baseUrl: normalizeBaseUrl(explicit),
                 chainId: runtimeConfig.chainId,
             };
-        } catch {
-            // Direct URL mode remains usable even when local config resolution is unavailable.
+        } catch (error) {
+            throw new Error(
+                `Unable to infer chainId for explicit --url from module "${configuredAgentRef}". Pass --chain-id explicitly or fix the module config. ${error?.message ?? error}`
+            );
         }
-        return {
-            baseUrl: normalizeBaseUrl(explicit),
-            chainId: explicitChainId,
-        };
     }
 
     const explicitHost = getArgValue('--host=', argv);
@@ -252,6 +255,7 @@ Required:
 
 Optional:
   --url=<base-url>                     Full base URL, e.g. http://127.0.0.1:8787
+                                       When used, also provide --chain-id or --module
   --host=<host>                        Used if --url is omitted; overrides module config host
   --port=<int>                         Used if --url is omitted; overrides module config port
   --scheme=<http|https>                Used if --url is omitted (default http)

@@ -76,15 +76,16 @@ async function run() {
         'utf8'
     );
 
-    assert.equal(
-        await buildBaseUrl({
-            argv: ['node', 'send-signed-message.mjs', '--url=http://cli-host:9555'],
-            env: {
-                MESSAGE_API_URL: 'http://env-url:8555',
-            },
-            repoRootPath,
-        }),
-        'http://cli-host:9555'
+    await assert.rejects(
+        () =>
+            buildBaseUrl({
+                argv: ['node', 'send-signed-message.mjs', '--url=http://cli-host:9555'],
+                env: {
+                    MESSAGE_API_URL: 'http://env-url:8555',
+                },
+                repoRootPath,
+            }),
+        /--url requires --chain-id or --module/
     );
 
     assert.equal(
@@ -96,13 +97,15 @@ async function run() {
         'http://local-host.local:9898'
     );
 
-    const directUrlTarget = await resolveMessageApiTarget({
-        argv: ['node', 'send-signed-message.mjs', '--url=http://cli-host:9555'],
-        env: {},
-        repoRootPath,
-    });
-    assert.equal(directUrlTarget.baseUrl, 'http://cli-host:9555');
-    assert.equal(directUrlTarget.chainId, undefined);
+    await assert.rejects(
+        () =>
+            resolveMessageApiTarget({
+                argv: ['node', 'send-signed-message.mjs', '--url=http://cli-host:9555'],
+                env: {},
+                repoRootPath,
+            }),
+        /--url requires --chain-id or --module/
+    );
 
     const directUrlWithModuleTarget = await resolveMessageApiTarget({
         argv: [
@@ -205,18 +208,20 @@ async function run() {
         'http://sepolia-host.local:9891'
     );
 
-    const ambiguousDirectUrlTarget = await resolveMessageApiTarget({
-        argv: [
-            'node',
-            'send-signed-message.mjs',
-            '--module=ambiguous',
-            '--url=http://explicit-host:9555',
-        ],
-        env: {},
-        repoRootPath,
-    });
-    assert.equal(ambiguousDirectUrlTarget.baseUrl, 'http://explicit-host:9555');
-    assert.equal(ambiguousDirectUrlTarget.chainId, undefined);
+    await assert.rejects(
+        () =>
+            resolveMessageApiTarget({
+                argv: [
+                    'node',
+                    'send-signed-message.mjs',
+                    '--module=ambiguous',
+                    '--url=http://explicit-host:9555',
+                ],
+                env: {},
+                repoRootPath,
+            }),
+        /Unable to infer chainId for explicit --url from module "ambiguous"/
+    );
 
     assert.equal(
         await buildBaseUrl({
