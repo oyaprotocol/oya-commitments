@@ -168,6 +168,28 @@ async function resolveMessageApiTarget({
     const explicitChainId =
         explicitChainIdRaw === null ? undefined : parseInteger(explicitChainIdRaw, 'chainId');
     if (explicit) {
+        const configuredAgentRef = getArgValue('--module=', argv) ?? env.AGENT_MODULE ?? null;
+        if (explicitChainId !== undefined || !configuredAgentRef) {
+            return {
+                baseUrl: normalizeBaseUrl(explicit),
+                chainId: explicitChainId,
+            };
+        }
+
+        try {
+            const runtimeConfig = await resolveMessageApiConfigForAgent({
+                agentRef: configuredAgentRef,
+                chainId: explicitChainId,
+                repoRootPath,
+                env,
+            });
+            return {
+                baseUrl: normalizeBaseUrl(explicit),
+                chainId: runtimeConfig.chainId,
+            };
+        } catch {
+            // Direct URL mode remains usable even when local config resolution is unavailable.
+        }
         return {
             baseUrl: normalizeBaseUrl(explicit),
             chainId: explicitChainId,

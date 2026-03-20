@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { formatMessageApiBaseUrl } from './lib/testnet-harness-agent.mjs';
+import {
+    buildHarnessAgentChildEnv,
+    formatMessageApiBaseUrl,
+} from './lib/testnet-harness-agent.mjs';
 
 async function run() {
     assert.equal(formatMessageApiBaseUrl('127.0.0.1', 9888), 'http://127.0.0.1:9888');
@@ -9,6 +12,30 @@ async function run() {
         formatMessageApiBaseUrl('[2001:db8::1]', 9888),
         'http://[2001:db8::1]:9888'
     );
+
+    const childEnv = buildHarnessAgentChildEnv({
+        env: {
+            COMMITMENT_SAFE: '0xlegacy',
+            OG_MODULE: '0xlegacyOg',
+            MESSAGE_API_ENABLED: 'true',
+            PRIVATE_KEY: '0xold',
+            KEEP_ME: 'yes',
+        },
+        agentRef: 'default',
+        rpcUrl: 'http://127.0.0.1:8545',
+        signerRole: {
+            privateKey: '0xnew',
+        },
+        overlayPath: '/tmp/overlay.json',
+    });
+    assert.equal(childEnv.COMMITMENT_SAFE, '');
+    assert.equal(childEnv.OG_MODULE, '');
+    assert.equal(childEnv.MESSAGE_API_ENABLED, '');
+    assert.equal(childEnv.KEEP_ME, 'yes');
+    assert.equal(childEnv.RPC_URL, 'http://127.0.0.1:8545');
+    assert.equal(childEnv.PRIVATE_KEY, '0xnew');
+    assert.equal(childEnv.AGENT_MODULE, 'default');
+    assert.equal(childEnv.AGENT_CONFIG_OVERLAY_PATH, '/tmp/overlay.json');
 
     console.log('ok');
 }
