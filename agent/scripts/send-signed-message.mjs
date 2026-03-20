@@ -169,13 +169,13 @@ async function resolveMessageApiTarget({
         explicitChainIdRaw === null ? undefined : parseInteger(explicitChainIdRaw, 'chainId');
     if (explicit) {
         const configuredAgentRef = getArgValue('--module=', argv) ?? env.AGENT_MODULE ?? null;
-        if (explicitChainId !== undefined) {
-            return {
-                baseUrl: normalizeBaseUrl(explicit),
-                chainId: explicitChainId,
-            };
-        }
         if (!configuredAgentRef) {
+            if (explicitChainId !== undefined) {
+                return {
+                    baseUrl: normalizeBaseUrl(explicit),
+                    chainId: explicitChainId,
+                };
+            }
             throw new Error(
                 '--url requires --chain-id or --module so the target chain can be inferred for chain-bound agents.'
             );

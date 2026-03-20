@@ -609,6 +609,40 @@ async function run() {
         configPath,
         JSON.stringify(
             {
+                byChain: {
+                    '11155111': {
+                        messageApi: {
+                            port: 9898,
+                        },
+                    },
+                },
+            },
+            null,
+            2
+        ),
+        'utf8'
+    );
+    const singleEntryChainFile = await loadAgentConfigFile(configPath);
+    assert.equal(
+        resolveConfiguredChainId({
+            agentConfigFile: singleEntryChainFile,
+            explicitChainId: 11155111,
+        }),
+        11155111
+    );
+    assert.throws(
+        () =>
+            resolveConfiguredChainId({
+                agentConfigFile: singleEntryChainFile,
+                explicitChainId: 137,
+            }),
+        /infers chainId 11155111 from byChain, but received conflicting chainId 137/
+    );
+
+    await writeFile(
+        configPath,
+        JSON.stringify(
+            {
                 chainId: 11155111,
                 byChain: {
                     '11155111': {
