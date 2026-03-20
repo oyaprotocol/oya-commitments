@@ -178,19 +178,18 @@ async function run() {
         /defines multiple byChain entries .* but no top-level chainId/
     );
 
-    await assert.rejects(
-        () =>
-            buildBaseUrl({
-                argv: [
-                    'node',
+    assert.equal(
+        await buildBaseUrl({
+            argv: [
+                'node',
                 'send-signed-message.mjs',
                 '--module=ambiguous',
                 '--chain-id=11155111',
             ],
             env: {},
             repoRootPath,
-            }),
-        /defines multiple byChain entries .* but no top-level chainId/
+        }),
+        'http://sepolia-host.local:9891'
     );
 
     const ambiguousDirectUrlTarget = await resolveMessageApiTarget({

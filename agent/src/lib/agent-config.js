@@ -676,6 +676,10 @@ function resolveConfiguredChainId({ agentConfigFile, explicitChainId } = {}) {
         return normalizedExplicitChainId;
     }
 
+    if (normalizedExplicitChainId !== undefined) {
+        return normalizedExplicitChainId;
+    }
+
     if (byChainKeys.length === 1) {
         const inferredChainId = parseChainIdValue(
             byChainKeys[0],

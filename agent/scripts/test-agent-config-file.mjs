@@ -590,6 +590,20 @@ async function run() {
         () => resolveConfiguredChainId({ agentConfigFile: ambiguousChainFile }),
         /defines multiple byChain entries .* but no top-level chainId/
     );
+    assert.equal(
+        resolveConfiguredChainId({
+            agentConfigFile: ambiguousChainFile,
+            explicitChainId: 11155111,
+        }),
+        11155111
+    );
+    const explicitAmbiguousResolved = resolveAgentRuntimeConfig({
+        baseConfig,
+        agentConfigFile: ambiguousChainFile,
+        chainId: 137,
+    });
+    assert.equal(explicitAmbiguousResolved.chainId, 137);
+    assert.equal(explicitAmbiguousResolved.messageApiPort, 9000);
 
     await writeFile(
         configPath,

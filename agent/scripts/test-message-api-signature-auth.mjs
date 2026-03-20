@@ -89,6 +89,36 @@ async function main() {
         assert.equal(queued[0].chainId, 11155111);
         inbox.ackBatch(queued.map((message) => message.messageId));
 
+        const unsignedChainIdTimestampMs = Date.now();
+        const unsignedChainIdBody = {
+            chainId: 11155111,
+            text: 'Unsigned chain id',
+            requestId: 'sig-unsigned-chain-id',
+        };
+        const unsignedChainIdPayload = buildSignedMessagePayload({
+            address: account.address,
+            timestampMs: unsignedChainIdTimestampMs,
+            text: unsignedChainIdBody.text,
+            requestId: unsignedChainIdBody.requestId,
+        });
+        const unsignedChainIdSignature = await account.signMessage({
+            message: unsignedChainIdPayload,
+        });
+        const unsignedChainId = await fetch(`${baseUrl}/v1/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ...unsignedChainIdBody,
+                auth: {
+                    type: 'eip191',
+                    address: account.address,
+                    timestampMs: unsignedChainIdTimestampMs,
+                    signature: unsignedChainIdSignature,
+                },
+            }),
+        });
+        assert.equal(unsignedChainId.status, 401);
+
         const missingChainIdTimestampMs = Date.now();
         const missingChainIdBody = {
             text: 'Missing chain id',
@@ -115,12 +145,7 @@ async function main() {
                 },
             }),
         });
-        assert.equal(missingChainId.status, 202);
-        const queuedMissingChainId = inbox.takeBatch({ maxItems: 1 });
-        assert.equal(queuedMissingChainId.length, 1);
-        assert.equal(queuedMissingChainId[0].requestId, missingChainIdBody.requestId);
-        assert.equal(queuedMissingChainId[0].chainId, undefined);
-        inbox.ackBatch(queuedMissingChainId.map((message) => message.messageId));
+        assert.equal(missingChainId.status, 400);
 
         const wrongChainIdTimestampMs = Date.now();
         const wrongChainIdBody = {
