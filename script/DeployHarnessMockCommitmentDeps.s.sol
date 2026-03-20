@@ -166,9 +166,7 @@ contract HarnessMockOptimisticGovernor {
         returns (bytes32 proposalHash)
     {
         proposalHash = keccak256(abi.encode(transactions));
-        bytes32 assertionId = keccak256(
-            abi.encodePacked(proposalHash, msg.sender, block.timestamp, block.number)
-        );
+        bytes32 assertionId = keccak256(abi.encodePacked(proposalHash, msg.sender, block.timestamp, block.number));
         assertionIds[proposalHash] = assertionId;
 
         Assertion storage assertion = assertions[assertionId];
