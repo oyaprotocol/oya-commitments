@@ -107,19 +107,17 @@ export async function initializeAgentRuntime() {
         agentModuleRef: agentRef,
     });
     const runtimeChainId = await publicClient.getChainId();
-    const configuredChainId = resolveConfiguredChainId({ agentConfigFile });
-    if (configuredChainId !== undefined && configuredChainId !== runtimeChainId) {
-        throw new Error(
-            `Active agent config selects chainId ${configuredChainId}, but RPC_URL is connected to chainId ${runtimeChainId}. Update the module config stack or RPC_URL so they match.`
-        );
-    }
+    resolveConfiguredChainId({
+        agentConfigFile,
+        explicitChainId: runtimeChainId,
+    });
 
     Object.assign(
         config,
         resolveAgentRuntimeConfig({
             baseConfig: config,
             agentConfigFile,
-            chainId: configuredChainId ?? runtimeChainId,
+            chainId: runtimeChainId,
         })
     );
 
