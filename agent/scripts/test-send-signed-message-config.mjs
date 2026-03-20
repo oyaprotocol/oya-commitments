@@ -104,6 +104,19 @@ async function run() {
     assert.equal(directUrlTarget.baseUrl, 'http://cli-host:9555');
     assert.equal(directUrlTarget.chainId, undefined);
 
+    const directUrlWithModuleTarget = await resolveMessageApiTarget({
+        argv: [
+            'node',
+            'send-signed-message.mjs',
+            '--module=single-chain',
+            '--url=http://cli-host:9555',
+        ],
+        env: {},
+        repoRootPath,
+    });
+    assert.equal(directUrlWithModuleTarget.baseUrl, 'http://cli-host:9555');
+    assert.equal(directUrlWithModuleTarget.chainId, 11155111);
+
     const directUrlWithChainTarget = await resolveMessageApiTarget({
         argv: [
             'node',

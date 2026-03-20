@@ -2,6 +2,7 @@ import { closeSync, openSync } from 'node:fs';
 import { mkdir, readFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
+import { listDeprecatedConfigEnvVars } from '../../src/lib/config.js';
 import { isProcessRunning } from './testnet-harness-anvil.mjs';
 
 const DEFAULT_AGENT_START_TIMEOUT_MS = 20_000;
@@ -15,6 +16,29 @@ function formatMessageApiBaseUrl(host, port) {
 function resolveNodeExecutable(env = process.env) {
     const candidate = typeof env?.NODE_BIN === 'string' ? env.NODE_BIN.trim() : '';
     return candidate || 'node';
+}
+
+function buildHarnessAgentChildEnv({
+    env = process.env,
+    agentRef,
+    rpcUrl,
+    signerRole,
+    overlayPath,
+}) {
+    const childEnv = {
+        ...env,
+    };
+    for (const key of listDeprecatedConfigEnvVars({ agentModuleName: agentRef })) {
+        childEnv[key] = '';
+    }
+
+    childEnv.RPC_URL = rpcUrl;
+    childEnv.SIGNER_TYPE = 'env';
+    childEnv.PRIVATE_KEY = signerRole.privateKey;
+    childEnv.AGENT_MODULE = agentRef;
+    childEnv.AGENT_CONFIG_OVERLAY_PATH = overlayPath;
+
+    return childEnv;
 }
 
 async function readLogTail(logPath, { maxBytes = 8_192 } = {}) {
@@ -206,14 +230,13 @@ async function startHarnessAgent({
     await mkdir(sessionPaths.sessionDir, { recursive: true });
     const nodeCommand = resolveNodeExecutable(env);
     const args = ['agent/src/index.js'];
-    const childEnv = {
-        ...env,
-        RPC_URL: rpcUrl,
-        SIGNER_TYPE: 'env',
-        PRIVATE_KEY: signerRole.privateKey,
-        AGENT_MODULE: agentRef,
-        AGENT_CONFIG_OVERLAY_PATH: sessionPaths.files.overlay,
-    };
+    const childEnv = buildHarnessAgentChildEnv({
+        env,
+        agentRef,
+        rpcUrl,
+        signerRole,
+        overlayPath: sessionPaths.files.overlay,
+    });
 
     const logFd = openSync(sessionPaths.files.agentLog, 'a');
     let child;
@@ -320,6 +343,7 @@ async function stopHarnessAgent(record, { timeoutMs = DEFAULT_AGENT_STOP_TIMEOUT
 }
 
 export {
+    buildHarnessAgentChildEnv,
     DEFAULT_AGENT_START_TIMEOUT_MS,
     DEFAULT_AGENT_STOP_TIMEOUT_MS,
     formatMessageApiBaseUrl,
