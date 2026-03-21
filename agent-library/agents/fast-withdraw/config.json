@@ -1,6 +1,13 @@
 {
   "chainId": 11155111,
   "policyName": "fast-withdraw",
+  "ipfsEnabled": true,
+  "messageApi": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 9890,
+    "requireSignerAllowlist": false
+  },
   "byChain": {
     "11155111": {
       "commitmentSafe": "0x5de24903d4c9D89a856282Cfc85B54a8390ceA19",

@@ -204,6 +204,15 @@ async function resolveMessageApiTarget({
     const explicitPort =
         explicitPortRaw === null ? undefined : parseInteger(explicitPortRaw, 'port');
     const explicitScheme = getArgValue('--scheme=', argv);
+    const hasExplicitBaseOverride =
+        explicitHost !== null || explicitPort !== undefined || explicitScheme !== null;
+    const configuredAgentRef = getArgValue('--module=', argv) ?? env.AGENT_MODULE ?? null;
+
+    if (hasExplicitBaseOverride && explicitChainId === undefined && !configuredAgentRef) {
+        throw new Error(
+            '--host/--port/--scheme require --chain-id or --module so the target chain can be inferred for chain-bound agents.'
+        );
+    }
 
     const agentRef = resolveAgentRef({ argv, env });
     const runtimeConfig = await resolveMessageApiConfigForAgent({
@@ -212,6 +221,12 @@ async function resolveMessageApiTarget({
         repoRootPath,
         env,
     });
+
+    if (hasExplicitBaseOverride && runtimeConfig.chainId === undefined) {
+        throw new Error(
+            `Unable to infer chainId for host/port override mode from module "${agentRef}". Pass --chain-id explicitly or fix the module config.`
+        );
+    }
 
     const baseParts = {
         scheme: 'http',
