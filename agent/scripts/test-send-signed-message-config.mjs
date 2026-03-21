@@ -173,13 +173,27 @@ async function run() {
 
     assert.equal(
         await buildBaseUrl({
+            argv: [
+                'node',
+                'send-signed-message.mjs',
+                '--module=single-chain',
+                `--overlay=${overlayPath}`,
+            ],
+            env: {},
+            repoRootPath,
+        }),
+        'http://local-host.local:9444'
+    );
+
+    assert.equal(
+        await buildBaseUrl({
             argv: ['node', 'send-signed-message.mjs', '--module=single-chain'],
             env: {
                 AGENT_CONFIG_OVERLAY_PATH: overlayPath,
             },
             repoRootPath,
         }),
-        'http://local-host.local:9444'
+        'http://local-host.local:9898'
     );
 
     assert.equal(

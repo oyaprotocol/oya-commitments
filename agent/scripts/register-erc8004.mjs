@@ -7,6 +7,7 @@ import {
     loadScriptEnv,
     normalizeAgentName,
     repoRoot,
+    resolveConfiguredChainIdForScript,
     resolveAgentDirectory,
     resolveAgentRef,
 } from './lib/cli-runtime.mjs';
@@ -129,10 +130,24 @@ async function main() {
     const publicClient = createPublicClient({ transport: http(rpcUrl) });
     const { account, walletClient } = await createSignerClient({ rpcUrl });
 
+    const explicitChainIdRaw = getArgValue('--chain-id=');
+    const explicitChainId =
+        explicitChainIdRaw === null ? undefined : Number(explicitChainIdRaw);
+    if (
+        explicitChainIdRaw !== null &&
+        (!Number.isInteger(explicitChainId) || explicitChainId < 1)
+    ) {
+        throw new Error('--chain-id must be an integer.');
+    }
+    const rpcChainId = await publicClient.getChainId();
     const chainId =
-        Number(getArgValue('--chain-id=')) ||
-        Number(process.env.CHAIN_ID) ||
-        (await publicClient.getChainId());
+        (await resolveConfiguredChainIdForScript(agentRef, {
+            repoRootPath: repoRoot,
+            env: process.env,
+            explicitChainId: explicitChainId ?? rpcChainId,
+        })) ??
+        explicitChainId ??
+        rpcChainId;
     const registryOverride = getArgValue('--agent-registry=') ?? process.env.AGENT_REGISTRY;
     const network =
         getArgValue('--network=') ??

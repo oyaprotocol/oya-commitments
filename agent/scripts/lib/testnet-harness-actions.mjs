@@ -193,10 +193,8 @@ async function sendHarnessSignedMessage({
             `--module=${agentRef}`,
             `--chain-id=${profile.chainId}`,
         ],
-        env: {
-            ...process.env,
-            ...(overlayPath ? { AGENT_CONFIG_OVERLAY_PATH: overlayPath } : {}),
-        },
+        env: process.env,
+        overlayPaths: overlayPath ? [overlayPath] : [],
         repoRootPath,
     });
 
