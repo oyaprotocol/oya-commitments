@@ -1,9 +1,10 @@
 import path from 'node:path';
 import { readFile, writeFile } from 'node:fs/promises';
-import { buildConfigMigrationPatch, mergePlainObjects } from './lib/config-migration.mjs';
+import { buildConfigMigrationPatch, finalizeConfigMigration } from './lib/config-migration.mjs';
 import {
     getArgValue,
     hasFlag,
+    isDirectScriptExecution,
     loadScriptEnv,
     repoRoot,
     resolveAgentDirectory,
@@ -36,7 +37,7 @@ Moves non-secret legacy env config into module-local JSON config.
 
 Defaults:
   --module     AGENT_MODULE or "default"
-  --chain-id   CHAIN_ID when set; writes top-level chainId plus byChain overrides
+  --chain-id   CHAIN_ID when set; writes a byChain override and pins top-level chainId only when needed to keep the merged config unambiguous
   --out        <module-dir>/config.local.json
 `);
 }
@@ -66,7 +67,11 @@ async function main() {
     }
 
     const existing = await readJsonObject(outputPath);
-    const merged = mergePlainObjects(existing, patch);
+    const merged = finalizeConfigMigration({
+        existingConfig: existing,
+        patch,
+        chainId,
+    });
 
     if (hasFlag('--dry-run')) {
         console.log(JSON.stringify({ outputPath, patch: merged }, null, 2));
@@ -79,7 +84,11 @@ async function main() {
     );
 }
 
-main().catch((error) => {
-    console.error('[agent] config migration failed:', error?.message ?? error);
-    process.exit(1);
-});
+export { main };
+
+if (isDirectScriptExecution(import.meta.url)) {
+    main().catch((error) => {
+        console.error('[agent] config migration failed:', error?.message ?? error);
+        process.exit(1);
+    });
+}
