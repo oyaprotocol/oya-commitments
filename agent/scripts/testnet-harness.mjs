@@ -12,6 +12,7 @@ import {
     stopHarnessAnvil,
 } from './lib/testnet-harness-anvil.mjs';
 import {
+    buildHarnessAgentChildEnv,
     getAgentRuntimeStatus,
     startHarnessAgent,
     stopHarnessAgent,
@@ -339,14 +340,13 @@ async function handleRunAgent({ agentRef, profileName, port, force }) {
 
     const child = spawn('node', ['agent/src/index.js'], {
         cwd: repoRoot,
-        env: {
-            ...process.env,
-            RPC_URL: runtime.rpcUrl,
-            SIGNER_TYPE: 'env',
-            PRIVATE_KEY: agentRole.privateKey,
-            AGENT_MODULE: agentRef,
-            AGENT_CONFIG_OVERLAY_PATH: runtime.sessionPaths.files.overlay,
-        },
+        env: buildHarnessAgentChildEnv({
+            env: process.env,
+            agentRef,
+            rpcUrl: runtime.rpcUrl,
+            signerRole: agentRole,
+            overlayPath: runtime.sessionPaths.files.overlay,
+        }),
         stdio: 'inherit',
     });
 
