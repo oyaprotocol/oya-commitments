@@ -11,6 +11,8 @@ import {
     parseAbi,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
+import { listDeprecatedConfigEnvVars } from '../src/lib/config.js';
+import { isDirectScriptExecution, normalizeAgentName } from './lib/cli-runtime.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -39,6 +41,22 @@ async function deployContract({ walletClient, publicClient, abi, bytecode, args 
         throw new Error('Deployment failed (no contractAddress).');
     }
     return receipt.contractAddress;
+}
+
+function applySimulateDisputeRuntimeEnv({
+    env = process.env,
+    agentRef = env.AGENT_MODULE ?? 'default',
+    overlayPath,
+} = {}) {
+    env.AGENT_MODULE = agentRef;
+    env.AGENT_CONFIG_OVERLAY_PATH = overlayPath;
+
+    const agentModuleName = normalizeAgentName(agentRef);
+    for (const key of listDeprecatedConfigEnvVars({ agentModuleName })) {
+        env[key] = '';
+    }
+
+    return env;
 }
 
 async function main() {
@@ -149,8 +167,10 @@ async function main() {
         'utf8'
     );
 
-    process.env.AGENT_MODULE = process.env.AGENT_MODULE ?? 'default';
-    process.env.AGENT_CONFIG_OVERLAY_PATH = overlayPath;
+    applySimulateDisputeRuntimeEnv({
+        env: process.env,
+        overlayPath,
+    });
 
     const { postBondAndDispute } = await import('../src/index.js');
 
@@ -172,7 +192,11 @@ async function main() {
     console.log('[sim] Assertion disputer:', updated.disputer);
 }
 
-main().catch((error) => {
-    console.error('[sim] failed', error);
-    process.exit(1);
-});
+export { applySimulateDisputeRuntimeEnv };
+
+if (isDirectScriptExecution(import.meta.url)) {
+    main().catch((error) => {
+        console.error('[sim] failed', error);
+        process.exit(1);
+    });
+}
