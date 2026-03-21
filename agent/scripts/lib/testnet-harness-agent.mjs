@@ -3,6 +3,7 @@ import { mkdir, readFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { listDeprecatedConfigEnvVars } from '../../src/lib/config.js';
+import { normalizeAgentName } from './cli-runtime.mjs';
 import { isProcessRunning } from './testnet-harness-anvil.mjs';
 
 const DEFAULT_AGENT_START_TIMEOUT_MS = 20_000;
@@ -28,7 +29,8 @@ function buildHarnessAgentChildEnv({
     const childEnv = {
         ...env,
     };
-    for (const key of listDeprecatedConfigEnvVars({ agentModuleName: agentRef })) {
+    const agentModuleName = normalizeAgentName(agentRef);
+    for (const key of listDeprecatedConfigEnvVars({ agentModuleName })) {
         childEnv[key] = '';
     }
 
