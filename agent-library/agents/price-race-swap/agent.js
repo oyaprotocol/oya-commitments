@@ -89,8 +89,9 @@ const singleFireState = {
     proposalSubmitted: false,
     proposalHash: null,
 };
-let singleFireStateHydrated = false;
-let singleFireReconciledOnchain = false;
+let activeSingleFireStatePath = null;
+let hydratedSingleFireStatePath = null;
+let reconciledSingleFireStatePath = null;
 const normalizeAddress = normalizeAddressOrThrow;
 const normalizeHash = normalizeHashOrNull;
 
@@ -105,6 +106,22 @@ function getSingleFireStatePath(config) {
         return path.resolve(String(fromEnv).trim());
     }
     return path.join(__dirname, '.single-fire-state.json');
+}
+
+function resetSingleFireStateMemory() {
+    singleFireState.proposalSubmitted = false;
+    singleFireState.proposalHash = null;
+}
+
+function ensureSingleFireStateScope(config) {
+    const statePath = getSingleFireStatePath(config);
+    if (activeSingleFireStatePath !== statePath) {
+        activeSingleFireStatePath = statePath;
+        hydratedSingleFireStatePath = null;
+        reconciledSingleFireStatePath = null;
+        resetSingleFireStateMemory();
+    }
+    return statePath;
 }
 
 function resolveSubmittedProposalHash(parsedOutput) {
@@ -122,6 +139,7 @@ function resolveSubmittedProposalHash(parsedOutput) {
 }
 
 async function persistSingleFireState(config) {
+    const statePath = ensureSingleFireStateScope(config);
     const payload = JSON.stringify(
         {
             proposalSubmitted: singleFireState.proposalSubmitted,
@@ -130,14 +148,15 @@ async function persistSingleFireState(config) {
         null,
         2
     );
-    await writeFile(getSingleFireStatePath(config), payload, 'utf8');
+    await writeFile(statePath, payload, 'utf8');
 }
 
 async function hydrateSingleFireState(config) {
-    if (singleFireStateHydrated) return;
-    singleFireStateHydrated = true;
+    const statePath = ensureSingleFireStateScope(config);
+    if (hydratedSingleFireStatePath === statePath) return;
+    hydratedSingleFireStatePath = statePath;
     try {
-        const raw = await readFile(getSingleFireStatePath(config), 'utf8');
+        const raw = await readFile(statePath, 'utf8');
         const parsed = JSON.parse(raw);
         singleFireState.proposalSubmitted = Boolean(parsed?.proposalSubmitted);
         singleFireState.proposalHash = normalizeHash(parsed?.proposalHash) ?? null;
@@ -158,8 +177,9 @@ async function reconcileSingleFireFromChain({
     startBlock,
     config,
 }) {
-    if (singleFireReconciledOnchain) return;
-    singleFireReconciledOnchain = true;
+    const statePath = ensureSingleFireStateScope(config);
+    if (reconciledSingleFireStatePath === statePath) return;
+    reconciledSingleFireStatePath = statePath;
     if (!publicClient || singleFireState.proposalSubmitted) return;
 
     const rawOgModule = ogModuleInput ?? config?.ogModule;
@@ -747,11 +767,11 @@ function getSingleFireState() {
 }
 
 function resetSingleFireState({ config } = {}) {
-    singleFireState.proposalSubmitted = false;
-    singleFireState.proposalHash = null;
-    singleFireStateHydrated = true;
-    singleFireReconciledOnchain = false;
-    void unlink(getSingleFireStatePath(config)).catch(() => {});
+    const statePath = ensureSingleFireStateScope(config);
+    resetSingleFireStateMemory();
+    hydratedSingleFireStatePath = statePath;
+    reconciledSingleFireStatePath = null;
+    void unlink(statePath).catch(() => {});
 }
 
 async function reconcileProposalSubmission({ publicClient, ogModule, startBlock, config }) {

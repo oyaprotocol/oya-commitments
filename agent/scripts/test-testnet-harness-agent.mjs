@@ -37,6 +37,23 @@ async function run() {
     assert.equal(childEnv.AGENT_MODULE, 'default');
     assert.equal(childEnv.AGENT_CONFIG_OVERLAY_PATH, '/tmp/overlay.json');
 
+    const pathRefChildEnv = buildHarnessAgentChildEnv({
+        env: {
+            COPY_TRADING_SOURCE_USER: '0xlegacySource',
+            COPY_TRADING_MARKET: 'legacy-market',
+            KEEP_ME: 'yes',
+        },
+        agentRef: 'agent-library/agents/copy-trading/agent.js',
+        rpcUrl: 'http://127.0.0.1:8545',
+        signerRole: {
+            privateKey: '0xnew',
+        },
+        overlayPath: '/tmp/overlay.json',
+    });
+    assert.equal(pathRefChildEnv.COPY_TRADING_SOURCE_USER, '');
+    assert.equal(pathRefChildEnv.COPY_TRADING_MARKET, '');
+    assert.equal(pathRefChildEnv.KEEP_ME, 'yes');
+
     console.log('ok');
 }
 
