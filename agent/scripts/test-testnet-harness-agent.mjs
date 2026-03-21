@@ -18,6 +18,7 @@ async function run() {
             COMMITMENT_SAFE: '0xlegacy',
             OG_MODULE: '0xlegacyOg',
             MESSAGE_API_ENABLED: 'true',
+            AGENT_CONFIG_OVERLAY_PATHS: '/tmp/legacy-overlay-a.json,/tmp/legacy-overlay-b.json',
             PRIVATE_KEY: '0xold',
             KEEP_ME: 'yes',
         },
@@ -31,6 +32,7 @@ async function run() {
     assert.equal(childEnv.COMMITMENT_SAFE, '');
     assert.equal(childEnv.OG_MODULE, '');
     assert.equal(childEnv.MESSAGE_API_ENABLED, '');
+    assert.equal(childEnv.AGENT_CONFIG_OVERLAY_PATHS, '');
     assert.equal(childEnv.KEEP_ME, 'yes');
     assert.equal(childEnv.RPC_URL, 'http://127.0.0.1:8545');
     assert.equal(childEnv.PRIVATE_KEY, '0xnew');

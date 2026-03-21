@@ -47,12 +47,9 @@ async function main() {
             repoRootPath: repoRoot,
             env: process.env,
             explicitChainId,
-        })) ?? explicitChainId;
-    if (chainId === undefined) {
-        throw new Error(
-            'Unable to resolve chainId from --chain-id or the selected agent config. Pass --chain-id explicitly or add chainId to the agent config.'
-        );
-    }
+        })) ??
+        explicitChainId ??
+        11155111;
     const wallet = getArgValue('--agent-wallet=') ?? process.env.AGENT_WALLET;
     if (!wallet) {
         throw new Error('Missing --agent-wallet or AGENT_WALLET.');
