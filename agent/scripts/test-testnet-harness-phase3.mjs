@@ -294,6 +294,56 @@ async function run() {
         await rm(customCollateralFixture.tempRoot, { recursive: true, force: true });
     }
 
+    const staleDefaultFixture = await createTempModule({
+        config: {
+            defaultDepositAsset: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238',
+        },
+    });
+    const staleDefaultAgentRef = staleDefaultFixture.agentPath;
+    const staleDefaultSessionPaths = await ensureHarnessSession({
+        repoRootPath: repoRoot,
+        agentRef: staleDefaultAgentRef,
+        profile: 'local-mock',
+    });
+
+    await writeHarnessJson(staleDefaultSessionPaths.files.overlay, {});
+    await writeHarnessJson(staleDefaultSessionPaths.files.roles, roles);
+
+    let staleDefaultAnvilRecord;
+    try {
+        staleDefaultAnvilRecord = await startHarnessAnvil({
+            profile: localProfile,
+            sessionPaths: staleDefaultSessionPaths,
+            env: process.env,
+        });
+
+        const staleDefaultDeployResult = await deployHarnessCommitment({
+            repoRootPath: repoRoot,
+            agentRef: staleDefaultAgentRef,
+            profileName: 'local-mock',
+            sessionPaths: staleDefaultSessionPaths,
+            rpcUrl: staleDefaultAnvilRecord.rpcUrl,
+            deployerPrivateKey: roles.roles.deployer.privateKey,
+            env: process.env,
+        });
+
+        const staleDefaultOverlay = await readHarnessJson(staleDefaultSessionPaths.files.overlay);
+        assert.equal(
+            staleDefaultOverlay.byChain['31337'].defaultDepositAsset,
+            staleDefaultDeployResult.deployment.mockDependencies.collateralToken
+        );
+    } finally {
+        if (staleDefaultAnvilRecord) {
+            await stopHarnessAnvil(staleDefaultAnvilRecord);
+        }
+        await resetHarnessSession({
+            repoRootPath: repoRoot,
+            agentRef: staleDefaultAgentRef,
+            profile: 'local-mock',
+        });
+        await rm(staleDefaultFixture.tempRoot, { recursive: true, force: true });
+    }
+
     console.log('ok');
 }
 

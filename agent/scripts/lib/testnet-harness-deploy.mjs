@@ -410,7 +410,8 @@ async function deployHarnessCommitment({
             commitmentSafe: deployment.commitmentSafe,
             ogModule: deployment.ogModule,
             ...(deployment.startBlock ? { startBlock: deployment.startBlock } : {}),
-            ...(!runtimeContext.runtimeConfig.defaultDepositAsset && effectiveConfig.collateral
+            ...((runtimeContext.profile.name === 'local-mock' && effectiveConfig.collateral) ||
+            (!runtimeContext.runtimeConfig.defaultDepositAsset && effectiveConfig.collateral)
                 ? { defaultDepositAsset: effectiveConfig.collateral }
                 : {}),
         },
