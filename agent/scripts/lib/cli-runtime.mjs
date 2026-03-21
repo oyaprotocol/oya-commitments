@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { loadAgentConfigStack } from '../../src/lib/agent-config.js';
+import { loadAgentConfigStack, resolveConfiguredChainId } from '../../src/lib/agent-config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,6 +22,20 @@ export function hasFlag(flag, argv = process.argv) {
     return argv.includes(flag);
 }
 
+function parseOverlayListValue(raw) {
+    if (raw === undefined || raw === null) {
+        return [];
+    }
+    return String(raw)
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
+}
+
+function dedupeStringList(values) {
+    return Array.from(new Set(values.filter(Boolean)));
+}
+
 export function resolveAgentRef({
     argv = process.argv,
     env = process.env,
@@ -30,6 +44,26 @@ export function resolveAgentRef({
     fallback = 'default',
 } = {}) {
     return getArgValue(flag, argv) ?? env[envKey] ?? fallback;
+}
+
+export function resolveExplicitOverlayPaths({ argv = process.argv } = {}) {
+    const singleOverlayPaths = argv
+        .filter((value) => value.startsWith('--overlay='))
+        .map((value) => value.slice('--overlay='.length).trim())
+        .filter(Boolean);
+    const multiOverlayPaths = [
+        ...parseOverlayListValue(getArgValue('--overlay-paths=', argv)),
+        ...parseOverlayListValue(getArgValue('--overlays=', argv)),
+    ];
+    return dedupeStringList([...singleOverlayPaths, ...multiOverlayPaths]);
+}
+
+export function sanitizeConfigSelectionEnv(env = process.env) {
+    return {
+        ...env,
+        AGENT_CONFIG_OVERLAY_PATH: '',
+        AGENT_CONFIG_OVERLAY_PATHS: '',
+    };
 }
 
 export function normalizeAgentName(agentRef) {
@@ -72,13 +106,21 @@ export function resolveAgentFilePath(
 
 export async function loadAgentConfigForScript(
     agentRef,
-    { repoRootPath = repoRoot, env = process.env, overlayPaths = [] } = {}
+    {
+        repoRootPath = repoRoot,
+        env = process.env,
+        overlayPaths,
+        allowAmbientOverlays = false,
+        argv = process.argv,
+    } = {}
 ) {
     const configPath = resolveAgentFilePath(agentRef, 'config.json', { repoRootPath });
     const modulePath = resolveAgentModulePath(agentRef, { repoRootPath });
+    const resolvedOverlayPaths =
+        overlayPaths === undefined ? resolveExplicitOverlayPaths({ argv }) : overlayPaths;
     const agentConfigStack = await loadAgentConfigStack(configPath, {
-        env,
-        overlayPaths,
+        env: allowAmbientOverlays ? env : sanitizeConfigSelectionEnv(env),
+        overlayPaths: resolvedOverlayPaths,
     });
     return {
         agentName: normalizeAgentName(agentRef),
@@ -87,6 +129,30 @@ export async function loadAgentConfigForScript(
         configPath,
         agentConfigStack,
     };
+}
+
+export async function resolveConfiguredChainIdForScript(
+    agentRef,
+    {
+        repoRootPath = repoRoot,
+        env = process.env,
+        overlayPaths,
+        allowAmbientOverlays = false,
+        argv = process.argv,
+        explicitChainId,
+    } = {}
+) {
+    const { agentConfigStack } = await loadAgentConfigForScript(agentRef, {
+        repoRootPath,
+        env,
+        overlayPaths,
+        allowAmbientOverlays,
+        argv,
+    });
+    return resolveConfiguredChainId({
+        agentConfigFile: agentConfigStack,
+        explicitChainId,
+    });
 }
 
 export function isDirectScriptExecution(importMetaUrl, argv = process.argv) {

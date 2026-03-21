@@ -12,6 +12,7 @@ import {
     loadAgentConfigForScript,
     loadScriptEnv,
     repoRoot,
+    resolveExplicitOverlayPaths,
     resolveAgentModulePath,
     resolveAgentRef,
 } from './lib/cli-runtime.mjs';
@@ -106,6 +107,8 @@ async function resolveMessageApiConfigForAgent({
     chainId,
     repoRootPath = repoRoot,
     env = process.env,
+    overlayPaths,
+    argv = process.argv,
 }) {
     const {
         modulePath: resolvedModulePath,
@@ -114,6 +117,8 @@ async function resolveMessageApiConfigForAgent({
     } = await loadAgentConfigForScript(agentRef, {
         repoRootPath,
         env,
+        overlayPaths,
+        argv,
     });
     const agentConfigFile = agentConfigStack;
     const runtimeChainId = resolveConfiguredChainId({
@@ -162,6 +167,7 @@ async function resolveMessageApiTarget({
     argv = process.argv,
     env = process.env,
     repoRootPath = repoRoot,
+    overlayPaths = resolveExplicitOverlayPaths({ argv }),
 } = {}) {
     const explicit = getArgValue('--url=', argv);
     const explicitChainIdRaw = getArgValue('--chain-id=', argv);
@@ -187,6 +193,8 @@ async function resolveMessageApiTarget({
                 chainId: explicitChainId,
                 repoRootPath,
                 env,
+                overlayPaths,
+                argv,
             });
             return {
                 baseUrl: normalizeBaseUrl(explicit),
@@ -220,6 +228,8 @@ async function resolveMessageApiTarget({
         chainId: explicitChainId,
         repoRootPath,
         env,
+        overlayPaths,
+        argv,
     });
 
     if (hasExplicitBaseOverride && runtimeConfig.chainId === undefined) {
@@ -251,11 +261,13 @@ async function buildBaseUrl({
     argv = process.argv,
     env = process.env,
     repoRootPath = repoRoot,
+    overlayPaths = resolveExplicitOverlayPaths({ argv }),
 } = {}) {
     const target = await resolveMessageApiTarget({
         argv,
         env,
         repoRootPath,
+        overlayPaths,
     });
     return target.baseUrl;
 }
@@ -276,6 +288,8 @@ Optional:
   --scheme=<http|https>                Used if --url is omitted (default http)
   --module=<agent-ref>                 Agent module whose config.json should supply messageApi host/port
   --chain-id=<int>                     Optional assertion; must match the module config's selected chain when provided
+  --overlay=<path>                     Optional extra config overlay file for script-side config resolution
+  --overlay-paths=<a,b>                Optional comma-separated extra overlay files
   --bearer-token=<string>              Optional bearer token (or MESSAGE_API_BEARER_TOKEN)
   --command=<string>                   Optional command field
   --args-json='<json-object>'          Optional args object

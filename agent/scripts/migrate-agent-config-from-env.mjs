@@ -7,6 +7,7 @@ import {
     isDirectScriptExecution,
     loadScriptEnv,
     repoRoot,
+    resolveConfiguredChainIdForScript,
     resolveAgentDirectory,
     resolveAgentRef,
 } from './lib/cli-runtime.mjs';
@@ -37,7 +38,7 @@ Moves non-secret legacy env config into module-local JSON config.
 
 Defaults:
   --module     AGENT_MODULE or "default"
-  --chain-id   CHAIN_ID when set; writes a byChain override and pins top-level chainId only when needed to keep the merged config unambiguous
+  --chain-id   selected agent config chain when it resolves uniquely; otherwise omitted unless you pass --chain-id explicitly
   --out        <module-dir>/config.local.json
 `);
 }
@@ -49,7 +50,13 @@ async function main() {
     }
 
     const agentRef = getArgValue('--module=') ?? resolveAgentRef();
-    const chainId = getArgValue('--chain-id=') ?? process.env.CHAIN_ID ?? undefined;
+    const explicitChainId = getArgValue('--chain-id=');
+    const chainId =
+        explicitChainId ??
+        (await resolveConfiguredChainIdForScript(agentRef, {
+            repoRootPath: repoRoot,
+            env: process.env,
+        }).catch(() => undefined));
     const outArg = getArgValue('--out=');
     const moduleDir = resolveAgentDirectory(agentRef, { repoRootPath: repoRoot });
     const outputPath = outArg ? path.resolve(outArg) : path.join(moduleDir, 'config.local.json');

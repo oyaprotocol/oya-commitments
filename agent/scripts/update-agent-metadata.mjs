@@ -5,6 +5,7 @@ import {
     loadScriptEnv,
     normalizeAgentName,
     repoRoot,
+    resolveConfiguredChainIdForScript,
     resolveAgentDirectory,
     resolveAgentRef,
 } from './lib/cli-runtime.mjs';
@@ -32,7 +33,26 @@ async function main() {
         throw new Error('Missing --agent-id or AGENT_ID.');
     }
 
-    const chainId = getArgValue('--chain-id=') ?? process.env.CHAIN_ID ?? '11155111';
+    const explicitChainIdRaw = getArgValue('--chain-id=');
+    const explicitChainId =
+        explicitChainIdRaw === null ? undefined : Number(explicitChainIdRaw);
+    if (
+        explicitChainIdRaw !== null &&
+        (!Number.isInteger(explicitChainId) || explicitChainId < 1)
+    ) {
+        throw new Error('--chain-id must be an integer.');
+    }
+    const chainId =
+        (await resolveConfiguredChainIdForScript(agentRef, {
+            repoRootPath: repoRoot,
+            env: process.env,
+            explicitChainId,
+        })) ?? explicitChainId;
+    if (chainId === undefined) {
+        throw new Error(
+            'Unable to resolve chainId from --chain-id or the selected agent config. Pass --chain-id explicitly or add chainId to the agent config.'
+        );
+    }
     const wallet = getArgValue('--agent-wallet=') ?? process.env.AGENT_WALLET;
     if (!wallet) {
         throw new Error('Missing --agent-wallet or AGENT_WALLET.');

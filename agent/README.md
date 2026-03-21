@@ -195,7 +195,7 @@ node agent/scripts/send-signed-message.mjs \
   --request-id="pause-2h"
 ```
 
-If `--url` is omitted, the helper reads `messageApi.host` and `messageApi.port` from the selected agent module's merged config stack (`config.json`, optional `config.local.json`, and any `AGENT_CONFIG_OVERLAY_PATH*` files). Use `--module=<agent-name>` and optional `--chain-id=<int>` to select the commitment config. When the module does not override those fields, the helper falls back to the built-in default `http://127.0.0.1:8787`.
+If `--url` is omitted, the helper reads `messageApi.host` and `messageApi.port` from the selected agent module's merged config stack (`config.json`, optional `config.local.json`, and any `--overlay` / `--overlay-paths` files passed to the script). Use `--module=<agent-name>` and optional `--chain-id=<int>` to select the commitment config. When the module does not override those fields, the helper falls back to the built-in default `http://127.0.0.1:8787`.
 
 If bearer gating is configured, also pass `--bearer-token="<token>"` or set `MESSAGE_API_BEARER_TOKEN`.
 
