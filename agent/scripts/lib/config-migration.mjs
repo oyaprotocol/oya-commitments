@@ -455,4 +455,31 @@ function buildConfigMigrationPatch({ env = process.env, moduleName, chainId } = 
     };
 }
 
-export { buildConfigMigrationPatch, mergePlainObjects };
+function finalizeConfigMigration({
+    existingConfig = {},
+    patch = {},
+    chainId,
+} = {}) {
+    const merged = mergePlainObjects(existingConfig, patch);
+    if (chainId === undefined || chainId === null || String(chainId).trim() === '') {
+        return merged;
+    }
+
+    const normalizedChainId = parseInteger(chainId, 'CHAIN_ID', { min: 1 });
+    const byChain = merged?.byChain;
+    const byChainKeys =
+        byChain && typeof byChain === 'object' && !Array.isArray(byChain)
+            ? Object.keys(byChain)
+            : [];
+
+    if (merged.chainId === undefined && byChainKeys.length > 1) {
+        return {
+            ...merged,
+            chainId: normalizedChainId,
+        };
+    }
+
+    return merged;
+}
+
+export { buildConfigMigrationPatch, finalizeConfigMigration, mergePlainObjects };

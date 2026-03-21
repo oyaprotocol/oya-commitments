@@ -27,6 +27,8 @@ function buildHarnessRuntimeEnv({
 } = {}) {
     return {
         ...env,
+        AGENT_CONFIG_OVERLAY_PATH: '',
+        AGENT_CONFIG_OVERLAY_PATHS: '',
         ...(rpcUrl
             ? { RPC_URL: rpcUrl }
             : pids?.anvil?.rpcUrl

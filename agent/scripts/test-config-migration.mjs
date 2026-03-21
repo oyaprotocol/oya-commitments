@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
-import { buildConfigMigrationPatch, mergePlainObjects } from './lib/config-migration.mjs';
+import {
+    buildConfigMigrationPatch,
+    finalizeConfigMigration,
+    mergePlainObjects,
+} from './lib/config-migration.mjs';
 
 async function run() {
     const patch = buildConfigMigrationPatch({
@@ -121,6 +125,29 @@ async function run() {
     });
     assert.deepEqual(chainScopedPatch, {
         byChain: {
+            '11155111': {
+                commitmentSafe: '0x8888888888888888888888888888888888888888',
+            },
+        },
+    });
+
+    const ambiguousMergedPatch = finalizeConfigMigration({
+        existingConfig: {
+            byChain: {
+                '137': {
+                    commitmentSafe: '0x7777777777777777777777777777777777777777',
+                },
+            },
+        },
+        patch: chainScopedPatch,
+        chainId: '11155111',
+    });
+    assert.deepEqual(ambiguousMergedPatch, {
+        chainId: 11155111,
+        byChain: {
+            '137': {
+                commitmentSafe: '0x7777777777777777777777777777777777777777',
+            },
             '11155111': {
                 commitmentSafe: '0x8888888888888888888888888888888888888888',
             },
