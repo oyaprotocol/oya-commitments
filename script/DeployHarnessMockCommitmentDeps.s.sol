@@ -82,6 +82,18 @@ contract HarnessMockSafe {
             nonce += 1;
         }
     }
+
+    function execTransactionFromModule(address to, uint256 value, bytes calldata data, uint8 operation)
+        external
+        payable
+        returns (bool success)
+    {
+        require(modules[msg.sender], "module not enabled");
+        if (operation != 0) {
+            return false;
+        }
+        (success,) = to.call{value: value}(data);
+    }
 }
 
 contract HarnessMockSafeProxyFactory {
@@ -213,9 +225,11 @@ contract HarnessMockOptimisticGovernor {
         bytes32 assertionId = assertionIds[proposalHash];
         require(assertionId != bytes32(0), "proposal not found");
 
+        HarnessMockSafe safe = HarnessMockSafe(owner);
         for (uint256 i = 0; i < transactions.length; i++) {
-            require(transactions[i].operation == 0, "operation unsupported");
-            (bool success,) = transactions[i].to.call{value: transactions[i].value}(transactions[i].data);
+            bool success = safe.execTransactionFromModule(
+                transactions[i].to, transactions[i].value, transactions[i].data, transactions[i].operation
+            );
             require(success, "transaction failed");
         }
 
