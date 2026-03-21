@@ -555,6 +555,11 @@ node agent/scripts/testnet-harness.mjs down --module=<agent-name> --profile=loca
 
 Use `local-mock` while building the module. It can auto-deploy mock Safe/OG dependencies, default the bond amount to `1` when the module omits it, and align `defaultDepositAsset` with the actual deployed collateral unless the module config already overrides that field.
 
+Important local-mock design note:
+- `local-mock` forces the session overlay `chainId` to the harness profile chain so the runner resolves the local deployment, but it does not copy source-chain `byChain.watchAssets` or `byChain.watchErc1155Assets` into the local session.
+- That is intentional. Copying Sepolia or Polygon watched asset addresses into Anvil makes the runner poll contracts that do not exist locally and causes false harness failures.
+- Local ERC20 assets should come from the harness deployment overlay and OG collateral defaults. If a module needs local ERC1155 tracking, wire explicit local mock ERC1155 addresses into the local overlay or module-local harness flow instead of inheriting real-network watch lists.
+
 For step-by-step debugging, the harness also supports:
 
 ```bash
