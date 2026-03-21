@@ -264,13 +264,46 @@ async function run() {
         'http://127.0.0.1:8787'
     );
 
+    await assert.rejects(
+        () =>
+            buildBaseUrl({
+                argv: [
+                    'node',
+                    'send-signed-message.mjs',
+                    '--host=override-host',
+                ],
+                env: {
+                    MESSAGE_API_URL: 'http://env-url:8555/base',
+                },
+                repoRootPath,
+            }),
+        /--host\/--port\/--scheme require --chain-id or --module/
+    );
+
+    await assert.rejects(
+        () =>
+            buildBaseUrl({
+                argv: [
+                    'node',
+                    'send-signed-message.mjs',
+                    '--module=blank',
+                    '--host=override-host',
+                ],
+                env: {
+                    MESSAGE_API_URL: 'http://env-url:8555/base',
+                },
+                repoRootPath,
+            }),
+        /Unable to infer chainId for host\/port override mode from module "blank"/
+    );
+
     assert.equal(
         await buildBaseUrl({
             argv: [
                 'node',
                 'send-signed-message.mjs',
-                '--module=blank',
                 '--host=override-host',
+                '--chain-id=11155111',
             ],
             env: {
                 MESSAGE_API_URL: 'http://env-url:8555/base',
