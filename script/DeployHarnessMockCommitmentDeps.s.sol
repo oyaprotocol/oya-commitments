@@ -85,9 +85,19 @@ contract HarnessMockSafe {
 }
 
 contract HarnessMockSafeProxyFactory {
+    address public immutable safeSingleton;
     address public lastProxy;
 
-    function createProxyWithNonce(address, bytes memory initializer, uint256) external returns (address proxy) {
+    constructor(address _safeSingleton) {
+        require(_safeSingleton != address(0), "singleton required");
+        safeSingleton = _safeSingleton;
+    }
+
+    function createProxyWithNonce(address singleton, bytes memory initializer, uint256)
+        external
+        returns (address proxy)
+    {
+        require(singleton == safeSingleton, "invalid singleton");
         HarnessMockSafe safe = new HarnessMockSafe();
         (bool success,) = address(safe).call(initializer);
         require(success, "setup failed");
@@ -302,8 +312,8 @@ contract DeployHarnessMockCommitmentDeps is Script {
         uint256 deployerPk = vm.envUint("DEPLOYER_PK");
 
         vm.startBroadcast(deployerPk);
-        safeSingleton = address(new HarnessMockPlaceholder());
-        safeProxyFactory = address(new HarnessMockSafeProxyFactory());
+        safeSingleton = address(new HarnessMockSafe());
+        safeProxyFactory = address(new HarnessMockSafeProxyFactory(safeSingleton));
         safeFallbackHandler = address(new HarnessMockPlaceholder());
         ogMasterCopy = address(new HarnessMockOptimisticGovernor());
         collateralToken = address(new HarnessMockErc20("Harness Mock USD", "HMUSD"));
