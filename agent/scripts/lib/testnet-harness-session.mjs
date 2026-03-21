@@ -88,6 +88,10 @@ async function ensureHarnessOverlayChainId(sessionPaths, chainId) {
         return overlay;
     }
 
+    // Local harness profiles force only the active chain selection here.
+    // Do not copy source-chain watchAssets/watchErc1155Assets into the session
+    // overlay: local-mock must keep using locally deployed mock asset addresses,
+    // not real Sepolia/Polygon token contracts.
     const nextOverlay =
         overlay && typeof overlay === 'object' && !Array.isArray(overlay)
             ? { ...overlay, chainId }
