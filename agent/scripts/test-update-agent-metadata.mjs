@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -9,7 +10,7 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '../..');
 
 async function run() {
-    const tempRoot = await mkdtemp(path.join(repoRoot, 'agent/.state/update-agent-metadata-'));
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'update-agent-metadata-'));
     const agentDir = path.join(tempRoot, 'fixture-agent');
     const agentJsonPath = path.join(agentDir, 'agent.json');
 
