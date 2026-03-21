@@ -21,7 +21,6 @@ async function run() {
     });
 
     assert.deepEqual(patch, {
-        chainId: 11155111,
         byChain: {
             '11155111': {
                 commitmentSafe: '0x1111111111111111111111111111111111111111',
@@ -47,6 +46,7 @@ async function run() {
 
     const merged = mergePlainObjects(
         {
+            chainId: 137,
             byChain: {
                 '11155111': {
                     copyTrading: {
@@ -60,7 +60,7 @@ async function run() {
         patch
     );
     assert.deepEqual(merged, {
-        chainId: 11155111,
+        chainId: 137,
         byChain: {
             '11155111': {
                 commitmentSafe: '0x1111111111111111111111111111111111111111',
@@ -110,6 +110,21 @@ async function run() {
     assert.deepEqual(deterministicDcaPathPatch, {
         deterministicDcaPolicyPreset: 'mainnet',
         deterministicDcaLogChunkSize: '5000',
+    });
+
+    const chainScopedPatch = buildConfigMigrationPatch({
+        moduleName: 'default',
+        chainId: '11155111',
+        env: {
+            COMMITMENT_SAFE: '0x8888888888888888888888888888888888888888',
+        },
+    });
+    assert.deepEqual(chainScopedPatch, {
+        byChain: {
+            '11155111': {
+                commitmentSafe: '0x8888888888888888888888888888888888888888',
+            },
+        },
     });
 
     console.log('[test] config migration OK');

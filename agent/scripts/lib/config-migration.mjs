@@ -449,7 +449,6 @@ function buildConfigMigrationPatch({ env = process.env, moduleName, chainId } = 
     const normalizedChainId = parseInteger(chainId, 'CHAIN_ID', { min: 1 });
 
     return {
-        chainId: normalizedChainId,
         byChain: {
             [String(normalizedChainId)]: patch,
         },
