@@ -22,6 +22,7 @@ const TEST_SIGNER = '0x1111111111111111111111111111111111111111';
 const TEST_AGENT = '0x2222222222222222222222222222222222222222';
 const TEST_SAFE = '0x3333333333333333333333333333333333333333';
 const TEST_OTHER_SIGNER = '0x5555555555555555555555555555555555555555';
+const TEST_OTHER_AGENT = '0x6666666666666666666666666666666666666666';
 const TEST_USDC = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
 const TEST_CTF = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
 const YES_TOKEN_ID = '101';
@@ -289,6 +290,19 @@ async function run() {
         assert.deepEqual(inactiveCalls, []);
         assert.deepEqual(getTradeIntentState().intents, {});
 
+        await assert.rejects(
+            getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_SAFE,
+                agentAddress: TEST_AGENT,
+                publicClient,
+                config: buildModuleConfig({
+                    polymarketClobAddress: TEST_OTHER_AGENT,
+                }),
+            }),
+            /POLYMARKET_CLOB_ADDRESS .* must match runtime signer address .* when POLYMARKET_RELAYER_ENABLED=false/
+        );
+
         const interpreted = interpretSignedTradeIntentSignal(validSignal, {
             policy: {
                 ready: true,
@@ -480,6 +494,9 @@ async function run() {
             config: buildModuleConfig(),
         });
         assert.deepEqual(duplicateDepositCalls, []);
+        state = getTradeIntentState();
+        storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-001`];
+        assert.equal(storedIntent.depositSubmittedAtMs, undefined);
 
         state = getTradeIntentState();
         storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-001`];

@@ -36,6 +36,7 @@ const PRICE_SCALE = 1_000_000n;
 const USDC_DECIMALS = 6;
 const DEFAULT_ARCHIVE_RETRY_DELAY_MS = 30_000;
 const DEFAULT_PENDING_TX_TIMEOUT_MS = 900_000;
+const PENDING_DEPOSIT_DISPATCH_GRACE_MS = 30_000;
 const DEFAULT_LOG_CHUNK_SIZE = 5_000n;
 const DEFAULT_CLOB_HOST = 'https://clob.polymarket.com';
 const DEFAULT_CLOB_REQUEST_TIMEOUT_MS = 15_000;
@@ -294,6 +295,21 @@ function hasTimedOut(submittedAtMs, timeoutMs, nowMs = Date.now()) {
     return nowMs - normalizedSubmittedAtMs >= timeoutMs;
 }
 
+function clearStalePendingDepositSubmission(nowMs = Date.now()) {
+    if (
+        !pendingDepositSubmission?.intentKey ||
+        !hasTimedOut(
+            pendingDepositSubmission.startedAtMs,
+            PENDING_DEPOSIT_DISPATCH_GRACE_MS,
+            nowMs
+        )
+    ) {
+        return false;
+    }
+    pendingDepositSubmission = null;
+    return true;
+}
+
 function sortIntentRecords(records) {
     return [...records].sort((left, right) => {
         const leftSequence = Number(left?.sequence ?? 0);
@@ -409,16 +425,19 @@ function getClobAuthAddress({ config, accountAddress }) {
 }
 
 async function resolveTokenHolderAddress({ publicClient, config, account }) {
+    const runtimeSignerAddress = normalizeAddressOrNull(account?.address);
     const fallbackAddress =
         getClobAuthAddress({
             config,
             accountAddress: account?.address,
-        }) ?? normalizeAddressOrNull(account?.address);
+        }) ?? runtimeSignerAddress;
 
     if (!config?.polymarketRelayerEnabled) {
         return {
-            tokenHolderAddress: fallbackAddress,
-            tokenHolderResolutionError: null,
+            tokenHolderAddress: runtimeSignerAddress,
+            tokenHolderResolutionError: runtimeSignerAddress
+                ? null
+                : 'Unable to resolve runtime signer address for non-relayer ERC1155 deposits.',
         };
     }
 
@@ -1894,6 +1913,7 @@ async function getDeterministicToolCalls({
 
     const latestBlock = await publicClient.getBlockNumber();
     const normalizedCommitmentSafe = normalizeAddress(commitmentSafe);
+    clearStalePendingDepositSubmission();
 
     while (queuedProposalEventUpdates.length > 0) {
         applyProposalEventUpdate(queuedProposalEventUpdates.shift());
@@ -1928,6 +1948,9 @@ async function getDeterministicToolCalls({
             walletAlignmentError =
                 `POLYMARKET_CLOB_ADDRESS (${clobAuthAddress}) must match relayer proxy wallet (${tokenHolderAddress}) when POLYMARKET_RELAYER_ENABLED=true.`;
         }
+    } else if (clobAuthAddress && tokenHolderAddress && clobAuthAddress !== tokenHolderAddress) {
+        walletAlignmentError =
+            `POLYMARKET_CLOB_ADDRESS (${clobAuthAddress}) must match runtime signer address (${tokenHolderAddress}) when POLYMARKET_RELAYER_ENABLED=false, because make_erc1155_deposit transfers from the runtime signer wallet.`;
     }
     if (walletAlignmentError) {
         throw new Error(walletAlignmentError);
@@ -2010,7 +2033,11 @@ async function getDeterministicToolCalls({
         if (!intent.orderFilled || intent.tokenDeposited) {
             continue;
         }
-        if (intent.depositTxHash || intent.depositSubmittedAtMs) {
+        if (
+            intent.depositTxHash ||
+            intent.depositSubmittedAtMs ||
+            pendingDepositSubmission?.intentKey === intent.intentKey
+        ) {
             continue;
         }
         if (!tokenHolderAddress) {
@@ -2026,11 +2053,9 @@ async function getDeterministicToolCalls({
             continue;
         }
 
-        intent.depositSubmittedAtMs = Date.now();
-        intent.updatedAtMs = Date.now();
-        await maybePersistTradeIntentState();
         pendingDepositSubmission = {
             intentKey: intent.intentKey,
+            startedAtMs: Date.now(),
         };
         return [buildDepositToolCall(intent, policy, BigInt(tokenBalance).toString())];
     }
@@ -2074,15 +2099,17 @@ async function getDeterministicToolCalls({
         ];
     }
 
-    const hasActiveExecution = openIntents.some(
-        (intent) =>
-            Boolean(intent.orderSubmittedAtMs) ||
-            Boolean(intent.orderId) ||
-            Boolean(intent.depositSubmittedAtMs) ||
-            Boolean(intent.depositTxHash) ||
-            Boolean(intent.reimbursementSubmittedAtMs) ||
-            Boolean(intent.reimbursementSubmissionTxHash)
-    );
+    const hasActiveExecution =
+        Boolean(pendingDepositSubmission?.intentKey) ||
+        openIntents.some(
+            (intent) =>
+                Boolean(intent.orderSubmittedAtMs) ||
+                Boolean(intent.orderId) ||
+                Boolean(intent.depositSubmittedAtMs) ||
+                Boolean(intent.depositTxHash) ||
+                Boolean(intent.reimbursementSubmittedAtMs) ||
+                Boolean(intent.reimbursementSubmissionTxHash)
+        );
 
     if (!hasActiveExecution) {
         for (const intent of openIntents) {
