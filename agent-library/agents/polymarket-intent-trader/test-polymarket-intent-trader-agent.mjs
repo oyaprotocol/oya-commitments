@@ -180,8 +180,9 @@ async function run() {
             order: {
                 id: TEST_ORDER_ID,
                 status: 'MATCHED',
-                original_size: '100',
-                size_matched: '100',
+                original_size: '25',
+                size_matched: '25',
+                maker_amount_filled: '25000000',
             },
         },
         tradesPayload: [
@@ -189,6 +190,8 @@ async function run() {
                 id: 'trade-1',
                 status: 'CONFIRMED',
                 taker_order_id: TEST_ORDER_ID,
+                price: '0.40',
+                size: '62.5',
             },
         ],
         ctfBalances: {},
@@ -199,6 +202,9 @@ async function run() {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (input) => {
         const url = new URL(String(input));
+        if (url.pathname === '/fee-rate') {
+            return buildFetchResponse({ base_fee: 30 });
+        }
         if (url.pathname === `/data/order/${TEST_ORDER_ID}`) {
             return buildFetchResponse(runtime.orderPayload);
         }
@@ -226,6 +232,22 @@ async function run() {
         assert.equal(pollingOptions.emitBalanceSnapshotsEveryPoll, true);
 
         const validSignal = buildSignedMessageSignal();
+        const inactiveCalls = await getDeterministicToolCalls({
+            signals: [validSignal],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig({
+                agentConfig: {
+                    polymarketIntentTrader: {
+                        authorizedAgent: null,
+                    },
+                },
+            }),
+        });
+        assert.deepEqual(inactiveCalls, []);
+        assert.deepEqual(getTradeIntentState().intents, {});
+
         const interpreted = interpretSignedTradeIntentSignal(validSignal, {
             policy: {
                 ready: true,
@@ -255,8 +277,8 @@ async function run() {
             collateralAmountWei: 25_000_000n,
             price: 0.42,
         });
-        assert.equal(sized.takerAmount, '25000000');
-        assert.ok(BigInt(sized.makerAmount) > 0n);
+        assert.equal(sized.makerAmount, '25000000');
+        assert.equal(sized.takerAmount, '59523810');
 
         const archiveArtifact = buildSignedTradeIntentArchiveArtifact({
             record: interpreted.intent,
@@ -364,7 +386,9 @@ async function run() {
         assert.equal(orderArgs.side, 'BUY');
         assert.equal(orderArgs.tokenId, NO_TOKEN_ID);
         assert.equal(orderArgs.orderType, 'FOK');
-        assert.equal(orderArgs.takerAmount, '25000000');
+        assert.equal(orderArgs.makerAmount, '25000000');
+        assert.equal(orderArgs.takerAmount, '59523810');
+        assert.equal(orderArgs.feeRateBps, '30');
         assert.equal(orderArgs.chainId, 137);
 
         await onToolOutput({
@@ -381,7 +405,7 @@ async function run() {
             config: buildModuleConfig(),
         });
 
-        runtime.ctfBalances[`${TEST_AGENT.toLowerCase()}:${NO_TOKEN_ID}`] = 59_523_809n;
+        runtime.ctfBalances[`${TEST_AGENT.toLowerCase()}:${NO_TOKEN_ID}`] = 62_500_000n;
 
         const depositCalls = await getDeterministicToolCalls({
             signals: [],
@@ -395,7 +419,12 @@ async function run() {
         const depositArgs = JSON.parse(depositCalls[0].arguments);
         assert.equal(depositArgs.token, TEST_CTF.toLowerCase());
         assert.equal(depositArgs.tokenId, NO_TOKEN_ID);
-        assert.equal(depositArgs.amount, '59523809');
+        assert.equal(depositArgs.amount, '62500000');
+
+        state = getTradeIntentState();
+        storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-001`];
+        assert.equal(storedIntent.reimbursementAmountWei, '25000000');
+        assert.equal(storedIntent.feeRateBps, '30');
 
         await onToolOutput({
             name: 'make_erc1155_deposit',
@@ -421,6 +450,7 @@ async function run() {
             reimbursementArgs.transactions[0].to.toLowerCase(),
             TEST_USDC.toLowerCase()
         );
+        assert.ok(reimbursementArgs.explanation.includes('spentWei=25000000'));
         assert.ok(reimbursementArgs.explanation.includes('signedRequestCid=ipfs%3A%2F%2Fbafyintent'));
         assert.ok(reimbursementArgs.explanation.includes(`orderId=${encodeURIComponent(TEST_ORDER_ID)}`));
         assert.ok(
