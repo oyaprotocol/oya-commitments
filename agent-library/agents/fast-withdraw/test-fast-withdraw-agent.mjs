@@ -32,12 +32,14 @@ const TEST_ERC1155_AMOUNT = '3';
 const TEST_ERC1155_FILL_TX_HASH = `0x${'e'.repeat(64)}`;
 const TEST_ERC1155_PROPOSAL_TX_HASH = `0x${'f'.repeat(64)}`;
 const TEST_ERC1155_OG_PROPOSAL_HASH = `0x${'9'.repeat(64)}`;
+const TEST_CHAIN_ID = 11155111;
 
 function buildSignedMessageSignal(overrides = {}) {
     const requestId = overrides.requestId ?? 'withdrawal-request-001';
     const messageId = overrides.messageId ?? `msg_${requestId}`;
     return {
         kind: 'userMessage',
+        chainId: overrides.chainId ?? TEST_CHAIN_ID,
         messageId,
         requestId,
         text: overrides.text ?? `Please withdraw 10 USDC to ${TEST_RECIPIENT}.`,
@@ -144,10 +146,12 @@ async function run() {
         });
         assert.equal(artifact.requestId, signal.requestId);
         assert.equal(artifact.signedRequest.signer, TEST_SIGNER);
+        assert.equal(artifact.signedRequest.envelope.chainId, TEST_CHAIN_ID);
         assert.equal(
             artifact.signedRequest.canonicalMessage,
             buildSignedMessagePayload({
                 address: TEST_SIGNER,
+                chainId: signal.chainId,
                 timestampMs: signal.sender.signedAtMs,
                 text: signal.text,
                 command: signal.command,

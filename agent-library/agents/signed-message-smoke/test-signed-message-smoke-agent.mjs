@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { getSystemPrompt } from './agent.js';
+import { getDeterministicToolCalls, getSystemPrompt } from './agent.js';
+import { getHarnessDefinition, runSmokeScenario } from './harness.mjs';
 
-function run() {
+async function run() {
     const prompt = getSystemPrompt({
         proposeEnabled: false,
         disputeEnabled: false,
@@ -15,7 +16,25 @@ function run() {
     assert.ok(prompt.includes('Return strict JSON'));
     assert.ok(prompt.includes('Commitment text'));
 
+    const deterministicCalls = await getDeterministicToolCalls({
+        signals: [
+            {
+                kind: 'userMessage',
+                text: 'Smoke-test signed message',
+            },
+        ],
+    });
+    assert.deepEqual(deterministicCalls, []);
+
+    const harnessDefinition = getHarnessDefinition();
+    assert.equal(harnessDefinition.scenario, 'signed-message-smoke');
+    assert.equal(typeof harnessDefinition.description, 'string');
+    assert.equal(typeof runSmokeScenario, 'function');
+
     console.log('[test] signed-message-smoke prompt OK');
 }
 
-run();
+run().catch((error) => {
+    console.error(error);
+    process.exit(1);
+});

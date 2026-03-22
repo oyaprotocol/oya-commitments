@@ -20,6 +20,7 @@ function canonicalize(value) {
 
 function buildSignedMessagePayload({
     address,
+    chainId,
     timestampMs,
     text,
     command,
@@ -33,10 +34,18 @@ function buildSignedMessagePayload({
     if (!Number.isInteger(normalizedTimestamp)) {
         throw new Error('timestampMs must be an integer.');
     }
+    const normalizedChainId =
+        chainId === undefined || chainId === null ? undefined : Number(chainId);
+    if (normalizedChainId !== undefined) {
+        if (!Number.isInteger(normalizedChainId) || normalizedChainId < 1) {
+            throw new Error('chainId must be a positive integer when provided.');
+        }
+    }
 
     const canonical = canonicalize({
         version: 'oya-agent-message-v1',
         address: normalizedAddress,
+        ...(normalizedChainId !== undefined ? { chainId: normalizedChainId } : {}),
         timestampMs: normalizedTimestamp,
         requestId: requestId ?? null,
         text: text ?? null,

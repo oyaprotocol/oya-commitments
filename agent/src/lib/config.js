@@ -178,331 +178,306 @@ function parseErc1155AssetList(raw, envName) {
     });
 }
 
-function parseOptionalAddressEnv(raw, envName) {
-    if (raw === undefined || raw === null) return undefined;
-    const trimmed = String(raw).trim();
-    if (!trimmed) {
-        return undefined;
+const MESSAGE_API_DEFAULTS = Object.freeze({
+    messageApiHost: '127.0.0.1',
+    messageApiPort: 8787,
+    messageApiMaxBodyBytes: 8192,
+    messageApiMaxTextLength: 2000,
+    messageApiQueueLimit: 500,
+    messageApiBatchSize: 25,
+    messageApiDefaultTtlSeconds: 3600,
+    messageApiMinTtlSeconds: 30,
+    messageApiMaxTtlSeconds: 86400,
+    messageApiIdempotencyTtlSeconds: 86400,
+    messageApiRateLimitPerMinute: 30,
+    messageApiRateLimitBurst: 10,
+    messageApiRequireSignerAllowlist: true,
+    messageApiSignerAllowlist: [],
+    messageApiSignatureMaxAgeSeconds: 300,
+    messageApiKeys: {},
+});
+
+const IPFS_DEFAULTS = Object.freeze({
+    ipfsApiUrl: 'http://127.0.0.1:5001',
+    ipfsHeaders: {},
+    ipfsRequestTimeoutMs: 15_000,
+    ipfsMaxRetries: 1,
+    ipfsRetryDelayMs: 250,
+});
+
+const DEFAULT_POLYMARKET_CONDITIONAL_TOKENS =
+    '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
+
+const MESSAGE_API_ENV_OVERRIDES = Symbol('messageApiEnvOverrides');
+const IPFS_ENV_OVERRIDES = Symbol('ipfsEnvOverrides');
+const DEPRECATED_SHARED_CONFIG_ENV_VARS = Object.freeze([
+    'CHAIN_ID',
+    'COMMITMENT_SAFE',
+    'OG_MODULE',
+    'WATCH_ASSETS',
+    'WATCH_ERC1155_ASSETS_JSON',
+    'POLL_INTERVAL_MS',
+    'LOG_CHUNK_SIZE',
+    'START_BLOCK',
+    'WATCH_NATIVE_BALANCE',
+    'DEFAULT_DEPOSIT_ASSET',
+    'DEFAULT_DEPOSIT_AMOUNT_WEI',
+    'BOND_SPENDER',
+    'OPENAI_MODEL',
+    'OPENAI_BASE_URL',
+    'OPENAI_REQUEST_TIMEOUT_MS',
+    'ALLOW_PROPOSE_ON_SIMULATION_FAIL',
+    'PROPOSE_GAS_LIMIT',
+    'EXECUTE_RETRY_MS',
+    'EXECUTE_PENDING_TX_TIMEOUT_MS',
+    'PROPOSE_ENABLED',
+    'DISPUTE_ENABLED',
+    'DISPUTE_RETRY_MS',
+    'PROPOSAL_HASH_RESOLVE_TIMEOUT_MS',
+    'PROPOSAL_HASH_RESOLVE_POLL_INTERVAL_MS',
+    'CHAINLINK_PRICE_FEED',
+    'POLYMARKET_CONDITIONAL_TOKENS',
+    'POLYMARKET_EXCHANGE',
+    'POLYMARKET_CLOB_ENABLED',
+    'POLYMARKET_CLOB_HOST',
+    'POLYMARKET_CLOB_ADDRESS',
+    'POLYMARKET_CLOB_SIGNATURE_TYPE',
+    'POLYMARKET_CLOB_REQUEST_TIMEOUT_MS',
+    'POLYMARKET_CLOB_MAX_RETRIES',
+    'POLYMARKET_CLOB_RETRY_DELAY_MS',
+    'POLYMARKET_RELAYER_ENABLED',
+    'POLYMARKET_RELAYER_HOST',
+    'POLYMARKET_RELAYER_TX_TYPE',
+    'POLYMARKET_RELAYER_FROM_ADDRESS',
+    'POLYMARKET_RELAYER_SAFE_FACTORY',
+    'POLYMARKET_RELAYER_PROXY_FACTORY',
+    'POLYMARKET_RELAYER_RESOLVE_PROXY_ADDRESS',
+    'POLYMARKET_RELAYER_AUTO_DEPLOY_PROXY',
+    'POLYMARKET_RELAYER_CHAIN_ID',
+    'POLYMARKET_RELAYER_REQUEST_TIMEOUT_MS',
+    'POLYMARKET_RELAYER_POLL_INTERVAL_MS',
+    'POLYMARKET_RELAYER_POLL_TIMEOUT_MS',
+    'UNISWAP_V3_FACTORY',
+    'UNISWAP_V3_QUOTER',
+    'UNISWAP_V3_FEE_TIERS',
+    'IPFS_ENABLED',
+    'IPFS_API_URL',
+    'IPFS_REQUEST_TIMEOUT_MS',
+    'IPFS_MAX_RETRIES',
+    'IPFS_RETRY_DELAY_MS',
+    'MESSAGE_API_ENABLED',
+    'MESSAGE_API_HOST',
+    'MESSAGE_API_PORT',
+    'MESSAGE_API_REQUIRE_SIGNER_ALLOWLIST',
+    'MESSAGE_API_SIGNER_ALLOWLIST',
+    'MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS',
+    'MESSAGE_API_MAX_BODY_BYTES',
+    'MESSAGE_API_MAX_TEXT_LENGTH',
+    'MESSAGE_API_QUEUE_LIMIT',
+    'MESSAGE_API_BATCH_SIZE',
+    'MESSAGE_API_DEFAULT_TTL_SECONDS',
+    'MESSAGE_API_MIN_TTL_SECONDS',
+    'MESSAGE_API_MAX_TTL_SECONDS',
+    'MESSAGE_API_IDEMPOTENCY_TTL_SECONDS',
+    'MESSAGE_API_RATE_LIMIT_PER_MINUTE',
+    'MESSAGE_API_RATE_LIMIT_BURST',
+]);
+const DEPRECATED_AGENT_CONFIG_ENV_VARS = Object.freeze({
+    'copy-trading': Object.freeze([
+        'COPY_TRADING_SOURCE_USER',
+        'COPY_TRADING_MARKET',
+        'COPY_TRADING_YES_TOKEN_ID',
+        'COPY_TRADING_NO_TOKEN_ID',
+        'COPY_TRADING_COLLATERAL_TOKEN',
+        'COPY_TRADING_CTF_CONTRACT',
+    ]),
+    'deterministic-dca-agent': Object.freeze([
+        'DETERMINISTIC_DCA_POLICY_PRESET',
+        'DETERMINISTIC_DCA_LOG_CHUNK_SIZE',
+    ]),
+});
+
+function collectMessageApiEnvOverrides(env = process.env) {
+    return {
+        keysJson: env.MESSAGE_API_KEYS_JSON,
+    };
+}
+
+function collectIpfsEnvOverrides(env = process.env) {
+    return {
+        headersJson: env.IPFS_HEADERS_JSON,
+    };
+}
+
+function resolveMessageApiEnvConfig({ enabled, envOverrides = {} } = {}) {
+    if (!enabled) {
+        return {
+            messageApiEnabled: false,
+            ...MESSAGE_API_DEFAULTS,
+        };
     }
-    try {
-        return getAddress(trimmed);
-    } catch (error) {
-        throw new Error(`${envName} must be a valid address`);
+
+    return {
+        messageApiEnabled: true,
+        ...MESSAGE_API_DEFAULTS,
+        messageApiKeys: parseMessageApiKeys(envOverrides.keysJson),
+    };
+}
+
+function resolveIpfsEnvConfig({ enabled, envOverrides = {} } = {}) {
+    if (!enabled) {
+        return {
+            ipfsEnabled: false,
+            ...IPFS_DEFAULTS,
+        };
     }
+
+    return {
+        ipfsEnabled: true,
+        ...IPFS_DEFAULTS,
+        ipfsHeaders: parseStringMap(envOverrides.headersJson, 'IPFS_HEADERS_JSON'),
+    };
+}
+
+function hasConfiguredEnvValue(value) {
+    return value !== undefined && value !== null && String(value).trim() !== '';
+}
+
+function findDeprecatedConfigEnvVars({ env = process.env, agentModuleName } = {}) {
+    const names = [
+        ...DEPRECATED_SHARED_CONFIG_ENV_VARS,
+        ...(DEPRECATED_AGENT_CONFIG_ENV_VARS[agentModuleName] ?? []),
+    ];
+    return names.filter((name) => hasConfiguredEnvValue(env[name]));
+}
+
+function listDeprecatedConfigEnvVars({ agentModuleName } = {}) {
+    return [
+        ...DEPRECATED_SHARED_CONFIG_ENV_VARS,
+        ...(DEPRECATED_AGENT_CONFIG_ENV_VARS[agentModuleName] ?? []),
+    ];
+}
+
+function assertNoDeprecatedConfigEnvVars({ env = process.env, agentModuleName } = {}) {
+    const names = findDeprecatedConfigEnvVars({ env, agentModuleName });
+    if (names.length === 0) {
+        return;
+    }
+
+    const scopeLabel = agentModuleName
+        ? ` for agent "${agentModuleName}"`
+        : '';
+    throw new Error(
+        `Legacy non-secret env config is no longer supported${scopeLabel}. Move these settings into the active agent config stack (config.json/config.local.json/overlay) and remove them from agent/.env: ${names.join(
+            ', '
+        )}. Use node agent/scripts/migrate-agent-config-from-env.mjs --module=${
+            agentModuleName ?? '<agent-name>'
+        } for one-time migration.`
+    );
+}
+
+function createDefaultRuntimeConfig({ env = process.env, rpcUrl } = {}) {
+    return {
+        rpcUrl,
+        chainId: undefined,
+        commitmentSafe: undefined,
+        ogModule: undefined,
+        pollIntervalMs: 10_000,
+        logChunkSize: undefined,
+        startBlock: undefined,
+        watchAssets: [],
+        watchErc1155Assets: [],
+        watchNativeBalance: true,
+        defaultDepositAsset: undefined,
+        defaultDepositAmountWei: undefined,
+        bondSpender: 'og',
+        openAiApiKey: env.OPENAI_API_KEY,
+        openAiModel: 'gpt-4.1-mini',
+        openAiBaseUrl: 'https://api.openai.com/v1',
+        openAiRequestTimeoutMs: 60_000,
+        allowProposeOnSimulationFail: false,
+        proposeGasLimit: 2_000_000n,
+        executeRetryMs: 60_000,
+        executePendingTxTimeoutMs: 900_000,
+        proposeEnabled: true,
+        disputeEnabled: true,
+        disputeRetryMs: 60_000,
+        proposalHashResolveTimeoutMs: 15_000,
+        proposalHashResolvePollIntervalMs: 1_500,
+        agentModule: env.AGENT_MODULE,
+        chainlinkPriceFeed: undefined,
+        polymarketConditionalTokens: getAddress(DEFAULT_POLYMARKET_CONDITIONAL_TOKENS),
+        polymarketExchange: undefined,
+        polymarketClobEnabled: false,
+        polymarketClobHost: 'https://clob.polymarket.com',
+        polymarketClobAddress: undefined,
+        polymarketClobSignatureType: undefined,
+        polymarketClobApiKey: env.POLYMARKET_CLOB_API_KEY,
+        polymarketClobApiSecret: env.POLYMARKET_CLOB_API_SECRET,
+        polymarketClobApiPassphrase: env.POLYMARKET_CLOB_API_PASSPHRASE,
+        polymarketClobRequestTimeoutMs: 15_000,
+        polymarketClobMaxRetries: 1,
+        polymarketClobRetryDelayMs: 250,
+        polymarketRelayerEnabled: false,
+        polymarketRelayerHost: 'https://relayer-v2.polymarket.com',
+        polymarketRelayerTxType: 'SAFE',
+        polymarketRelayerFromAddress: undefined,
+        polymarketRelayerSafeFactory: undefined,
+        polymarketRelayerProxyFactory: undefined,
+        polymarketRelayerResolveProxyAddress: true,
+        polymarketRelayerAutoDeployProxy: false,
+        polymarketRelayerChainId: undefined,
+        polymarketRelayerRequestTimeoutMs: 15_000,
+        polymarketRelayerPollIntervalMs: 2_000,
+        polymarketRelayerPollTimeoutMs: 120_000,
+        polymarketApiKey: env.POLYMARKET_API_KEY,
+        polymarketApiSecret: env.POLYMARKET_API_SECRET,
+        polymarketApiPassphrase: env.POLYMARKET_API_PASSPHRASE,
+        polymarketBuilderApiKey:
+            env.POLYMARKET_BUILDER_API_KEY ?? env.POLYMARKET_API_KEY,
+        polymarketBuilderSecret:
+            env.POLYMARKET_BUILDER_SECRET ?? env.POLYMARKET_API_SECRET,
+        polymarketBuilderPassphrase:
+            env.POLYMARKET_BUILDER_PASSPHRASE ?? env.POLYMARKET_API_PASSPHRASE,
+        uniswapV3Factory: undefined,
+        uniswapV3Quoter: undefined,
+        uniswapV3FeeTiers: [500, 3000, 10000],
+        messageApiEnabled: false,
+        ...MESSAGE_API_DEFAULTS,
+        ipfsEnabled: false,
+        ...IPFS_DEFAULTS,
+    };
 }
 
 function buildConfig() {
     const rpcUrl = mustGetEnv('RPC_URL');
-    const commitmentSafe = parseOptionalAddressEnv(process.env.COMMITMENT_SAFE, 'COMMITMENT_SAFE');
-    const ogModule = parseOptionalAddressEnv(process.env.OG_MODULE, 'OG_MODULE');
 
-    const messageApiEnabled = parseBoolean(process.env.MESSAGE_API_ENABLED, false);
-    // Keep optional ingress isolated: malformed keys should only fail when the feature is enabled.
-    const messageApiKeys = messageApiEnabled
-        ? parseMessageApiKeys(process.env.MESSAGE_API_KEYS_JSON)
-        : {};
-    const messageApiSignerAllowlist = messageApiEnabled
-        ? parseAddressList(process.env.MESSAGE_API_SIGNER_ALLOWLIST)
-        : [];
-    if (messageApiEnabled && messageApiSignerAllowlist.length === 0) {
-        throw new Error(
-            'MESSAGE_API_ENABLED=true requires MESSAGE_API_SIGNER_ALLOWLIST. MESSAGE_API_KEYS_JSON is optional additional bearer gating.'
-        );
-    }
-    // Keep disabled ingress fully inert: optional MESSAGE_API_* parsing/validation
-    // should not abort unrelated agent runs when the API is turned off.
-    const messageApiConfig = messageApiEnabled
-        ? {
-              messageApiHost: parseHost(process.env.MESSAGE_API_HOST, '127.0.0.1'),
-              messageApiPort: parsePositiveInteger(
-                  process.env.MESSAGE_API_PORT,
-                  'MESSAGE_API_PORT',
-                  8787
-              ),
-              messageApiMaxBodyBytes: parsePositiveInteger(
-                  process.env.MESSAGE_API_MAX_BODY_BYTES,
-                  'MESSAGE_API_MAX_BODY_BYTES',
-                  8192
-              ),
-              messageApiMaxTextLength: parsePositiveInteger(
-                  process.env.MESSAGE_API_MAX_TEXT_LENGTH,
-                  'MESSAGE_API_MAX_TEXT_LENGTH',
-                  2000
-              ),
-              messageApiQueueLimit: parsePositiveInteger(
-                  process.env.MESSAGE_API_QUEUE_LIMIT,
-                  'MESSAGE_API_QUEUE_LIMIT',
-                  500
-              ),
-              messageApiBatchSize: parsePositiveInteger(
-                  process.env.MESSAGE_API_BATCH_SIZE,
-                  'MESSAGE_API_BATCH_SIZE',
-                  25
-              ),
-              messageApiDefaultTtlSeconds: parsePositiveInteger(
-                  process.env.MESSAGE_API_DEFAULT_TTL_SECONDS,
-                  'MESSAGE_API_DEFAULT_TTL_SECONDS',
-                  3600
-              ),
-              messageApiMinTtlSeconds: parsePositiveInteger(
-                  process.env.MESSAGE_API_MIN_TTL_SECONDS,
-                  'MESSAGE_API_MIN_TTL_SECONDS',
-                  30
-              ),
-              messageApiMaxTtlSeconds: parsePositiveInteger(
-                  process.env.MESSAGE_API_MAX_TTL_SECONDS,
-                  'MESSAGE_API_MAX_TTL_SECONDS',
-                  86400
-              ),
-              messageApiIdempotencyTtlSeconds: parsePositiveInteger(
-                  process.env.MESSAGE_API_IDEMPOTENCY_TTL_SECONDS,
-                  'MESSAGE_API_IDEMPOTENCY_TTL_SECONDS',
-                  86400
-              ),
-              messageApiRateLimitPerMinute: parsePositiveInteger(
-                  process.env.MESSAGE_API_RATE_LIMIT_PER_MINUTE,
-                  'MESSAGE_API_RATE_LIMIT_PER_MINUTE',
-                  30,
-                  { min: 0 }
-              ),
-              messageApiRateLimitBurst: parsePositiveInteger(
-                  process.env.MESSAGE_API_RATE_LIMIT_BURST,
-                  'MESSAGE_API_RATE_LIMIT_BURST',
-                  10,
-                  { min: 0 }
-              ),
-              messageApiSignerAllowlist,
-              messageApiSignatureMaxAgeSeconds: parsePositiveInteger(
-                  process.env.MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS,
-                  'MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS',
-                  300
-              ),
-          }
-        : {
-              messageApiHost: '127.0.0.1',
-              messageApiPort: 8787,
-              messageApiMaxBodyBytes: 8192,
-              messageApiMaxTextLength: 2000,
-              messageApiQueueLimit: 500,
-              messageApiBatchSize: 25,
-              messageApiDefaultTtlSeconds: 3600,
-              messageApiMinTtlSeconds: 30,
-              messageApiMaxTtlSeconds: 86400,
-              messageApiIdempotencyTtlSeconds: 86400,
-              messageApiRateLimitPerMinute: 30,
-              messageApiRateLimitBurst: 10,
-              messageApiSignerAllowlist: [],
-              messageApiSignatureMaxAgeSeconds: 300,
-          };
-    const ipfsEnabled = parseBoolean(process.env.IPFS_ENABLED, false);
-    const ipfsConfig = ipfsEnabled
-        ? {
-              ipfsApiUrl: parseHost(process.env.IPFS_API_URL, 'http://127.0.0.1:5001'),
-              ipfsHeaders: parseStringMap(process.env.IPFS_HEADERS_JSON, 'IPFS_HEADERS_JSON'),
-              ipfsRequestTimeoutMs: parsePositiveInteger(
-                  process.env.IPFS_REQUEST_TIMEOUT_MS,
-                  'IPFS_REQUEST_TIMEOUT_MS',
-                  15_000
-              ),
-              ipfsMaxRetries: parsePositiveInteger(
-                  process.env.IPFS_MAX_RETRIES,
-                  'IPFS_MAX_RETRIES',
-                  1,
-                  { min: 0 }
-              ),
-              ipfsRetryDelayMs: parsePositiveInteger(
-                  process.env.IPFS_RETRY_DELAY_MS,
-                  'IPFS_RETRY_DELAY_MS',
-                  250,
-                  { min: 0 }
-              ),
-          }
-        : {
-              ipfsApiUrl: 'http://127.0.0.1:5001',
-              ipfsHeaders: {},
-              ipfsRequestTimeoutMs: 15_000,
-              ipfsMaxRetries: 1,
-              ipfsRetryDelayMs: 250,
-          };
+    const messageApiEnvOverrides = collectMessageApiEnvOverrides();
+    const ipfsEnvOverrides = collectIpfsEnvOverrides();
 
-    return {
-        rpcUrl,
-        commitmentSafe,
-        ogModule,
-        pollIntervalMs: parsePositiveInteger(
-            process.env.POLL_INTERVAL_MS,
-            'POLL_INTERVAL_MS',
-            10_000
-        ),
-        logChunkSize: parsePositiveBigInt(process.env.LOG_CHUNK_SIZE, 'LOG_CHUNK_SIZE'),
-        startBlock: process.env.START_BLOCK ? BigInt(process.env.START_BLOCK) : undefined,
-        watchAssets: parseAddressList(process.env.WATCH_ASSETS),
-        watchErc1155Assets: parseErc1155AssetList(
-            process.env.WATCH_ERC1155_ASSETS_JSON,
-            'WATCH_ERC1155_ASSETS_JSON'
-        ),
-        watchNativeBalance:
-            process.env.WATCH_NATIVE_BALANCE === undefined
-                ? true
-                : process.env.WATCH_NATIVE_BALANCE.toLowerCase() !== 'false',
-        defaultDepositAsset: process.env.DEFAULT_DEPOSIT_ASSET
-            ? getAddress(process.env.DEFAULT_DEPOSIT_ASSET)
-            : undefined,
-        defaultDepositAmountWei: process.env.DEFAULT_DEPOSIT_AMOUNT_WEI
-            ? BigInt(process.env.DEFAULT_DEPOSIT_AMOUNT_WEI)
-            : undefined,
-        bondSpender: (process.env.BOND_SPENDER ?? 'og').toLowerCase(),
-        openAiApiKey: process.env.OPENAI_API_KEY,
-        openAiModel: process.env.OPENAI_MODEL ?? 'gpt-4.1-mini',
-        openAiBaseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
-        openAiRequestTimeoutMs: parsePositiveInteger(
-            process.env.OPENAI_REQUEST_TIMEOUT_MS,
-            'OPENAI_REQUEST_TIMEOUT_MS',
-            60_000
-        ),
-        allowProposeOnSimulationFail:
-            process.env.ALLOW_PROPOSE_ON_SIMULATION_FAIL === undefined
-                ? false
-                : process.env.ALLOW_PROPOSE_ON_SIMULATION_FAIL.toLowerCase() === 'true',
-        proposeGasLimit: process.env.PROPOSE_GAS_LIMIT
-            ? BigInt(process.env.PROPOSE_GAS_LIMIT)
-            : 2_000_000n,
-        executeRetryMs: parsePositiveInteger(
-            process.env.EXECUTE_RETRY_MS,
-            'EXECUTE_RETRY_MS',
-            60_000
-        ),
-        executePendingTxTimeoutMs: parsePositiveInteger(
-            process.env.EXECUTE_PENDING_TX_TIMEOUT_MS,
-            'EXECUTE_PENDING_TX_TIMEOUT_MS',
-            900_000
-        ),
-        proposeEnabled:
-            process.env.PROPOSE_ENABLED === undefined
-                ? true
-                : process.env.PROPOSE_ENABLED.toLowerCase() !== 'false',
-        disputeEnabled:
-            process.env.DISPUTE_ENABLED === undefined
-                ? true
-                : process.env.DISPUTE_ENABLED.toLowerCase() !== 'false',
-        disputeRetryMs: parsePositiveInteger(
-            process.env.DISPUTE_RETRY_MS,
-            'DISPUTE_RETRY_MS',
-            60_000
-        ),
-        proposalHashResolveTimeoutMs: parseNonNegativeInteger(
-            process.env.PROPOSAL_HASH_RESOLVE_TIMEOUT_MS,
-            'PROPOSAL_HASH_RESOLVE_TIMEOUT_MS',
-            15_000
-        ),
-        proposalHashResolvePollIntervalMs: parsePositiveInteger(
-            process.env.PROPOSAL_HASH_RESOLVE_POLL_INTERVAL_MS,
-            'PROPOSAL_HASH_RESOLVE_POLL_INTERVAL_MS',
-            1_500
-        ),
-        agentModule: process.env.AGENT_MODULE,
-        chainlinkPriceFeed: process.env.CHAINLINK_PRICE_FEED
-            ? getAddress(process.env.CHAINLINK_PRICE_FEED)
-            : undefined,
-        polymarketConditionalTokens: process.env.POLYMARKET_CONDITIONAL_TOKENS
-            ? getAddress(process.env.POLYMARKET_CONDITIONAL_TOKENS)
-            : getAddress('0x4D97DCd97eC945f40cF65F87097ACe5EA0476045'),
-        polymarketExchange: process.env.POLYMARKET_EXCHANGE
-            ? getAddress(process.env.POLYMARKET_EXCHANGE)
-            : undefined,
-        polymarketClobEnabled:
-            process.env.POLYMARKET_CLOB_ENABLED === undefined
-                ? false
-                : process.env.POLYMARKET_CLOB_ENABLED.toLowerCase() !== 'false',
-        polymarketClobHost: process.env.POLYMARKET_CLOB_HOST ?? 'https://clob.polymarket.com',
-        polymarketClobAddress: process.env.POLYMARKET_CLOB_ADDRESS
-            ? getAddress(process.env.POLYMARKET_CLOB_ADDRESS)
-            : undefined,
-        polymarketClobSignatureType: process.env.POLYMARKET_CLOB_SIGNATURE_TYPE,
-        polymarketClobApiKey: process.env.POLYMARKET_CLOB_API_KEY,
-        polymarketClobApiSecret: process.env.POLYMARKET_CLOB_API_SECRET,
-        polymarketClobApiPassphrase: process.env.POLYMARKET_CLOB_API_PASSPHRASE,
-        polymarketClobRequestTimeoutMs: parseNonNegativeInteger(
-            process.env.POLYMARKET_CLOB_REQUEST_TIMEOUT_MS,
-            'POLYMARKET_CLOB_REQUEST_TIMEOUT_MS',
-            15_000
-        ),
-        polymarketClobMaxRetries: parseNonNegativeInteger(
-            process.env.POLYMARKET_CLOB_MAX_RETRIES,
-            'POLYMARKET_CLOB_MAX_RETRIES',
-            1
-        ),
-        polymarketClobRetryDelayMs: parseNonNegativeInteger(
-            process.env.POLYMARKET_CLOB_RETRY_DELAY_MS,
-            'POLYMARKET_CLOB_RETRY_DELAY_MS',
-            250
-        ),
-        polymarketRelayerEnabled:
-            process.env.POLYMARKET_RELAYER_ENABLED === undefined
-                ? false
-                : process.env.POLYMARKET_RELAYER_ENABLED.toLowerCase() !== 'false',
-        polymarketRelayerHost:
-            process.env.POLYMARKET_RELAYER_HOST ?? 'https://relayer-v2.polymarket.com',
-        polymarketRelayerTxType: process.env.POLYMARKET_RELAYER_TX_TYPE ?? 'SAFE',
-        polymarketRelayerFromAddress: process.env.POLYMARKET_RELAYER_FROM_ADDRESS
-            ? getAddress(process.env.POLYMARKET_RELAYER_FROM_ADDRESS)
-            : undefined,
-        polymarketRelayerSafeFactory: process.env.POLYMARKET_RELAYER_SAFE_FACTORY
-            ? getAddress(process.env.POLYMARKET_RELAYER_SAFE_FACTORY)
-            : undefined,
-        polymarketRelayerProxyFactory: process.env.POLYMARKET_RELAYER_PROXY_FACTORY
-            ? getAddress(process.env.POLYMARKET_RELAYER_PROXY_FACTORY)
-            : undefined,
-        polymarketRelayerResolveProxyAddress:
-            process.env.POLYMARKET_RELAYER_RESOLVE_PROXY_ADDRESS === undefined
-                ? true
-                : process.env.POLYMARKET_RELAYER_RESOLVE_PROXY_ADDRESS.toLowerCase() !==
-                  'false',
-        polymarketRelayerAutoDeployProxy:
-            process.env.POLYMARKET_RELAYER_AUTO_DEPLOY_PROXY === undefined
-                ? false
-                : process.env.POLYMARKET_RELAYER_AUTO_DEPLOY_PROXY.toLowerCase() === 'true',
-        polymarketRelayerChainId: parseOptionalPositiveInteger(
-            process.env.POLYMARKET_RELAYER_CHAIN_ID,
-            'POLYMARKET_RELAYER_CHAIN_ID'
-        ),
-        polymarketRelayerRequestTimeoutMs: parseNonNegativeInteger(
-            process.env.POLYMARKET_RELAYER_REQUEST_TIMEOUT_MS,
-            'POLYMARKET_RELAYER_REQUEST_TIMEOUT_MS',
-            15_000
-        ),
-        polymarketRelayerPollIntervalMs: parsePositiveInteger(
-            process.env.POLYMARKET_RELAYER_POLL_INTERVAL_MS,
-            'POLYMARKET_RELAYER_POLL_INTERVAL_MS',
-            2_000
-        ),
-        polymarketRelayerPollTimeoutMs: parseNonNegativeInteger(
-            process.env.POLYMARKET_RELAYER_POLL_TIMEOUT_MS,
-            'POLYMARKET_RELAYER_POLL_TIMEOUT_MS',
-            120_000
-        ),
-        polymarketApiKey: process.env.POLYMARKET_API_KEY,
-        polymarketApiSecret: process.env.POLYMARKET_API_SECRET,
-        polymarketApiPassphrase: process.env.POLYMARKET_API_PASSPHRASE,
-        polymarketBuilderApiKey:
-            process.env.POLYMARKET_BUILDER_API_KEY ?? process.env.POLYMARKET_API_KEY,
-        polymarketBuilderSecret:
-            process.env.POLYMARKET_BUILDER_SECRET ?? process.env.POLYMARKET_API_SECRET,
-        polymarketBuilderPassphrase:
-            process.env.POLYMARKET_BUILDER_PASSPHRASE ?? process.env.POLYMARKET_API_PASSPHRASE,
-        uniswapV3Factory: process.env.UNISWAP_V3_FACTORY
-            ? getAddress(process.env.UNISWAP_V3_FACTORY)
-            : undefined,
-        uniswapV3Quoter: process.env.UNISWAP_V3_QUOTER
-            ? getAddress(process.env.UNISWAP_V3_QUOTER)
-            : undefined,
-        uniswapV3FeeTiers: parseFeeTierList(process.env.UNISWAP_V3_FEE_TIERS),
-        messageApiEnabled,
-        messageApiKeys,
-        ...messageApiConfig,
-        ipfsEnabled,
-        ...ipfsConfig,
-    };
+    const config = createDefaultRuntimeConfig({ rpcUrl });
+
+    Object.defineProperty(config, MESSAGE_API_ENV_OVERRIDES, {
+        value: messageApiEnvOverrides,
+        enumerable: false,
+    });
+    Object.defineProperty(config, IPFS_ENV_OVERRIDES, {
+        value: ipfsEnvOverrides,
+        enumerable: false,
+    });
+
+    return config;
 }
 
-export { buildConfig };
+export {
+    assertNoDeprecatedConfigEnvVars,
+    createDefaultRuntimeConfig,
+    DEFAULT_POLYMARKET_CONDITIONAL_TOKENS,
+    buildConfig,
+    findDeprecatedConfigEnvVars,
+    IPFS_ENV_OVERRIDES,
+    listDeprecatedConfigEnvVars,
+    MESSAGE_API_ENV_OVERRIDES,
+    resolveIpfsEnvConfig,
+    resolveMessageApiEnvConfig,
+};

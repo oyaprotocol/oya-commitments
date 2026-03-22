@@ -1,32 +1,21 @@
-import dotenv from 'dotenv';
 import { readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { createPublicClient, createWalletClient, decodeEventLog, http } from 'viem';
+import { createPublicClient, decodeEventLog, http } from 'viem';
 import { getAddress } from 'viem';
 import { createSignerClient } from '../src/lib/signer.js';
+import {
+    getArgValue,
+    loadScriptEnv,
+    normalizeAgentName,
+    repoRoot,
+    resolveConfiguredChainIdForScript,
+    resolveAgentDirectory,
+    resolveAgentRef,
+} from './lib/cli-runtime.mjs';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const repoRoot = path.resolve(__dirname, '../..');
-
-dotenv.config();
-dotenv.config({ path: path.resolve(repoRoot, 'agent/.env') });
-
-function getArgValue(prefix) {
-    const arg = process.argv.find((value) => value.startsWith(prefix));
-    return arg ? arg.slice(prefix.length) : null;
-}
+loadScriptEnv();
 
 function formatCaip10(chainId, address) {
     return `eip155:${chainId}:${address.toLowerCase()}`;
-}
-
-function normalizeAgentName(agentRef) {
-    if (!agentRef) return 'default';
-    if (!agentRef.includes('/')) return agentRef;
-    const trimmed = agentRef.endsWith('.js') ? path.dirname(agentRef) : agentRef;
-    return path.basename(trimmed);
 }
 
 const REGISTRY_BY_NETWORK = {
@@ -105,14 +94,13 @@ const identityRegistryAbi = [
 ];
 
 async function main() {
-    const agentRef = getArgValue('--agent=') ?? process.env.AGENT_MODULE ?? 'default';
+    const agentRef =
+        getArgValue('--agent=') ??
+        resolveAgentRef({ flag: '--agent=' });
     const agentName = normalizeAgentName(agentRef);
-    const agentDir = agentRef.includes('/')
-        ? agentRef.endsWith('.js')
-            ? path.dirname(agentRef)
-            : agentRef
-        : `agent-library/agents/${agentName}`;
-    const agentJsonPath = path.resolve(repoRoot, agentDir, 'agent.json');
+    const agentJsonPath = `${resolveAgentDirectory(agentRef, {
+        repoRootPath: repoRoot,
+    })}/agent.json`;
 
     const agentUriArg = getArgValue('--agent-uri=');
     const agentOrg = process.env.AGENT_ORG ?? 'oyaprotocol';
@@ -142,10 +130,24 @@ async function main() {
     const publicClient = createPublicClient({ transport: http(rpcUrl) });
     const { account, walletClient } = await createSignerClient({ rpcUrl });
 
+    const explicitChainIdRaw = getArgValue('--chain-id=');
+    const explicitChainId =
+        explicitChainIdRaw === null ? undefined : Number(explicitChainIdRaw);
+    if (
+        explicitChainIdRaw !== null &&
+        (!Number.isInteger(explicitChainId) || explicitChainId < 1)
+    ) {
+        throw new Error('--chain-id must be an integer.');
+    }
+    const rpcChainId = await publicClient.getChainId();
     const chainId =
-        Number(getArgValue('--chain-id=')) ||
-        Number(process.env.CHAIN_ID) ||
-        (await publicClient.getChainId());
+        (await resolveConfiguredChainIdForScript(agentRef, {
+            repoRootPath: repoRoot,
+            env: process.env,
+            explicitChainId: explicitChainId ?? rpcChainId,
+        })) ??
+        explicitChainId ??
+        rpcChainId;
     const registryOverride = getArgValue('--agent-registry=') ?? process.env.AGENT_REGISTRY;
     const network =
         getArgValue('--network=') ??

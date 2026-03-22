@@ -89,17 +89,39 @@ const singleFireState = {
     proposalSubmitted: false,
     proposalHash: null,
 };
-let singleFireStateHydrated = false;
-let singleFireReconciledOnchain = false;
+let activeSingleFireStatePath = null;
+let hydratedSingleFireStatePath = null;
+let reconciledSingleFireStatePath = null;
 const normalizeAddress = normalizeAddressOrThrow;
 const normalizeHash = normalizeHashOrNull;
 
-function getSingleFireStatePath() {
+function getSingleFireStatePath(config) {
+    const fromConfig =
+        config?.agentConfig?.priceRaceSwapStateFile ?? config?.priceRaceSwapStateFile;
+    if (fromConfig && String(fromConfig).trim().length > 0) {
+        return path.resolve(String(fromConfig).trim());
+    }
     const fromEnv = process.env.PRICE_RACE_SWAP_STATE_FILE;
     if (fromEnv && String(fromEnv).trim().length > 0) {
         return path.resolve(String(fromEnv).trim());
     }
     return path.join(__dirname, '.single-fire-state.json');
+}
+
+function resetSingleFireStateMemory() {
+    singleFireState.proposalSubmitted = false;
+    singleFireState.proposalHash = null;
+}
+
+function ensureSingleFireStateScope(config) {
+    const statePath = getSingleFireStatePath(config);
+    if (activeSingleFireStatePath !== statePath) {
+        activeSingleFireStatePath = statePath;
+        hydratedSingleFireStatePath = null;
+        reconciledSingleFireStatePath = null;
+        resetSingleFireStateMemory();
+    }
+    return statePath;
 }
 
 function resolveSubmittedProposalHash(parsedOutput) {
@@ -116,7 +138,8 @@ function resolveSubmittedProposalHash(parsedOutput) {
     return txHash ?? legacyHash;
 }
 
-async function persistSingleFireState() {
+async function persistSingleFireState(config) {
+    const statePath = ensureSingleFireStateScope(config);
     const payload = JSON.stringify(
         {
             proposalSubmitted: singleFireState.proposalSubmitted,
@@ -125,14 +148,15 @@ async function persistSingleFireState() {
         null,
         2
     );
-    await writeFile(getSingleFireStatePath(), payload, 'utf8');
+    await writeFile(statePath, payload, 'utf8');
 }
 
-async function hydrateSingleFireState() {
-    if (singleFireStateHydrated) return;
-    singleFireStateHydrated = true;
+async function hydrateSingleFireState(config) {
+    const statePath = ensureSingleFireStateScope(config);
+    if (hydratedSingleFireStatePath === statePath) return;
+    hydratedSingleFireStatePath = statePath;
     try {
-        const raw = await readFile(getSingleFireStatePath(), 'utf8');
+        const raw = await readFile(statePath, 'utf8');
         const parsed = JSON.parse(raw);
         singleFireState.proposalSubmitted = Boolean(parsed?.proposalSubmitted);
         singleFireState.proposalHash = normalizeHash(parsed?.proposalHash) ?? null;
@@ -141,18 +165,24 @@ async function hydrateSingleFireState() {
     }
 }
 
-async function lockSingleFire({ proposalHash = null } = {}) {
+async function lockSingleFire({ proposalHash = null, config } = {}) {
     singleFireState.proposalSubmitted = true;
     singleFireState.proposalHash = normalizeHash(proposalHash) ?? singleFireState.proposalHash;
-    await persistSingleFireState();
+    await persistSingleFireState(config);
 }
 
-async function reconcileSingleFireFromChain({ publicClient }) {
-    if (singleFireReconciledOnchain) return;
-    singleFireReconciledOnchain = true;
+async function reconcileSingleFireFromChain({
+    publicClient,
+    ogModule: ogModuleInput,
+    startBlock,
+    config,
+}) {
+    const statePath = ensureSingleFireStateScope(config);
+    if (reconciledSingleFireStatePath === statePath) return;
+    reconciledSingleFireStatePath = statePath;
     if (!publicClient || singleFireState.proposalSubmitted) return;
 
-    const rawOgModule = process.env.OG_MODULE;
+    const rawOgModule = ogModuleInput ?? config?.ogModule;
     if (!rawOgModule) return;
 
     let ogModule;
@@ -163,7 +193,12 @@ async function reconcileSingleFireFromChain({ publicClient }) {
     }
 
     const latestBlock = await publicClient.getBlockNumber();
-    const configuredStart = process.env.START_BLOCK ? BigInt(process.env.START_BLOCK) : 0n;
+    const configuredStart =
+        startBlock !== undefined && startBlock !== null
+            ? BigInt(startBlock)
+            : config?.startBlock !== undefined && config?.startBlock !== null
+              ? BigInt(config.startBlock)
+              : 0n;
     const chunkSize = 50_000n;
     let currentTo = latestBlock;
 
@@ -178,7 +213,7 @@ async function reconcileSingleFireFromChain({ publicClient }) {
         });
         if (logs.length > 0) {
             const hash = normalizeHash(logs[logs.length - 1]?.args?.proposalHash);
-            await lockSingleFire({ proposalHash: hash });
+            await lockSingleFire({ proposalHash: hash, config });
             return;
         }
         if (currentFrom === configuredStart) break;
@@ -542,8 +577,13 @@ async function validateToolCalls({
     config,
     onchainPendingProposal,
 }) {
-    await hydrateSingleFireState();
-    await reconcileSingleFireFromChain({ publicClient });
+    await hydrateSingleFireState(config);
+    await reconcileSingleFireFromChain({
+        publicClient,
+        ogModule: config?.ogModule,
+        startBlock: config?.startBlock,
+        config,
+    });
 
     const validated = [];
     const safeAddress = commitmentSafe ? String(commitmentSafe).toLowerCase() : null;
@@ -708,17 +748,17 @@ function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
         .join(' ');
 }
 
-async function onToolOutput({ name, parsedOutput }) {
+async function onToolOutput({ name, parsedOutput, config }) {
     if (!name || !parsedOutput || parsedOutput.status !== 'submitted') return;
     if (name !== 'post_bond_and_propose' && name !== 'auto_post_bond_and_propose') return;
     const proposalHash = resolveSubmittedProposalHash(parsedOutput);
     if (!proposalHash) return;
-    await lockSingleFire({ proposalHash });
+    await lockSingleFire({ proposalHash, config });
 }
 
-function onProposalEvents({ executedProposalCount = 0 }) {
+function onProposalEvents({ executedProposalCount = 0, config }) {
     if (executedProposalCount > 0) {
-        void lockSingleFire();
+        void lockSingleFire({ config });
     }
 }
 
@@ -726,17 +766,22 @@ function getSingleFireState() {
     return { ...singleFireState };
 }
 
-function resetSingleFireState() {
-    singleFireState.proposalSubmitted = false;
-    singleFireState.proposalHash = null;
-    singleFireStateHydrated = true;
-    singleFireReconciledOnchain = false;
-    void unlink(getSingleFireStatePath()).catch(() => {});
+function resetSingleFireState({ config } = {}) {
+    const statePath = ensureSingleFireStateScope(config);
+    resetSingleFireStateMemory();
+    hydratedSingleFireStatePath = statePath;
+    reconciledSingleFireStatePath = null;
+    void unlink(statePath).catch(() => {});
 }
 
-async function reconcileProposalSubmission({ publicClient }) {
-    await hydrateSingleFireState();
-    await reconcileSingleFireFromChain({ publicClient });
+async function reconcileProposalSubmission({ publicClient, ogModule, startBlock, config }) {
+    await hydrateSingleFireState(config);
+    await reconcileSingleFireFromChain({
+        publicClient,
+        ogModule,
+        startBlock,
+        config,
+    });
 }
 
 export {

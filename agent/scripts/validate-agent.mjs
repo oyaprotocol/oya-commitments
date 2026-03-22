@@ -1,24 +1,20 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
+import {
+    getArgValue,
+    loadScriptEnv,
+    repoRoot,
+    resolveAgentModulePath,
+    resolveAgentRef,
+} from './lib/cli-runtime.mjs';
 
-function getArgValue(prefix) {
-    const arg = process.argv.find((value) => value.startsWith(prefix));
-    return arg ? arg.slice(prefix.length) : null;
-}
+loadScriptEnv();
 
 async function main() {
     const moduleArg = getArgValue('--module=');
-    const agentRef = moduleArg ?? process.env.AGENT_MODULE ?? 'default';
-    const modulePath = agentRef.includes('/')
-        ? agentRef
-        : `agent-library/agents/${agentRef}/agent.js`;
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
-    const repoRoot = path.resolve(__dirname, '../..');
-    const resolvedPath = path.isAbsolute(modulePath)
-        ? modulePath
-        : path.resolve(repoRoot, modulePath);
+    const agentRef = moduleArg ?? resolveAgentRef();
+    const resolvedPath = resolveAgentModulePath(agentRef, { repoRootPath: repoRoot });
 
     const agentModule = await import(pathToFileURL(resolvedPath).href);
     const hasSystemPrompt = typeof agentModule.getSystemPrompt === 'function';

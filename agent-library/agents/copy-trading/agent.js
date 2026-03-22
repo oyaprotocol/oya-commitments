@@ -93,6 +93,14 @@ function hasClobCredentials(config) {
     );
 }
 
+function getCopyTradingConfig(config) {
+    const candidate = config?.agentConfig?.copyTrading ?? config?.copyTrading;
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+        return {};
+    }
+    return candidate;
+}
+
 function getClobAuthAddress({ config, accountAddress }) {
     return (
         normalizeAddress(config?.polymarketClobAddress) ??
@@ -362,30 +370,29 @@ function parseActivityEntry(entry) {
 }
 
 function getPolicy(config) {
-    const sourceUserRaw = process.env.COPY_TRADING_SOURCE_USER;
-    const market = process.env.COPY_TRADING_MARKET?.trim() || null;
-    const yesTokenId = normalizeTokenId(process.env.COPY_TRADING_YES_TOKEN_ID);
-    const noTokenId = normalizeTokenId(process.env.COPY_TRADING_NO_TOKEN_ID);
+    const policyConfig = getCopyTradingConfig(config);
+    const sourceUserRaw = policyConfig.sourceUser;
+    const market = String(policyConfig.market ?? '').trim() || null;
+    const yesTokenId = normalizeTokenId(policyConfig.yesTokenId);
+    const noTokenId = normalizeTokenId(policyConfig.noTokenId);
     const collateralToken =
-        normalizeAddress(process.env.COPY_TRADING_COLLATERAL_TOKEN) ??
+        normalizeAddress(policyConfig.collateralToken) ??
         normalizeAddress(DEFAULT_COLLATERAL_TOKEN);
     const ctfContract =
-        normalizeAddress(process.env.COPY_TRADING_CTF_CONTRACT) ??
+        normalizeAddress(policyConfig.ctfContract) ??
         normalizeAddress(config?.polymarketConditionalTokens);
 
     const errors = [];
     const sourceUser = normalizeAddress(sourceUserRaw);
-    if (!sourceUser) errors.push('COPY_TRADING_SOURCE_USER missing or invalid address.');
-    if (!market) errors.push('COPY_TRADING_MARKET is required.');
-    if (!yesTokenId) errors.push('COPY_TRADING_YES_TOKEN_ID is required.');
-    if (!noTokenId) errors.push('COPY_TRADING_NO_TOKEN_ID is required.');
+    if (!sourceUser) errors.push('copyTrading.sourceUser missing or invalid address.');
+    if (!market) errors.push('copyTrading.market is required.');
+    if (!yesTokenId) errors.push('copyTrading.yesTokenId is required.');
+    if (!noTokenId) errors.push('copyTrading.noTokenId is required.');
     if (!collateralToken) {
-        errors.push('COPY_TRADING_COLLATERAL_TOKEN invalid and no default available.');
+        errors.push('copyTrading.collateralToken invalid and no default available.');
     }
     if (!ctfContract) {
-        errors.push(
-            'COPY_TRADING_CTF_CONTRACT invalid and POLYMARKET_CONDITIONAL_TOKENS unavailable.'
-        );
+        errors.push('copyTrading.ctfContract invalid and polymarketConditionalTokens unavailable.');
     }
 
     return {

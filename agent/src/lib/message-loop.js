@@ -10,6 +10,7 @@ function toUserMessageSignal(message) {
         messageId: message.messageId,
         requestId: message.requestId,
         text: message.text,
+        chainId: message.chainId,
         command: message.command,
         args: message.args,
         metadata: message.metadata,

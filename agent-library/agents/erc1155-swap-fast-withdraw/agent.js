@@ -473,6 +473,7 @@ function buildSignedRequestArchiveArtifact({ order, commitmentSafe, agentAddress
 
     const canonicalSignedMessage = buildSignedMessagePayload({
         address: order.signer,
+        chainId: order.chainId,
         timestampMs: order.signedAtMs,
         text: order.text ?? null,
         command: order.command ?? null,
@@ -493,6 +494,7 @@ function buildSignedRequestArchiveArtifact({ order, commitmentSafe, agentAddress
             signedAtMs: order.signedAtMs,
             canonicalMessage: canonicalSignedMessage,
             envelope: {
+                chainId: order.chainId ?? null,
                 requestId: order.requestId,
                 deadline: order.deadline ?? null,
                 text: order.text ?? null,
@@ -790,6 +792,7 @@ function createSignedRequestOrder(signal, policy) {
         sourceId: signal.requestId,
         requestId: signal.requestId,
         messageId: signal.messageId ?? null,
+        chainId: signal.chainId ?? null,
         signer,
         signature: signal.sender.signature,
         signedAtMs: signal.sender.signedAtMs,
@@ -1223,7 +1226,7 @@ function ingestSignals(signals, policy, config) {
         }
         if (!config?.ipfsEnabled) {
             throw new Error(
-                'erc1155-swap-fast-withdraw requires IPFS_ENABLED=true to archive signed withdrawal requests before reserving deposited credit.'
+                'erc1155-swap-fast-withdraw requires ipfsEnabled=true in module config to archive signed withdrawal requests before reserving deposited credit.'
             );
         }
 
@@ -1666,7 +1669,7 @@ async function getDeterministicToolCalls({
 
     if (!config?.ipfsEnabled && getOrdersAwaitingArchive().length > 0) {
         throw new Error(
-            'erc1155-swap-fast-withdraw requires IPFS_ENABLED=true to continue signed withdrawal orders awaiting IPFS archival.'
+            'erc1155-swap-fast-withdraw requires ipfsEnabled=true in module config to continue signed withdrawal orders awaiting IPFS archival.'
         );
     }
 

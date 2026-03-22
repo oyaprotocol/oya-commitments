@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import os from 'node:os';
+import path from 'node:path';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import {
     getSingleFireState,
     onProposalEvents,
@@ -230,7 +233,6 @@ async function run() {
     );
 
     resetSingleFireState();
-    process.env.OG_MODULE = '0x1234000000000000000000000000000000000000';
     await reconcileProposalSubmission({
         publicClient: {
             getBlockNumber: async () => 100n,
@@ -243,8 +245,53 @@ async function run() {
                 },
             ],
         },
+        ogModule: '0x1234000000000000000000000000000000000000',
     });
     assert.equal(getSingleFireState().proposalSubmitted, true);
+
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'price-race-swap-state-'));
+    const stateFileA = path.join(tempDir, 'state-a.json');
+    const stateFileB = path.join(tempDir, 'state-b.json');
+    const configA = { agentConfig: { priceRaceSwapStateFile: stateFileA } };
+    const configB = { agentConfig: { priceRaceSwapStateFile: stateFileB } };
+    const idleClient = {
+        getBlockNumber: async () => 0n,
+        getLogs: async () => [],
+    };
+
+    resetSingleFireState({
+        config: { agentConfig: { priceRaceSwapStateFile: path.join(tempDir, 'bootstrap.json') } },
+    });
+    await writeFile(
+        stateFileA,
+        JSON.stringify({
+            proposalSubmitted: true,
+            proposalHash: '0xbeef000000000000000000000000000000000000000000000000000000000000',
+        }),
+        'utf8'
+    );
+    await writeFile(
+        stateFileB,
+        JSON.stringify({
+            proposalSubmitted: false,
+            proposalHash: null,
+        }),
+        'utf8'
+    );
+
+    await reconcileProposalSubmission({
+        publicClient: idleClient,
+        ogModule: '0x1234000000000000000000000000000000000000',
+        config: configA,
+    });
+    assert.equal(getSingleFireState().proposalSubmitted, true);
+
+    await reconcileProposalSubmission({
+        publicClient: idleClient,
+        ogModule: '0x1234000000000000000000000000000000000000',
+        config: configB,
+    });
+    assert.equal(getSingleFireState().proposalSubmitted, false);
 
     resetSingleFireState();
     onProposalEvents({ executedProposalCount: 1 });
