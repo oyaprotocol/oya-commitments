@@ -18,6 +18,7 @@
     }
   },
   "polymarketIntentTrader": {
+    "authorizedAgent": "0x2967C076182F0303037072670e744e26Ed4A830f",
     "signedCommands": [
       "buy",
       "trade",
