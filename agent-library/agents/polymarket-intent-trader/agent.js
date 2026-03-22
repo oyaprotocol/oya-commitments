@@ -1471,7 +1471,15 @@ async function refreshOrderStatus({
     let changed = false;
     const nowMs = Date.now();
     for (const intent of getOpenIntents()) {
-        if (!intent.orderId || intent.orderFilled) {
+        if (intent.orderFilled) {
+            continue;
+        }
+        if (!intent.orderId) {
+            if (hasTimedOut(intent.orderSubmittedAtMs, policy.pendingTxTimeoutMs, nowMs)) {
+                delete intent.orderSubmittedAtMs;
+                intent.updatedAtMs = nowMs;
+                changed = true;
+            }
             continue;
         }
 
@@ -1559,7 +1567,15 @@ async function refreshDepositSubmissionStatus({ publicClient, latestBlock, polic
     const nowMs = Date.now();
 
     for (const intent of getOpenIntents()) {
-        if (!intent.depositTxHash || intent.tokenDeposited) {
+        if (intent.tokenDeposited) {
+            continue;
+        }
+        if (!intent.depositTxHash) {
+            if (hasTimedOut(intent.depositSubmittedAtMs, policy.pendingTxTimeoutMs, nowMs)) {
+                delete intent.depositSubmittedAtMs;
+                intent.updatedAtMs = nowMs;
+                changed = true;
+            }
             continue;
         }
 
@@ -1605,7 +1621,15 @@ async function refreshProposalSubmissionStatus({ publicClient, policy }) {
     const nowMs = Date.now();
 
     for (const intent of getOpenIntents()) {
-        if (!intent.reimbursementSubmissionTxHash || intent.reimbursementProposalHash) {
+        if (intent.reimbursementProposalHash) {
+            continue;
+        }
+        if (!intent.reimbursementSubmissionTxHash) {
+            if (hasTimedOut(intent.reimbursementSubmittedAtMs, policy.pendingTxTimeoutMs, nowMs)) {
+                delete intent.reimbursementSubmittedAtMs;
+                intent.updatedAtMs = nowMs;
+                changed = true;
+            }
             continue;
         }
 
@@ -1963,6 +1987,9 @@ async function getDeterministicToolCalls({
         if (!intent.orderFilled || intent.tokenDeposited) {
             continue;
         }
+        if (intent.depositTxHash || intent.depositSubmittedAtMs) {
+            continue;
+        }
         if (!tokenHolderAddress) {
             continue;
         }
@@ -1976,6 +2003,9 @@ async function getDeterministicToolCalls({
             continue;
         }
 
+        intent.depositSubmittedAtMs = Date.now();
+        intent.updatedAtMs = Date.now();
+        await maybePersistTradeIntentState();
         pendingDepositSubmission = {
             intentKey: intent.intentKey,
         };
@@ -1986,7 +2016,11 @@ async function getDeterministicToolCalls({
         if (!intent.tokenDeposited) {
             continue;
         }
-        if (intent.reimbursementProposalHash || intent.reimbursementSubmissionTxHash) {
+        if (
+            intent.reimbursementProposalHash ||
+            intent.reimbursementSubmissionTxHash ||
+            intent.reimbursementSubmittedAtMs
+        ) {
             continue;
         }
         if (onchainPendingProposal) {
@@ -1999,6 +2033,7 @@ async function getDeterministicToolCalls({
         }
         intent.reimbursementRecipientAddress = reimbursementRecipientAddress;
         intent.reimbursementExplanation = buildReimbursementExplanation(intent);
+        intent.reimbursementSubmittedAtMs = Date.now();
         intent.updatedAtMs = Date.now();
         await maybePersistTradeIntentState();
 
@@ -2018,8 +2053,11 @@ async function getDeterministicToolCalls({
 
     const hasActiveExecution = openIntents.some(
         (intent) =>
+            Boolean(intent.orderSubmittedAtMs) ||
             Boolean(intent.orderId) ||
+            Boolean(intent.depositSubmittedAtMs) ||
             Boolean(intent.depositTxHash) ||
+            Boolean(intent.reimbursementSubmittedAtMs) ||
             Boolean(intent.reimbursementSubmissionTxHash)
     );
 
@@ -2048,7 +2086,7 @@ async function getDeterministicToolCalls({
                 ? await publicClient.getChainId()
                 : undefined;
         for (const intent of openIntents) {
-            if (!intent.artifactCid || intent.orderId) {
+            if (!intent.artifactCid || intent.orderId || intent.orderSubmittedAtMs) {
                 continue;
             }
             if (Number.isInteger(intent.expiryMs) && Date.now() > intent.expiryMs) {
@@ -2222,7 +2260,12 @@ async function onToolOutput({ name, parsedOutput, config }) {
             }
             intent.updatedAtMs = Date.now();
             await maybePersistTradeIntentState();
+            return;
         }
+
+        delete intent.depositSubmittedAtMs;
+        intent.updatedAtMs = Date.now();
+        await maybePersistTradeIntentState();
         return;
     }
 
@@ -2243,6 +2286,8 @@ async function onToolOutput({ name, parsedOutput, config }) {
 
         const status = getParsedToolOutputStatus(parsedOutput);
         if (status !== 'submitted') {
+            delete intent.reimbursementSubmittedAtMs;
+            intent.updatedAtMs = Date.now();
             await maybePersistTradeIntentState();
             return;
         }
