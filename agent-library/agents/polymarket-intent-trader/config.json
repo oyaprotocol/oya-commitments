@@ -1,0 +1,32 @@
+{
+  "chainId": 137,
+  "policyName": "polymarket-intent-trader",
+  "pollIntervalMs": 1000,
+  "ipfsEnabled": true,
+  "messageApi": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 9892,
+    "requireSignerAllowlist": false
+  },
+  "defaultDepositAsset": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+  "byChain": {
+    "137": {
+      "watchAssets": [
+        "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+      ]
+    }
+  },
+  "polymarketIntentTrader": {
+    "signedCommands": [
+      "buy",
+      "trade",
+      "intent",
+      "polymarket_buy",
+      "polymarket_trade",
+      "polymarket_intent"
+    ],
+    "archiveRetryDelayMs": 30000,
+    "pendingTxTimeoutMs": 900000
+  }
+}
