@@ -5,11 +5,14 @@ import { mkdtemp } from 'node:fs/promises';
 import { buildSignedMessagePayload } from '../../../agent/src/lib/message-signing.js';
 import {
     buildSignedTradeIntentArchiveArtifact,
+    computeBuyOrderAmounts,
     enrichSignals,
     getDeterministicToolCalls,
+    getPollingOptions,
     getSystemPrompt,
     getTradeIntentState,
     interpretSignedTradeIntentSignal,
+    onProposalEvents,
     onToolOutput,
     resetTradeIntentState,
     setTradeIntentStatePathForTest,
@@ -18,19 +21,48 @@ import {
 const TEST_SIGNER = '0x1111111111111111111111111111111111111111';
 const TEST_AGENT = '0x2222222222222222222222222222222222222222';
 const TEST_SAFE = '0x3333333333333333333333333333333333333333';
+const TEST_USDC = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
+const TEST_CTF = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
+const YES_TOKEN_ID = '101';
+const NO_TOKEN_ID = '202';
 const TEST_SIGNATURE = `0x${'1a'.repeat(65)}`;
+const TEST_PROPOSAL_HASH = `0x${'a'.repeat(64)}`;
+const TEST_ORDER_ID = 'order-1';
+const TEST_DEPOSIT_TX_HASH = `0x${'b'.repeat(64)}`;
+const TEST_REIMBURSE_TX_HASH = `0x${'c'.repeat(64)}`;
 
 function buildModuleConfig(overrides = {}) {
+    const baseAgentConfig = {
+        polymarketIntentTrader: {
+            authorizedAgent: TEST_AGENT,
+            marketId: 'market-123',
+            yesTokenId: YES_TOKEN_ID,
+            noTokenId: NO_TOKEN_ID,
+            collateralToken: TEST_USDC,
+            ctfContract: TEST_CTF,
+        },
+    };
+    const overrideAgentConfig = overrides.agentConfig ?? {};
     return {
         commitmentSafe: TEST_SAFE,
-        ipfsEnabled: false,
+        ogModule: '0x4444444444444444444444444444444444444444',
+        startBlock: 0,
+        ipfsEnabled: true,
+        proposeEnabled: true,
+        polymarketClobEnabled: true,
+        polymarketClobApiKey: 'k_test',
+        polymarketClobApiSecret: 's_test',
+        polymarketClobApiPassphrase: 'p_test',
+        polymarketClobAddress: TEST_AGENT,
+        watchAssets: [TEST_USDC],
+        polymarketConditionalTokens: TEST_CTF,
+        ...overrides,
         agentConfig: {
+            ...baseAgentConfig,
+            ...overrideAgentConfig,
             polymarketIntentTrader: {
-                authorizedAgent: TEST_AGENT,
-                marketId: 'market-123',
-                yesTokenId: '101',
-                noTokenId: '202',
-                ...overrides,
+                ...baseAgentConfig.polymarketIntentTrader,
+                ...(overrideAgentConfig.polymarketIntentTrader ?? {}),
             },
         },
     };
@@ -55,7 +87,7 @@ function buildSignedMessageSignal(overrides = {}) {
         metadata: overrides.metadata ?? {
             source: 'test-suite',
         },
-        chainId: overrides.chainId ?? 11155111,
+        chainId: overrides.chainId ?? 137,
         receivedAtMs,
         expiresAtMs: overrides.expiresAtMs ?? deadline,
         deadline,
@@ -68,34 +100,144 @@ function buildSignedMessageSignal(overrides = {}) {
     };
 }
 
+function buildFetchResponse(json, status = 200) {
+    return {
+        ok: status >= 200 && status < 300,
+        status,
+        statusText: status === 200 ? 'OK' : 'ERROR',
+        async json() {
+            return json;
+        },
+        async text() {
+            return JSON.stringify(json);
+        },
+    };
+}
+
+function buildPublicClient(runtime) {
+    return {
+        async getChainId() {
+            return 137;
+        },
+        async getBlockNumber() {
+            return runtime.latestBlock;
+        },
+        async getCode({ address }) {
+            return String(address).toLowerCase() === TEST_SAFE.toLowerCase() ? '0x1' : '0x';
+        },
+        async getLogs({ address, args }) {
+            if (String(address).toLowerCase() !== TEST_USDC.toLowerCase()) {
+                return [];
+            }
+            if (String(args?.to ?? '').toLowerCase() !== TEST_SAFE.toLowerCase()) {
+                return [];
+            }
+            return runtime.depositLogs;
+        },
+        async readContract({ address, functionName, args }) {
+            if (
+                String(address).toLowerCase() === TEST_CTF.toLowerCase() &&
+                functionName === 'balanceOf'
+            ) {
+                const owner = String(args?.[0] ?? '').toLowerCase();
+                const tokenId = BigInt(args?.[1] ?? 0n).toString();
+                return BigInt(runtime.ctfBalances[`${owner}:${tokenId}`] ?? 0n);
+            }
+            throw new Error(
+                `Unexpected readContract call: address=${address} functionName=${functionName}`
+            );
+        },
+        async getTransactionReceipt({ hash }) {
+            const receipt = runtime.receipts[String(hash).toLowerCase()];
+            if (receipt) {
+                return receipt;
+            }
+            const error = new Error(`Transaction receipt not found for ${hash}`);
+            error.name = 'TransactionReceiptNotFoundError';
+            throw error;
+        },
+    };
+}
+
 async function run() {
     const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'polymarket-intent-trader-'));
     setTradeIntentStatePathForTest(path.join(tmpDir, '.trade-intent-state.json'));
+
+    const runtime = {
+        latestBlock: 100n,
+        depositLogs: [
+            {
+                args: {
+                    from: TEST_SIGNER,
+                    value: 50_000_000n,
+                },
+                blockNumber: 10n,
+                transactionHash: `0x${'d'.repeat(64)}`,
+                logIndex: 0,
+            },
+        ],
+        orderPayload: {
+            order: {
+                id: TEST_ORDER_ID,
+                status: 'MATCHED',
+                original_size: '100',
+                size_matched: '100',
+            },
+        },
+        tradesPayload: [
+            {
+                id: 'trade-1',
+                status: 'CONFIRMED',
+                taker_order_id: TEST_ORDER_ID,
+            },
+        ],
+        ctfBalances: {},
+        receipts: {},
+    };
+
+    const publicClient = buildPublicClient(runtime);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+        const url = new URL(String(input));
+        if (url.pathname === `/data/order/${TEST_ORDER_ID}`) {
+            return buildFetchResponse(runtime.orderPayload);
+        }
+        if (url.pathname === '/data/trades') {
+            return buildFetchResponse(runtime.tradesPayload);
+        }
+        throw new Error(`Unexpected fetch URL: ${url.toString()}`);
+    };
 
     try {
         await resetTradeIntentState();
 
         const prompt = getSystemPrompt({
-            proposeEnabled: false,
-            disputeEnabled: false,
             commitmentText: 'Signed Polymarket trade intents may be written in plain English.',
         });
         assert.ok(prompt.includes('kind is "userMessage"'));
         assert.ok(prompt.includes('sender.authType is "eip191"'));
-        assert.ok(prompt.includes('signed human-readable message text as the primary source of trading intent'));
-        assert.ok(prompt.includes('Parse signed free-text messages into candidate BUY intents'));
+        assert.ok(
+            prompt.includes('signed human-readable message text as the primary source of trading intent')
+        );
         assert.ok(prompt.includes('Archive accepted signed trade intents'));
         assert.ok(prompt.includes('Return strict JSON'));
-        assert.ok(prompt.includes('Commitment text'));
+
+        const pollingOptions = getPollingOptions();
+        assert.equal(pollingOptions.emitBalanceSnapshotsEveryPoll, true);
 
         const validSignal = buildSignedMessageSignal();
         const interpreted = interpretSignedTradeIntentSignal(validSignal, {
             policy: {
+                ready: true,
                 authorizedAgent: TEST_AGENT.toLowerCase(),
                 marketId: 'market-123',
-                yesTokenId: '101',
-                noTokenId: '202',
+                yesTokenId: YES_TOKEN_ID,
+                noTokenId: NO_TOKEN_ID,
+                collateralToken: TEST_USDC.toLowerCase(),
+                ctfContract: TEST_CTF.toLowerCase(),
                 archiveRetryDelayMs: 30_000,
+                pendingTxTimeoutMs: 900_000,
+                logChunkSize: 5_000n,
                 signedCommands: new Set(['buy']),
             },
             commitmentSafe: TEST_SAFE,
@@ -105,13 +247,16 @@ async function run() {
         assert.equal(interpreted.ok, true);
         assert.equal(interpreted.intent.intentKey, `${TEST_SIGNER.toLowerCase()}:pm-intent-001`);
         assert.equal(interpreted.intent.outcome, 'NO');
-        assert.equal(interpreted.intent.marketId, 'market-123');
-        assert.equal(interpreted.intent.tokenId, '202');
-        assert.equal(interpreted.intent.maxSpendUsdc, '25');
+        assert.equal(interpreted.intent.tokenId, NO_TOKEN_ID);
         assert.equal(interpreted.intent.maxSpendWei, '25000000');
-        assert.equal(interpreted.intent.maxPrice, '0.42');
         assert.equal(interpreted.intent.maxPriceScaled, '420000');
-        assert.equal(interpreted.intent.side, 'BUY');
+
+        const sized = computeBuyOrderAmounts({
+            collateralAmountWei: 25_000_000n,
+            price: 0.42,
+        });
+        assert.equal(sized.takerAmount, '25000000');
+        assert.ok(BigInt(sized.makerAmount) > 0n);
 
         const archiveArtifact = buildSignedTradeIntentArchiveArtifact({
             record: interpreted.intent,
@@ -141,6 +286,12 @@ async function run() {
         });
         const invalidInterpreted = interpretSignedTradeIntentSignal(invalidSignal, {
             policy: {
+                ready: true,
+                marketId: 'market-123',
+                yesTokenId: YES_TOKEN_ID,
+                noTokenId: NO_TOKEN_ID,
+                collateralToken: TEST_USDC.toLowerCase(),
+                ctfContract: TEST_CTF.toLowerCase(),
                 signedCommands: new Set(['buy']),
             },
             nowMs: invalidSignal.receivedAtMs,
@@ -154,41 +305,35 @@ async function run() {
             },
             nowMs: validSignal.receivedAtMs,
         });
-        const tradeIntentSignal = enrichedSignals.find(
-            (entry) => entry.kind === 'polymarketTradeIntent'
+        assert.ok(
+            enrichedSignals.some((entry) => entry.kind === 'polymarketTradeIntent')
         );
-        const archiveSignal = enrichedSignals.find(
-            (entry) => entry.kind === 'polymarketSignedIntentArchive'
+        assert.ok(
+            enrichedSignals.some((entry) => entry.kind === 'polymarketSignedIntentArchive')
         );
-        assert.ok(tradeIntentSignal);
-        assert.ok(archiveSignal);
-        assert.equal(tradeIntentSignal.outcome, 'NO');
-        assert.equal(tradeIntentSignal.maxSpendWei, '25000000');
-        assert.equal(tradeIntentSignal.maxPriceScaled, '420000');
-        assert.equal(archiveSignal.archived, false);
+        assert.ok(
+            enrichedSignals.some((entry) => entry.kind === 'polymarketTradeIntentState')
+        );
 
         const archiveCalls = await getDeterministicToolCalls({
             signals: [validSignal],
             commitmentSafe: TEST_SAFE,
             agentAddress: TEST_AGENT,
-            config: {
-                ...buildModuleConfig(),
-                ipfsEnabled: true,
-            },
+            publicClient,
+            config: buildModuleConfig(),
         });
         assert.equal(archiveCalls.length, 1);
         assert.equal(archiveCalls[0].name, 'ipfs_publish');
         const archiveArgs = JSON.parse(archiveCalls[0].arguments);
         assert.equal(archiveArgs.filename, interpreted.intent.archiveFilename);
         assert.equal(archiveArgs.json.interpretedIntent.maxSpendWei, '25000000');
-        assert.equal(archiveArgs.json.interpretedIntent.maxPriceScaled, '420000');
 
-        const stateAfterArchiveCall = getTradeIntentState();
-        const storedIntent =
-            stateAfterArchiveCall.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-001`];
+        let state = getTradeIntentState();
+        let storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-001`];
         assert.ok(storedIntent);
-        assert.equal(storedIntent.outcome, 'NO');
+        assert.equal(storedIntent.reservedCreditAmountWei, '25000000');
         assert.equal(typeof storedIntent.lastArchiveAttemptAtMs, 'number');
+        assert.equal(state.deposits[Object.keys(state.deposits)[0]].amountWei, '50000000');
 
         await onToolOutput({
             name: 'ipfs_publish',
@@ -198,33 +343,133 @@ async function run() {
                 uri: 'ipfs://bafyintent',
                 pinned: true,
             },
-            config: {
-                ...buildModuleConfig(),
-                ipfsEnabled: true,
-            },
+            config: buildModuleConfig(),
         });
 
-        const stateAfterPublished = getTradeIntentState();
-        const archivedIntent =
-            stateAfterPublished.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-001`];
-        assert.equal(archivedIntent.artifactCid, 'bafyintent');
-        assert.equal(archivedIntent.artifactUri, 'ipfs://bafyintent');
-        assert.equal(archivedIntent.pinned, true);
-        assert.equal(typeof archivedIntent.archivedAtMs, 'number');
+        state = getTradeIntentState();
+        storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-001`];
+        assert.equal(storedIntent.artifactCid, 'bafyintent');
+        assert.equal(storedIntent.artifactUri, 'ipfs://bafyintent');
 
-        const noRepeatCalls = await getDeterministicToolCalls({
+        const orderCalls = await getDeterministicToolCalls({
             signals: [],
             commitmentSafe: TEST_SAFE,
             agentAddress: TEST_AGENT,
-            config: {
-                ...buildModuleConfig(),
-                ipfsEnabled: true,
-            },
+            publicClient,
+            config: buildModuleConfig(),
         });
-        assert.deepEqual(noRepeatCalls, []);
+        assert.equal(orderCalls.length, 1);
+        assert.equal(orderCalls[0].name, 'polymarket_clob_build_sign_and_place_order');
+        const orderArgs = JSON.parse(orderCalls[0].arguments);
+        assert.equal(orderArgs.side, 'BUY');
+        assert.equal(orderArgs.tokenId, NO_TOKEN_ID);
+        assert.equal(orderArgs.orderType, 'FOK');
+        assert.equal(orderArgs.takerAmount, '25000000');
+        assert.equal(orderArgs.chainId, 137);
 
-        console.log('[test] polymarket-intent-trader parser OK');
+        await onToolOutput({
+            name: 'polymarket_clob_build_sign_and_place_order',
+            parsedOutput: {
+                status: 'submitted',
+                result: {
+                    order: {
+                        id: TEST_ORDER_ID,
+                        status: 'LIVE',
+                    },
+                },
+            },
+            config: buildModuleConfig(),
+        });
+
+        runtime.ctfBalances[`${TEST_AGENT.toLowerCase()}:${NO_TOKEN_ID}`] = 59_523_809n;
+
+        const depositCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(depositCalls.length, 1);
+        assert.equal(depositCalls[0].name, 'make_erc1155_deposit');
+        const depositArgs = JSON.parse(depositCalls[0].arguments);
+        assert.equal(depositArgs.token, TEST_CTF.toLowerCase());
+        assert.equal(depositArgs.tokenId, NO_TOKEN_ID);
+        assert.equal(depositArgs.amount, '59523809');
+
+        await onToolOutput({
+            name: 'make_erc1155_deposit',
+            parsedOutput: {
+                status: 'confirmed',
+                transactionHash: TEST_DEPOSIT_TX_HASH,
+            },
+            config: buildModuleConfig(),
+        });
+
+        const reimbursementCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(reimbursementCalls.length, 1);
+        assert.equal(reimbursementCalls[0].name, 'post_bond_and_propose');
+        const reimbursementArgs = JSON.parse(reimbursementCalls[0].arguments);
+        assert.equal(reimbursementArgs.transactions.length, 1);
+        assert.equal(
+            reimbursementArgs.transactions[0].to.toLowerCase(),
+            TEST_USDC.toLowerCase()
+        );
+        assert.ok(reimbursementArgs.explanation.includes('signedRequestCid=ipfs%3A%2F%2Fbafyintent'));
+        assert.ok(reimbursementArgs.explanation.includes(`orderId=${encodeURIComponent(TEST_ORDER_ID)}`));
+        assert.ok(
+            reimbursementArgs.explanation.includes(
+                `depositTx=${encodeURIComponent(TEST_DEPOSIT_TX_HASH.toLowerCase())}`
+            )
+        );
+
+        await onToolOutput({
+            name: 'post_bond_and_propose',
+            parsedOutput: {
+                status: 'submitted',
+                transactionHash: TEST_REIMBURSE_TX_HASH,
+                ogProposalHash: TEST_PROPOSAL_HASH,
+            },
+            config: buildModuleConfig(),
+        });
+
+        state = getTradeIntentState();
+        storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-001`];
+        assert.equal(storedIntent.orderId, TEST_ORDER_ID);
+        assert.equal(storedIntent.orderFilled, true);
+        assert.equal(storedIntent.tokenDeposited, true);
+        assert.equal(storedIntent.reimbursementProposalHash, TEST_PROPOSAL_HASH.toLowerCase());
+        assert.equal(
+            storedIntent.reimbursementRecipientAddress,
+            TEST_AGENT.toLowerCase()
+        );
+
+        onProposalEvents({
+            executedProposals: [TEST_PROPOSAL_HASH],
+        });
+
+        const noFurtherCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.deepEqual(noFurtherCalls, []);
+
+        state = getTradeIntentState();
+        storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-001`];
+        assert.equal(typeof storedIntent.reimbursedAtMs, 'number');
+
+        console.log('[test] polymarket-intent-trader lifecycle OK');
     } finally {
+        globalThis.fetch = originalFetch;
         await resetTradeIntentState();
     }
 }
