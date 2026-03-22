@@ -1,0 +1,15 @@
+Only the following agent address is authorized to serve this commitment: <AUTHORIZED_AGENT_ADDRESS>.
+
+This commitment accepts USDC deposits from multiple users for one configured Polymarket market.
+
+A depositor may submit a signed trade intent message asking the agent to buy either the YES token or the NO token for that market.
+A valid trade intent must be signed by the depositor whose balance will reimburse the trade and must include a unique intent id, the desired outcome (YES or NO), a maximum USDC spend amount, a maximum price, and an expiry time.
+
+When the authorized agent receives a valid, unexpired signed trade intent, the agent may execute the buy through the Polymarket CLOB using the agent's own trading wallet and funds.
+After the order fills, the agent must deposit the purchased outcome tokens into this Safe.
+
+After the token deposit is confirmed, the agent may propose one USDC reimbursement transfer from this Safe to the same trading wallet that funded the trade.
+The reimbursement amount may not exceed the actual USDC spent for the filled order and may not exceed the depositor's available committed balance.
+
+The agent must ignore unsigned, expired, duplicate, malformed, or over-budget intents.
+Any reimbursement proposal explanation must include a durable reference to the signed intent and the corresponding fill or deposit transaction identifiers.

@@ -1,0 +1,8 @@
+{
+  "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+  "name": "Oya Polymarket Intent Trader",
+  "description": "Polymarket commitment agent for signed depositor BUY intents, YES/NO token deposits, and post-fill USDC reimbursement.",
+  "image": "https://raw.githubusercontent.com/oya-commitments/oya-commitments/main/agent-library/agents/default/agent.png",
+  "endpoints": [],
+  "registrations": []
+}
