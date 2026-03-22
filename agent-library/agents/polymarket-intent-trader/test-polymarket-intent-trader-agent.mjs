@@ -21,6 +21,7 @@ import {
 const TEST_SIGNER = '0x1111111111111111111111111111111111111111';
 const TEST_AGENT = '0x2222222222222222222222222222222222222222';
 const TEST_SAFE = '0x3333333333333333333333333333333333333333';
+const TEST_OTHER_SIGNER = '0x5555555555555555555555555555555555555555';
 const TEST_USDC = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
 const TEST_CTF = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
 const YES_TOKEN_ID = '101';
@@ -125,14 +126,22 @@ function buildPublicClient(runtime) {
         async getCode({ address }) {
             return String(address).toLowerCase() === TEST_SAFE.toLowerCase() ? '0x1' : '0x';
         },
-        async getLogs({ address, args }) {
+        async getLogs({ address, args, fromBlock, toBlock }) {
             if (String(address).toLowerCase() !== TEST_USDC.toLowerCase()) {
                 return [];
             }
             if (String(args?.to ?? '').toLowerCase() !== TEST_SAFE.toLowerCase()) {
                 return [];
             }
-            return runtime.depositLogs;
+            const normalizedFromBlock = BigInt(fromBlock ?? 0n);
+            const normalizedToBlock = BigInt(toBlock ?? runtime.latestBlock);
+            return runtime.depositLogs.filter((log) => {
+                const blockNumber = BigInt(log.blockNumber ?? 0n);
+                return (
+                    blockNumber >= normalizedFromBlock &&
+                    blockNumber <= normalizedToBlock
+                );
+            });
         },
         async readContract({ address, functionName, args }) {
             if (
@@ -182,7 +191,7 @@ async function run() {
                 status: 'MATCHED',
                 original_size: '25',
                 size_matched: '25',
-                maker_amount_filled: '25000000',
+                maker_amount_filled: '20000000',
             },
         },
         tradesPayload: [
@@ -190,7 +199,7 @@ async function run() {
                 id: 'trade-1',
                 status: 'CONFIRMED',
                 taker_order_id: TEST_ORDER_ID,
-                price: '0.40',
+                price: '0.32',
                 size: '62.5',
             },
         ],
@@ -230,6 +239,38 @@ async function run() {
 
         const pollingOptions = getPollingOptions();
         assert.equal(pollingOptions.emitBalanceSnapshotsEveryPoll, true);
+
+        const initialBackfillCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.deepEqual(initialBackfillCalls, []);
+        let state = getTradeIntentState();
+        assert.equal(Object.keys(state.deposits).length, 1);
+
+        runtime.latestBlock = 101n;
+        runtime.depositLogs.push({
+            args: {
+                from: TEST_OTHER_SIGNER,
+                value: 30_000_000n,
+            },
+            blockNumber: 101n,
+            transactionHash: `0x${'e'.repeat(64)}`,
+            logIndex: 0,
+        });
+        const incrementalBackfillCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.deepEqual(incrementalBackfillCalls, []);
+        state = getTradeIntentState();
+        assert.equal(Object.keys(state.deposits).length, 2);
 
         const validSignal = buildSignedMessageSignal();
         const inactiveCalls = await getDeterministicToolCalls({
@@ -350,12 +391,15 @@ async function run() {
         assert.equal(archiveArgs.filename, interpreted.intent.archiveFilename);
         assert.equal(archiveArgs.json.interpretedIntent.maxSpendWei, '25000000');
 
-        let state = getTradeIntentState();
+        state = getTradeIntentState();
         let storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-001`];
         assert.ok(storedIntent);
         assert.equal(storedIntent.reservedCreditAmountWei, '25000000');
         assert.equal(typeof storedIntent.lastArchiveAttemptAtMs, 'number');
-        assert.equal(state.deposits[Object.keys(state.deposits)[0]].amountWei, '50000000');
+        assert.equal(
+            Object.values(state.deposits).filter((deposit) => deposit.depositor === TEST_SIGNER.toLowerCase()).length,
+            1
+        );
 
         await onToolOutput({
             name: 'ipfs_publish',
@@ -439,8 +483,22 @@ async function run() {
 
         state = getTradeIntentState();
         storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-001`];
-        assert.equal(storedIntent.reimbursementAmountWei, '25000000');
+        assert.equal(storedIntent.reimbursementAmountWei, '20000000');
+        assert.equal(storedIntent.reservedCreditAmountWei, '20000000');
         assert.equal(storedIntent.feeRateBps, '30');
+        const creditStateSignal = (
+            await enrichSignals([], {
+                config: buildModuleConfig(),
+                account: {
+                    address: TEST_AGENT,
+                },
+                nowMs: validSignal.receivedAtMs,
+            })
+        ).find((entry) => entry.kind === 'polymarketTradeIntentState');
+        assert.equal(
+            creditStateSignal.credits[TEST_SIGNER.toLowerCase()].availableWei,
+            '30000000'
+        );
 
         await onToolOutput({
             name: 'make_erc1155_deposit',
@@ -466,7 +524,7 @@ async function run() {
             reimbursementArgs.transactions[0].to.toLowerCase(),
             TEST_USDC.toLowerCase()
         );
-        assert.ok(reimbursementArgs.explanation.includes('spentWei=25000000'));
+        assert.ok(reimbursementArgs.explanation.includes('spentWei=20000000'));
         assert.ok(reimbursementArgs.explanation.includes('signedRequestCid=ipfs%3A%2F%2Fbafyintent'));
         assert.ok(reimbursementArgs.explanation.includes(`orderId=${encodeURIComponent(TEST_ORDER_ID)}`));
         assert.ok(
@@ -520,6 +578,73 @@ async function run() {
         state = getTradeIntentState();
         storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-001`];
         assert.equal(typeof storedIntent.reimbursedAtMs, 'number');
+
+        await resetTradeIntentState();
+        runtime.latestBlock = 200n;
+        runtime.depositLogs = [
+            {
+                args: {
+                    from: TEST_SIGNER,
+                    value: 50_000_000n,
+                },
+                blockNumber: 10n,
+                transactionHash: `0x${'d'.repeat(64)}`,
+                logIndex: 0,
+            },
+        ];
+
+        const ambiguousSignal = buildSignedMessageSignal({
+            requestId: 'pm-intent-ambiguous',
+        });
+        const ambiguousArchiveCalls = await getDeterministicToolCalls({
+            signals: [ambiguousSignal],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(ambiguousArchiveCalls.length, 1);
+        assert.equal(ambiguousArchiveCalls[0].name, 'ipfs_publish');
+        await onToolOutput({
+            name: 'ipfs_publish',
+            parsedOutput: {
+                status: 'published',
+                cid: 'bafyintent-ambiguous',
+                uri: 'ipfs://bafyintent-ambiguous',
+                pinned: true,
+            },
+            config: buildModuleConfig(),
+        });
+        const ambiguousOrderCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(ambiguousOrderCalls.length, 1);
+        assert.equal(ambiguousOrderCalls[0].name, 'polymarket_clob_build_sign_and_place_order');
+        await onToolOutput({
+            name: 'polymarket_clob_build_sign_and_place_order',
+            parsedOutput: {
+                status: 'error',
+                message: 'socket hang up',
+            },
+            config: buildModuleConfig(),
+        });
+        const noDuplicateAfterAmbiguousOrderError = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.deepEqual(noDuplicateAfterAmbiguousOrderError, []);
+        state = getTradeIntentState();
+        storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-ambiguous`];
+        assert.equal(storedIntent.lastOrderSubmissionStatus, 'error');
+        assert.equal(storedIntent.lastOrderSubmissionError, 'socket hang up');
+        assert.equal(typeof storedIntent.orderSubmittedAtMs, 'number');
 
         console.log('[test] polymarket-intent-trader lifecycle OK');
     } finally {
