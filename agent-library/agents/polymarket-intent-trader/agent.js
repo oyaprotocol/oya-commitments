@@ -37,6 +37,8 @@ const USDC_DECIMALS = 6;
 const DEFAULT_ARCHIVE_RETRY_DELAY_MS = 30_000;
 const DEFAULT_PENDING_TX_TIMEOUT_MS = 900_000;
 const DEFAULT_LOG_CHUNK_SIZE = 5_000n;
+const DEFAULT_CLOB_HOST = 'https://clob.polymarket.com';
+const DEFAULT_CLOB_REQUEST_TIMEOUT_MS = 15_000;
 const DEFAULT_SIGNED_COMMANDS = [
     'buy',
     'trade',
@@ -196,6 +198,22 @@ function parseOptionalPositiveInteger(value) {
     return normalized;
 }
 
+function parseOptionalNonNegativeIntegerString(value) {
+    if (value === null || value === undefined || value === '') {
+        return null;
+    }
+
+    try {
+        const normalized = BigInt(String(value));
+        if (normalized < 0n) {
+            return null;
+        }
+        return normalized.toString();
+    } catch (error) {
+        return null;
+    }
+}
+
 function normalizeWhitespace(value) {
     return String(value ?? '')
         .replace(/\s+/g, ' ')
@@ -224,6 +242,15 @@ function formatScaledDecimal(value, decimals) {
     const fraction = (absolute % scale).toString().padStart(decimals, '0').replace(/0+$/, '');
     const sign = negative ? '-' : '';
     return fraction.length > 0 ? `${sign}${whole}.${fraction}` : `${sign}${whole}`;
+}
+
+function computeCeilDiv(numerator, denominator) {
+    const normalizedNumerator = BigInt(numerator);
+    const normalizedDenominator = BigInt(denominator);
+    if (normalizedDenominator <= 0n) {
+        throw new Error('denominator must be > 0.');
+    }
+    return (normalizedNumerator + normalizedDenominator - 1n) / normalizedDenominator;
 }
 
 function normalizeTradePrice(value) {
@@ -477,6 +504,9 @@ function resolvePolicy(config = {}) {
     if (!policy.marketId) {
         policy.errors.push('polymarketIntentTrader.marketId is required.');
     }
+    if (!policy.authorizedAgent) {
+        policy.errors.push('polymarketIntentTrader.authorizedAgent is required.');
+    }
     if (!policy.yesTokenId) {
         policy.errors.push('polymarketIntentTrader.yesTokenId is required.');
     }
@@ -627,14 +657,19 @@ function computeBuyOrderAmounts({ collateralAmountWei, price }) {
         throw new Error('price is too small for buy-order sizing.');
     }
 
-    const makerAmount = (normalizedCollateralAmountWei * PRICE_SCALE) / priceScaled;
-    if (makerAmount <= 0n) {
-        throw new Error('makerAmount computed to zero; refusing order.');
+    // For BUY orders on Polymarket, makerAmount is the USDC spend and takerAmount is the
+    // minimum number of shares to receive at the signed worst price or better.
+    const takerAmount = computeCeilDiv(
+        normalizedCollateralAmountWei * PRICE_SCALE,
+        priceScaled
+    );
+    if (takerAmount <= 0n) {
+        throw new Error('takerAmount computed to zero; refusing order.');
     }
 
     return {
-        makerAmount: makerAmount.toString(),
-        takerAmount: normalizedCollateralAmountWei.toString(),
+        makerAmount: normalizedCollateralAmountWei.toString(),
+        takerAmount: takerAmount.toString(),
         priceScaled: priceScaled.toString(),
     };
 }
@@ -755,12 +790,13 @@ function interpretSignedTradeIntentSignal(
             maxSpendUsdc: maxSpend.usdc,
             maxSpendWei: maxSpend.wei,
             reservedCreditAmountWei: maxSpend.wei,
-            reimbursementAmountWei: maxSpend.wei,
+            reimbursementAmountWei: null,
             maxPrice: maxPrice.decimal,
             maxPriceScaled: maxPrice.scaled,
             orderMakerAmount: orderAmounts.makerAmount,
             orderTakerAmount: orderAmounts.takerAmount,
             orderPriceScaled: orderAmounts.priceScaled,
+            feeRateBps: null,
             archiveFilename: buildArtifactFilename(requestId),
             canonicalMessage,
             commitmentSafe: commitmentSafe ? normalizeAddress(commitmentSafe) : null,
@@ -1138,6 +1174,18 @@ function extractOrderSummary(payload) {
         status: normalizeClobStatus(order.status),
         originalSize: parseFiniteNumber(order.original_size ?? order.originalSize),
         sizeMatched: parseFiniteNumber(order.size_matched ?? order.sizeMatched),
+        makerAmountFilled: parseOptionalNonNegativeIntegerString(
+            order.maker_amount_filled ??
+                order.makerAmountFilled ??
+                order.making_amount_filled ??
+                order.makingAmountFilled
+        ),
+        takerAmountFilled: parseOptionalNonNegativeIntegerString(
+            order.taker_amount_filled ??
+                order.takerAmountFilled ??
+                order.taking_amount_filled ??
+                order.takingAmountFilled
+        ),
     };
 }
 
@@ -1183,6 +1231,53 @@ function dedupeTrades(trades) {
         unique.push(trade);
     }
     return unique;
+}
+
+function resolveFilledBuySpendWei({ intent, orderSummary }) {
+    return (
+        parseOptionalNonNegativeIntegerString(
+            orderSummary?.makerAmountFilled ?? orderSummary?.makingAmountFilled
+        ) ??
+        parseOptionalNonNegativeIntegerString(intent?.orderMakerAmount) ??
+        parseOptionalNonNegativeIntegerString(intent?.maxSpendWei)
+    );
+}
+
+function normalizeClobHost(host) {
+    return (normalizeNonEmptyString(host) ?? DEFAULT_CLOB_HOST).replace(/\/+$/, '');
+}
+
+async function fetchClobFeeRateBps({ config, tokenId }) {
+    const timeoutMs =
+        parseOptionalPositiveInteger(config?.polymarketClobRequestTimeoutMs) ??
+        DEFAULT_CLOB_REQUEST_TIMEOUT_MS;
+    const url = new URL('/fee-rate', `${normalizeClobHost(config?.polymarketClobHost)}/`);
+    url.searchParams.set('token_id', String(tokenId));
+
+    const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+            Accept: 'application/json',
+        },
+        signal: AbortSignal.timeout(timeoutMs),
+    });
+
+    if (!response.ok) {
+        const body = await response.text();
+        throw new Error(
+            `Failed to fetch Polymarket fee rate for token ${tokenId} (${response.status} ${response.statusText}): ${body}`
+        );
+    }
+
+    const payload = await response.json();
+    const feeRateBps = Number(payload?.base_fee ?? payload?.baseFee);
+    if (!Number.isInteger(feeRateBps) || feeRateBps < 0) {
+        throw new Error(
+            `Polymarket fee-rate response missing non-negative integer base_fee for token ${tokenId}.`
+        );
+    }
+
+    return String(feeRateBps);
 }
 
 async function fetchRelatedClobTrades({
@@ -1427,10 +1522,18 @@ async function refreshOrderStatus({
             }
 
             if (allConfirmedTrades && orderFilled) {
+                const reimbursementAmountWei = resolveFilledBuySpendWei({
+                    intent,
+                    orderSummary,
+                });
+                if (!reimbursementAmountWei) {
+                    throw new Error(
+                        `Unable to determine actual USDC spent for filled Polymarket BUY order ${intent.orderId}.`
+                    );
+                }
                 intent.orderFilled = true;
                 intent.orderFilledAtMs = nowMs;
-                intent.reimbursementAmountWei =
-                    intent.orderTakerAmount ?? intent.reimbursementAmountWei;
+                intent.reimbursementAmountWei = reimbursementAmountWei;
                 intent.updatedAtMs = nowMs;
                 changed = true;
             }
@@ -1593,6 +1696,13 @@ function buildArchiveToolCall(intent, commitmentSafe, agentAddress) {
 }
 
 function buildOrderToolCall(intent, chainId) {
+    const feeRateBps = parseOptionalNonNegativeIntegerString(intent.feeRateBps);
+    if (!feeRateBps) {
+        throw new Error(
+            `Missing feeRateBps for signed Polymarket trade intent ${intent.intentKey}.`
+        );
+    }
+
     return {
         callId: `place-polymarket-order-${intent.sequence}`,
         name: 'polymarket_clob_build_sign_and_place_order',
@@ -1602,6 +1712,7 @@ function buildOrderToolCall(intent, chainId) {
             orderType: 'FOK',
             makerAmount: intent.orderMakerAmount,
             takerAmount: intent.orderTakerAmount,
+            feeRateBps,
             expiration: String(Math.floor(intent.expiryMs / 1000)),
             chainId,
         }),
@@ -1944,6 +2055,12 @@ async function getDeterministicToolCalls({
                 continue;
             }
 
+            const feeRateBps = await fetchClobFeeRateBps({
+                config,
+                tokenId: intent.tokenId,
+            });
+            intent.feeRateBps = feeRateBps;
+            intent.feeRateFetchedAtMs = Date.now();
             intent.orderSubmittedAtMs = Date.now();
             intent.tradingWalletAddress = clobAuthAddress ?? normalizedAgentAddress;
             intent.reimbursementRecipientAddress = clobAuthAddress ?? normalizedAgentAddress;
