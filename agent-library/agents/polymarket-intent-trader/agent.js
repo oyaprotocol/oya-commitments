@@ -940,7 +940,15 @@ async function maybeBackfillDeposits({
     policy,
     config,
 }) {
-    if (tradeIntentState.backfilledDepositsThroughBlock !== null) {
+    const previousBackfilledThroughBlock =
+        tradeIntentState.backfilledDepositsThroughBlock !== null
+            ? BigInt(tradeIntentState.backfilledDepositsThroughBlock)
+            : null;
+
+    if (
+        previousBackfilledThroughBlock !== null &&
+        previousBackfilledThroughBlock >= latestBlock
+    ) {
         if (!depositBackfillStatusLogged) {
             console.log(
                 `[agent] polymarket-intent-trader credit backfill already complete through block ${tradeIntentState.backfilledDepositsThroughBlock}.`
@@ -950,12 +958,15 @@ async function maybeBackfillDeposits({
         return false;
     }
 
-    const fromBlock = await resolveInitialDepositBackfillStartBlock({
-        publicClient,
-        commitmentSafe,
-        startBlock: config?.startBlock,
-        latestBlock,
-    });
+    const fromBlock =
+        previousBackfilledThroughBlock !== null
+            ? previousBackfilledThroughBlock + 1n
+            : await resolveInitialDepositBackfillStartBlock({
+                  publicClient,
+                  commitmentSafe,
+                  startBlock: config?.startBlock,
+                  latestBlock,
+              });
 
     const logs = await getLogsChunked({
         publicClient,
@@ -992,10 +1003,14 @@ async function maybeBackfillDeposits({
     }
 
     tradeIntentState.backfilledDepositsThroughBlock = latestBlock.toString();
-    depositBackfillStatusLogged = true;
-    if (logs.length > 0) {
+    depositBackfillStatusLogged = false;
+    if (logs.length > 0 && previousBackfilledThroughBlock === null) {
         console.log(
             `[agent] Rebuilt ${logs.length} historical ERC20 deposit credit records for ${commitmentSafe}.`
+        );
+    } else if (logs.length > 0) {
+        console.log(
+            `[agent] Recovered ${logs.length} incremental ERC20 deposit credit records for ${commitmentSafe} through block ${latestBlock.toString()}.`
         );
     }
     markStateDirty();
@@ -1476,8 +1491,15 @@ async function refreshOrderStatus({
         }
         if (!intent.orderId) {
             if (hasTimedOut(intent.orderSubmittedAtMs, policy.pendingTxTimeoutMs, nowMs)) {
-                delete intent.orderSubmittedAtMs;
-                intent.updatedAtMs = nowMs;
+                markTerminalIntentFailure(intent, {
+                    stage: 'order_submission',
+                    status: 'unknown_result_timeout',
+                    detail:
+                        intent.lastOrderSubmissionError ??
+                        'Polymarket order submission outcome remained ambiguous until timeout; refusing automatic retry.',
+                    sideEffectsLikelyCommitted: true,
+                    releaseCredit: false,
+                });
                 changed = true;
             }
             continue;
@@ -1542,6 +1564,7 @@ async function refreshOrderStatus({
                 intent.orderFilled = true;
                 intent.orderFilledAtMs = nowMs;
                 intent.reimbursementAmountWei = reimbursementAmountWei;
+                intent.reservedCreditAmountWei = reimbursementAmountWei;
                 intent.updatedAtMs = nowMs;
                 changed = true;
             }
@@ -2204,15 +2227,18 @@ async function onToolOutput({ name, parsedOutput, config }) {
 
         const status = getParsedToolOutputStatus(parsedOutput);
         if (status !== 'submitted') {
-            if (parsedOutput?.retryable === false && parsedOutput?.sideEffectsLikelyCommitted !== true) {
+            const detail = getParsedToolOutputDetail(parsedOutput, status);
+            const sideEffectsLikelyCommitted = parsedOutput?.sideEffectsLikelyCommitted === true;
+            if (parsedOutput?.retryable === false && !sideEffectsLikelyCommitted) {
                 markTerminalIntentFailure(intent, {
                     stage: 'order_submission',
                     status,
-                    detail: getParsedToolOutputDetail(parsedOutput, status),
+                    detail,
                     releaseCredit: true,
                 });
             } else {
-                delete intent.orderSubmittedAtMs;
+                intent.lastOrderSubmissionStatus = status;
+                intent.lastOrderSubmissionError = detail;
                 intent.updatedAtMs = Date.now();
             }
             await maybePersistTradeIntentState();
@@ -2226,11 +2252,14 @@ async function onToolOutput({ name, parsedOutput, config }) {
                 stage: 'order_submission',
                 status: 'missing_order_id',
                 detail: 'Polymarket order submission did not return an order id.',
-                releaseCredit: true,
+                sideEffectsLikelyCommitted: true,
+                releaseCredit: false,
             });
             await maybePersistTradeIntentState();
             return;
         }
+        delete intent.lastOrderSubmissionStatus;
+        delete intent.lastOrderSubmissionError;
         intent.orderSubmittedAtMs = Date.now();
         intent.updatedAtMs = Date.now();
         await maybePersistTradeIntentState();
