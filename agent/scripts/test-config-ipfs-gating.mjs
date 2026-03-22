@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import { buildConfig } from '../src/lib/config.js';
+import { resolveAgentRuntimeConfig } from '../src/lib/agent-config.js';
 
 const REQUIRED_BASE_ENV = {
     RPC_URL: 'http://127.0.0.1:8545',
-    COMMITMENT_SAFE: '0x1111111111111111111111111111111111111111',
-    OG_MODULE: '0x2222222222222222222222222222222222222222',
 };
 
 const MANAGED_ENV_KEYS = [
@@ -28,13 +27,14 @@ function withManagedEnv(overrides, fn) {
             process.env[key] = value;
         }
         for (const key of MANAGED_ENV_KEYS) {
-            if (Object.prototype.hasOwnProperty.call(overrides, key)) {
-                const nextValue = overrides[key];
-                if (nextValue === undefined) {
-                    delete process.env[key];
-                } else {
-                    process.env[key] = String(nextValue);
-                }
+            if (!Object.prototype.hasOwnProperty.call(overrides, key)) {
+                continue;
+            }
+            const nextValue = overrides[key];
+            if (nextValue === undefined) {
+                delete process.env[key];
+            } else {
+                process.env[key] = String(nextValue);
             }
         }
         return fn();
@@ -52,7 +52,7 @@ function withManagedEnv(overrides, fn) {
 async function run() {
     withManagedEnv(
         {
-            IPFS_ENABLED: 'false',
+            IPFS_ENABLED: 'true',
             IPFS_API_URL: ' not a url ',
             IPFS_HEADERS_JSON: '{not-json}',
             IPFS_REQUEST_TIMEOUT_MS: 'abc',
@@ -72,17 +72,15 @@ async function run() {
 
     withManagedEnv(
         {
-            IPFS_ENABLED: 'true',
             IPFS_HEADERS_JSON: '{not-json}',
         },
         () => {
-            assert.throws(() => buildConfig(), /IPFS_HEADERS_JSON must be valid JSON object/);
+            assert.doesNotThrow(() => buildConfig());
         }
     );
 
     withManagedEnv(
         {
-            IPFS_ENABLED: 'true',
             IPFS_API_URL: 'https://ipfs.example.com',
             IPFS_HEADERS_JSON: '{"Authorization":"Bearer token"}',
             IPFS_REQUEST_TIMEOUT_MS: '5000',
@@ -91,12 +89,77 @@ async function run() {
         },
         () => {
             const config = buildConfig();
+            assert.equal(config.ipfsEnabled, false);
+            assert.equal(config.ipfsApiUrl, 'http://127.0.0.1:5001');
+            assert.deepEqual(config.ipfsHeaders, {});
+            assert.equal(config.ipfsRequestTimeoutMs, 15_000);
+            assert.equal(config.ipfsMaxRetries, 1);
+            assert.equal(config.ipfsRetryDelayMs, 250);
+        }
+    );
+
+    withManagedEnv(
+        {
+            IPFS_API_URL: 'https://ipfs.config-env.example',
+            IPFS_HEADERS_JSON: '{"Authorization":"Bearer config-token"}',
+            IPFS_REQUEST_TIMEOUT_MS: '5001',
+            IPFS_MAX_RETRIES: '3',
+            IPFS_RETRY_DELAY_MS: '11',
+        },
+        () => {
+            const config = buildConfig();
+            Object.assign(
+                config,
+                resolveAgentRuntimeConfig({
+                    baseConfig: config,
+                    agentConfigFile: {
+                        raw: {
+                            ipfsEnabled: true,
+                            ipfsApiUrl: 'https://ipfs.config.example',
+                            ipfsRequestTimeoutMs: 7000,
+                            ipfsMaxRetries: 6,
+                            ipfsRetryDelayMs: 33,
+                        },
+                    },
+                    chainId: 11155111,
+                })
+            );
             assert.equal(config.ipfsEnabled, true);
-            assert.equal(config.ipfsApiUrl, 'https://ipfs.example.com');
-            assert.deepEqual(config.ipfsHeaders, { Authorization: 'Bearer token' });
-            assert.equal(config.ipfsRequestTimeoutMs, 5000);
-            assert.equal(config.ipfsMaxRetries, 2);
-            assert.equal(config.ipfsRetryDelayMs, 10);
+            assert.equal(config.ipfsApiUrl, 'https://ipfs.config.example');
+            assert.deepEqual(config.ipfsHeaders, {
+                Authorization: 'Bearer config-token',
+            });
+            assert.equal(config.ipfsRequestTimeoutMs, 7000);
+            assert.equal(config.ipfsMaxRetries, 6);
+            assert.equal(config.ipfsRetryDelayMs, 33);
+        }
+    );
+
+    withManagedEnv(
+        {
+            IPFS_API_URL: ' not a valid host ',
+            IPFS_HEADERS_JSON: '{"Authorization":"Bearer config-token"}',
+        },
+        () => {
+            const config = buildConfig();
+            Object.assign(
+                config,
+                resolveAgentRuntimeConfig({
+                    baseConfig: config,
+                    agentConfigFile: {
+                        raw: {
+                            ipfsEnabled: true,
+                            ipfsApiUrl: 'https://ipfs.config.example',
+                        },
+                    },
+                    chainId: 11155111,
+                })
+            );
+            assert.equal(config.ipfsEnabled, true);
+            assert.equal(config.ipfsApiUrl, 'https://ipfs.config.example');
+            assert.deepEqual(config.ipfsHeaders, {
+                Authorization: 'Bearer config-token',
+            });
         }
     );
 

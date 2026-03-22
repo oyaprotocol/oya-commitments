@@ -19,12 +19,15 @@ function buildInbox() {
 
 async function main() {
     const account = privateKeyToAccount(`0x${'1'.repeat(64)}`);
+    const otherAccount = privateKeyToAccount(`0x${'2'.repeat(64)}`);
     const inbox = buildInbox();
     const config = {
+        chainId: 11155111,
         messageApiHost: '127.0.0.1',
         messageApiPort: 0,
         messageApiKeys: {},
         messageApiSignerAllowlist: [account.address],
+        messageApiRequireSignerAllowlist: true,
         messageApiSignatureMaxAgeSeconds: 300,
         messageApiMaxBodyBytes: 2048,
     };
@@ -42,6 +45,7 @@ async function main() {
     try {
         const timestampMs = Date.now();
         const signedBody = {
+            chainId: 11155111,
             text: 'Pause proposals for 2 hours',
             command: 'pause_proposals',
             args: { hours: 2 },
@@ -82,11 +86,100 @@ async function main() {
         assert.equal(queued[0].sender.signature, signature);
         assert.equal(queued[0].requestId, signedBody.requestId);
         assert.equal(queued[0].deadline, signedBody.deadline);
+        assert.equal(queued[0].chainId, 11155111);
         inbox.ackBatch(queued.map((message) => message.messageId));
+
+        const unsignedChainIdTimestampMs = Date.now();
+        const unsignedChainIdBody = {
+            chainId: 11155111,
+            text: 'Unsigned chain id',
+            requestId: 'sig-unsigned-chain-id',
+        };
+        const unsignedChainIdPayload = buildSignedMessagePayload({
+            address: account.address,
+            timestampMs: unsignedChainIdTimestampMs,
+            text: unsignedChainIdBody.text,
+            requestId: unsignedChainIdBody.requestId,
+        });
+        const unsignedChainIdSignature = await account.signMessage({
+            message: unsignedChainIdPayload,
+        });
+        const unsignedChainId = await fetch(`${baseUrl}/v1/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ...unsignedChainIdBody,
+                auth: {
+                    type: 'eip191',
+                    address: account.address,
+                    timestampMs: unsignedChainIdTimestampMs,
+                    signature: unsignedChainIdSignature,
+                },
+            }),
+        });
+        assert.equal(unsignedChainId.status, 401);
+
+        const missingChainIdTimestampMs = Date.now();
+        const missingChainIdBody = {
+            text: 'Missing chain id',
+            requestId: 'sig-missing-chain-id',
+        };
+        const missingChainIdPayload = buildSignedMessagePayload({
+            address: account.address,
+            timestampMs: missingChainIdTimestampMs,
+            ...missingChainIdBody,
+        });
+        const missingChainIdSignature = await account.signMessage({
+            message: missingChainIdPayload,
+        });
+        const missingChainId = await fetch(`${baseUrl}/v1/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ...missingChainIdBody,
+                auth: {
+                    type: 'eip191',
+                    address: account.address,
+                    timestampMs: missingChainIdTimestampMs,
+                    signature: missingChainIdSignature,
+                },
+            }),
+        });
+        assert.equal(missingChainId.status, 400);
+
+        const wrongChainIdTimestampMs = Date.now();
+        const wrongChainIdBody = {
+            text: 'Wrong chain id',
+            requestId: 'sig-wrong-chain-id',
+        };
+        const wrongChainIdPayload = buildSignedMessagePayload({
+            address: account.address,
+            timestampMs: wrongChainIdTimestampMs,
+            ...wrongChainIdBody,
+        });
+        const wrongChainIdSignature = await account.signMessage({
+            message: wrongChainIdPayload,
+        });
+        const wrongChainId = await fetch(`${baseUrl}/v1/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ...wrongChainIdBody,
+                chainId: 1,
+                auth: {
+                    type: 'eip191',
+                    address: account.address,
+                    timestampMs: wrongChainIdTimestampMs,
+                    signature: wrongChainIdSignature,
+                },
+            }),
+        });
+        assert.equal(wrongChainId.status, 400);
 
         // Signed request IDs remain replay-locked beyond message expiry.
         const shortTtlTimestampMs = Date.now();
         const shortTtlBody = {
+            chainId: 11155111,
             text: 'Short TTL signed command',
             requestId: 'sig-short-ttl',
             deadline: shortTtlTimestampMs + 2_000,
@@ -190,8 +283,96 @@ async function main() {
             }),
         });
         assert.equal(expired.status, 401);
+
+        // Unknown signers should still be rejected when allowlist mode is enabled.
+        const otherTimestampMs = Date.now();
+        const otherRequestBody = {
+            chainId: 11155111,
+            text: 'Open a trade',
+            requestId: 'sig-other-signer',
+        };
+        const otherPayload = buildSignedMessagePayload({
+            address: otherAccount.address,
+            timestampMs: otherTimestampMs,
+            ...otherRequestBody,
+        });
+        const otherSignature = await otherAccount.signMessage({ message: otherPayload });
+        const rejectedOtherSigner = await fetch(`${baseUrl}/v1/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ...otherRequestBody,
+                auth: {
+                    type: 'eip191',
+                    address: otherAccount.address,
+                    timestampMs: otherTimestampMs,
+                    signature: otherSignature,
+                },
+            }),
+        });
+        assert.equal(rejectedOtherSigner.status, 401);
     } finally {
         await messageApi.stop();
+    }
+
+    const openInbox = buildInbox();
+    const openConfig = {
+        chainId: 11155111,
+        messageApiHost: '127.0.0.1',
+        messageApiPort: 0,
+        messageApiKeys: {},
+        messageApiSignerAllowlist: [account.address],
+        messageApiRequireSignerAllowlist: false,
+        messageApiSignatureMaxAgeSeconds: 300,
+        messageApiMaxBodyBytes: 2048,
+    };
+    const openMessageApi = createMessageApiServer({
+        config: openConfig,
+        inbox: openInbox,
+        logger: { log() {} },
+    });
+    const openServer = await openMessageApi.start();
+    const openAddress = openServer.address();
+    assert.ok(openAddress && typeof openAddress === 'object' && typeof openAddress.port === 'number');
+    const openBaseUrl = `http://127.0.0.1:${openAddress.port}`;
+
+    try {
+        const timestampMs = Date.now();
+        const openBody = {
+            chainId: 11155111,
+            text: 'Open a YES trade with 5 USDC',
+            requestId: 'sig-open-mode',
+        };
+        const payload = buildSignedMessagePayload({
+            address: otherAccount.address,
+            timestampMs,
+            ...openBody,
+        });
+        const signature = await otherAccount.signMessage({ message: payload });
+
+        const accepted = await fetch(`${openBaseUrl}/v1/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ...openBody,
+                auth: {
+                    type: 'eip191',
+                    address: otherAccount.address,
+                    timestampMs,
+                    signature,
+                },
+            }),
+        });
+        assert.equal(accepted.status, 202);
+        const acceptedJson = await accepted.json();
+        assert.equal(acceptedJson.status, 'queued');
+
+        const queued = openInbox.takeBatch({ maxItems: 1 });
+        assert.equal(queued.length, 1);
+        assert.equal(queued[0].sender.address, otherAccount.address);
+        openInbox.ackBatch(queued.map((message) => message.messageId));
+    } finally {
+        await openMessageApi.stop();
     }
 
     console.log('[test] message API signature auth OK');

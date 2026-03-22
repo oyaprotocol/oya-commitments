@@ -1,25 +1,23 @@
-import dotenv from 'dotenv';
 import { randomUUID } from 'node:crypto';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import {
+    resolveAgentRuntimeConfig,
+    resolveConfiguredChainId,
+} from '../src/lib/agent-config.js';
 import { privateKeyToAccount } from 'viem/accounts';
 import { buildSignedMessagePayload } from '../src/lib/message-signing.js';
+import {
+    getArgValue,
+    hasFlag,
+    isDirectScriptExecution,
+    loadAgentConfigForScript,
+    loadScriptEnv,
+    repoRoot,
+    resolveExplicitOverlayPaths,
+    resolveAgentModulePath,
+    resolveAgentRef,
+} from './lib/cli-runtime.mjs';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const repoRoot = path.resolve(__dirname, '../..');
-
-dotenv.config();
-dotenv.config({ path: path.resolve(repoRoot, 'agent/.env') });
-
-function getArgValue(prefix) {
-    const arg = process.argv.find((value) => value.startsWith(prefix));
-    return arg ? arg.slice(prefix.length) : null;
-}
-
-function hasFlag(flag) {
-    return process.argv.includes(flag);
-}
+loadScriptEnv();
 
 function parseInteger(value, label) {
     const parsed = Number(value);
@@ -52,16 +50,226 @@ function normalizePrivateKey(value) {
     return value.startsWith('0x') ? value : `0x${value}`;
 }
 
-function buildBaseUrl() {
-    const explicit = getArgValue('--url=') ?? process.env.MESSAGE_API_URL;
-    if (explicit) {
-        return explicit.replace(/\/+$/, '');
+function normalizeBaseUrl(value) {
+    if (typeof value !== 'string' || !value.trim()) {
+        throw new Error('base URL must be a non-empty string.');
     }
-    const host = getArgValue('--host=') ?? process.env.MESSAGE_API_HOST ?? '127.0.0.1';
-    const portRaw = getArgValue('--port=') ?? process.env.MESSAGE_API_PORT ?? '8787';
-    const port = parseInteger(portRaw, 'port');
-    const scheme = getArgValue('--scheme=') ?? process.env.MESSAGE_API_SCHEME ?? 'http';
-    return `${scheme}://${host}:${port}`;
+    return value.trim().replace(/\/+$/, '');
+}
+
+function parseBaseUrlParts(value, label) {
+    let parsed;
+    try {
+        parsed = new URL(normalizeBaseUrl(value));
+    } catch (error) {
+        throw new Error(`${label} must be a valid URL.`);
+    }
+
+    const scheme = parsed.protocol.replace(/:$/, '');
+    if (!scheme) {
+        throw new Error(`${label} must include a scheme.`);
+    }
+    if (!parsed.hostname) {
+        throw new Error(`${label} must include a host.`);
+    }
+
+    let port;
+    if (parsed.port) {
+        port = parseInteger(parsed.port, `${label} port`);
+    } else if (scheme === 'http') {
+        port = 80;
+    } else if (scheme === 'https') {
+        port = 443;
+    } else {
+        throw new Error(`${label} must include an explicit port for scheme "${scheme}".`);
+    }
+
+    return {
+        scheme,
+        host: parsed.hostname,
+        port,
+        pathname: parsed.pathname,
+        search: parsed.search,
+    };
+}
+
+function formatBaseUrl({ scheme, host, port, pathname = '', search = '' }) {
+    const authorityHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+    const normalizedPath =
+        pathname && pathname !== '/'
+            ? pathname.replace(/\/+$/, '')
+            : '';
+    return `${scheme}://${authorityHost}:${port}${normalizedPath}${search}`;
+}
+
+async function resolveMessageApiConfigForAgent({
+    agentRef,
+    chainId,
+    repoRootPath = repoRoot,
+    env = process.env,
+    overlayPaths,
+    argv = process.argv,
+}) {
+    const {
+        modulePath: resolvedModulePath,
+        configPath: agentConfigPath,
+        agentConfigStack,
+    } = await loadAgentConfigForScript(agentRef, {
+        repoRootPath,
+        env,
+        overlayPaths,
+        argv,
+    });
+    const agentConfigFile = agentConfigStack;
+    const runtimeChainId = resolveConfiguredChainId({
+        agentConfigFile,
+        explicitChainId: chainId,
+    });
+
+    const runtimeConfig = resolveAgentRuntimeConfig({
+        baseConfig: {
+            chainId: runtimeChainId,
+            commitmentSafe: undefined,
+            ogModule: undefined,
+            watchAssets: [],
+            watchErc1155Assets: [],
+            messageApiEnabled: false,
+            messageApiHost: '127.0.0.1',
+            messageApiPort: 8787,
+            messageApiKeys: {},
+            messageApiRequireSignerAllowlist: true,
+            messageApiSignerAllowlist: [],
+            messageApiSignatureMaxAgeSeconds: 300,
+            messageApiMaxBodyBytes: 8192,
+            messageApiMaxTextLength: 2000,
+            messageApiQueueLimit: 500,
+            messageApiBatchSize: 25,
+            messageApiDefaultTtlSeconds: 3600,
+            messageApiMinTtlSeconds: 30,
+            messageApiMaxTtlSeconds: 86400,
+            messageApiIdempotencyTtlSeconds: 86400,
+            messageApiRateLimitPerMinute: 30,
+            messageApiRateLimitBurst: 10,
+        },
+        agentConfigFile,
+        chainId: runtimeChainId,
+    });
+
+    return {
+        ...runtimeConfig,
+        hasMessageApiConfig: Boolean(runtimeConfig.agentConfig?.messageApi),
+        modulePath: resolvedModulePath,
+        configPath: agentConfigPath,
+    };
+}
+
+async function resolveMessageApiTarget({
+    argv = process.argv,
+    env = process.env,
+    repoRootPath = repoRoot,
+    overlayPaths = resolveExplicitOverlayPaths({ argv }),
+} = {}) {
+    const explicit = getArgValue('--url=', argv);
+    const explicitChainIdRaw = getArgValue('--chain-id=', argv);
+    const explicitChainId =
+        explicitChainIdRaw === null ? undefined : parseInteger(explicitChainIdRaw, 'chainId');
+    if (explicit) {
+        const configuredAgentRef = getArgValue('--module=', argv) ?? env.AGENT_MODULE ?? null;
+        if (!configuredAgentRef) {
+            if (explicitChainId !== undefined) {
+                return {
+                    baseUrl: normalizeBaseUrl(explicit),
+                    chainId: explicitChainId,
+                };
+            }
+            throw new Error(
+                '--url requires --chain-id or --module so the target chain can be inferred for chain-bound agents.'
+            );
+        }
+
+        try {
+            const runtimeConfig = await resolveMessageApiConfigForAgent({
+                agentRef: configuredAgentRef,
+                chainId: explicitChainId,
+                repoRootPath,
+                env,
+                overlayPaths,
+                argv,
+            });
+            return {
+                baseUrl: normalizeBaseUrl(explicit),
+                chainId: runtimeConfig.chainId,
+            };
+        } catch (error) {
+            throw new Error(
+                `Unable to infer chainId for explicit --url from module "${configuredAgentRef}". Pass --chain-id explicitly or fix the module config. ${error?.message ?? error}`
+            );
+        }
+    }
+
+    const explicitHost = getArgValue('--host=', argv);
+    const explicitPortRaw = getArgValue('--port=', argv);
+    const explicitPort =
+        explicitPortRaw === null ? undefined : parseInteger(explicitPortRaw, 'port');
+    const explicitScheme = getArgValue('--scheme=', argv);
+    const hasExplicitBaseOverride =
+        explicitHost !== null || explicitPort !== undefined || explicitScheme !== null;
+    const configuredAgentRef = getArgValue('--module=', argv) ?? env.AGENT_MODULE ?? null;
+
+    if (hasExplicitBaseOverride && explicitChainId === undefined && !configuredAgentRef) {
+        throw new Error(
+            '--host/--port/--scheme require --chain-id or --module so the target chain can be inferred for chain-bound agents.'
+        );
+    }
+
+    const agentRef = resolveAgentRef({ argv, env });
+    const runtimeConfig = await resolveMessageApiConfigForAgent({
+        agentRef,
+        chainId: explicitChainId,
+        repoRootPath,
+        env,
+        overlayPaths,
+        argv,
+    });
+
+    if (hasExplicitBaseOverride && runtimeConfig.chainId === undefined) {
+        throw new Error(
+            `Unable to infer chainId for host/port override mode from module "${agentRef}". Pass --chain-id explicitly or fix the module config.`
+        );
+    }
+
+    const baseParts = {
+        scheme: 'http',
+        host: runtimeConfig.messageApiHost,
+        port: runtimeConfig.messageApiPort,
+    };
+
+    return {
+        baseUrl: explicit
+            ? normalizeBaseUrl(explicit)
+            : formatBaseUrl({
+                  ...baseParts,
+                  scheme: explicitScheme ?? baseParts.scheme,
+                  host: explicitHost ?? baseParts.host,
+                  port: explicitPort ?? baseParts.port,
+              }),
+        chainId: runtimeConfig.chainId,
+    };
+}
+
+async function buildBaseUrl({
+    argv = process.argv,
+    env = process.env,
+    repoRootPath = repoRoot,
+    overlayPaths = resolveExplicitOverlayPaths({ argv }),
+} = {}) {
+    const target = await resolveMessageApiTarget({
+        argv,
+        env,
+        repoRootPath,
+        overlayPaths,
+    });
+    return target.baseUrl;
 }
 
 function printUsage() {
@@ -74,9 +282,14 @@ Required:
 
 Optional:
   --url=<base-url>                     Full base URL, e.g. http://127.0.0.1:8787
-  --host=<host>                        Used if --url is omitted (default 127.0.0.1)
-  --port=<int>                         Used if --url is omitted (default 8787)
+                                       When used, also provide --chain-id or --module
+  --host=<host>                        Used if --url is omitted; overrides module config host
+  --port=<int>                         Used if --url is omitted; overrides module config port
   --scheme=<http|https>                Used if --url is omitted (default http)
+  --module=<agent-ref>                 Agent module whose config.json should supply messageApi host/port
+  --chain-id=<int>                     Optional assertion; must match the module config's selected chain when provided
+  --overlay=<path>                     Optional extra config overlay file for script-side config resolution
+  --overlay-paths=<a,b>                Optional comma-separated extra overlay files
   --bearer-token=<string>              Optional bearer token (or MESSAGE_API_BEARER_TOKEN)
   --command=<string>                   Optional command field
   --args-json='<json-object>'          Optional args object
@@ -91,7 +304,7 @@ Optional:
 }
 
 async function main() {
-    if (hasFlag('--help') || hasFlag('-h')) {
+    if (hasFlag('--help', process.argv) || hasFlag('-h', process.argv)) {
         printUsage();
         return;
     }
@@ -106,7 +319,7 @@ async function main() {
     );
     const account = privateKeyToAccount(normalizedPrivateKey);
 
-    const baseUrl = buildBaseUrl();
+    const { baseUrl, chainId } = await resolveMessageApiTarget();
     const bearerToken =
         getArgValue('--bearer-token=') ?? process.env.MESSAGE_API_BEARER_TOKEN ?? undefined;
     const command = getArgValue('--command=') ?? undefined;
@@ -128,6 +341,7 @@ async function main() {
 
     const payload = buildSignedMessagePayload({
         address: account.address,
+        chainId,
         timestampMs,
         text,
         command,
@@ -140,6 +354,7 @@ async function main() {
 
     const body = {
         text,
+        ...(chainId !== undefined ? { chainId } : {}),
         requestId,
         auth: {
             type: 'eip191',
@@ -153,7 +368,7 @@ async function main() {
     if (metadata !== undefined) body.metadata = metadata;
     if (deadline !== undefined) body.deadline = deadline;
 
-    if (hasFlag('--dry-run')) {
+    if (hasFlag('--dry-run', process.argv)) {
         console.log(
             JSON.stringify(
                 {
@@ -218,7 +433,16 @@ async function main() {
     }
 }
 
-main().catch((error) => {
-    console.error('[agent] send signed message failed:', error?.message ?? error);
-    process.exit(1);
-});
+if (isDirectScriptExecution(import.meta.url)) {
+    main().catch((error) => {
+        console.error('[agent] send signed message failed:', error?.message ?? error);
+        process.exit(1);
+    });
+}
+
+export {
+    buildBaseUrl,
+    resolveMessageApiConfigForAgent,
+    resolveMessageApiTarget,
+    resolveAgentModulePath,
+};

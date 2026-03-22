@@ -1,6 +1,3 @@
-import dotenv from 'dotenv';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createPublicClient, decodeEventLog, getAddress, http } from 'viem';
 import {
     optimisticGovernorAbi,
@@ -11,25 +8,12 @@ import {
 import { createSignerClient } from '../src/lib/signer.js';
 import { getLogsChunked } from '../src/lib/chain-history.js';
 import { normalizeHashOrNull } from '../src/lib/utils.js';
+import { getArgValue, hasFlag, loadScriptEnv } from './lib/cli-runtime.mjs';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const repoRoot = path.resolve(__dirname, '../..');
-
-dotenv.config();
-dotenv.config({ path: path.resolve(repoRoot, 'agent/.env') });
+loadScriptEnv();
 
 const DEFAULT_LOG_CHUNK_SIZE = 5_000n;
 const DEFAULT_WAIT_TIMEOUT_MS = 180_000;
-
-function getArgValue(prefix) {
-    const arg = process.argv.find((value) => value.startsWith(prefix));
-    return arg ? arg.slice(prefix.length) : null;
-}
-
-function hasFlag(flag) {
-    return process.argv.includes(flag);
-}
 
 function parseNonNegativeBigInt(value, label) {
     let parsed;
@@ -65,11 +49,11 @@ function printUsage() {
 node agent/scripts/execute-og-proposal.mjs --og=<og-module-address> --proposal-tx-hash=<0x...>
 
 Options:
-  --og=<address>                 Optimistic Governor module address (fallback: OG_MODULE env)
+  --og=<address>                 Optimistic Governor module address
   --proposal-tx-hash=<0x...>     Proposal submission transaction hash (required)
   --tx-hash=<0x...>              Alias for --proposal-tx-hash
   --rpc-url=<url>                RPC URL (fallback: RPC_URL env)
-  --log-chunk-size=<number>      Chunk size for getLogs scans (fallback: LOG_CHUNK_SIZE env, default 5000)
+  --log-chunk-size=<number>      Chunk size for getLogs scans (default 5000)
   --wait-timeout-ms=<number>     Wait timeout for execution receipt (default 180000)
   --help                         Show this help
 `);
@@ -81,9 +65,9 @@ async function main() {
         return;
     }
 
-    const ogRaw = getArgValue('--og=') ?? process.env.OG_MODULE;
+    const ogRaw = getArgValue('--og=');
     if (!ogRaw) {
-        throw new Error('Missing --og=<address> (or OG_MODULE env).');
+        throw new Error('Missing --og=<address>.');
     }
     const ogModule = getAddress(ogRaw);
 
@@ -98,7 +82,7 @@ async function main() {
         throw new Error('Missing --rpc-url=<url> (or RPC_URL env).');
     }
 
-    const chunkSizeRaw = getArgValue('--log-chunk-size=') ?? process.env.LOG_CHUNK_SIZE;
+    const chunkSizeRaw = getArgValue('--log-chunk-size=');
     const chunkSize = chunkSizeRaw
         ? parsePositiveBigInt(chunkSizeRaw, 'log chunk size')
         : DEFAULT_LOG_CHUNK_SIZE;

@@ -36,7 +36,9 @@ function authenticateRequest({ authorizationHeader, keyEntries }) {
 async function authenticateSignedRequest({
     body,
     signerAllowlist,
+    requireSignerAllowlist,
     signatureMaxAgeSeconds,
+    expectedChainId,
     nowMs,
 }) {
     if (!body?.auth) {
@@ -70,6 +72,13 @@ async function authenticateSignedRequest({
             message: 'requestId is required when using signed auth.',
         };
     }
+    if (expectedChainId !== undefined && body.chainId !== expectedChainId) {
+        return {
+            ok: false,
+            statusCode: 400,
+            message: `chainId must equal ${expectedChainId}.`,
+        };
+    }
 
     let declaredAddress;
     try {
@@ -78,7 +87,14 @@ async function authenticateSignedRequest({
         return { ok: false, statusCode: 400, message: 'auth.address must be a valid EVM address.' };
     }
     const normalizedDeclared = declaredAddress.toLowerCase();
-    if (!signerAllowlist.has(normalizedDeclared)) {
+    if (requireSignerAllowlist && signerAllowlist.size === 0) {
+        return {
+            ok: false,
+            statusCode: 503,
+            message: 'Signer allowlist is required but not configured.',
+        };
+    }
+    if (requireSignerAllowlist && !signerAllowlist.has(normalizedDeclared)) {
         return { ok: false, statusCode: 401, message: 'Signer is not allowlisted.' };
     }
 
@@ -95,6 +111,7 @@ async function authenticateSignedRequest({
 
     const payload = buildSignedMessagePayload({
         address: declaredAddress,
+        chainId: body.chainId,
         timestampMs: auth.timestampMs,
         text: body.text,
         command: body.command,
@@ -167,6 +184,7 @@ function validateMessageBody(body) {
 
     const allowedFields = new Set([
         'text',
+        'chainId',
         'command',
         'args',
         'metadata',
@@ -182,6 +200,9 @@ function validateMessageBody(body) {
 
     if (typeof body.text !== 'string') {
         return { ok: false, message: 'text is required and must be a string.' };
+    }
+    if (body.chainId !== undefined && (!Number.isInteger(body.chainId) || body.chainId < 1)) {
+        return { ok: false, message: 'chainId must be a positive integer when provided.' };
     }
     if (body.command !== undefined && typeof body.command !== 'string') {
         return { ok: false, message: 'command must be a string when provided.' };
@@ -232,10 +253,15 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
     const signerAllowlist = new Set(
         (config.messageApiSignerAllowlist ?? []).map((address) => getAddress(address).toLowerCase())
     );
+    const requireSignerAllowlist = config.messageApiRequireSignerAllowlist !== false;
     const signatureMaxAgeSeconds = Number(config.messageApiSignatureMaxAgeSeconds ?? 300);
-    if (signerAllowlist.size === 0) {
+    const expectedChainId =
+        config.chainId === undefined || config.chainId === null
+            ? undefined
+            : Number(config.chainId);
+    if (requireSignerAllowlist && signerAllowlist.size === 0) {
         throw new Error(
-            'Message API requires MESSAGE_API_SIGNER_ALLOWLIST. MESSAGE_API_KEYS_JSON is optional additional bearer gating.'
+            'Message API requires messageApi.signerAllowlist when messageApi.requireSignerAllowlist=true. MESSAGE_API_KEYS_JSON is optional additional bearer gating.'
         );
     }
 
@@ -363,7 +389,9 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
             const signedAuth = await authenticateSignedRequest({
                 body,
                 signerAllowlist,
+                requireSignerAllowlist,
                 signatureMaxAgeSeconds,
+                expectedChainId,
                 nowMs,
             });
             if (!signedAuth?.ok) {
@@ -393,6 +421,7 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
 
             const result = inbox.submitMessage({
                 text: body.text,
+                chainId: body.chainId,
                 command: body.command,
                 args: body.args,
                 metadata: body.metadata,

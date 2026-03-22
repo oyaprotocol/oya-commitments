@@ -3,8 +3,6 @@ import { buildConfig } from '../src/lib/config.js';
 
 const REQUIRED_BASE_ENV = {
     RPC_URL: 'http://127.0.0.1:8545',
-    COMMITMENT_SAFE: '0x1111111111111111111111111111111111111111',
-    OG_MODULE: '0x2222222222222222222222222222222222222222',
 };
 
 const MANAGED_ENV_KEYS = [
@@ -21,6 +19,11 @@ const MANAGED_ENV_KEYS = [
     'POLYMARKET_RELAYER_REQUEST_TIMEOUT_MS',
     'POLYMARKET_RELAYER_POLL_INTERVAL_MS',
     'POLYMARKET_RELAYER_POLL_TIMEOUT_MS',
+    'PROPOSE_ENABLED',
+    'DISPUTE_ENABLED',
+    'OPENAI_MODEL',
+    'OPENAI_BASE_URL',
+    'OPENAI_REQUEST_TIMEOUT_MS',
 ];
 
 function withManagedEnv(overrides, fn) {
@@ -69,147 +72,42 @@ async function run() {
             POLYMARKET_RELAYER_REQUEST_TIMEOUT_MS: '0',
             POLYMARKET_RELAYER_POLL_INTERVAL_MS: '2500',
             POLYMARKET_RELAYER_POLL_TIMEOUT_MS: '0',
+            PROPOSE_ENABLED: 'false',
+            DISPUTE_ENABLED: 'false',
+            OPENAI_MODEL: 'gpt-5',
+            OPENAI_BASE_URL: 'https://example.invalid/v1',
+            OPENAI_REQUEST_TIMEOUT_MS: '1',
         },
         () => {
             const config = buildConfig();
-            assert.equal(config.pollIntervalMs, 1500);
-            assert.equal(config.logChunkSize, 64n);
-            assert.equal(config.disputeRetryMs, 45000);
-            assert.equal(config.proposalHashResolveTimeoutMs, 0);
-            assert.equal(config.proposalHashResolvePollIntervalMs, 750);
-            assert.equal(config.polymarketClobRequestTimeoutMs, 0);
-            assert.equal(config.polymarketClobMaxRetries, 0);
-            assert.equal(config.polymarketClobRetryDelayMs, 125);
-            assert.equal(config.polymarketRelayerChainId, 137);
-            assert.equal(config.polymarketRelayerRequestTimeoutMs, 0);
-            assert.equal(config.polymarketRelayerPollIntervalMs, 2500);
-            assert.equal(config.polymarketRelayerPollTimeoutMs, 0);
-        }
-    );
-
-    withManagedEnv(
-        {
-            POLL_INTERVAL_MS: '0',
-        },
-        () => {
-            assert.throws(() => buildConfig(), /POLL_INTERVAL_MS must be >= 1/);
+            assert.equal(config.pollIntervalMs, 10_000);
+            assert.equal(config.logChunkSize, undefined);
+            assert.equal(config.disputeRetryMs, 60_000);
+            assert.equal(config.proposalHashResolveTimeoutMs, 15_000);
+            assert.equal(config.proposalHashResolvePollIntervalMs, 1_500);
+            assert.equal(config.polymarketClobRequestTimeoutMs, 15_000);
+            assert.equal(config.polymarketClobMaxRetries, 1);
+            assert.equal(config.polymarketClobRetryDelayMs, 250);
+            assert.equal(config.polymarketRelayerChainId, undefined);
+            assert.equal(config.polymarketRelayerRequestTimeoutMs, 15_000);
+            assert.equal(config.polymarketRelayerPollIntervalMs, 2_000);
+            assert.equal(config.polymarketRelayerPollTimeoutMs, 120_000);
+            assert.equal(config.proposeEnabled, true);
+            assert.equal(config.disputeEnabled, true);
+            assert.equal(config.openAiModel, 'gpt-4.1-mini');
+            assert.equal(config.openAiBaseUrl, 'https://api.openai.com/v1');
+            assert.equal(config.openAiRequestTimeoutMs, 60_000);
         }
     );
 
     withManagedEnv(
         {
             POLL_INTERVAL_MS: 'abc',
-        },
-        () => {
-            assert.throws(() => buildConfig(), /POLL_INTERVAL_MS must be an integer/);
-        }
-    );
-
-    withManagedEnv(
-        {
             LOG_CHUNK_SIZE: '0',
-        },
-        () => {
-            assert.throws(() => buildConfig(), /LOG_CHUNK_SIZE must be a positive integer/);
-        }
-    );
-
-    withManagedEnv(
-        {
-            PROPOSAL_HASH_RESOLVE_TIMEOUT_MS: '-1',
-        },
-        () => {
-            assert.throws(
-                () => buildConfig(),
-                /PROPOSAL_HASH_RESOLVE_TIMEOUT_MS must be >= 0/
-            );
-        }
-    );
-
-    withManagedEnv(
-        {
-            DISPUTE_RETRY_MS: '-1',
-        },
-        () => {
-            assert.throws(() => buildConfig(), /DISPUTE_RETRY_MS must be >= 1/);
-        }
-    );
-
-    withManagedEnv(
-        {
-            PROPOSAL_HASH_RESOLVE_POLL_INTERVAL_MS: '0',
-        },
-        () => {
-            assert.throws(
-                () => buildConfig(),
-                /PROPOSAL_HASH_RESOLVE_POLL_INTERVAL_MS must be >= 1/
-            );
-        }
-    );
-
-    withManagedEnv(
-        {
-            POLYMARKET_CLOB_REQUEST_TIMEOUT_MS: '-1',
-        },
-        () => {
-            assert.throws(
-                () => buildConfig(),
-                /POLYMARKET_CLOB_REQUEST_TIMEOUT_MS must be >= 0/
-            );
-        }
-    );
-
-    withManagedEnv(
-        {
-            POLYMARKET_CLOB_MAX_RETRIES: '-1',
-        },
-        () => {
-            assert.throws(() => buildConfig(), /POLYMARKET_CLOB_MAX_RETRIES must be >= 0/);
-        }
-    );
-
-    withManagedEnv(
-        {
-            POLYMARKET_CLOB_RETRY_DELAY_MS: '-1',
-        },
-        () => {
-            assert.throws(
-                () => buildConfig(),
-                /POLYMARKET_CLOB_RETRY_DELAY_MS must be >= 0/
-            );
-        }
-    );
-
-    withManagedEnv(
-        {
             POLYMARKET_RELAYER_CHAIN_ID: '0',
         },
         () => {
-            assert.throws(() => buildConfig(), /POLYMARKET_RELAYER_CHAIN_ID must be >= 1/);
-        }
-    );
-
-    withManagedEnv(
-        {
-            POLYMARKET_RELAYER_REQUEST_TIMEOUT_MS: '-1',
-        },
-        () => {
-            assert.throws(
-                () => buildConfig(),
-                /POLYMARKET_RELAYER_REQUEST_TIMEOUT_MS must be >= 0/
-            );
-        }
-    );
-
-    withManagedEnv(
-        {
-            POLYMARKET_RELAYER_POLL_INTERVAL_MS: '0',
-        },
-        () => {
-            assert.throws(
-                () => buildConfig(),
-                /POLYMARKET_RELAYER_POLL_INTERVAL_MS must be >= 1/
-            );
+            assert.doesNotThrow(() => buildConfig());
         }
     );
 

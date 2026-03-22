@@ -16,20 +16,21 @@ This is beta software provided “as is.” Use at your own risk. No guarantees 
 
 1. Copy `.env.example` to `.env` and fill in:
    - `RPC_URL`: RPC the agent should use
-   - `COMMITMENT_SAFE`: Safe address holding assets, unless the selected agent overrides it in `config.json`
-   - `OG_MODULE`: Optimistic Governor module address, unless the selected agent overrides it in `config.json`
-   - `WATCH_ASSETS`: Comma-separated ERC20s to monitor when the selected agent does not override watchlists in `config.json` (the OG collateral is auto-added)
-   - `WATCH_ERC1155_ASSETS_JSON`: Optional JSON array of tracked ERC1155 assets used as fallback when the selected agent does not override ERC1155 watchlists in `config.json`
+   - `AGENT_MODULE`: Agent implementation name, unless you pass `--module` to helper scripts
    - Signer selection: `SIGNER_TYPE` (default `env`)
      - `env`: `PRIVATE_KEY`
      - `keystore`: `KEYSTORE_PATH`, `KEYSTORE_PASSWORD`
      - `keychain`: `KEYCHAIN_SERVICE`, `KEYCHAIN_ACCOUNT` (macOS Keychain or Linux Secret Service)
      - `vault`: `VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_SECRET_PATH`, optional `VAULT_SECRET_KEY` (default `private_key`), optional `VAULT_REQUEST_TIMEOUT_MS`
      - `kms`/`vault-signer`/`rpc`: `SIGNER_RPC_URL`, `SIGNER_ADDRESS` (JSON-RPC signer that accepts `eth_sendTransaction`)
-   - Optional tuning: `POLL_INTERVAL_MS`, `LOG_CHUNK_SIZE`, `EXECUTE_RETRY_MS`, `EXECUTE_PENDING_TX_TIMEOUT_MS`, `PROPOSAL_HASH_RESOLVE_TIMEOUT_MS`, `PROPOSAL_HASH_RESOLVE_POLL_INTERVAL_MS`, `START_BLOCK`, `WATCH_NATIVE_BALANCE`, `DEFAULT_DEPOSIT_*`, `AGENT_MODULE`, `UNISWAP_V3_FACTORY`, `UNISWAP_V3_QUOTER`, `UNISWAP_V3_FEE_TIERS`, `POLYMARKET_*`, `MESSAGE_API_*`
-   - Optional proposals: `PROPOSE_ENABLED` (default true), `ALLOW_PROPOSE_ON_SIMULATION_FAIL` (default false)
-   - Optional disputes: `DISPUTE_ENABLED` (default true), `DISPUTE_RETRY_MS` (default 60000)
-   - Optional LLM: `OPENAI_API_KEY`, `OPENAI_MODEL` (default `gpt-4.1-mini`), `OPENAI_BASE_URL`, `OPENAI_REQUEST_TIMEOUT_MS`
+   - Secret API/auth values only:
+     - `OPENAI_API_KEY`
+     - `MESSAGE_API_KEYS_JSON` for secret bearer tokens layered on signed Message API auth
+     - `POLYMARKET_CLOB_API_KEY`, `POLYMARKET_CLOB_API_SECRET`, `POLYMARKET_CLOB_API_PASSPHRASE`
+     - `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, `POLYMARKET_API_PASSPHRASE`
+     - `POLYMARKET_BUILDER_API_KEY`, `POLYMARKET_BUILDER_SECRET`, `POLYMARKET_BUILDER_PASSPHRASE`
+     - `IPFS_HEADERS_JSON` when it carries auth headers
+   - Non-secret runner behavior belongs in the selected agent module's `config.json`.
 2. Install deps and start the loop:
 
 ```bash
@@ -80,31 +81,57 @@ Export `getPriceTriggers({ commitmentText, config })` from `agent-library/agents
 
 ### Message API (Optional)
 
-Enable inbound user messages with signed requests (EIP-191 message signatures from allowlisted addresses).
+Enable inbound user messages with signed requests (EIP-191 message signatures).
 Optional bearer tokens can be layered on top as an additional gate to limit who may submit those signed requests.
 
-- `MESSAGE_API_ENABLED`: Set to `true` to start the API server.
-- `MESSAGE_API_HOST`: Bind host (default `127.0.0.1`).
-- `MESSAGE_API_PORT`: Bind port (default `8787`).
-- `MESSAGE_API_KEYS_JSON`: Optional JSON object of API key ids to tokens, for example `{"ops":"k_live_replace_me"}`. When set, requests must include both a valid bearer token and valid signed auth.
-- `MESSAGE_API_SIGNER_ALLOWLIST`: Comma-separated EVM addresses allowed to sign requests. Required when `MESSAGE_API_ENABLED=true`.
-- `MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS`: Max signature age (default `300`).
-- `MESSAGE_API_MAX_BODY_BYTES`: Request body limit in bytes (default `8192`).
-- `MESSAGE_API_MAX_TEXT_LENGTH`: Max `text` length (default `2000`).
-- `MESSAGE_API_QUEUE_LIMIT`: Max queued/in-flight messages (default `500`).
-- `MESSAGE_API_BATCH_SIZE`: Max messages consumed per agent loop (default `25`).
-- `MESSAGE_API_DEFAULT_TTL_SECONDS`: Default message lifetime applied when `deadline` is omitted (default `3600`).
-- `MESSAGE_API_MIN_TTL_SECONDS`: Minimum allowed remaining lifetime for `deadline` (default `30`).
-- `MESSAGE_API_MAX_TTL_SECONDS`: Maximum allowed remaining lifetime for `deadline` (default `86400`).
-- `MESSAGE_API_IDEMPOTENCY_TTL_SECONDS`: Request replay/dedup cache window (default `86400`).
-- `MESSAGE_API_RATE_LIMIT_PER_MINUTE`: Per-key refill rate (default `30`).
-- `MESSAGE_API_RATE_LIMIT_BURST`: Per-key burst capacity (default `10`).
+Configure Message API settings in `agent-library/agents/<name>/config.json`:
 
-When `MESSAGE_API_ENABLED=true`, configure:
-- `MESSAGE_API_SIGNER_ALLOWLIST`
+```json
+{
+  "messageApi": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 8787,
+    "requireSignerAllowlist": true,
+    "signerAllowlist": [
+      "0x1111111111111111111111111111111111111111"
+    ],
+    "signatureMaxAgeSeconds": 300,
+    "maxBodyBytes": 8192,
+    "maxTextLength": 2000,
+    "queueLimit": 500,
+    "batchSize": 25,
+    "defaultTtlSeconds": 3600,
+    "minTtlSeconds": 30,
+    "maxTtlSeconds": 86400,
+    "idempotencyTtlSeconds": 86400,
+    "rateLimitPerMinute": 30,
+    "rateLimitBurst": 10
+  }
+}
+```
 
-Optionally configure:
-- `MESSAGE_API_KEYS_JSON`
+Supported `messageApi` fields:
+- `enabled`: Set to `true` to start the API server.
+- `host`: Bind host (default `127.0.0.1`).
+- `port`: Bind port (default `8787`).
+- `requireSignerAllowlist`: Require `signerAllowlist` membership for signed requests (`true`/`false`, default `true`).
+- `signerAllowlist`: Optional array of EVM addresses allowed to sign requests. Required when `requireSignerAllowlist=true`.
+- `signatureMaxAgeSeconds`: Max signature age (default `300`).
+- `maxBodyBytes`: Request body limit in bytes (default `8192`).
+- `maxTextLength`: Max `text` length (default `2000`).
+- `queueLimit`: Max queued/in-flight messages (default `500`).
+- `batchSize`: Max messages consumed per agent loop (default `25`).
+- `defaultTtlSeconds`: Default message lifetime applied when `deadline` is omitted (default `3600`).
+- `minTtlSeconds`: Minimum allowed remaining lifetime for `deadline` (default `30`).
+- `maxTtlSeconds`: Maximum allowed remaining lifetime for `deadline` (default `86400`).
+- `idempotencyTtlSeconds`: Request replay/dedup cache window (default `86400`).
+- `rateLimitPerMinute`: Per-key refill rate (default `30`).
+- `rateLimitBurst`: Per-key burst capacity (default `10`).
+
+Keep bearer tokens in env via `MESSAGE_API_KEYS_JSON`; `messageApi.keys` is intentionally not supported in repo-tracked commitment config because those tokens are secret.
+
+Use `byChain.<chainId>.messageApi` for chain-specific overrides to the shared `messageApi` object.
 
 Endpoints:
 
@@ -136,7 +163,8 @@ All accepted messages must include signed auth:
 - `deadline` is optional and, when present, must be a Unix timestamp in milliseconds
 - signature is verified against a canonical payload that includes
   `address`, `timestampMs`, `text`, `command`, `args`, `metadata`, `requestId`, and `deadline`
-- signed requests keep `requestId` replay-locked for at least `MESSAGE_API_SIGNATURE_MAX_AGE_SECONDS`; replays during that window return `409` with code `request_replay_blocked`
+- when `messageApi.requireSignerAllowlist=true`, the recovered signer must also appear in `messageApi.signerAllowlist`
+- signed requests keep `requestId` replay-locked for at least `messageApi.signatureMaxAgeSeconds`; replays during that window return `409` with code `request_replay_blocked`
 - when `MESSAGE_API_KEYS_JSON` is configured, a valid `Authorization: Bearer ...` header is also required
 
 Example request with optional bearer gate:
@@ -162,10 +190,18 @@ node agent/scripts/send-signed-message.mjs \
   --text="Pause proposals for 2 hours" \
   --private-key="0x<signer-private-key>" \
   --url="http://127.0.0.1:8787" \
+  --chain-id=11155111 \
   --command="pause_proposals" \
   --args-json='{"hours":2}' \
   --request-id="pause-2h"
 ```
+
+Compatibility note:
+- Older versions of the helper allowed `--url` by itself.
+- That flow is intentionally no longer supported.
+- Signed Message API requests are now chain-bound, so `--url` must be paired with `--chain-id=<id>` or `--module=<agent>` so the helper can sign the correct chain-aware payload.
+
+If `--url` is omitted, the helper reads `messageApi.host` and `messageApi.port` from the selected agent module's merged config stack (`config.json`, optional `config.local.json`, and any `--overlay` / `--overlay-paths` files passed to the script). Use `--module=<agent-name>` and optional `--chain-id=<int>` to select the commitment config. When the module does not override those fields, the helper falls back to the built-in default `http://127.0.0.1:8787`.
 
 If bearer gating is configured, also pass `--bearer-token="<token>"` or set `MESSAGE_API_BEARER_TOKEN`.
 
@@ -173,12 +209,14 @@ If bearer gating is configured, also pass `--bearer-token="<token>"` or set `MES
 
 Enable IPFS artifact publishing when agents need to store signed requests, explanations, or other artifacts offchain and refer to them by CID.
 
-- `IPFS_ENABLED`: Enable the `ipfs_publish` tool (`true`/`false`, default `false`).
-- `IPFS_API_URL`: Base URL for a Kubo-compatible IPFS API (default `http://127.0.0.1:5001`).
-- `IPFS_HEADERS_JSON`: Optional JSON object of extra HTTP headers for the IPFS API, for example `{"Authorization":"Bearer <token>"}`.
-- `IPFS_REQUEST_TIMEOUT_MS`: Optional request timeout (default `15000`).
-- `IPFS_MAX_RETRIES`: Optional retry count for transient IPFS failures (default `1`).
-- `IPFS_RETRY_DELAY_MS`: Optional retry delay in milliseconds (default `250`).
+Configure non-secret IPFS settings in the module `config.json` or `byChain.<chainId>`:
+- `ipfsEnabled`: Enable the `ipfs_publish` tool (`true`/`false`, default `false`).
+- `ipfsApiUrl`: Base URL for a Kubo-compatible IPFS API (default `http://127.0.0.1:5001`).
+- `ipfsRequestTimeoutMs`: Optional request timeout (default `15000`).
+- `ipfsMaxRetries`: Optional retry count for transient IPFS failures (default `1`).
+- `ipfsRetryDelayMs`: Optional retry delay in milliseconds (default `250`).
+
+Keep `IPFS_HEADERS_JSON` in env when it contains auth headers, for example `{"Authorization":"Bearer <token>"}`.
 
 Tool:
 
@@ -228,36 +266,36 @@ The shared tooling supports:
 
 #### Polymarket Environment Variables
 
-Set these when using Polymarket functionality:
-- `POLYMARKET_CONDITIONAL_TOKENS`: Optional CTF contract address override used by CTF actions (default is Polymarket mainnet ConditionalTokens).
-- `POLYMARKET_EXCHANGE`: Optional CTF exchange override for EIP-712 order signing domain.
-- `POLYMARKET_CLOB_ENABLED`: Enable CLOB tools (`true`/`false`, default `false`).
-- `POLYMARKET_CLOB_HOST`: CLOB API host (default `https://clob.polymarket.com`).
-- `POLYMARKET_CLOB_ADDRESS`: Optional address used as `POLY_ADDRESS` for CLOB auth (for proxy/funder setups). Defaults to runtime signer address.
-- `POLYMARKET_CLOB_SIGNATURE_TYPE`: Optional default order signature type for build/sign flow (`EOA`/`POLY_PROXY`/`POLY_GNOSIS_SAFE` or `0`/`1`/`2`).
+Set these in module config when using Polymarket functionality. Secret API credentials remain env-only:
+- `polymarketConditionalTokens`: Optional CTF contract address override used by CTF actions (default is Polymarket mainnet ConditionalTokens).
+- `polymarketExchange`: Optional CTF exchange override for EIP-712 order signing domain.
+- `polymarketClobEnabled`: Enable CLOB tools (`true`/`false`, default `false`).
+- `polymarketClobHost`: CLOB API host (default `https://clob.polymarket.com`).
+- `polymarketClobAddress`: Optional address used as `POLY_ADDRESS` for CLOB auth (for proxy/funder setups). Defaults to runtime signer address.
+- `polymarketClobSignatureType`: Optional default order signature type for build/sign flow (`EOA`/`POLY_PROXY`/`POLY_GNOSIS_SAFE` or `0`/`1`/`2`).
   - Per Polymarket docs: `0=EOA`, `1=POLY_PROXY`, `2=POLY_GNOSIS_SAFE`.
   - When using `POLY_PROXY` or `POLY_GNOSIS_SAFE`, set `POLYMARKET_CLOB_ADDRESS` to the proxy/funder wallet address.
 - `POLYMARKET_CLOB_API_KEY`, `POLYMARKET_CLOB_API_SECRET`, `POLYMARKET_CLOB_API_PASSPHRASE`: Required for authenticated CLOB calls.
-- `POLYMARKET_CLOB_REQUEST_TIMEOUT_MS`, `POLYMARKET_CLOB_MAX_RETRIES`, `POLYMARKET_CLOB_RETRY_DELAY_MS`: Optional request tuning.
-- `POLYMARKET_RELAYER_ENABLED`: Enable Polymarket relayer submission for ERC1155 deposits (`true`/`false`, default `false`).
-- `POLYMARKET_RELAYER_HOST`: Relayer API host (default `https://relayer-v2.polymarket.com`).
-- `POLYMARKET_RELAYER_TX_TYPE`: Relayer wallet type (`SAFE` default, or `PROXY`).
-- `POLYMARKET_RELAYER_FROM_ADDRESS`: Optional explicit relayer proxy wallet address (if omitted, runtime auto-resolves from signer + relayer APIs / deterministic address).
-- `POLYMARKET_RELAYER_SAFE_FACTORY`, `POLYMARKET_RELAYER_PROXY_FACTORY`: Optional factory overrides for deterministic SAFE/PROXY address derivation.
-- `POLYMARKET_RELAYER_RESOLVE_PROXY_ADDRESS`: Resolve proxy address via relayer API when from-address is not set (default `true`).
-- `POLYMARKET_RELAYER_AUTO_DEPLOY_PROXY`: Optionally create proxy wallet when absent (default `false`).
-- `POLYMARKET_RELAYER_CHAIN_ID`, `POLYMARKET_RELAYER_REQUEST_TIMEOUT_MS`, `POLYMARKET_RELAYER_POLL_INTERVAL_MS`, `POLYMARKET_RELAYER_POLL_TIMEOUT_MS`: Optional relayer runtime tuning.
+- `polymarketClobRequestTimeoutMs`, `polymarketClobMaxRetries`, `polymarketClobRetryDelayMs`: Optional request tuning.
+- `polymarketRelayerEnabled`: Enable Polymarket relayer submission for ERC1155 deposits (`true`/`false`, default `false`).
+- `polymarketRelayerHost`: Relayer API host (default `https://relayer-v2.polymarket.com`).
+- `polymarketRelayerTxType`: Relayer wallet type (`SAFE` default, or `PROXY`).
+- `polymarketRelayerFromAddress`: Optional explicit relayer proxy wallet address (if omitted, runtime auto-resolves from signer + relayer APIs / deterministic address).
+- `polymarketRelayerSafeFactory`, `polymarketRelayerProxyFactory`: Optional factory overrides for deterministic SAFE/PROXY address derivation.
+- `polymarketRelayerResolveProxyAddress`: Resolve proxy address via relayer API when from-address is not set (default `true`).
+- `polymarketRelayerAutoDeployProxy`: Optionally create proxy wallet when absent (default `false`).
+- `polymarketRelayerChainId`, `polymarketRelayerRequestTimeoutMs`, `polymarketRelayerPollIntervalMs`, `polymarketRelayerPollTimeoutMs`: Optional relayer runtime tuning.
 - Builder credentials for relayer auth headers:
   - Preferred: `POLYMARKET_BUILDER_API_KEY`, `POLYMARKET_BUILDER_SECRET`, `POLYMARKET_BUILDER_PASSPHRASE`.
   - Fallbacks supported: `POLYMARKET_API_*` then `POLYMARKET_CLOB_API_*`.
 
 #### Execution Modes
 
-- `PROPOSE_ENABLED=true` and/or `DISPUTE_ENABLED=true`: onchain tools are enabled (`build_og_transactions`, `make_deposit`, `make_transfer`, `make_erc1155_deposit`, `make_erc1155_transfer`, propose/dispute tools).
-- `PROPOSE_ENABLED=false` and `DISPUTE_ENABLED=false`: onchain tools are disabled.
-- `POLYMARKET_CLOB_ENABLED=true`: CLOB tools can still run in this mode (`polymarket_clob_place_order`, `polymarket_clob_build_sign_and_place_order`, `polymarket_clob_cancel_orders`).
-- `IPFS_ENABLED=true`: IPFS publishing tools can run in this mode (`ipfs_publish`), even if onchain/CLOB tools are disabled.
-- All four disabled (`PROPOSE_ENABLED=false`, `DISPUTE_ENABLED=false`, `POLYMARKET_CLOB_ENABLED=false`, `IPFS_ENABLED=false`): monitor/opinion only.
+- `proposeEnabled=true` and/or `disputeEnabled=true`: onchain tools are enabled (`build_og_transactions`, `make_deposit`, `make_transfer`, `make_erc1155_deposit`, `make_erc1155_transfer`, propose/dispute tools).
+- `proposeEnabled=false` and `disputeEnabled=false`: onchain tools are disabled.
+- `polymarketClobEnabled=true`: CLOB tools can still run in this mode (`polymarket_clob_place_order`, `polymarket_clob_build_sign_and_place_order`, `polymarket_clob_cancel_orders`).
+- `ipfsEnabled=true`: IPFS publishing tools can run in this mode (`ipfs_publish`), even if onchain/CLOB tools are disabled.
+- All four disabled (`proposeEnabled=false`, `disputeEnabled=false`, `polymarketClobEnabled=false`, `ipfsEnabled=false`): monitor/opinion only.
 
 #### CTF Actions (`build_og_transactions`)
 
@@ -395,10 +433,10 @@ This tool requires a signer backend that supports `signTypedData`.
 
 ### Propose vs Dispute Modes
 
-Set `PROPOSE_ENABLED` and `DISPUTE_ENABLED` to control behavior:
+Set `proposeEnabled` and `disputeEnabled` in module config to control behavior:
 - Both true: propose and dispute as needed (default).
-- Only `PROPOSE_ENABLED=true`: propose only, never dispute.
-- Only `DISPUTE_ENABLED=true`: dispute only, never propose.
+- Only `proposeEnabled=true`: propose only, never dispute.
+- Only `disputeEnabled=true`: dispute only, never propose.
 - Both false: monitor and log opinions only; no on-chain actions.
 
 ### Agent Modules & Commitments
@@ -406,22 +444,41 @@ Set `PROPOSE_ENABLED` and `DISPUTE_ENABLED` to control behavior:
 Use `AGENT_MODULE` to point to an agent implementation name (e.g., `default`, `timelock-withdraw`). The runner will load `agent-library/agents/<name>/agent.js`.
 Each agent directory must include a `commitment.txt` with the plain language commitment the agent is designed to serve.
 An agent directory may also include an optional `config.json` for repo-tracked, non-secret configuration.
+For machine-local or ephemeral overrides, the loader also supports an optional untracked `config.local.json` next to `config.json`, plus extra overlay files passed through `AGENT_CONFIG_OVERLAY_PATH` or `AGENT_CONFIG_OVERLAY_PATHS`.
 
-`config.json` is loaded from `agent-library/agents/<name>/config.json` and merged like this:
+The config stack is loaded and merged like this:
+- `agent-library/agents/<name>/config.json`
+- optional `agent-library/agents/<name>/config.local.json`
+- optional overlay files from `AGENT_CONFIG_OVERLAY_PATH` and `AGENT_CONFIG_OVERLAY_PATHS`
 - top-level keys apply on every chain
 - `byChain.<chainId>` overrides top-level keys for the active RPC chain
-- `commitmentSafe`, `ogModule`, `watchAssets`, and `watchErc1155Assets` from the file override env values when present
-- if the file is missing, or those keys are absent or `null`, the runner falls back to `COMMITMENT_SAFE`, `OG_MODULE`, `WATCH_ASSETS`, and `WATCH_ERC1155_ASSETS_JSON`
+- nested plain objects are merged recursively; arrays and scalar values replace the shared value
+- non-secret shared runner fields come from the config stack, including `commitmentSafe`, `ogModule`, `watchAssets`, `watchErc1155Assets`, `pollIntervalMs`, `logChunkSize`, `startBlock`, `watchNativeBalance`, `defaultDepositAsset`, `defaultDepositAmountWei`, `bondSpender`, proposal/dispute toggles and retry controls, `openAiModel`, `openAiBaseUrl`, `openAiRequestTimeoutMs`, `ipfsEnabled`, `ipfsApiUrl`, `ipfsRequestTimeoutMs`, `ipfsMaxRetries`, `ipfsRetryDelayMs`, `chainlinkPriceFeed`, `uniswapV3*`, `polymarket*`, and `messageApi`
+- if the file is missing, or those keys are absent or `null`, the runner uses built-in defaults for optional fields and requires config values for commitment-specific addresses like `commitmentSafe` and `ogModule`
+- secrets remain env-only: signer credentials, `OPENAI_API_KEY`, `MESSAGE_API_KEYS_JSON`, Polymarket API credentials, `IPFS_HEADERS_JSON` auth headers, and similar bearer/API keys
+
+If you still have legacy non-secret settings only in env, migrate them once into `config.local.json` with:
+
+```bash
+node agent/scripts/migrate-agent-config-from-env.mjs --module=<agent-name> --chain-id=<chain-id>
+```
 
 Example:
 
 ```json
 {
   "policyName": "fast-withdraw",
+  "pollIntervalMs": 15000,
+  "proposeEnabled": true,
+  "disputeEnabled": true,
+  "openAiModel": "gpt-4.1-mini",
+  "polymarketClobEnabled": true,
+  "polymarketClobHost": "https://clob.polymarket.com",
   "byChain": {
     "11155111": {
       "commitmentSafe": "0x1111111111111111111111111111111111111111",
       "ogModule": "0x2222222222222222222222222222222222222222",
+      "startBlock": "8123456",
       "watchAssets": [
         "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
       ],
@@ -438,6 +495,146 @@ Example:
 ```
 
 The merged result is exposed to agent modules as `config.agentConfig`, while the resolved active-chain addresses and watchlists still appear at `config.commitmentSafe`, `config.ogModule`, `config.watchAssets`, and `config.watchErc1155Assets`.
+
+#### Building A New Agentic Commitment
+
+Recommended workflow for a new module:
+1. Copy `agent-library/agents/default/` to `agent-library/agents/<agent-name>/`.
+2. Write the plain-language rules in `commitment.txt`.
+3. Implement commitment-specific logic in `agent.js`.
+4. Add `config.json` for non-secret behavior and chain-specific deployment details.
+5. Add `harness.mjs` when the module needs a custom smoke flow beyond generic deploy/start/message/deposit steps.
+6. Keep secrets in `agent/.env` only: signer keys, `OPENAI_API_KEY`, `MESSAGE_API_KEYS_JSON`, authenticated `IPFS_HEADERS_JSON`, Polymarket API credentials, and similar bearer tokens.
+
+Recommended minimal module config shape:
+
+```json
+{
+  "defaultDepositAmountWei": "1000000",
+  "messageApi": {
+    "enabled": true,
+    "requireSignerAllowlist": false
+  },
+  "harness": {
+    "deployment": {
+      "bondAmount": "1000000"
+    }
+  },
+  "byChain": {
+    "11155111": {
+      "commitmentSafe": "0x1111111111111111111111111111111111111111",
+      "ogModule": "0x2222222222222222222222222222222222222222",
+      "startBlock": "8123456"
+    }
+  }
+}
+```
+
+Validate the module before running it:
+
+```bash
+node agent/scripts/validate-agent.mjs --module=<agent-name>
+node agent-library/agents/<agent-name>/test-<agent-name>.mjs
+```
+
+The local testnet harness stores untracked session state under `agent/.state/harness/<module>/<profile>/`, including:
+- `overlay.json` for ephemeral config overrides layered above the tracked module config
+- `deployment.json` for the most recent commitment deployment discovered or created by the harness
+- `roles.json` for deterministic local dev roles (`deployer`, `agent`, `depositor`)
+- `pids.json` plus `anvil.log` / `agent.log` / `ipfs.log` for local process supervision
+
+#### Local Harness
+
+The fastest end-to-end loop for a new commitment module is:
+
+```bash
+node agent/scripts/testnet-harness.mjs smoke --module=<agent-name> --profile=local-mock
+node agent/scripts/testnet-harness.mjs status --module=<agent-name> --profile=local-mock
+node agent/scripts/testnet-harness.mjs down --module=<agent-name> --profile=local-mock
+```
+
+Use `local-mock` while building the module. It can auto-deploy mock Safe/OG dependencies, default the bond amount to `1` when the module omits it, and align `defaultDepositAsset` with the actual deployed collateral unless the module config already overrides that field.
+
+Important local-mock design note:
+- `local-mock` forces the session overlay `chainId` to the harness profile chain so the runner resolves the local deployment, but it does not copy source-chain `byChain.watchAssets` or `byChain.watchErc1155Assets` into the local session.
+- That is intentional. Copying Sepolia or Polygon watched asset addresses into Anvil makes the runner poll contracts that do not exist locally and causes false harness failures.
+- Local ERC20 assets should come from the harness deployment overlay and OG collateral defaults. If a module needs local ERC1155 tracking, wire explicit local mock ERC1155 addresses into the local overlay or module-local harness flow instead of inheriting real-network watch lists.
+
+For step-by-step debugging, the harness also supports:
+
+```bash
+node agent/scripts/testnet-harness.mjs init --module=<agent-name> --profile=local-mock
+node agent/scripts/testnet-harness.mjs up --module=<agent-name> --profile=local-mock
+node agent/scripts/testnet-harness.mjs deploy --module=<agent-name> --profile=local-mock
+node agent/scripts/testnet-harness.mjs agent-up --module=<agent-name> --profile=local-mock
+node agent/scripts/testnet-harness.mjs run-agent --module=<agent-name> --profile=local-mock
+node agent/scripts/testnet-harness.mjs smoke --module=<agent-name> --profile=local-mock
+node agent/scripts/testnet-harness.mjs seed-erc20 --module=<agent-name> --profile=local-mock --token=0x... --amount-wei=1000000 --mint
+node agent/scripts/testnet-harness.mjs deposit --module=<agent-name> --profile=local-mock --amount-wei=1000000
+node agent/scripts/testnet-harness.mjs message --module=<agent-name> --profile=local-mock --text="Test signed instruction" --dry-run
+node agent/scripts/testnet-harness.mjs status --module=<agent-name> --profile=local-mock
+node agent/scripts/testnet-harness.mjs down --module=<agent-name> --profile=local-mock
+```
+
+Available built-in profiles are `local-mock`, `fork-sepolia`, `fork-polygon`, and `remote-sepolia`. Fork and remote Sepolia profiles expect `SEPOLIA_RPC_URL`; Polygon fork expects `POLYGON_RPC_URL`.
+
+For local harness deployment, you can optionally add non-secret defaults under `harness` in the module config:
+
+```json
+{
+  "defaultDepositAmountWei": "1000000",
+  "harness": {
+    "deployment": {
+      "collateral": "0xYourCollateral",
+      "bondAmount": "1000000",
+      "liveness": "7200"
+    },
+    "seedErc20Holders": {
+      "0xYourCollateralLowercase": "0xFundedHolder"
+    }
+  }
+}
+```
+
+`local-mock` can auto-deploy mock Safe/OG dependencies. If `harness.deployment.collateral` is omitted, it also provisions a mock collateral token. Fork profiles reuse configured dependency addresses when present, and otherwise expect `harness.deployment` to provide the non-secret deployment inputs.
+
+`agent-up` starts the runner in the background with the harness-managed deterministic `agent` key and records it in `pids.json`; `down` now stops both the detached runner and Anvil. `run-agent` remains the foreground option.
+
+When `ipfsEnabled=true` and `ipfsApiUrl` points to localhost, the harness now health-checks the Kubo API and starts a session-local `ipfs daemon` automatically if needed. It keeps the repo under the harness session directory and records the daemon in `pids.json`. Remote IPFS URLs are never started or stopped by the harness.
+
+For one-command scenarios, add an optional `harness.mjs` next to the agent module. The harness loader will call `runSmokeScenario(ctx)` when present and fall back to a generic deploy + agent-start smoke when absent.
+
+For a permanent short-name message API smoke target, use `signed-message-smoke`:
+
+```bash
+node agent/scripts/testnet-harness.mjs smoke --module=signed-message-smoke --profile=local-mock
+node agent/scripts/testnet-harness.mjs status --module=signed-message-smoke --profile=local-mock
+node agent/scripts/testnet-harness.mjs down --module=signed-message-smoke --profile=local-mock
+```
+
+That module ships with deterministic no-op decision logic plus `messageApi` and harness defaults in its own `agent-library/agents/signed-message-smoke/config.json`, along with a module-local `harness.mjs` smoke scenario, so local harness tests can use the short module name without ad hoc fixture paths.
+
+For remote Sepolia smoke runs, the harness uses env-backed role keys instead of deterministic local keys. Supported secret env fallbacks are:
+- deployer: `HARNESS_DEPLOYER_PRIVATE_KEY` or `DEPLOYER_PK`
+- agent: `HARNESS_AGENT_PRIVATE_KEY` or `PRIVATE_KEY`
+- depositor/message signer: `HARNESS_DEPOSITOR_PRIVATE_KEY` or `MESSAGE_API_SIGNER_PRIVATE_KEY`
+
+The simplest real testnet path is:
+1. make sure the module has Sepolia `byChain.11155111` config for `commitmentSafe` / `ogModule`, or enough `harness.deployment` settings for remote deployment
+2. keep only the private keys and API tokens in `agent/.env`
+3. run:
+
+```bash
+node agent/scripts/testnet-harness.mjs smoke --module=<agent-name> --profile=remote-sepolia
+```
+
+Example remote smoke command:
+
+```bash
+node agent/scripts/testnet-harness.mjs smoke --module=signed-message-smoke --profile=remote-sepolia
+```
+
+For remote deployment, the selected module still needs enough non-secret `harness.deployment` config for Sepolia, especially `collateral` and any chain-specific Safe/OG overrides required by that network.
 
 You can validate a module quickly:
 

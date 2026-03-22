@@ -115,7 +115,7 @@ async function run() {
                 config: { messageApiEnabled: true, openAiApiKey: '' },
                 agentModule: {},
             }),
-        /MESSAGE_API_ENABLED=true requires OPENAI_API_KEY or agentModule\.getDeterministicToolCalls\(\)\./
+        /messageApi\.enabled requires OPENAI_API_KEY or agentModule\.getDeterministicToolCalls\(\)\./
     );
 
     console.log('[test] decision support OK');

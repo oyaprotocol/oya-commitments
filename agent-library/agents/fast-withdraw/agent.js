@@ -455,6 +455,7 @@ function buildSignedRequestArchiveArtifact({ message, commitmentSafe, agentAddre
 
     const canonicalSignedMessage = buildSignedMessagePayload({
         address: message.sender.address,
+        chainId: message.chainId,
         timestampMs: message.sender.signedAtMs,
         text: message.text,
         command: message.command,
@@ -475,6 +476,7 @@ function buildSignedRequestArchiveArtifact({ message, commitmentSafe, agentAddre
             signedAtMs: message.sender.signedAtMs,
             canonicalMessage: canonicalSignedMessage,
             envelope: {
+                chainId: message.chainId ?? null,
                 requestId: message.requestId,
                 deadline: message.deadline ?? null,
                 text: message.text ?? null,
@@ -496,6 +498,7 @@ function buildSignedRequestArchiveRecord({ message, commitmentSafe, agentAddress
     return {
         requestId: message.requestId,
         messageId: message.messageId ?? null,
+        chainId: message.chainId ?? null,
         signer: message.sender.address,
         signature: message.sender.signature,
         signedAtMs: message.sender.signedAtMs,
@@ -869,7 +872,7 @@ async function validateToolCalls({
     for (const call of Array.isArray(toolCalls) ? toolCalls : []) {
         if (call?.name === 'ipfs_publish') {
             if (!config?.ipfsEnabled) {
-                throw new Error('fast-withdraw archival requires IPFS_ENABLED=true.');
+                throw new Error('fast-withdraw archival requires ipfsEnabled=true in module config.');
             }
 
             const args = parseCallArgs(call);
@@ -905,6 +908,7 @@ async function validateToolCalls({
                 buildSignedRequestArchiveRecord({
                     message: {
                         requestId: archiveSignal.requestId,
+                        chainId: archiveSignal.archiveArtifact?.signedRequest?.envelope?.chainId ?? null,
                         messageId: archiveSignal.messageId,
                         text: archiveSignal.archiveArtifact?.signedRequest?.envelope?.text ?? null,
                         command: archiveSignal.archiveArtifact?.signedRequest?.envelope?.command ?? null,

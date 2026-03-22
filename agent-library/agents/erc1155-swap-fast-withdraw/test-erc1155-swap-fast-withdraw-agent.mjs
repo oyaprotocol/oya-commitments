@@ -77,6 +77,7 @@ function buildDepositSignal({
 
 function buildSignedRequestSignal({
     requestId,
+    chainId = SEPOLIA_CHAIN_ID,
     signer = SIGNER,
     recipient = RECIPIENT,
     amount = '1',
@@ -88,6 +89,7 @@ function buildSignedRequestSignal({
 } = {}) {
     return {
         kind: 'userMessage',
+        chainId,
         requestId,
         messageId: `msg-${requestId}`,
         command,
@@ -743,6 +745,7 @@ async function testSignedFastWithdrawLifecycleUsesDepositorCredit() {
         assert.equal(archiveArgs.filename, 'signed-request-7265712d31.json');
         assert.equal(archiveArgs.pin, true);
         assert.equal(archiveArgs.json.signedRequest.signer, SIGNER);
+        assert.equal(archiveArgs.json.signedRequest.envelope.chainId, SEPOLIA_CHAIN_ID);
         assert.equal(archiveArgs.json.agentContext.commitmentSafe, SAFE);
 
         await onToolOutput({
@@ -946,7 +949,7 @@ async function testSignedRequestRequiresIpfsEnabled() {
                     config,
                     onchainPendingProposal: false,
                 }),
-            /IPFS_ENABLED=true/i
+            /ipfsEnabled=true in module config/i
         );
 
         const state = await getSwapState();
@@ -1001,7 +1004,7 @@ async function testPendingArchiveOrdersRequireIpfsEnabled() {
                     config: configWithoutIpfs,
                     onchainPendingProposal: false,
                 }),
-            /IPFS_ENABLED=true/i
+            /ipfsEnabled=true in module config/i
         );
     });
 }

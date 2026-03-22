@@ -1,5 +1,6 @@
 import 'dotenv/config';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -10,6 +11,8 @@ import {
     parseAbi,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
+import { listDeprecatedConfigEnvVars } from '../src/lib/config.js';
+import { isDirectScriptExecution, normalizeAgentName } from './lib/cli-runtime.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,6 +41,22 @@ async function deployContract({ walletClient, publicClient, abi, bytecode, args 
         throw new Error('Deployment failed (no contractAddress).');
     }
     return receipt.contractAddress;
+}
+
+function applySimulateDisputeRuntimeEnv({
+    env = process.env,
+    agentRef = env.AGENT_MODULE ?? 'default',
+    overlayPath,
+} = {}) {
+    env.AGENT_MODULE = agentRef;
+    env.AGENT_CONFIG_OVERLAY_PATH = overlayPath;
+
+    const agentModuleName = normalizeAgentName(agentRef);
+    for (const key of listDeprecatedConfigEnvVars({ agentModuleName })) {
+        env[key] = '';
+    }
+
+    return env;
 }
 
 async function main() {
@@ -132,10 +151,26 @@ async function main() {
     });
     console.log('[sim] Seeded assertion currency:', seeded.currency);
 
-    process.env.COMMITMENT_SAFE = account.address;
-    process.env.OG_MODULE = og;
-    process.env.WATCH_ASSETS = erc20;
-    process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? '';
+    const overlayDir = await mkdtemp(path.join(os.tmpdir(), 'simulate-dispute-'));
+    const overlayPath = path.join(overlayDir, 'overlay.json');
+    await writeFile(
+        overlayPath,
+        JSON.stringify(
+            {
+                commitmentSafe: account.address,
+                ogModule: og,
+                watchAssets: [erc20],
+            },
+            null,
+            2
+        ),
+        'utf8'
+    );
+
+    applySimulateDisputeRuntimeEnv({
+        env: process.env,
+        overlayPath,
+    });
 
     const { postBondAndDispute } = await import('../src/index.js');
 
@@ -157,7 +192,11 @@ async function main() {
     console.log('[sim] Assertion disputer:', updated.disputer);
 }
 
-main().catch((error) => {
-    console.error('[sim] failed', error);
-    process.exit(1);
-});
+export { applySimulateDisputeRuntimeEnv };
+
+if (isDirectScriptExecution(import.meta.url)) {
+    main().catch((error) => {
+        console.error('[sim] failed', error);
+        process.exit(1);
+    });
+}
