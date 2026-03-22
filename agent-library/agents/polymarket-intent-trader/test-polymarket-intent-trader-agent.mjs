@@ -390,6 +390,14 @@ async function run() {
         assert.equal(orderArgs.takerAmount, '59523810');
         assert.equal(orderArgs.feeRateBps, '30');
         assert.equal(orderArgs.chainId, 137);
+        const duplicateOrderCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.deepEqual(duplicateOrderCalls, []);
 
         await onToolOutput({
             name: 'polymarket_clob_build_sign_and_place_order',
@@ -420,6 +428,14 @@ async function run() {
         assert.equal(depositArgs.token, TEST_CTF.toLowerCase());
         assert.equal(depositArgs.tokenId, NO_TOKEN_ID);
         assert.equal(depositArgs.amount, '62500000');
+        const duplicateDepositCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.deepEqual(duplicateDepositCalls, []);
 
         state = getTradeIntentState();
         storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-001`];
@@ -458,6 +474,14 @@ async function run() {
                 `depositTx=${encodeURIComponent(TEST_DEPOSIT_TX_HASH.toLowerCase())}`
             )
         );
+        const duplicateReimbursementCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.deepEqual(duplicateReimbursementCalls, []);
 
         await onToolOutput({
             name: 'post_bond_and_propose',
