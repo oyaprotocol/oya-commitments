@@ -61,6 +61,18 @@ function buildModuleConfig(overrides = {}) {
         polymarketClobApiPassphrase: 'p_test',
         polymarketClobAddress: TEST_AGENT,
         watchAssets: [TEST_USDC],
+        watchErc1155Assets: [
+            {
+                token: TEST_CTF,
+                tokenId: YES_TOKEN_ID,
+                symbol: 'YES',
+            },
+            {
+                token: TEST_CTF,
+                tokenId: NO_TOKEN_ID,
+                symbol: 'NO',
+            },
+        ],
         polymarketConditionalTokens: TEST_CTF,
         ...overrides,
         agentConfig: {
@@ -144,6 +156,31 @@ function buildPublicClient(runtime) {
                     return blockNumber >= normalizedFromBlock && blockNumber <= normalizedToBlock;
                 });
             }
+            if (normalizedAddress === TEST_CTF.toLowerCase()) {
+                const eventName = String(event?.name ?? '');
+                const sourceLogs =
+                    eventName === 'TransferSingle'
+                        ? runtime.ctfTransferSingleLogs
+                        : eventName === 'TransferBatch'
+                            ? runtime.ctfTransferBatchLogs
+                            : [];
+                return sourceLogs.filter((log) => {
+                    const blockNumber = BigInt(log.blockNumber ?? 0n);
+                    if (blockNumber < normalizedFromBlock || blockNumber > normalizedToBlock) {
+                        return false;
+                    }
+                    if (args?.to && String(log.args?.to ?? '').toLowerCase() !== String(args.to).toLowerCase()) {
+                        return false;
+                    }
+                    if (
+                        args?.from &&
+                        String(log.args?.from ?? '').toLowerCase() !== String(args.from).toLowerCase()
+                    ) {
+                        return false;
+                    }
+                    return true;
+                });
+            }
             if (normalizedAddress === TEST_OG_MODULE.toLowerCase()) {
                 const eventName = String(event?.name ?? '');
                 const sourceLogs =
@@ -225,7 +262,12 @@ async function run() {
                 fee: '0.1',
             },
         ],
+        bookPayload: {
+            minimum_tick_size: '0.01',
+        },
         ctfBalances: {},
+        ctfTransferSingleLogs: [],
+        ctfTransferBatchLogs: [],
         receipts: {},
         orderFetchError: null,
         tradesFetchError: null,
@@ -238,6 +280,9 @@ async function run() {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (input) => {
         const url = new URL(String(input));
+        if (url.pathname === '/book') {
+            return buildFetchResponse(runtime.bookPayload);
+        }
         if (url.pathname === '/fee-rate') {
             return buildFetchResponse({ base_fee: 30 });
         }
@@ -832,6 +877,38 @@ async function run() {
         } finally {
             Date.now = originalDepositDispatchDateNow;
         }
+        runtime.latestBlock = 151n;
+        runtime.ctfTransferSingleLogs = [
+            {
+                args: {
+                    operator: TEST_AGENT,
+                    from: TEST_AGENT,
+                    to: TEST_SAFE,
+                    id: BigInt(NO_TOKEN_ID),
+                    value: BigInt(storedIntent.filledShareAmount),
+                },
+                blockNumber: 151n,
+                transactionHash: `0x${'e'.repeat(64)}`,
+                logIndex: 0,
+            },
+        ];
+        setTradeIntentStatePathForTest(stateFilePath);
+        const recoveredDepositCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+            onchainPendingProposal: true,
+        });
+        assert.deepEqual(recoveredDepositCalls, []);
+        state = getTradeIntentState();
+        storedIntent =
+            state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-deposit-dispatch-restart`];
+        assert.equal(storedIntent.tokenDeposited, true);
+        assert.equal(storedIntent.depositTxHash, `0x${'e'.repeat(64)}`);
+        assert.equal(storedIntent.depositBlockNumber, '151');
+        runtime.ctfTransferSingleLogs = [];
 
         await resetTradeIntentState();
         runtime.latestBlock = 150n;
@@ -1203,6 +1280,40 @@ async function run() {
         assert.deepEqual(offTickCalls, []);
         state = getTradeIntentState();
         assert.equal(state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-off-tick`], undefined);
+
+        await resetTradeIntentState();
+        runtime.latestBlock = 100n;
+        runtime.bookPayload = {
+            minimum_tick_size: '0.001',
+        };
+        const liveTickSignal = buildSignedMessageSignal({
+            requestId: 'pm-intent-live-tick-size',
+            text: 'Buy NO for up to 25 USDC if the price is 0.421 or better before 6pm UTC.',
+        });
+        const liveTickCalls = await getDeterministicToolCalls({
+            signals: [liveTickSignal],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig({
+                polymarketClobHost: 'https://clob-live-tick.example',
+                agentConfig: {
+                    polymarketIntentTrader: {
+                        minimumTickSize: '0.01',
+                    },
+                },
+            }),
+        });
+        assert.equal(liveTickCalls.length, 1);
+        assert.equal(liveTickCalls[0].name, 'ipfs_publish');
+        state = getTradeIntentState();
+        storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-live-tick-size`];
+        assert.ok(storedIntent);
+        assert.equal(storedIntent.maxPriceScaled, '421000');
+        await resetTradeIntentState();
+        runtime.bookPayload = {
+            minimum_tick_size: '0.01',
+        };
 
         const enrichedSignals = await enrichSignals([validSignal], {
             config: buildModuleConfig(),

@@ -17,6 +17,8 @@ const USDC_DECIMALS = 6;
 const SHARE_DECIMALS = 6;
 const DEFAULT_CLOB_HOST = 'https://clob.polymarket.com';
 const DEFAULT_CLOB_REQUEST_TIMEOUT_MS = 15_000;
+const DEFAULT_TICK_SIZE_REFRESH_MS = 30_000;
+const tickSizeCache = new Map();
 
 function normalizeNonEmptyString(value) {
     if (typeof value !== 'string') return null;
@@ -319,6 +321,24 @@ function normalizeClobHost(host) {
     return (normalizeNonEmptyString(host) ?? DEFAULT_CLOB_HOST).replace(/\/+$/, '');
 }
 
+function normalizePriceToScaled(value) {
+    const normalized = normalizeDecimalText(value);
+    if (!normalized) return null;
+
+    try {
+        const scaled = parseUnits(normalized, 6);
+        if (scaled <= 0n || scaled > PRICE_SCALE) {
+            return null;
+        }
+        return {
+            decimal: normalized,
+            scaled: scaled.toString(),
+        };
+    } catch (error) {
+        return null;
+    }
+}
+
 export function getClobAuthAddress({ config, accountAddress }) {
     return (
         normalizeAddressOrNull(config?.polymarketClobAddress) ??
@@ -357,6 +377,108 @@ export async function fetchClobFeeRateBps({ config, tokenId }) {
     }
 
     return String(feeRateBps);
+}
+
+async function fetchClobBook({ config, tokenId }) {
+    const timeoutMs =
+        parseOptionalPositiveInteger(config?.polymarketClobRequestTimeoutMs) ??
+        DEFAULT_CLOB_REQUEST_TIMEOUT_MS;
+    const url = new URL('/book', `${normalizeClobHost(config?.polymarketClobHost)}/`);
+    url.searchParams.set('token_id', String(tokenId));
+
+    const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+            Accept: 'application/json',
+        },
+        signal: AbortSignal.timeout(timeoutMs),
+    });
+
+    if (!response.ok) {
+        const body = await response.text();
+        throw new Error(
+            `Failed to fetch Polymarket order book for token ${tokenId} (${response.status} ${response.statusText}): ${body}`
+        );
+    }
+
+    return response.json();
+}
+
+function extractBookTickSize(payload) {
+    return normalizePriceToScaled(
+        payload?.minimum_tick_size ??
+            payload?.minimumTickSize ??
+            payload?.tick_size ??
+            payload?.tickSize ??
+            payload?.min_tick_size ??
+            payload?.minTickSize
+    );
+}
+
+export async function refreshPolicyMarketConstraints({ policy, config } = {}) {
+    if (!policy?.ready) {
+        return policy;
+    }
+
+    const tokenId = policy.noTokenId ?? policy.yesTokenId ?? null;
+    if (!tokenId) {
+        return policy;
+    }
+
+    const refreshMs =
+        parseOptionalPositiveInteger(config?.polymarketTickSizeRefreshMs) ??
+        DEFAULT_TICK_SIZE_REFRESH_MS;
+    const cacheKey = `${normalizeClobHost(config?.polymarketClobHost)}:${String(tokenId)}`;
+    const nowMs = Date.now();
+    const cached = tickSizeCache.get(cacheKey);
+    if (
+        cached &&
+        Number.isInteger(cached.fetchedAtMs) &&
+        nowMs - cached.fetchedAtMs < refreshMs &&
+        cached.tickSize?.scaled
+    ) {
+        return {
+            ...policy,
+            minimumTickSize: cached.tickSize.decimal,
+            minimumTickSizeScaled: cached.tickSize.scaled,
+            minimumTickSizeSource: 'live_cache',
+        };
+    }
+
+    try {
+        const book = await fetchClobBook({ config, tokenId });
+        const tickSize = extractBookTickSize(book);
+        if (!tickSize) {
+            throw new Error(`Order book for token ${tokenId} did not include a valid tick size.`);
+        }
+        tickSizeCache.set(cacheKey, {
+            tickSize,
+            fetchedAtMs: nowMs,
+        });
+        return {
+            ...policy,
+            minimumTickSize: tickSize.decimal,
+            minimumTickSizeScaled: tickSize.scaled,
+            minimumTickSizeSource: 'live',
+        };
+    } catch (error) {
+        if (policy.minimumTickSizeScaled) {
+            return {
+                ...policy,
+                minimumTickSizeSource: 'config',
+                minimumTickSizeRefreshError: error?.message ?? String(error),
+            };
+        }
+        return {
+            ...policy,
+            ready: false,
+            errors: [
+                ...(Array.isArray(policy.errors) ? policy.errors : []),
+                error?.message ?? String(error),
+            ],
+            minimumTickSizeSource: 'unresolved',
+        };
+    }
 }
 
 async function fetchRelatedClobTrades({

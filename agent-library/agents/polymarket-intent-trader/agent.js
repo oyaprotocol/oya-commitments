@@ -1,6 +1,13 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { decodeEventLog, erc1155Abi, getAddress, isAddressEqual, parseUnits } from 'viem';
+import {
+    decodeEventLog,
+    erc1155Abi,
+    getAddress,
+    isAddressEqual,
+    parseAbiItem,
+    parseUnits,
+} from 'viem';
 import { buildSignedMessagePayload } from '../../../agent/src/lib/message-signing.js';
 import {
     transactionsProposedEvent,
@@ -57,6 +64,7 @@ import {
     extractOrderStatusFromSubmission,
     fetchClobFeeRateBps,
     getClobAuthAddress,
+    refreshPolicyMarketConstraints,
     refreshOrderStatus,
 } from './polymarket-reconciliation.js';
 import {
@@ -91,6 +99,12 @@ const DEFAULT_SIGNED_COMMANDS = [
     'polymarket_trade',
     'polymarket_intent',
 ];
+const erc1155TransferSingleEvent = parseAbiItem(
+    'event TransferSingle(address indexed operator, address indexed from, address indexed to, uint256 id, uint256 value)'
+);
+const erc1155TransferBatchEvent = parseAbiItem(
+    'event TransferBatch(address indexed operator, address indexed from, address indexed to, uint256[] ids, uint256[] values)'
+);
 
 const tradeIntentState = createEmptyTradeIntentState();
 
@@ -108,6 +122,14 @@ const queuedProposalEventUpdates = [];
 
 function markStateDirty() {
     // State writes are infrequent and the runtime is single-threaded enough for direct writes.
+}
+
+async function resolveEffectivePolicy(config = {}) {
+    const policy = resolvePolicy(config);
+    if (!policy.ready) {
+        return policy;
+    }
+    return refreshPolicyMarketConstraints({ policy, config });
 }
 
 function resetInMemoryState({ hydrated = false, preserveQueuedProposalEventUpdates = false } = {}) {
@@ -470,6 +492,213 @@ async function observeFilledTokenInventoryDelta({
 
     const observedDelta = currentBalance - BigInt(preOrderTokenBalance);
     return observedDelta > 0n ? observedDelta.toString() : null;
+}
+
+function getExpectedDepositSourceAddress(intent) {
+    return normalizeAddressOrNull(
+        intent?.depositSourceAddress ??
+            intent?.preOrderTokenHolderAddress ??
+            intent?.tradingWalletAddress ??
+            intent?.reimbursementRecipientAddress ??
+            null
+    );
+}
+
+function getExpectedDepositAmount(intent) {
+    return parseOptionalNonNegativeIntegerString(
+        intent?.depositExpectedAmount ?? intent?.filledShareAmount ?? null
+    );
+}
+
+function matchesRecoveredDepositSignal({ signal, intent, policy }) {
+    if (signal?.kind !== 'erc1155Deposit') {
+        return false;
+    }
+    const signalToken = normalizeAddressOrNull(signal?.token ?? signal?.asset ?? null);
+    if (!signalToken || !policy?.ctfContract || signalToken !== policy.ctfContract) {
+        return false;
+    }
+    if (normalizeTokenId(signal?.tokenId) !== normalizeTokenId(intent?.tokenId)) {
+        return false;
+    }
+    const expectedSourceAddress = getExpectedDepositSourceAddress(intent);
+    if (!expectedSourceAddress) {
+        return false;
+    }
+    const signalSourceAddress = normalizeAddressOrNull(signal?.from ?? null);
+    if (!signalSourceAddress || signalSourceAddress !== expectedSourceAddress) {
+        return false;
+    }
+    const expectedAmount = getExpectedDepositAmount(intent);
+    const signalAmount = parseOptionalNonNegativeIntegerString(signal?.amount);
+    if (!expectedAmount || !signalAmount || signalAmount !== expectedAmount) {
+        return false;
+    }
+    return true;
+}
+
+function findRecoveredDepositSignal({ signals, intent, policy }) {
+    for (const signal of Array.isArray(signals) ? signals : []) {
+        if (matchesRecoveredDepositSignal({ signal, intent, policy })) {
+            return signal;
+        }
+    }
+    return null;
+}
+
+function extractRecoveredDepositLogMatch({ intent, log }) {
+    if (!log?.args) {
+        return null;
+    }
+
+    const expectedTokenId = normalizeTokenId(intent?.tokenId);
+    const expectedAmount = getExpectedDepositAmount(intent);
+    if (!expectedTokenId || !expectedAmount) {
+        return null;
+    }
+
+    const logTokenId = parseOptionalNonNegativeIntegerString(log.args?.id);
+    const logAmount = parseOptionalNonNegativeIntegerString(log.args?.value);
+    if (logTokenId && logAmount && logTokenId === expectedTokenId && logAmount === expectedAmount) {
+        return log;
+    }
+
+    const ids = Array.isArray(log.args?.ids) ? log.args.ids : [];
+    const values = Array.isArray(log.args?.values) ? log.args.values : [];
+    for (let index = 0; index < ids.length; index += 1) {
+        const batchTokenId = parseOptionalNonNegativeIntegerString(ids[index]);
+        const batchAmount = parseOptionalNonNegativeIntegerString(values[index]);
+        if (
+            batchTokenId &&
+            batchAmount &&
+            batchTokenId === expectedTokenId &&
+            batchAmount === expectedAmount
+        ) {
+            return log;
+        }
+    }
+
+    return null;
+}
+
+async function findRecoveredDepositLog({
+    publicClient,
+    policy,
+    commitmentSafe,
+    latestBlock,
+    intent,
+}) {
+    if (!publicClient || !policy?.ctfContract || !commitmentSafe) {
+        return null;
+    }
+
+    const depositSourceAddress = getExpectedDepositSourceAddress(intent);
+    const fromBlock = parseOptionalNonNegativeIntegerString(intent?.depositDispatchBlockNumber);
+    if (!depositSourceAddress || !fromBlock) {
+        return null;
+    }
+
+    const toBlock = BigInt(latestBlock);
+    const normalizedFromBlock = BigInt(fromBlock);
+    if (normalizedFromBlock > toBlock) {
+        return null;
+    }
+
+    const [singleLogs, batchLogs] = await Promise.all([
+        publicClient.getLogs({
+            address: policy.ctfContract,
+            event: erc1155TransferSingleEvent,
+            args: {
+                from: depositSourceAddress,
+                to: commitmentSafe,
+            },
+            fromBlock: normalizedFromBlock,
+            toBlock,
+        }),
+        publicClient.getLogs({
+            address: policy.ctfContract,
+            event: erc1155TransferBatchEvent,
+            args: {
+                from: depositSourceAddress,
+                to: commitmentSafe,
+            },
+            fromBlock: normalizedFromBlock,
+            toBlock,
+        }),
+    ]);
+
+    const matches = [...singleLogs, ...batchLogs]
+        .map((log) => extractRecoveredDepositLogMatch({ intent, log }))
+        .filter(Boolean)
+        .sort((left, right) => {
+            const leftBlock = BigInt(left.blockNumber ?? 0n);
+            const rightBlock = BigInt(right.blockNumber ?? 0n);
+            if (leftBlock !== rightBlock) {
+                return leftBlock < rightBlock ? -1 : 1;
+            }
+            return Number(left.logIndex ?? 0) - Number(right.logIndex ?? 0);
+        });
+
+    return matches[0] ?? null;
+}
+
+function markRecoveredDepositTransfer(intent, recovered, nowMs = Date.now()) {
+    const transactionHash = normalizeHash(recovered?.transactionHash);
+    if (transactionHash) {
+        intent.depositTxHash = transactionHash;
+    }
+    if (recovered?.blockNumber !== undefined && recovered?.blockNumber !== null) {
+        intent.depositBlockNumber = BigInt(recovered.blockNumber).toString();
+    }
+    if (!Number.isInteger(intent.depositSubmittedAtMs)) {
+        intent.depositSubmittedAtMs = intent.depositDispatchAtMs ?? nowMs;
+    }
+    intent.tokenDeposited = true;
+    intent.tokenDepositedAtMs = nowMs;
+    clearStageDispatchStarted(intent, 'deposit');
+    clearStageAmbiguity(intent, 'deposit');
+    intent.updatedAtMs = nowMs;
+}
+
+async function reconcileRecoveredDepositSubmissions({
+    signals,
+    publicClient,
+    commitmentSafe,
+    latestBlock,
+    policy,
+}) {
+    let changed = false;
+    const nowMs = Date.now();
+
+    for (const intent of getOpenIntents()) {
+        if (intent.tokenDeposited) {
+            continue;
+        }
+        if (!Number.isInteger(intent.depositSubmittedAtMs) && !Number.isInteger(intent.depositDispatchAtMs)) {
+            continue;
+        }
+
+        const recoveredSignal = findRecoveredDepositSignal({ signals, intent, policy });
+        if (recoveredSignal) {
+            markRecoveredDepositTransfer(intent, recoveredSignal, nowMs);
+            changed = true;
+            continue;
+        }
+
+        const recoveredLog = await findRecoveredDepositLog({
+            publicClient,
+            policy,
+            commitmentSafe,
+            latestBlock,
+            intent,
+        });
+        if (recoveredLog) {
+            markRecoveredDepositTransfer(intent, recoveredLog, nowMs);
+            changed = true;
+        }
+    }
+
+    return changed;
 }
 
 function hasConcurrentTokenSettlementDependency({ intent, tokenHolderAddress }) {
@@ -1855,7 +2084,7 @@ async function enrichSignals(
     } = {}
 ) {
     await hydrateTradeIntentState();
-    const policy = resolvePolicy(config);
+    const policy = await resolveEffectivePolicy(config);
     const effectiveNowMs = parseOptionalPositiveInteger(nowMs) ?? Date.now();
     const commitmentSafe = config?.commitmentSafe ?? null;
     const agentAddress = account?.address ?? null;
@@ -1902,7 +2131,7 @@ async function getDeterministicToolCalls({
     await configureRuntimeStateContext({ publicClient, commitmentSafe, config });
     await hydrateTradeIntentState();
 
-    const policy = resolvePolicy(config);
+    const policy = await resolveEffectivePolicy(config);
     if (!policy.ready) {
         return [];
     }
@@ -1987,6 +2216,14 @@ async function getDeterministicToolCalls({
                     tokenHolderAddress,
                     intent,
                 }),
+        })) || changed;
+    changed =
+        (await reconcileRecoveredDepositSubmissions({
+            signals,
+            publicClient,
+            commitmentSafe: normalizedCommitmentSafe,
+            latestBlock,
+            policy,
         })) || changed;
     changed =
         (await refreshDepositSubmissionStatus({
@@ -2087,6 +2324,10 @@ async function getDeterministicToolCalls({
             }
 
             markStageDispatchStarted(intent, 'deposit');
+            intent.depositSourceAddress = tokenHolderAddress;
+            intent.depositExpectedAmount = filledShareAmount;
+            intent.depositDispatchBlockNumber = latestBlock.toString();
+            intent.updatedAtMs = Date.now();
             await maybePersistTradeIntentState();
             pendingDepositSubmission = {
                 intentKey: intent.intentKey,
