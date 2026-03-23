@@ -413,6 +413,7 @@ async function run() {
         assert.equal(archiveCalls[0].name, 'ipfs_publish');
         const archiveArgs = JSON.parse(archiveCalls[0].arguments);
         assert.equal(archiveArgs.filename, interpreted.intent.archiveFilename);
+        assert.equal(archiveArgs.pin, true);
         assert.equal(archiveArgs.json.interpretedIntent.maxSpendWei, '25000000');
 
         state = getTradeIntentState();
@@ -1033,6 +1034,114 @@ async function run() {
         assert.equal(typeof storedIntent.creditReleasedAtMs, 'number');
         assert.equal(storedIntent.terminalFailureStatus, 'REJECTED');
         runtime.tradesFetchError = null;
+
+        await resetTradeIntentState();
+        runtime.latestBlock = 600n;
+        runtime.depositLogs = [
+            {
+                args: {
+                    from: TEST_SIGNER,
+                    value: 50_000_000n,
+                },
+                blockNumber: 10n,
+                transactionHash: `0x${'d'.repeat(64)}`,
+                logIndex: 0,
+            },
+        ];
+        runtime.orderPayload = {
+            order: {
+                id: 'order-filled-no-trades',
+                status: 'MATCHED',
+                original_size: '25',
+                size_matched: '25',
+                maker_amount_filled: '20000000',
+                taker_amount_filled: '62500000',
+            },
+        };
+        runtime.tradesPayload = [];
+        runtime.ctfBalances = {
+            [`${TEST_AGENT.toLowerCase()}:${NO_TOKEN_ID}`]: 100_000_000n,
+        };
+        runtime.orderFetchError = null;
+        runtime.tradesFetchError = null;
+        const noTradesSignal = buildSignedMessageSignal({
+            requestId: 'pm-intent-filled-no-trades',
+        });
+        const noTradesArchiveCalls = await getDeterministicToolCalls({
+            signals: [noTradesSignal],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(noTradesArchiveCalls.length, 1);
+        await onToolOutput({
+            name: 'ipfs_publish',
+            parsedOutput: {
+                status: 'published',
+                cid: 'bafyintent-no-trades',
+                uri: 'ipfs://bafyintent-no-trades',
+                pinned: true,
+            },
+            config: buildModuleConfig(),
+        });
+        const noTradesOrderCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(noTradesOrderCalls.length, 1);
+        await onToolOutput({
+            name: 'polymarket_clob_build_sign_and_place_order',
+            parsedOutput: {
+                status: 'submitted',
+                result: {
+                    order: {
+                        id: 'order-filled-no-trades',
+                        status: 'LIVE',
+                    },
+                },
+            },
+            config: buildModuleConfig(),
+        });
+        const noTradesDepositCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(noTradesDepositCalls.length, 1);
+        assert.equal(noTradesDepositCalls[0].name, 'make_erc1155_deposit');
+        assert.equal(JSON.parse(noTradesDepositCalls[0].arguments).amount, '62500000');
+        state = getTradeIntentState();
+        storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-filled-no-trades`];
+        assert.equal(storedIntent.reimbursementAmountWei, '20000000');
+        assert.equal(storedIntent.filledShareAmount, '62500000');
+        await onToolOutput({
+            name: 'make_erc1155_deposit',
+            parsedOutput: {
+                status: 'error',
+                message: 'erc1155 receiver rejected transfer',
+                retryable: false,
+            },
+            config: buildModuleConfig(),
+        });
+        const noRetryAfterDeterministicDepositFailure = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.deepEqual(noRetryAfterDeterministicDepositFailure, []);
+        state = getTradeIntentState();
+        storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-filled-no-trades`];
+        assert.equal(typeof storedIntent.closedAtMs, 'number');
+        assert.equal(storedIntent.terminalFailureStage, 'deposit');
+        assert.equal(storedIntent.terminalFailureStatus, 'error');
 
         console.log('[test] polymarket-intent-trader lifecycle OK');
     } finally {

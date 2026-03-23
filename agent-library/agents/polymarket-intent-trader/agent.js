@@ -1287,14 +1287,66 @@ function dedupeTrades(trades) {
     return unique;
 }
 
-function resolveFilledBuySpendWei({ intent, orderSummary }) {
-    return (
-        parseOptionalNonNegativeIntegerString(
-            orderSummary?.makerAmountFilled ?? orderSummary?.makingAmountFilled
-        ) ??
-        parseOptionalNonNegativeIntegerString(intent?.orderMakerAmount) ??
-        parseOptionalNonNegativeIntegerString(intent?.maxSpendWei)
+function resolveFilledBuySpendWei({ orderSummary, relatedTrades }) {
+    const orderSummarySpend = parseOptionalNonNegativeIntegerString(
+        orderSummary?.makerAmountFilled ?? orderSummary?.makingAmountFilled
     );
+    if (orderSummarySpend) {
+        return orderSummarySpend;
+    }
+
+    const confirmedTradeSpend = sumConfirmedTradeSpendWei({ relatedTrades });
+    if (confirmedTradeSpend) {
+        return confirmedTradeSpend;
+    }
+
+    return null;
+}
+
+function resolveConfirmedTradeSpendWei(trade) {
+    const price = normalizeDecimalText(trade?.price ?? trade?.match_price ?? trade?.matchPrice);
+    const shareAmount = parseOptionalShareAmountString(
+        trade?.size ??
+            trade?.matched_size ??
+            trade?.matchedSize ??
+            trade?.size_matched ??
+            trade?.sizeMatched
+    );
+    if (!price || !shareAmount) {
+        return null;
+    }
+
+    try {
+        const priceScaled = parseUnits(price, USDC_DECIMALS);
+        const product = priceScaled * BigInt(shareAmount);
+        if (product % PRICE_SCALE !== 0n) {
+            return null;
+        }
+        return (product / PRICE_SCALE).toString();
+    } catch (error) {
+        return null;
+    }
+}
+
+function sumConfirmedTradeSpendWei({ relatedTrades }) {
+    let total = 0n;
+    let sawConfirmedTrade = false;
+
+    for (const trade of Array.isArray(relatedTrades) ? relatedTrades : []) {
+        if (normalizeClobStatus(trade?.status) !== CLOB_SUCCESS_TERMINAL_STATUS) {
+            continue;
+        }
+
+        const spendWei = resolveConfirmedTradeSpendWei(trade);
+        if (!spendWei) {
+            return null;
+        }
+
+        total += BigInt(spendWei);
+        sawConfirmedTrade = true;
+    }
+
+    return sawConfirmedTrade ? total.toString() : null;
 }
 
 function sumConfirmedTradeShareAmount({ relatedTrades }) {
@@ -1657,16 +1709,22 @@ async function refreshOrderStatus({
                 continue;
             }
 
-            if (allConfirmedTrades && orderFilled) {
-                const reimbursementAmountWei = resolveFilledBuySpendWei({
-                    intent,
-                    orderSummary,
-                });
-                const filledShareAmount = resolveFilledBuyShareAmount({
-                    intent,
-                    orderSummary,
-                    relatedTrades,
-                });
+            const reimbursementAmountWei = resolveFilledBuySpendWei({
+                orderSummary,
+                relatedTrades,
+            });
+            const filledShareAmount = resolveFilledBuyShareAmount({
+                intent,
+                orderSummary,
+                relatedTrades,
+            });
+            const orderSummaryFillReady =
+                orderFilled &&
+                relatedStatuses.length === 0 &&
+                Boolean(reimbursementAmountWei) &&
+                Boolean(filledShareAmount);
+
+            if ((allConfirmedTrades && orderFilled) || orderSummaryFillReady) {
                 if (!reimbursementAmountWei) {
                     throw new Error(
                         `Unable to determine actual USDC spent for filled Polymarket BUY order ${intent.orderId}.`
@@ -1875,7 +1933,7 @@ function buildArchiveToolCall(intent, commitmentSafe, agentAddress) {
                 agentAddress,
             }),
             filename: intent.archiveFilename,
-            pin: false,
+            pin: true,
         }),
     };
 }
@@ -2157,6 +2215,12 @@ async function getDeterministicToolCalls({
             continue;
         }
         if (
+            Number.isInteger(intent.nextDepositAttemptAtMs) &&
+            intent.nextDepositAttemptAtMs > Date.now()
+        ) {
+            continue;
+        }
+        if (
             intent.depositTxHash ||
             intent.depositSubmittedAtMs ||
             pendingDepositSubmission?.intentKey === intent.intentKey
@@ -2433,6 +2497,9 @@ async function onToolOutput({ name, parsedOutput, config }) {
             const txHash = normalizeHash(parsedOutput?.transactionHash);
             intent.depositTxHash = txHash;
             intent.depositSubmittedAtMs = Date.now();
+            delete intent.lastDepositStatus;
+            delete intent.lastDepositError;
+            delete intent.nextDepositAttemptAtMs;
             if (status === 'confirmed') {
                 intent.tokenDeposited = true;
                 intent.tokenDepositedAtMs = Date.now();
@@ -2442,7 +2509,22 @@ async function onToolOutput({ name, parsedOutput, config }) {
             return;
         }
 
+        const detail = getParsedToolOutputDetail(parsedOutput, status);
+        intent.lastDepositStatus = status;
+        intent.lastDepositError = detail;
+        if (status === 'skipped' || parsedOutput?.retryable === false) {
+            markTerminalIntentFailure(intent, {
+                stage: 'deposit',
+                status,
+                detail,
+                releaseCredit: false,
+            });
+            await maybePersistTradeIntentState();
+            return;
+        }
+
         delete intent.depositSubmittedAtMs;
+        intent.nextDepositAttemptAtMs = Date.now() + policy.archiveRetryDelayMs;
         intent.updatedAtMs = Date.now();
         await maybePersistTradeIntentState();
         return;
