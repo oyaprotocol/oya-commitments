@@ -1362,7 +1362,16 @@ function parseReimbursementExplanationFields(explanation) {
     return fields;
 }
 
-function buildBackfilledReimbursementCommitmentRecord({ proposalHash, transactions, explanation, policy }) {
+function buildBackfilledReimbursementCommitmentRecord({
+    proposalHash,
+    proposer,
+    transactions,
+    explanation,
+    policy,
+}) {
+    if (!policy.authorizedAgent || !proposer || !isAddressEqual(proposer, policy.authorizedAgent)) {
+        return null;
+    }
     const fields = parseReimbursementExplanationFields(explanation);
     if (!fields) {
         return null;
@@ -1497,6 +1506,7 @@ async function maybeBackfillReimbursementCommitments({
                 : [];
             const record = buildBackfilledReimbursementCommitmentRecord({
                 proposalHash,
+                proposer: event.log?.args?.proposer,
                 transactions,
                 explanation,
                 policy,
@@ -1536,8 +1546,13 @@ async function maybeBackfillReimbursementCommitments({
             continue;
         }
 
-        delete tradeIntentState.reimbursementCommitments[commitmentKey];
-        changed = true;
+        if (existing.status !== 'deleted') {
+            tradeIntentState.reimbursementCommitments[commitmentKey] = {
+                ...existing,
+                status: 'deleted',
+            };
+            changed = true;
+        }
     }
 
     const nextBackfilledThroughBlock = latestBlock.toString();
@@ -2167,6 +2182,47 @@ function recoverProposalHashesFromSignals({ signals, agentAddress, policy }) {
     return changed;
 }
 
+function recoverProposalHashesFromBackfilledCommitments() {
+    let changed = false;
+
+    for (const intent of getOpenIntents()) {
+        if (intent.reimbursementProposalHash || !intent.reimbursementExplanation) {
+            continue;
+        }
+
+        const matchingCommitments = Object.values(tradeIntentState.reimbursementCommitments).filter(
+            (commitment) =>
+                commitment?.proposalHash &&
+                commitment?.intentKey &&
+                commitment.intentKey === intent.intentKey
+        );
+        const matchingProposalHashes = Array.from(
+            new Set(
+                matchingCommitments
+                    .map((commitment) => normalizeHash(commitment?.proposalHash))
+                    .filter(Boolean)
+            )
+        );
+        if (matchingProposalHashes.length !== 1) {
+            continue;
+        }
+
+        intent.reimbursementProposalHash = matchingProposalHashes[0];
+        delete intent.reimbursementDispatchAtMs;
+        delete intent.reimbursementSubmittedAtMs;
+        if (pendingProposalSubmission?.intentKey === intent.intentKey) {
+            pendingProposalSubmission = null;
+        }
+        clearReimbursementSubmissionAmbiguity(intent);
+        delete intent.lastReimbursementSubmissionStatus;
+        delete intent.lastReimbursementSubmissionError;
+        intent.updatedAtMs = Date.now();
+        changed = true;
+    }
+
+    return changed;
+}
+
 function markTerminalIntentFailure(
     intent,
     { stage, status, detail, releaseCredit = false, sideEffectsLikelyCommitted = false } = {}
@@ -2611,41 +2667,6 @@ function applyProposalEventUpdate({ executedProposals = [], deletedProposals = [
         }
     }
 
-    const unresolvedIntents = getOpenIntents().filter(
-        (intent) =>
-            !intent.reimbursementProposalHash &&
-            (intent.reimbursementSubmissionTxHash ||
-                intent.reimbursementSubmittedAtMs ||
-                intent.reimbursementDispatchAtMs)
-    );
-
-    if (unresolvedIntents.length === 1 && executedHashes.size === 1 && deletedHashes.size === 0) {
-        const [proposalHash] = Array.from(executedHashes);
-        const [intent] = unresolvedIntents;
-        intent.reimbursementProposalHash = proposalHash;
-        intent.reimbursedAtMs = nowMs;
-        intent.updatedAtMs = nowMs;
-        clearReimbursementSubmissionAmbiguity(intent);
-        delete intent.lastReimbursementSubmissionStatus;
-        delete intent.lastReimbursementSubmissionError;
-        if (pendingProposalSubmission?.intentKey === intent.intentKey) {
-            pendingProposalSubmission = null;
-        }
-        executedHashes.delete(proposalHash);
-        changed = true;
-    }
-
-    if (unresolvedIntents.length === 1 && deletedHashes.size === 1 && executedHashes.size === 0) {
-        const [intent] = unresolvedIntents;
-        clearReimbursementSubmissionTracking(intent);
-        intent.updatedAtMs = nowMs;
-        if (pendingProposalSubmission?.intentKey === intent.intentKey) {
-            pendingProposalSubmission = null;
-        }
-        deletedHashes.clear();
-        changed = true;
-    }
-
     changed =
         setPendingProposalLifecycleHashes({
             executed: Array.from(executedHashes),
@@ -2862,6 +2883,7 @@ async function getDeterministicToolCalls({
             policy,
             config,
         })) || changed;
+    changed = recoverProposalHashesFromBackfilledCommitments() || changed;
     changed = ingestSignals(signals, policy) || changed;
 
     const clobAuthAddress = getClobAuthAddress({
