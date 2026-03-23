@@ -31,6 +31,7 @@ const TEST_SIGNATURE = `0x${'1a'.repeat(65)}`;
 const TEST_PROPOSAL_HASH = `0x${'a'.repeat(64)}`;
 const TEST_ORDER_ID = 'order-1';
 const TEST_TIMEOUT_ORDER_ID = 'order-timeout';
+const TEST_REJECTED_ORDER_ID = 'order-rejected';
 const TEST_DEPOSIT_TX_HASH = `0x${'b'.repeat(64)}`;
 const TEST_REIMBURSE_TX_HASH = `0x${'c'.repeat(64)}`;
 
@@ -795,6 +796,243 @@ async function run() {
             runtime.orderFetchError = null;
             runtime.tradesFetchError = null;
         }
+
+        await resetTradeIntentState();
+        runtime.latestBlock = 400n;
+        runtime.depositLogs = [
+            {
+                args: {
+                    from: TEST_SIGNER,
+                    value: 50_000_000n,
+                },
+                blockNumber: 10n,
+                transactionHash: `0x${'d'.repeat(64)}`,
+                logIndex: 0,
+            },
+        ];
+        runtime.orderPayload = {
+            order: {
+                id: TEST_ORDER_ID,
+                status: 'MATCHED',
+                original_size: '25',
+                size_matched: '25',
+                maker_amount_filled: '20000000',
+            },
+        };
+        runtime.tradesPayload = [
+            {
+                id: 'trade-1',
+                status: 'CONFIRMED',
+                taker_order_id: TEST_ORDER_ID,
+                price: '0.32',
+                size: '62.5',
+            },
+        ];
+        runtime.ctfBalances = {
+            [`${TEST_AGENT.toLowerCase()}:${NO_TOKEN_ID}`]: 100_000_000n,
+        };
+        runtime.orderFetchError = null;
+        runtime.tradesFetchError = null;
+        const proposalPendingDateNow = Date.now;
+        try {
+            const baseNowMs = 1_910_000_000_000;
+            Date.now = () => baseNowMs;
+            const proposalPendingConfig = buildModuleConfig({
+                agentConfig: {
+                    polymarketIntentTrader: {
+                        pendingTxTimeoutMs: 1_000,
+                    },
+                },
+            });
+            const proposalPendingSignal = buildSignedMessageSignal({
+                requestId: 'pm-intent-proposal-pending',
+                receivedAtMs: baseNowMs,
+                signedAtMs: baseNowMs,
+                deadline: baseNowMs + 60_000,
+            });
+            const proposalPendingArchiveCalls = await getDeterministicToolCalls({
+                signals: [proposalPendingSignal],
+                commitmentSafe: TEST_SAFE,
+                agentAddress: TEST_AGENT,
+                publicClient,
+                config: proposalPendingConfig,
+            });
+            assert.equal(proposalPendingArchiveCalls.length, 1);
+            await onToolOutput({
+                name: 'ipfs_publish',
+                parsedOutput: {
+                    status: 'published',
+                    cid: 'bafyintent-proposal-pending',
+                    uri: 'ipfs://bafyintent-proposal-pending',
+                    pinned: true,
+                },
+                config: proposalPendingConfig,
+            });
+            const proposalPendingOrderCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_SAFE,
+                agentAddress: TEST_AGENT,
+                publicClient,
+                config: proposalPendingConfig,
+            });
+            assert.equal(proposalPendingOrderCalls.length, 1);
+            await onToolOutput({
+                name: 'polymarket_clob_build_sign_and_place_order',
+                parsedOutput: {
+                    status: 'submitted',
+                    result: {
+                        order: {
+                            id: TEST_ORDER_ID,
+                            status: 'LIVE',
+                        },
+                    },
+                },
+                config: proposalPendingConfig,
+            });
+            await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_SAFE,
+                agentAddress: TEST_AGENT,
+                publicClient,
+                config: proposalPendingConfig,
+            });
+            await onToolOutput({
+                name: 'make_erc1155_deposit',
+                parsedOutput: {
+                    status: 'confirmed',
+                    transactionHash: TEST_DEPOSIT_TX_HASH,
+                },
+                config: proposalPendingConfig,
+            });
+            const proposalPendingCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_SAFE,
+                agentAddress: TEST_AGENT,
+                publicClient,
+                config: proposalPendingConfig,
+            });
+            assert.equal(proposalPendingCalls.length, 1);
+            assert.equal(proposalPendingCalls[0].name, 'post_bond_and_propose');
+            await onToolOutput({
+                name: 'post_bond_and_propose',
+                parsedOutput: {
+                    status: 'pending',
+                    message: 'receipt wait timed out',
+                    sideEffectsLikelyCommitted: true,
+                },
+                config: proposalPendingConfig,
+            });
+
+            Date.now = () => baseNowMs + 2_000;
+            const noDuplicateAfterPendingProposal = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_SAFE,
+                agentAddress: TEST_AGENT,
+                publicClient,
+                config: proposalPendingConfig,
+            });
+            assert.deepEqual(noDuplicateAfterPendingProposal, []);
+
+            state = getTradeIntentState();
+            storedIntent =
+                state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-proposal-pending`];
+            assert.equal(typeof storedIntent.reimbursementSubmittedAtMs, 'number');
+            assert.equal(storedIntent.reimbursementSubmissionAmbiguous, true);
+            assert.equal(storedIntent.lastReimbursementSubmissionStatus, 'pending');
+            assert.equal(
+                storedIntent.lastReimbursementSubmissionError,
+                'receipt wait timed out'
+            );
+            assert.equal(typeof storedIntent.reimbursementSubmissionAmbiguousAtMs, 'number');
+        } finally {
+            Date.now = proposalPendingDateNow;
+            runtime.orderFetchError = null;
+            runtime.tradesFetchError = null;
+        }
+
+        await resetTradeIntentState();
+        runtime.latestBlock = 500n;
+        runtime.depositLogs = [
+            {
+                args: {
+                    from: TEST_SIGNER,
+                    value: 50_000_000n,
+                },
+                blockNumber: 10n,
+                transactionHash: `0x${'d'.repeat(64)}`,
+                logIndex: 0,
+            },
+        ];
+        runtime.orderPayload = {
+            order: {
+                id: TEST_REJECTED_ORDER_ID,
+                status: 'REJECTED',
+                original_size: '25',
+                size_matched: '0',
+                maker_amount_filled: '0',
+            },
+        };
+        runtime.tradesPayload = [];
+        runtime.ctfBalances = {};
+        runtime.orderFetchError = null;
+        runtime.tradesFetchError = null;
+        const rejectedSignal = buildSignedMessageSignal({
+            requestId: 'pm-intent-rejected',
+        });
+        const rejectedArchiveCalls = await getDeterministicToolCalls({
+            signals: [rejectedSignal],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(rejectedArchiveCalls.length, 1);
+        await onToolOutput({
+            name: 'ipfs_publish',
+            parsedOutput: {
+                status: 'published',
+                cid: 'bafyintent-rejected',
+                uri: 'ipfs://bafyintent-rejected',
+                pinned: true,
+            },
+            config: buildModuleConfig(),
+        });
+        const rejectedOrderCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(rejectedOrderCalls.length, 1);
+        await onToolOutput({
+            name: 'polymarket_clob_build_sign_and_place_order',
+            parsedOutput: {
+                status: 'submitted',
+                result: {
+                    order: {
+                        id: TEST_REJECTED_ORDER_ID,
+                        status: 'LIVE',
+                    },
+                },
+            },
+            config: buildModuleConfig(),
+        });
+        runtime.tradesFetchError = 'trade api unavailable';
+        const rejectedFollowupCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.deepEqual(rejectedFollowupCalls, []);
+        state = getTradeIntentState();
+        storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-rejected`];
+        assert.equal(typeof storedIntent.closedAtMs, 'number');
+        assert.equal(typeof storedIntent.creditReleasedAtMs, 'number');
+        assert.equal(storedIntent.terminalFailureStatus, 'REJECTED');
+        runtime.tradesFetchError = null;
 
         console.log('[test] polymarket-intent-trader lifecycle OK');
     } finally {
