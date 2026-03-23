@@ -1,10 +1,10 @@
 import { readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { erc1155Abi, getAddress, isAddressEqual, parseUnits } from 'viem';
+import { decodeEventLog, erc1155Abi, getAddress, isAddressEqual, parseUnits } from 'viem';
 import { findContractDeploymentBlock, getLogsChunked } from '../../../agent/src/lib/chain-history.js';
 import { buildSignedMessagePayload } from '../../../agent/src/lib/message-signing.js';
-import { transferEvent } from '../../../agent/src/lib/og.js';
+import { transactionsProposedEvent, transferEvent } from '../../../agent/src/lib/og.js';
 import { getAlwaysEmitBalanceSnapshotPollingOptions } from '../../../agent/src/lib/polling.js';
 import {
     CLOB_FAILURE_TERMINAL_STATUS,
@@ -45,6 +45,7 @@ const DEFAULT_ARCHIVE_RETRY_DELAY_MS = 30_000;
 const DEFAULT_PENDING_TX_TIMEOUT_MS = 900_000;
 const PENDING_ORDER_DISPATCH_GRACE_MS = 30_000;
 const PENDING_DEPOSIT_DISPATCH_GRACE_MS = 30_000;
+const PENDING_PROPOSAL_DISPATCH_GRACE_MS = 30_000;
 const DEFAULT_LOG_CHUNK_SIZE = 5_000n;
 const DEFAULT_CLOB_HOST = 'https://clob.polymarket.com';
 const DEFAULT_CLOB_REQUEST_TIMEOUT_MS = 15_000;
@@ -330,6 +331,21 @@ function clearStalePendingOrderSubmission(nowMs = Date.now()) {
     return true;
 }
 
+function clearStalePendingProposalSubmission(nowMs = Date.now()) {
+    if (
+        !pendingProposalSubmission?.intentKey ||
+        !hasTimedOut(
+            pendingProposalSubmission.startedAtMs,
+            PENDING_PROPOSAL_DISPATCH_GRACE_MS,
+            nowMs
+        )
+    ) {
+        return false;
+    }
+    pendingProposalSubmission = null;
+    return true;
+}
+
 function markDispatchStarted(intent, kind, nowMs = Date.now()) {
     if (!intent) {
         return;
@@ -338,6 +354,8 @@ function markDispatchStarted(intent, kind, nowMs = Date.now()) {
         intent.orderDispatchAtMs = nowMs;
     } else if (kind === 'deposit') {
         intent.depositDispatchAtMs = nowMs;
+    } else if (kind === 'reimbursement') {
+        intent.reimbursementDispatchAtMs = nowMs;
     } else {
         throw new Error(`Unsupported dispatch kind: ${kind}`);
     }
@@ -354,6 +372,10 @@ function clearDispatchStarted(intent, kind) {
     }
     if (kind === 'deposit') {
         delete intent.depositDispatchAtMs;
+        return;
+    }
+    if (kind === 'reimbursement') {
+        delete intent.reimbursementDispatchAtMs;
         return;
     }
     throw new Error(`Unsupported dispatch kind: ${kind}`);
@@ -392,6 +414,25 @@ function reconcileDurableDispatchState(nowMs = Date.now()) {
             markAmbiguousDepositSubmission(
                 intent,
                 'ERC1155 deposit tool output was lost after dispatch; treating submission as ambiguous and refusing automatic retry.',
+                nowMs
+            );
+            changed = true;
+        }
+
+        if (
+            Number.isInteger(intent.reimbursementDispatchAtMs) &&
+            !intent.reimbursementProposalHash &&
+            !intent.reimbursementSubmissionTxHash &&
+            !intent.reimbursementSubmittedAtMs &&
+            hasTimedOut(intent.reimbursementDispatchAtMs, PENDING_PROPOSAL_DISPATCH_GRACE_MS, nowMs)
+        ) {
+            intent.reimbursementSubmittedAtMs = intent.reimbursementDispatchAtMs;
+            intent.lastReimbursementSubmissionStatus =
+                intent.lastReimbursementSubmissionStatus ?? 'dispatch_pending';
+            delete intent.reimbursementDispatchAtMs;
+            markAmbiguousReimbursementSubmission(
+                intent,
+                'Reimbursement proposal tool output was lost after dispatch; treating submission as ambiguous and refusing automatic retry.',
                 nowMs
             );
             changed = true;
@@ -711,6 +752,7 @@ function resolvePolicy(config = {}) {
         yesTokenId: normalizeTokenId(candidate.yesTokenId),
         noTokenId: normalizeTokenId(candidate.noTokenId),
         collateralToken,
+        ogModule: normalizeAddressOrNull(config?.ogModule),
         ctfContract:
             normalizeAddressOrNull(candidate.ctfContract) ??
             normalizeAddressOrNull(config?.polymarketConditionalTokens),
@@ -1263,6 +1305,7 @@ function getIntentLifecycleStatus(record, nowMs = Date.now()) {
     if (record.reimbursementProposalHash || record.reimbursementSubmissionTxHash) {
         return 'reimbursement_submitted';
     }
+    if (record.reimbursementDispatchAtMs) return 'reimbursement_dispatching';
     if (record.tokenDeposited) return 'deposited';
     if (record.depositDispatchAtMs) return 'deposit_dispatching';
     if (record.depositTxHash) return 'deposit_submitted';
@@ -1301,6 +1344,7 @@ function buildIntentSignal(record, nowMs = Date.now()) {
         tokenDeposited: Boolean(record.tokenDeposited),
         reimbursementAmountWei: record.reimbursementAmountWei ?? null,
         filledShareAmount: record.filledShareAmount ?? null,
+        reimbursementDispatchAtMs: record.reimbursementDispatchAtMs ?? null,
         reimbursementProposalHash: record.reimbursementProposalHash ?? null,
         reimbursementSubmissionTxHash: record.reimbursementSubmissionTxHash ?? null,
         archived: Boolean(record.artifactCid),
@@ -1660,6 +1704,40 @@ function resolveOgProposalHashFromToolOutput(parsedOutput) {
     return legacyHash;
 }
 
+function extractProposalHashFromReceipt({ receipt, ogModule }) {
+    const normalizedOgModule = normalizeAddressOrNull(ogModule);
+    if (!normalizedOgModule || !Array.isArray(receipt?.logs)) {
+        return null;
+    }
+
+    for (const log of receipt.logs) {
+        if (!isAddressEqual(log?.address, normalizedOgModule)) {
+            continue;
+        }
+
+        const directHash = normalizeHash(log?.args?.proposalHash);
+        if (directHash) {
+            return directHash;
+        }
+
+        try {
+            const decoded = decodeEventLog({
+                abi: [transactionsProposedEvent],
+                data: log.data,
+                topics: log.topics,
+            });
+            const decodedHash = normalizeHash(decoded?.args?.proposalHash);
+            if (decodedHash) {
+                return decodedHash;
+            }
+        } catch (error) {
+            continue;
+        }
+    }
+
+    return null;
+}
+
 function matchesReimbursementProposalSignal({ signal, intent, agentAddress, policy }) {
     if (signal?.kind !== 'proposal' || !Array.isArray(signal.transactions) || signal.transactions.length !== 1) {
         return false;
@@ -1720,6 +1798,14 @@ function recoverProposalHashesFromSignals({ signals, agentAddress, policy }) {
         }
 
         intent.reimbursementProposalHash = proposalHash;
+        delete intent.reimbursementDispatchAtMs;
+        delete intent.reimbursementSubmittedAtMs;
+        if (pendingProposalSubmission?.intentKey === intent.intentKey) {
+            pendingProposalSubmission = null;
+        }
+        clearReimbursementSubmissionAmbiguity(intent);
+        delete intent.lastReimbursementSubmissionStatus;
+        delete intent.lastReimbursementSubmissionError;
         intent.updatedAtMs = Date.now();
         changed = true;
     }
@@ -1734,6 +1820,7 @@ function markTerminalIntentFailure(
     const nowMs = Date.now();
     delete intent.orderDispatchAtMs;
     delete intent.depositDispatchAtMs;
+    delete intent.reimbursementDispatchAtMs;
     intent.terminalFailureStage = stage ?? 'unknown';
     intent.terminalFailureStatus = status ?? 'unknown';
     intent.terminalFailureMessage = detail ?? null;
@@ -2047,11 +2134,44 @@ async function refreshProposalSubmissionStatus({ publicClient, policy }) {
             const status = receipt?.status;
             const reverted = status === 0n || status === 0 || status === 'reverted';
             if (!reverted) {
+                const recoveredProposalHash = extractProposalHashFromReceipt({
+                    receipt,
+                    ogModule: policy.ogModule,
+                });
+                if (recoveredProposalHash && recoveredProposalHash !== intent.reimbursementProposalHash) {
+                    intent.reimbursementProposalHash = recoveredProposalHash;
+                    delete intent.reimbursementSubmittedAtMs;
+                    if (pendingProposalSubmission?.intentKey === intent.intentKey) {
+                        pendingProposalSubmission = null;
+                    }
+                    clearReimbursementSubmissionAmbiguity(intent);
+                    delete intent.lastReimbursementSubmissionStatus;
+                    delete intent.lastReimbursementSubmissionError;
+                    intent.updatedAtMs = nowMs;
+                    changed = true;
+                    continue;
+                }
+                if (
+                    !intent.reimbursementSubmissionAmbiguous ||
+                    intent.lastReimbursementSubmissionStatus !== 'confirmed_missing_hash'
+                ) {
+                    intent.lastReimbursementSubmissionStatus = 'confirmed_missing_hash';
+                    markAmbiguousReimbursementSubmission(
+                        intent,
+                        'Reimbursement proposal transaction confirmed but proposal hash could not be recovered from receipt; waiting for proposal signal recovery.',
+                        nowMs
+                    );
+                    changed = true;
+                }
                 continue;
             }
 
             delete intent.reimbursementSubmissionTxHash;
             delete intent.reimbursementSubmittedAtMs;
+            delete intent.reimbursementDispatchAtMs;
+            if (pendingProposalSubmission?.intentKey === intent.intentKey) {
+                pendingProposalSubmission = null;
+            }
             delete intent.reimbursementSubmissionAmbiguous;
             delete intent.reimbursementSubmissionAmbiguousAtMs;
             delete intent.lastReimbursementSubmissionStatus;
@@ -2302,6 +2422,7 @@ async function getDeterministicToolCalls({
     const normalizedCommitmentSafe = normalizeAddress(commitmentSafe);
     clearStalePendingOrderSubmission();
     clearStalePendingDepositSubmission();
+    clearStalePendingProposalSubmission();
     let changed = reconcileDurableDispatchState();
 
     while (queuedProposalEventUpdates.length > 0) {
@@ -2468,12 +2589,12 @@ async function getDeterministicToolCalls({
             }
             intent.reimbursementRecipientAddress = reimbursementRecipientAddress;
             intent.reimbursementExplanation = buildReimbursementExplanation(intent);
-            intent.reimbursementSubmittedAtMs = Date.now();
-            intent.updatedAtMs = Date.now();
+            markDispatchStarted(intent, 'reimbursement');
             await maybePersistTradeIntentState();
 
             pendingProposalSubmission = {
                 intentKey: intent.intentKey,
+                startedAtMs: Date.now(),
                 explanation: intent.reimbursementExplanation,
             };
             const reimbursementCall = buildReimbursementToolCall(intent, policy, config);
@@ -2769,6 +2890,7 @@ async function onToolOutput({ name, parsedOutput, config }) {
         if (!intent) {
             return;
         }
+        clearDispatchStarted(intent, 'reimbursement');
 
         const status = getParsedToolOutputStatus(parsedOutput);
         if (status !== 'submitted') {
@@ -2778,6 +2900,7 @@ async function onToolOutput({ name, parsedOutput, config }) {
             intent.lastReimbursementSubmissionStatus = status;
             intent.lastReimbursementSubmissionError = detail;
             if (ambiguousSubmission) {
+                intent.reimbursementSubmittedAtMs = Date.now();
                 intent.reimbursementSubmissionAmbiguous = true;
                 intent.updatedAtMs = Date.now();
                 await maybePersistTradeIntentState();
@@ -2785,7 +2908,9 @@ async function onToolOutput({ name, parsedOutput, config }) {
             }
 
             delete intent.reimbursementSubmittedAtMs;
+            delete intent.reimbursementDispatchAtMs;
             delete intent.reimbursementSubmissionAmbiguous;
+            delete intent.reimbursementSubmissionAmbiguousAtMs;
             intent.updatedAtMs = Date.now();
             await maybePersistTradeIntentState();
             return;
@@ -2804,6 +2929,13 @@ async function onToolOutput({ name, parsedOutput, config }) {
         } else if (txHash) {
             intent.reimbursementSubmissionTxHash = txHash;
             intent.reimbursementSubmittedAtMs = Date.now();
+        } else {
+            intent.reimbursementSubmittedAtMs = Date.now();
+            markAmbiguousReimbursementSubmission(
+                intent,
+                'Reimbursement proposal returned submitted without proposal hash or transaction hash.',
+                Date.now()
+            );
         }
         intent.updatedAtMs = Date.now();
         await maybePersistTradeIntentState();
