@@ -328,6 +328,102 @@ function clearStalePendingDepositSubmission(nowMs = Date.now()) {
     return true;
 }
 
+async function readOutcomeTokenBalance({
+    publicClient,
+    policy,
+    tokenHolderAddress,
+    tokenId,
+}) {
+    if (!publicClient || !policy?.ctfContract || !tokenHolderAddress || tokenId === undefined || tokenId === null) {
+        return null;
+    }
+
+    const balance = await publicClient.readContract({
+        address: policy.ctfContract,
+        abi: erc1155Abi,
+        functionName: 'balanceOf',
+        args: [tokenHolderAddress, BigInt(tokenId)],
+    });
+    return BigInt(balance);
+}
+
+function hasConcurrentTokenSettlementDependency({ intent, tokenHolderAddress }) {
+    const normalizedHolder = normalizeAddressOrNull(
+        tokenHolderAddress ?? intent?.preOrderTokenHolderAddress ?? null
+    );
+    if (!normalizedHolder) {
+        return true;
+    }
+
+    return getOpenIntents().some((otherIntent) => {
+        if (!otherIntent || otherIntent.intentKey === intent?.intentKey) {
+            return false;
+        }
+        if (otherIntent.tokenDeposited || otherIntent.closedAtMs || otherIntent.creditReleasedAtMs) {
+            return false;
+        }
+        if (normalizeTokenId(otherIntent.tokenId) !== normalizeTokenId(intent?.tokenId)) {
+            return false;
+        }
+        const otherHolder = normalizeAddressOrNull(
+            otherIntent.preOrderTokenHolderAddress ??
+                otherIntent.tradingWalletAddress ??
+                otherIntent.reimbursementRecipientAddress ??
+                null
+        );
+        return otherHolder === normalizedHolder;
+    });
+}
+
+async function hasObservedFilledTokenInventory({
+    publicClient,
+    policy,
+    tokenHolderAddress,
+    intent,
+    filledShareAmount,
+}) {
+    const normalizedHolder = normalizeAddressOrNull(
+        tokenHolderAddress ?? intent?.preOrderTokenHolderAddress ?? null
+    );
+    const preOrderTokenBalance = parseOptionalNonNegativeIntegerString(intent?.preOrderTokenBalance);
+    const normalizedFilledShareAmount = parseOptionalNonNegativeIntegerString(filledShareAmount);
+    if (!normalizedHolder || !preOrderTokenBalance || !normalizedFilledShareAmount) {
+        return false;
+    }
+    if (hasConcurrentTokenSettlementDependency({ intent, tokenHolderAddress: normalizedHolder })) {
+        return false;
+    }
+
+    const currentBalance = await readOutcomeTokenBalance({
+        publicClient,
+        policy,
+        tokenHolderAddress: normalizedHolder,
+        tokenId: intent.tokenId,
+    });
+    if (currentBalance === null) {
+        return false;
+    }
+
+    const requiredBalance =
+        BigInt(preOrderTokenBalance) + BigInt(normalizedFilledShareAmount);
+    return currentBalance >= requiredBalance;
+}
+
+function clearDepositSubmissionAmbiguity(intent) {
+    delete intent.depositSubmissionAmbiguous;
+    delete intent.depositSubmissionAmbiguousAtMs;
+    delete intent.lastDepositReceiptError;
+}
+
+function markAmbiguousDepositSubmission(intent, detail, nowMs = Date.now()) {
+    intent.depositSubmissionAmbiguous = true;
+    if (!Number.isInteger(intent.depositSubmissionAmbiguousAtMs)) {
+        intent.depositSubmissionAmbiguousAtMs = nowMs;
+    }
+    intent.lastDepositReceiptError = detail ?? null;
+    intent.updatedAtMs = nowMs;
+}
+
 function sortIntentRecords(records) {
     return [...records].sort((left, right) => {
         const leftSequence = Number(left?.sequence ?? 0);
@@ -1616,6 +1712,7 @@ async function refreshOrderStatus({
     account,
     config,
     policy,
+    tokenHolderAddress,
 }) {
     const clobAuthAddress = getClobAuthAddress({
         config,
@@ -1718,8 +1815,20 @@ async function refreshOrderStatus({
                 orderSummary,
                 relatedTrades,
             });
+            const tokenBalanceSettlementReady =
+                orderFilled &&
+                relatedStatuses.length === 0 &&
+                Boolean(reimbursementAmountWei) &&
+                Boolean(filledShareAmount) &&
+                (await hasObservedFilledTokenInventory({
+                    publicClient,
+                    policy,
+                    tokenHolderAddress,
+                    intent,
+                    filledShareAmount,
+                }));
 
-            if (allConfirmedTrades && orderFilled) {
+            if ((allConfirmedTrades && orderFilled) || tokenBalanceSettlementReady) {
                 if (!reimbursementAmountWei) {
                     throw new Error(
                         `Unable to determine actual USDC spent for filled Polymarket BUY order ${intent.orderId}.`
@@ -1735,6 +1844,9 @@ async function refreshOrderStatus({
                 intent.reimbursementAmountWei = reimbursementAmountWei;
                 intent.reservedCreditAmountWei = reimbursementAmountWei;
                 intent.filledShareAmount = filledShareAmount;
+                intent.orderSettlementEvidence = tokenBalanceSettlementReady
+                    ? 'token_balance'
+                    : 'confirmed_trades';
                 intent.updatedAtMs = nowMs;
                 changed = true;
             }
@@ -1784,6 +1896,7 @@ async function refreshDepositSubmissionStatus({ publicClient, latestBlock, polic
             if (reverted) {
                 delete intent.depositTxHash;
                 delete intent.depositSubmittedAtMs;
+                clearDepositSubmissionAmbiguity(intent);
                 intent.updatedAtMs = nowMs;
                 changed = true;
                 continue;
@@ -1793,6 +1906,7 @@ async function refreshDepositSubmissionStatus({ publicClient, latestBlock, polic
             intent.depositBlockNumber = blockNumber.toString();
             intent.tokenDeposited = true;
             intent.tokenDepositedAtMs = nowMs;
+            clearDepositSubmissionAmbiguity(intent);
             intent.updatedAtMs = nowMs;
             changed = true;
         } catch (error) {
@@ -1802,10 +1916,14 @@ async function refreshDepositSubmissionStatus({ publicClient, latestBlock, polic
             if (!hasTimedOut(intent.depositSubmittedAtMs, policy.pendingTxTimeoutMs, nowMs)) {
                 continue;
             }
-            delete intent.depositTxHash;
-            delete intent.depositSubmittedAtMs;
-            intent.updatedAtMs = nowMs;
-            changed = true;
+            const detail = error?.message ?? String(error);
+            if (
+                intent.lastDepositReceiptError !== detail ||
+                !Number.isInteger(intent.depositSubmissionAmbiguousAtMs)
+            ) {
+                markAmbiguousDepositSubmission(intent, detail, nowMs);
+                changed = true;
+            }
         }
     }
 
@@ -2136,6 +2254,7 @@ async function getDeterministicToolCalls({
             account: { address: normalizedAgentAddress },
             config,
             policy,
+            tokenHolderAddress,
         })) || changed;
     changed =
         (await refreshDepositSubmissionStatus({
@@ -2225,13 +2344,13 @@ async function getDeterministicToolCalls({
         if (!tokenHolderAddress) {
             continue;
         }
-        const tokenBalance = await publicClient.readContract({
-            address: policy.ctfContract,
-            abi: erc1155Abi,
-            functionName: 'balanceOf',
-            args: [tokenHolderAddress, BigInt(intent.tokenId)],
+        const tokenBalance = await readOutcomeTokenBalance({
+            publicClient,
+            policy,
+            tokenHolderAddress,
+            tokenId: intent.tokenId,
         });
-        if (BigInt(tokenBalance) < BigInt(filledShareAmount)) {
+        if (tokenBalance === null || tokenBalance < BigInt(filledShareAmount)) {
             continue;
         }
 
@@ -2329,10 +2448,26 @@ async function getDeterministicToolCalls({
                 config,
                 tokenId: intent.tokenId,
             });
+            let preOrderTokenBalance = null;
+            if (tokenHolderAddress) {
+                try {
+                    preOrderTokenBalance = await readOutcomeTokenBalance({
+                        publicClient,
+                        policy,
+                        tokenHolderAddress,
+                        tokenId: intent.tokenId,
+                    });
+                } catch (error) {
+                    preOrderTokenBalance = null;
+                }
+            }
             intent.feeRateBps = feeRateBps;
             intent.feeRateFetchedAtMs = Date.now();
             intent.orderSubmittedAtMs = Date.now();
             intent.tradingWalletAddress = clobAuthAddress ?? normalizedAgentAddress;
+            intent.preOrderTokenHolderAddress = tokenHolderAddress ?? null;
+            intent.preOrderTokenBalance =
+                preOrderTokenBalance === null ? null : preOrderTokenBalance.toString();
             intent.reimbursementRecipientAddress = clobAuthAddress ?? normalizedAgentAddress;
             intent.updatedAtMs = Date.now();
             await maybePersistTradeIntentState();
@@ -2495,9 +2630,14 @@ async function onToolOutput({ name, parsedOutput, config }) {
             delete intent.lastDepositStatus;
             delete intent.lastDepositError;
             delete intent.nextDepositAttemptAtMs;
+            clearDepositSubmissionAmbiguity(intent);
+            if (status === 'submitted' && parsedOutput?.pendingConfirmation === true) {
+                markAmbiguousDepositSubmission(intent, parsedOutput?.warning ?? null, Date.now());
+            }
             if (status === 'confirmed') {
                 intent.tokenDeposited = true;
                 intent.tokenDepositedAtMs = Date.now();
+                clearDepositSubmissionAmbiguity(intent);
             }
             intent.updatedAtMs = Date.now();
             await maybePersistTradeIntentState();
@@ -2507,6 +2647,14 @@ async function onToolOutput({ name, parsedOutput, config }) {
         const detail = getParsedToolOutputDetail(parsedOutput, status);
         intent.lastDepositStatus = status;
         intent.lastDepositError = detail;
+        if (parsedOutput?.sideEffectsLikelyCommitted === true) {
+            intent.depositTxHash = normalizeHash(parsedOutput?.transactionHash) ?? intent.depositTxHash;
+            intent.depositSubmittedAtMs = Date.now();
+            delete intent.nextDepositAttemptAtMs;
+            markAmbiguousDepositSubmission(intent, detail, Date.now());
+            await maybePersistTradeIntentState();
+            return;
+        }
         if (status === 'skipped' || parsedOutput?.retryable === false) {
             markTerminalIntentFailure(intent, {
                 stage: 'deposit',
@@ -2519,6 +2667,7 @@ async function onToolOutput({ name, parsedOutput, config }) {
         }
 
         delete intent.depositSubmittedAtMs;
+        clearDepositSubmissionAmbiguity(intent);
         intent.nextDepositAttemptAtMs = Date.now() + policy.archiveRetryDelayMs;
         intent.updatedAtMs = Date.now();
         await maybePersistTradeIntentState();

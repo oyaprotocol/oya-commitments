@@ -1059,9 +1059,7 @@ async function run() {
             },
         };
         runtime.tradesPayload = [];
-        runtime.ctfBalances = {
-            [`${TEST_AGENT.toLowerCase()}:${NO_TOKEN_ID}`]: 100_000_000n,
-        };
+        runtime.ctfBalances = {};
         runtime.orderFetchError = null;
         runtime.tradesFetchError = null;
         const noTradesSignal = buildSignedMessageSignal({
@@ -1106,6 +1104,7 @@ async function run() {
             },
             config: buildModuleConfig(),
         });
+        runtime.ctfBalances[`${TEST_AGENT.toLowerCase()}:${NO_TOKEN_ID}`] = 100_000_000n;
         const noTradesFollowupCalls = await getDeterministicToolCalls({
             signals: [],
             commitmentSafe: TEST_SAFE,
@@ -1113,12 +1112,14 @@ async function run() {
             publicClient,
             config: buildModuleConfig(),
         });
-        assert.deepEqual(noTradesFollowupCalls, []);
+        assert.equal(noTradesFollowupCalls.length, 1);
+        assert.equal(noTradesFollowupCalls[0].name, 'make_erc1155_deposit');
         state = getTradeIntentState();
         storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-filled-no-trades`];
-        assert.equal(storedIntent.orderFilled, undefined);
-        assert.equal(storedIntent.reimbursementAmountWei, null);
-        assert.equal(storedIntent.filledShareAmount, null);
+        assert.equal(storedIntent.orderFilled, true);
+        assert.equal(storedIntent.reimbursementAmountWei, '20000000');
+        assert.equal(storedIntent.filledShareAmount, '62500000');
+        assert.equal(storedIntent.orderSettlementEvidence, 'token_balance');
 
         await resetTradeIntentState();
         runtime.latestBlock = 700n;
@@ -1229,6 +1230,136 @@ async function run() {
         assert.equal(typeof storedIntent.closedAtMs, 'number');
         assert.equal(storedIntent.terminalFailureStage, 'deposit');
         assert.equal(storedIntent.terminalFailureStatus, 'error');
+
+        await resetTradeIntentState();
+        runtime.latestBlock = 800n;
+        runtime.depositLogs = [
+            {
+                args: {
+                    from: TEST_SIGNER,
+                    value: 50_000_000n,
+                },
+                blockNumber: 10n,
+                transactionHash: `0x${'d'.repeat(64)}`,
+                logIndex: 0,
+            },
+        ];
+        runtime.orderPayload = {
+            order: {
+                id: 'order-deposit-timeout',
+                status: 'MATCHED',
+                original_size: '25',
+                size_matched: '25',
+                maker_amount_filled: '20000000',
+            },
+        };
+        runtime.tradesPayload = [
+            {
+                id: 'trade-deposit-timeout',
+                status: 'CONFIRMED',
+                taker_order_id: 'order-deposit-timeout',
+                price: '0.32',
+                size: '62.5',
+            },
+        ];
+        runtime.ctfBalances = {
+            [`${TEST_AGENT.toLowerCase()}:${NO_TOKEN_ID}`]: 100_000_000n,
+        };
+        runtime.receipts = {};
+        const depositTimeoutNow = Date.now;
+        try {
+            const baseNowMs = 1_920_000_000_000;
+            Date.now = () => baseNowMs;
+            const depositTimeoutConfig = buildModuleConfig({
+                agentConfig: {
+                    polymarketIntentTrader: {
+                        pendingTxTimeoutMs: 1_000,
+                    },
+                },
+            });
+            const depositTimeoutSignal = buildSignedMessageSignal({
+                requestId: 'pm-intent-deposit-timeout',
+                receivedAtMs: baseNowMs,
+                signedAtMs: baseNowMs,
+                deadline: baseNowMs + 60_000,
+            });
+            const depositTimeoutArchiveCalls = await getDeterministicToolCalls({
+                signals: [depositTimeoutSignal],
+                commitmentSafe: TEST_SAFE,
+                agentAddress: TEST_AGENT,
+                publicClient,
+                config: depositTimeoutConfig,
+            });
+            assert.equal(depositTimeoutArchiveCalls.length, 1);
+            await onToolOutput({
+                name: 'ipfs_publish',
+                parsedOutput: {
+                    status: 'published',
+                    cid: 'bafyintent-deposit-timeout',
+                    uri: 'ipfs://bafyintent-deposit-timeout',
+                    pinned: true,
+                },
+                config: depositTimeoutConfig,
+            });
+            const depositTimeoutOrderCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_SAFE,
+                agentAddress: TEST_AGENT,
+                publicClient,
+                config: depositTimeoutConfig,
+            });
+            assert.equal(depositTimeoutOrderCalls.length, 1);
+            await onToolOutput({
+                name: 'polymarket_clob_build_sign_and_place_order',
+                parsedOutput: {
+                    status: 'submitted',
+                    result: {
+                        order: {
+                            id: 'order-deposit-timeout',
+                            status: 'LIVE',
+                        },
+                    },
+                },
+                config: depositTimeoutConfig,
+            });
+            const depositTimeoutCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_SAFE,
+                agentAddress: TEST_AGENT,
+                publicClient,
+                config: depositTimeoutConfig,
+            });
+            assert.equal(depositTimeoutCalls.length, 1);
+            assert.equal(depositTimeoutCalls[0].name, 'make_erc1155_deposit');
+            await onToolOutput({
+                name: 'make_erc1155_deposit',
+                parsedOutput: {
+                    status: 'submitted',
+                    transactionHash: TEST_DEPOSIT_TX_HASH,
+                    pendingConfirmation: true,
+                },
+                config: depositTimeoutConfig,
+            });
+
+            Date.now = () => baseNowMs + 2_000;
+            const noRetryAfterDepositReceiptTimeout = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_SAFE,
+                agentAddress: TEST_AGENT,
+                publicClient,
+                config: depositTimeoutConfig,
+            });
+            assert.deepEqual(noRetryAfterDepositReceiptTimeout, []);
+            state = getTradeIntentState();
+            storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-deposit-timeout`];
+            assert.equal(storedIntent.depositTxHash, TEST_DEPOSIT_TX_HASH.toLowerCase());
+            assert.equal(typeof storedIntent.depositSubmittedAtMs, 'number');
+            assert.equal(storedIntent.depositSubmissionAmbiguous, true);
+            assert.equal(typeof storedIntent.depositSubmissionAmbiguousAtMs, 'number');
+            assert.equal(storedIntent.tokenDeposited, undefined);
+        } finally {
+            Date.now = depositTimeoutNow;
+        }
 
         console.log('[test] polymarket-intent-trader lifecycle OK');
     } finally {
