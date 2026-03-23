@@ -37,6 +37,7 @@ const USDC_DECIMALS = 6;
 const SHARE_DECIMALS = 6;
 const DEFAULT_ARCHIVE_RETRY_DELAY_MS = 30_000;
 const DEFAULT_PENDING_TX_TIMEOUT_MS = 900_000;
+const PENDING_ORDER_DISPATCH_GRACE_MS = 30_000;
 const PENDING_DEPOSIT_DISPATCH_GRACE_MS = 30_000;
 const DEFAULT_LOG_CHUNK_SIZE = 5_000n;
 const DEFAULT_CLOB_HOST = 'https://clob.polymarket.com';
@@ -328,6 +329,21 @@ function clearStalePendingDepositSubmission(nowMs = Date.now()) {
     return true;
 }
 
+function clearStalePendingOrderSubmission(nowMs = Date.now()) {
+    if (
+        !pendingOrderSubmission?.intentKey ||
+        !hasTimedOut(
+            pendingOrderSubmission.startedAtMs,
+            PENDING_ORDER_DISPATCH_GRACE_MS,
+            nowMs
+        )
+    ) {
+        return false;
+    }
+    pendingOrderSubmission = null;
+    return true;
+}
+
 async function readOutcomeTokenBalance({
     publicClient,
     policy,
@@ -422,6 +438,34 @@ function markAmbiguousDepositSubmission(intent, detail, nowMs = Date.now()) {
     }
     intent.lastDepositReceiptError = detail ?? null;
     intent.updatedAtMs = nowMs;
+}
+
+function clearReimbursementSubmissionAmbiguity(intent) {
+    delete intent.reimbursementSubmissionAmbiguous;
+    delete intent.reimbursementSubmissionAmbiguousAtMs;
+}
+
+function markAmbiguousReimbursementSubmission(intent, detail, nowMs = Date.now()) {
+    intent.reimbursementSubmissionAmbiguous = true;
+    if (!Number.isInteger(intent.reimbursementSubmissionAmbiguousAtMs)) {
+        intent.reimbursementSubmissionAmbiguousAtMs = nowMs;
+    }
+    intent.lastReimbursementSubmissionError = detail ?? null;
+    intent.updatedAtMs = nowMs;
+}
+
+function getClobExecutionPreflightError(config) {
+    if (!config?.polymarketClobEnabled) {
+        return 'polymarketClobEnabled=true is required before placing Polymarket orders.';
+    }
+    if (
+        !config?.polymarketClobApiKey ||
+        !config?.polymarketClobApiSecret ||
+        !config?.polymarketClobApiPassphrase
+    ) {
+        return 'Missing CLOB credentials. Set POLYMARKET_CLOB_API_KEY, POLYMARKET_CLOB_API_SECRET, and POLYMARKET_CLOB_API_PASSPHRASE.';
+    }
+    return null;
 }
 
 function sortIntentRecords(records) {
@@ -1982,15 +2026,14 @@ async function refreshProposalSubmissionStatus({ publicClient, policy }) {
             if (!hasTimedOut(intent.reimbursementSubmittedAtMs, policy.pendingTxTimeoutMs, nowMs)) {
                 continue;
             }
-
-            delete intent.reimbursementSubmissionTxHash;
-            delete intent.reimbursementSubmittedAtMs;
-            delete intent.reimbursementSubmissionAmbiguous;
-            delete intent.reimbursementSubmissionAmbiguousAtMs;
-            delete intent.lastReimbursementSubmissionStatus;
-            delete intent.lastReimbursementSubmissionError;
-            intent.updatedAtMs = nowMs;
-            changed = true;
+            const detail = error?.message ?? String(error);
+            if (
+                intent.lastReimbursementSubmissionError !== detail ||
+                !Number.isInteger(intent.reimbursementSubmissionAmbiguousAtMs)
+            ) {
+                markAmbiguousReimbursementSubmission(intent, detail, nowMs);
+                changed = true;
+            }
         }
     }
 
@@ -2203,6 +2246,7 @@ async function getDeterministicToolCalls({
 
     const latestBlock = await publicClient.getBlockNumber();
     const normalizedCommitmentSafe = normalizeAddress(commitmentSafe);
+    clearStalePendingOrderSubmission();
     clearStalePendingDepositSubmission();
 
     while (queuedProposalEventUpdates.length > 0) {
@@ -2401,6 +2445,7 @@ async function getDeterministicToolCalls({
     }
 
     const hasActiveExecution =
+        Boolean(pendingOrderSubmission?.intentKey) ||
         Boolean(pendingDepositSubmission?.intentKey) ||
         openIntents.some(
             (intent) =>
@@ -2437,10 +2482,30 @@ async function getDeterministicToolCalls({
                 ? await publicClient.getChainId()
                 : undefined;
         for (const intent of openIntents) {
-            if (!intent.artifactCid || intent.orderId || intent.orderSubmittedAtMs) {
+            if (
+                !intent.artifactCid ||
+                intent.orderId ||
+                intent.orderSubmittedAtMs ||
+                pendingOrderSubmission?.intentKey === intent.intentKey
+            ) {
                 continue;
             }
             if (Number.isInteger(intent.expiryMs) && Date.now() > intent.expiryMs) {
+                continue;
+            }
+            if (
+                Number.isInteger(intent.nextOrderAttemptAtMs) &&
+                intent.nextOrderAttemptAtMs > Date.now()
+            ) {
+                continue;
+            }
+            const clobExecutionPreflightError = getClobExecutionPreflightError(config);
+            if (clobExecutionPreflightError) {
+                intent.lastOrderSubmissionStatus = 'unavailable';
+                intent.lastOrderSubmissionError = clobExecutionPreflightError;
+                intent.nextOrderAttemptAtMs = Date.now() + policy.archiveRetryDelayMs;
+                intent.updatedAtMs = Date.now();
+                await maybePersistTradeIntentState();
                 continue;
             }
 
@@ -2463,7 +2528,6 @@ async function getDeterministicToolCalls({
             }
             intent.feeRateBps = feeRateBps;
             intent.feeRateFetchedAtMs = Date.now();
-            intent.orderSubmittedAtMs = Date.now();
             intent.tradingWalletAddress = clobAuthAddress ?? normalizedAgentAddress;
             intent.preOrderTokenHolderAddress = tokenHolderAddress ?? null;
             intent.preOrderTokenBalance =
@@ -2473,6 +2537,7 @@ async function getDeterministicToolCalls({
             await maybePersistTradeIntentState();
             pendingOrderSubmission = {
                 intentKey: intent.intentKey,
+                startedAtMs: Date.now(),
             };
             console.log(`[agent] Preparing Polymarket BUY order for ${intent.intentKey}.`);
             return [buildOrderToolCall(intent, chainId)];
@@ -2583,6 +2648,11 @@ async function onToolOutput({ name, parsedOutput, config }) {
             } else {
                 intent.lastOrderSubmissionStatus = status;
                 intent.lastOrderSubmissionError = detail;
+                intent.nextOrderAttemptAtMs = Date.now() + policy.archiveRetryDelayMs;
+                if (sideEffectsLikelyCommitted) {
+                    intent.orderSubmittedAtMs = Date.now();
+                    delete intent.nextOrderAttemptAtMs;
+                }
                 intent.updatedAtMs = Date.now();
             }
             await maybePersistTradeIntentState();
@@ -2604,6 +2674,7 @@ async function onToolOutput({ name, parsedOutput, config }) {
         }
         delete intent.lastOrderSubmissionStatus;
         delete intent.lastOrderSubmissionError;
+        delete intent.nextOrderAttemptAtMs;
         intent.orderSubmittedAtMs = Date.now();
         intent.updatedAtMs = Date.now();
         await maybePersistTradeIntentState();
@@ -2715,8 +2786,7 @@ async function onToolOutput({ name, parsedOutput, config }) {
         intent.reimbursementExplanation = pending.explanation ?? intent.reimbursementExplanation;
         delete intent.lastReimbursementSubmissionStatus;
         delete intent.lastReimbursementSubmissionError;
-        delete intent.reimbursementSubmissionAmbiguous;
-        delete intent.reimbursementSubmissionAmbiguousAtMs;
+        clearReimbursementSubmissionAmbiguity(intent);
         if (proposalHash) {
             intent.reimbursementProposalHash = proposalHash;
             intent.reimbursementSubmissionTxHash = txHash;

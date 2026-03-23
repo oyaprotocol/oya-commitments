@@ -300,6 +300,66 @@ async function run() {
         assert.deepEqual(inactiveCalls, []);
         assert.deepEqual(getTradeIntentState().intents, {});
 
+        await resetTradeIntentState();
+        runtime.latestBlock = 150n;
+        runtime.depositLogs = [
+            {
+                args: {
+                    from: TEST_SIGNER,
+                    value: 50_000_000n,
+                },
+                blockNumber: 10n,
+                transactionHash: `0x${'d'.repeat(64)}`,
+                logIndex: 0,
+            },
+        ];
+        const clobDisabledSignal = buildSignedMessageSignal({
+            requestId: 'pm-intent-clob-disabled',
+        });
+        const clobDisabledArchiveCalls = await getDeterministicToolCalls({
+            signals: [clobDisabledSignal],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig({
+                polymarketClobEnabled: false,
+            }),
+        });
+        assert.equal(clobDisabledArchiveCalls.length, 1);
+        assert.equal(clobDisabledArchiveCalls[0].name, 'ipfs_publish');
+        await onToolOutput({
+            name: 'ipfs_publish',
+            parsedOutput: {
+                status: 'published',
+                cid: 'bafyintent-clob-disabled',
+                uri: 'ipfs://bafyintent-clob-disabled',
+                pinned: true,
+            },
+            config: buildModuleConfig({
+                polymarketClobEnabled: false,
+            }),
+        });
+        const clobDisabledOrderCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig({
+                polymarketClobEnabled: false,
+            }),
+        });
+        assert.deepEqual(clobDisabledOrderCalls, []);
+        state = getTradeIntentState();
+        let storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-clob-disabled`];
+        assert.equal(storedIntent.orderSubmittedAtMs, undefined);
+        assert.equal(storedIntent.orderId, undefined);
+        assert.equal(storedIntent.lastOrderSubmissionStatus, 'unavailable');
+        assert.match(
+            storedIntent.lastOrderSubmissionError,
+            /polymarketClobEnabled=true is required/
+        );
+        assert.equal(typeof storedIntent.nextOrderAttemptAtMs, 'number');
+
         await assert.rejects(
             getDeterministicToolCalls({
                 signals: [],
@@ -312,6 +372,20 @@ async function run() {
             }),
             /POLYMARKET_CLOB_ADDRESS .* must match runtime signer address .* when POLYMARKET_RELAYER_ENABLED=false/
         );
+
+        await resetTradeIntentState();
+        runtime.latestBlock = 150n;
+        runtime.depositLogs = [
+            {
+                args: {
+                    from: TEST_SIGNER,
+                    value: 50_000_000n,
+                },
+                blockNumber: 10n,
+                transactionHash: `0x${'d'.repeat(64)}`,
+                logIndex: 0,
+            },
+        ];
 
         const interpreted = interpretSignedTradeIntentSignal(validSignal, {
             policy: {
@@ -417,7 +491,7 @@ async function run() {
         assert.equal(archiveArgs.json.interpretedIntent.maxSpendWei, '25000000');
 
         state = getTradeIntentState();
-        let storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-001`];
+        storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-001`];
         assert.ok(storedIntent);
         assert.equal(storedIntent.reservedCreditAmountWei, '25000000');
         assert.equal(typeof storedIntent.lastArchiveAttemptAtMs, 'number');
@@ -673,7 +747,8 @@ async function run() {
         storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-ambiguous`];
         assert.equal(storedIntent.lastOrderSubmissionStatus, 'error');
         assert.equal(storedIntent.lastOrderSubmissionError, 'socket hang up');
-        assert.equal(typeof storedIntent.orderSubmittedAtMs, 'number');
+        assert.equal(storedIntent.orderSubmittedAtMs, undefined);
+        assert.equal(typeof storedIntent.nextOrderAttemptAtMs, 'number');
 
         await resetTradeIntentState();
         runtime.latestBlock = 300n;
@@ -949,6 +1024,153 @@ async function run() {
             Date.now = proposalPendingDateNow;
             runtime.orderFetchError = null;
             runtime.tradesFetchError = null;
+        }
+
+        await resetTradeIntentState();
+        runtime.latestBlock = 450n;
+        runtime.depositLogs = [
+            {
+                args: {
+                    from: TEST_SIGNER,
+                    value: 50_000_000n,
+                },
+                blockNumber: 10n,
+                transactionHash: `0x${'d'.repeat(64)}`,
+                logIndex: 0,
+            },
+        ];
+        runtime.orderPayload = {
+            order: {
+                id: TEST_ORDER_ID,
+                status: 'MATCHED',
+                original_size: '25',
+                size_matched: '25',
+                maker_amount_filled: '20000000',
+            },
+        };
+        runtime.tradesPayload = [
+            {
+                id: 'trade-1',
+                status: 'CONFIRMED',
+                taker_order_id: TEST_ORDER_ID,
+                price: '0.32',
+                size: '62.5',
+            },
+        ];
+        runtime.ctfBalances = {
+            [`${TEST_AGENT.toLowerCase()}:${NO_TOKEN_ID}`]: 100_000_000n,
+        };
+        runtime.receipts = {};
+        const proposalTxTimeoutNow = Date.now;
+        try {
+            const baseNowMs = 1_915_000_000_000;
+            Date.now = () => baseNowMs;
+            const proposalTxTimeoutConfig = buildModuleConfig({
+                agentConfig: {
+                    polymarketIntentTrader: {
+                        pendingTxTimeoutMs: 1_000,
+                    },
+                },
+            });
+            const proposalTxTimeoutSignal = buildSignedMessageSignal({
+                requestId: 'pm-intent-proposal-tx-timeout',
+                receivedAtMs: baseNowMs,
+                signedAtMs: baseNowMs,
+                deadline: baseNowMs + 60_000,
+            });
+            const proposalTxTimeoutArchiveCalls = await getDeterministicToolCalls({
+                signals: [proposalTxTimeoutSignal],
+                commitmentSafe: TEST_SAFE,
+                agentAddress: TEST_AGENT,
+                publicClient,
+                config: proposalTxTimeoutConfig,
+            });
+            assert.equal(proposalTxTimeoutArchiveCalls.length, 1);
+            await onToolOutput({
+                name: 'ipfs_publish',
+                parsedOutput: {
+                    status: 'published',
+                    cid: 'bafyintent-proposal-tx-timeout',
+                    uri: 'ipfs://bafyintent-proposal-tx-timeout',
+                    pinned: true,
+                },
+                config: proposalTxTimeoutConfig,
+            });
+            const proposalTxTimeoutOrderCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_SAFE,
+                agentAddress: TEST_AGENT,
+                publicClient,
+                config: proposalTxTimeoutConfig,
+            });
+            assert.equal(proposalTxTimeoutOrderCalls.length, 1);
+            await onToolOutput({
+                name: 'polymarket_clob_build_sign_and_place_order',
+                parsedOutput: {
+                    status: 'submitted',
+                    result: {
+                        order: {
+                            id: TEST_ORDER_ID,
+                            status: 'LIVE',
+                        },
+                    },
+                },
+                config: proposalTxTimeoutConfig,
+            });
+            await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_SAFE,
+                agentAddress: TEST_AGENT,
+                publicClient,
+                config: proposalTxTimeoutConfig,
+            });
+            await onToolOutput({
+                name: 'make_erc1155_deposit',
+                parsedOutput: {
+                    status: 'confirmed',
+                    transactionHash: TEST_DEPOSIT_TX_HASH,
+                },
+                config: proposalTxTimeoutConfig,
+            });
+            const proposalTxTimeoutCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_SAFE,
+                agentAddress: TEST_AGENT,
+                publicClient,
+                config: proposalTxTimeoutConfig,
+            });
+            assert.equal(proposalTxTimeoutCalls.length, 1);
+            assert.equal(proposalTxTimeoutCalls[0].name, 'post_bond_and_propose');
+            await onToolOutput({
+                name: 'post_bond_and_propose',
+                parsedOutput: {
+                    status: 'submitted',
+                    transactionHash: TEST_REIMBURSE_TX_HASH,
+                },
+                config: proposalTxTimeoutConfig,
+            });
+
+            Date.now = () => baseNowMs + 2_000;
+            const noDuplicateAfterProposalTxTimeout = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_SAFE,
+                agentAddress: TEST_AGENT,
+                publicClient,
+                config: proposalTxTimeoutConfig,
+            });
+            assert.deepEqual(noDuplicateAfterProposalTxTimeout, []);
+            state = getTradeIntentState();
+            storedIntent =
+                state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-proposal-tx-timeout`];
+            assert.equal(
+                storedIntent.reimbursementSubmissionTxHash,
+                TEST_REIMBURSE_TX_HASH.toLowerCase()
+            );
+            assert.equal(typeof storedIntent.reimbursementSubmittedAtMs, 'number');
+            assert.equal(storedIntent.reimbursementSubmissionAmbiguous, true);
+            assert.equal(typeof storedIntent.reimbursementSubmissionAmbiguousAtMs, 'number');
+        } finally {
+            Date.now = proposalTxTimeoutNow;
         }
 
         await resetTradeIntentState();
