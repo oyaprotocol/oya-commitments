@@ -381,6 +381,7 @@ async function run() {
         runtime.proposedProposalLogs = [
             {
                 args: {
+                    proposer: TEST_AGENT,
                     proposalHash: TEST_PROPOSAL_HASH,
                     explanation:
                         'polymarket-intent-trader reimbursement | intent=legacy-intent-1 | signer=0x1111111111111111111111111111111111111111 | spentWei=20000000',
@@ -396,6 +397,26 @@ async function run() {
                     },
                 },
                 blockNumber: 100n,
+                logIndex: 0,
+            },
+            {
+                args: {
+                    proposer: TEST_OTHER_AGENT,
+                    proposalHash: `0x${'f'.repeat(64)}`,
+                    explanation:
+                        'polymarket-intent-trader reimbursement | intent=legacy-intent-ignored | signer=0x1111111111111111111111111111111111111111 | spentWei=20000000',
+                    proposal: {
+                        transactions: [
+                            {
+                                to: TEST_USDC,
+                                operation: 0,
+                                value: 0n,
+                                data: '0xa9059cbb00000000000000000000000022222222222222222222222222222222222222220000000000000000000000000000000000000000000000000000000001312d00',
+                            },
+                        ],
+                    },
+                },
+                blockNumber: 101n,
                 logIndex: 0,
             },
         ];
@@ -424,6 +445,10 @@ async function run() {
         state = getTradeIntentState();
         assert.equal(Object.keys(state.intents).length, 0);
         assert.equal(Object.keys(state.reimbursementCommitments).length, 1);
+        assert.equal(
+            state.reimbursementCommitments[`proposal:${TEST_PROPOSAL_HASH.toLowerCase()}`].status,
+            'executed'
+        );
         runtime.proposedProposalLogs = [];
         runtime.executedProposalLogs = [];
         runtime.deletedProposalLogs = [];
@@ -2234,7 +2259,44 @@ async function run() {
         onProposalEvents({
             executedProposals: [TEST_PROPOSAL_HASH],
         });
-        const noDuplicateAfterProposalEventRecovery = await getDeterministicToolCalls({
+        let noDuplicateAfterProposalEventRecovery = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.deepEqual(noDuplicateAfterProposalEventRecovery, []);
+        state = getTradeIntentState();
+        storedIntent =
+            state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-proposal-event-recovery`];
+        assert.equal(storedIntent.reimbursementProposalHash, undefined);
+        assert.equal(storedIntent.reimbursedAtMs, undefined);
+        assert.deepEqual(state.pendingExecutedProposalHashes, [TEST_PROPOSAL_HASH.toLowerCase()]);
+
+        runtime.latestBlock = 491n;
+        runtime.proposedProposalLogs = [
+            {
+                args: {
+                    proposer: TEST_AGENT,
+                    proposalHash: TEST_PROPOSAL_HASH,
+                    explanation: storedIntent.reimbursementExplanation,
+                    proposal: {
+                        transactions: [
+                            {
+                                to: TEST_USDC,
+                                operation: 0,
+                                value: 0n,
+                                data: '0xa9059cbb00000000000000000000000022222222222222222222222222222222222222220000000000000000000000000000000000000000000000000000000001312d00',
+                            },
+                        ],
+                    },
+                },
+                blockNumber: 491n,
+                logIndex: 0,
+            },
+        ];
+        noDuplicateAfterProposalEventRecovery = await getDeterministicToolCalls({
             signals: [],
             commitmentSafe: TEST_SAFE,
             agentAddress: TEST_AGENT,
@@ -2247,6 +2309,7 @@ async function run() {
             state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-proposal-event-recovery`];
         assert.equal(storedIntent.reimbursementProposalHash, TEST_PROPOSAL_HASH.toLowerCase());
         assert.equal(typeof storedIntent.reimbursedAtMs, 'number');
+        assert.deepEqual(state.pendingExecutedProposalHashes, []);
 
         await resetTradeIntentState();
         runtime.latestBlock = 500n;

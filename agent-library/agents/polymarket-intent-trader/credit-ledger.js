@@ -141,6 +141,9 @@ export function getReservedCreditWeiForAddress(state, address) {
         if (!commitment?.signer || !isAddressEqual(commitment.signer, address)) {
             continue;
         }
+        if (commitment.status === 'deleted') {
+            continue;
+        }
         if (hasMatchingIntentReservation(state, commitment)) {
             continue;
         }
