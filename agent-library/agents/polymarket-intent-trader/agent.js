@@ -34,7 +34,7 @@ import { planNextActionCandidates } from './planner.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const STATE_VERSION = 2;
+const STATE_VERSION = 3;
 const ARTIFACT_VERSION = 'oya-polymarket-signed-intent-archive-v1';
 const FILENAME_PREFIX = 'signed-trade-intent-';
 const FILENAME_SUFFIX = '.json';
@@ -328,6 +328,77 @@ function clearStalePendingOrderSubmission(nowMs = Date.now()) {
     }
     pendingOrderSubmission = null;
     return true;
+}
+
+function markDispatchStarted(intent, kind, nowMs = Date.now()) {
+    if (!intent) {
+        return;
+    }
+    if (kind === 'order') {
+        intent.orderDispatchAtMs = nowMs;
+    } else if (kind === 'deposit') {
+        intent.depositDispatchAtMs = nowMs;
+    } else {
+        throw new Error(`Unsupported dispatch kind: ${kind}`);
+    }
+    intent.updatedAtMs = nowMs;
+}
+
+function clearDispatchStarted(intent, kind) {
+    if (!intent) {
+        return;
+    }
+    if (kind === 'order') {
+        delete intent.orderDispatchAtMs;
+        return;
+    }
+    if (kind === 'deposit') {
+        delete intent.depositDispatchAtMs;
+        return;
+    }
+    throw new Error(`Unsupported dispatch kind: ${kind}`);
+}
+
+function reconcileDurableDispatchState(nowMs = Date.now()) {
+    let changed = false;
+
+    for (const intent of getOpenIntents()) {
+        if (
+            Number.isInteger(intent.orderDispatchAtMs) &&
+            !intent.orderId &&
+            !intent.orderSubmittedAtMs &&
+            hasTimedOut(intent.orderDispatchAtMs, PENDING_ORDER_DISPATCH_GRACE_MS, nowMs)
+        ) {
+            intent.orderSubmittedAtMs = intent.orderDispatchAtMs;
+            intent.lastOrderSubmissionStatus = intent.lastOrderSubmissionStatus ?? 'dispatch_pending';
+            intent.lastOrderSubmissionError =
+                intent.lastOrderSubmissionError ??
+                'Polymarket order tool output was lost after dispatch; treating submission as ambiguous and refusing automatic retry.';
+            delete intent.nextOrderAttemptAtMs;
+            delete intent.orderDispatchAtMs;
+            intent.updatedAtMs = nowMs;
+            changed = true;
+        }
+
+        if (
+            Number.isInteger(intent.depositDispatchAtMs) &&
+            !intent.depositTxHash &&
+            !intent.depositSubmittedAtMs &&
+            hasTimedOut(intent.depositDispatchAtMs, PENDING_DEPOSIT_DISPATCH_GRACE_MS, nowMs)
+        ) {
+            intent.depositSubmittedAtMs = intent.depositDispatchAtMs;
+            delete intent.nextDepositAttemptAtMs;
+            delete intent.depositDispatchAtMs;
+            markAmbiguousDepositSubmission(
+                intent,
+                'ERC1155 deposit tool output was lost after dispatch; treating submission as ambiguous and refusing automatic retry.',
+                nowMs
+            );
+            changed = true;
+        }
+    }
+
+    return changed;
 }
 
 async function readOutcomeTokenBalance({
@@ -1184,8 +1255,10 @@ function getIntentLifecycleStatus(record, nowMs = Date.now()) {
         return 'reimbursement_submitted';
     }
     if (record.tokenDeposited) return 'deposited';
+    if (record.depositDispatchAtMs) return 'deposit_dispatching';
     if (record.depositTxHash) return 'deposit_submitted';
     if (record.orderFilled) return 'order_filled';
+    if (record.orderDispatchAtMs) return 'order_dispatching';
     if (record.orderId) return 'order_submitted';
     if (record.artifactCid) return 'archived';
     if (Number.isInteger(record.expiryMs) && nowMs > record.expiryMs) return 'expired';
@@ -1210,9 +1283,11 @@ function buildIntentSignal(record, nowMs = Date.now()) {
         reservedCreditAmountWei: record.reservedCreditAmountWei,
         maxPrice: record.maxPrice,
         maxPriceScaled: record.maxPriceScaled,
+        orderDispatchAtMs: record.orderDispatchAtMs ?? null,
         orderId: record.orderId ?? null,
         orderStatus: record.orderStatus ?? null,
         orderFilled: Boolean(record.orderFilled),
+        depositDispatchAtMs: record.depositDispatchAtMs ?? null,
         depositTxHash: record.depositTxHash ?? null,
         tokenDeposited: Boolean(record.tokenDeposited),
         reimbursementAmountWei: record.reimbursementAmountWei ?? null,
@@ -1648,6 +1723,8 @@ function markTerminalIntentFailure(
     { stage, status, detail, releaseCredit = false, sideEffectsLikelyCommitted = false } = {}
 ) {
     const nowMs = Date.now();
+    delete intent.orderDispatchAtMs;
+    delete intent.depositDispatchAtMs;
     intent.terminalFailureStage = stage ?? 'unknown';
     intent.terminalFailureStatus = status ?? 'unknown';
     intent.terminalFailureMessage = detail ?? null;
@@ -1867,6 +1944,14 @@ async function refreshDepositSubmissionStatus({ publicClient, latestBlock, polic
         }
         if (!intent.depositTxHash) {
             if (hasTimedOut(intent.depositSubmittedAtMs, policy.pendingTxTimeoutMs, nowMs)) {
+                if (intent.depositSubmissionAmbiguous) {
+                    if (!Number.isInteger(intent.depositSubmissionAmbiguousAtMs)) {
+                        intent.depositSubmissionAmbiguousAtMs = nowMs;
+                        intent.updatedAtMs = nowMs;
+                        changed = true;
+                    }
+                    continue;
+                }
                 delete intent.depositSubmittedAtMs;
                 intent.updatedAtMs = nowMs;
                 changed = true;
@@ -1883,6 +1968,7 @@ async function refreshDepositSubmissionStatus({ publicClient, latestBlock, polic
             if (reverted) {
                 delete intent.depositTxHash;
                 delete intent.depositSubmittedAtMs;
+                delete intent.depositDispatchAtMs;
                 clearDepositSubmissionAmbiguity(intent);
                 intent.updatedAtMs = nowMs;
                 changed = true;
@@ -1893,6 +1979,7 @@ async function refreshDepositSubmissionStatus({ publicClient, latestBlock, polic
             intent.depositBlockNumber = blockNumber.toString();
             intent.tokenDeposited = true;
             intent.tokenDepositedAtMs = nowMs;
+            delete intent.depositDispatchAtMs;
             clearDepositSubmissionAmbiguity(intent);
             intent.updatedAtMs = nowMs;
             changed = true;
@@ -2206,6 +2293,7 @@ async function getDeterministicToolCalls({
     const normalizedCommitmentSafe = normalizeAddress(commitmentSafe);
     clearStalePendingOrderSubmission();
     clearStalePendingDepositSubmission();
+    let changed = reconcileDurableDispatchState();
 
     while (queuedProposalEventUpdates.length > 0) {
         applyProposalEventUpdate(queuedProposalEventUpdates.shift());
@@ -2248,7 +2336,6 @@ async function getDeterministicToolCalls({
         throw new Error(walletAlignmentError);
     }
 
-    let changed = false;
     changed = expireUnsubmittedIntents() || changed;
     changed =
         (await refreshOrderStatus({
@@ -2355,6 +2442,8 @@ async function getDeterministicToolCalls({
                 continue;
             }
 
+            markDispatchStarted(intent, 'deposit');
+            await maybePersistTradeIntentState();
             pendingDepositSubmission = {
                 intentKey: intent.intentKey,
                 startedAtMs: Date.now(),
@@ -2443,7 +2532,7 @@ async function getDeterministicToolCalls({
         intent.preOrderTokenBalance =
             preOrderTokenBalance === null ? null : preOrderTokenBalance.toString();
         intent.reimbursementRecipientAddress = clobAuthAddress ?? normalizedAgentAddress;
-        intent.updatedAtMs = Date.now();
+        markDispatchStarted(intent, 'order');
         await maybePersistTradeIntentState();
         pendingOrderSubmission = {
             intentKey: intent.intentKey,
@@ -2542,6 +2631,7 @@ async function onToolOutput({ name, parsedOutput, config }) {
         if (!intent) {
             return;
         }
+        clearDispatchStarted(intent, 'order');
 
         const status = getParsedToolOutputStatus(parsedOutput);
         if (status !== 'submitted') {
@@ -2601,6 +2691,7 @@ async function onToolOutput({ name, parsedOutput, config }) {
         if (!intent) {
             return;
         }
+        clearDispatchStarted(intent, 'deposit');
 
         const status = getParsedToolOutputStatus(parsedOutput);
         if (status === 'confirmed' || status === 'submitted') {

@@ -173,7 +173,8 @@ function buildPublicClient(runtime) {
 
 async function run() {
     const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'polymarket-intent-trader-'));
-    setTradeIntentStatePathForTest(path.join(tmpDir, '.trade-intent-state.json'));
+    const stateFilePath = path.join(tmpDir, '.trade-intent-state.json');
+    setTradeIntentStatePathForTest(stateFilePath);
 
     const runtime = {
         latestBlock: 100n,
@@ -427,6 +428,182 @@ async function run() {
             JSON.parse(relayerOrderCalls[0].arguments).signatureType,
             'POLY_GNOSIS_SAFE'
         );
+
+        await resetTradeIntentState();
+        runtime.latestBlock = 150n;
+        runtime.depositLogs = [
+            {
+                args: {
+                    from: TEST_SIGNER,
+                    value: 50_000_000n,
+                },
+                blockNumber: 10n,
+                transactionHash: `0x${'d'.repeat(64)}`,
+                logIndex: 0,
+            },
+        ];
+        const orderDispatchSignal = buildSignedMessageSignal({
+            requestId: 'pm-intent-order-dispatch-restart',
+        });
+        const orderDispatchArchiveCalls = await getDeterministicToolCalls({
+            signals: [orderDispatchSignal],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(orderDispatchArchiveCalls.length, 1);
+        await onToolOutput({
+            name: 'ipfs_publish',
+            parsedOutput: {
+                status: 'published',
+                cid: 'bafyintent-order-dispatch-restart',
+                uri: 'ipfs://bafyintent-order-dispatch-restart',
+                pinned: true,
+            },
+            config: buildModuleConfig(),
+        });
+        const orderDispatchCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(orderDispatchCalls.length, 1);
+        state = getTradeIntentState();
+        storedIntent =
+            state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-order-dispatch-restart`];
+        assert.equal(typeof storedIntent.orderDispatchAtMs, 'number');
+        setTradeIntentStatePathForTest(stateFilePath);
+        const restartOrderDispatchCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.deepEqual(restartOrderDispatchCalls, []);
+        const originalOrderDispatchDateNow = Date.now;
+        try {
+            Date.now = () => Number(storedIntent.orderDispatchAtMs) + 31_000;
+            setTradeIntentStatePathForTest(stateFilePath);
+            const orderDispatchTimeoutCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_SAFE,
+                agentAddress: TEST_AGENT,
+                publicClient,
+                config: buildModuleConfig(),
+            });
+            assert.deepEqual(orderDispatchTimeoutCalls, []);
+            state = getTradeIntentState();
+            storedIntent =
+                state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-order-dispatch-restart`];
+            assert.equal(storedIntent.orderDispatchAtMs, undefined);
+            assert.equal(typeof storedIntent.orderSubmittedAtMs, 'number');
+            assert.equal(storedIntent.lastOrderSubmissionStatus, 'dispatch_pending');
+        } finally {
+            Date.now = originalOrderDispatchDateNow;
+        }
+
+        await resetTradeIntentState();
+        runtime.latestBlock = 150n;
+        runtime.depositLogs = [
+            {
+                args: {
+                    from: TEST_SIGNER,
+                    value: 50_000_000n,
+                },
+                blockNumber: 10n,
+                transactionHash: `0x${'d'.repeat(64)}`,
+                logIndex: 0,
+            },
+        ];
+        const depositDispatchSignal = buildSignedMessageSignal({
+            requestId: 'pm-intent-deposit-dispatch-restart',
+        });
+        const depositDispatchArchiveCalls = await getDeterministicToolCalls({
+            signals: [depositDispatchSignal],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(depositDispatchArchiveCalls.length, 1);
+        await onToolOutput({
+            name: 'ipfs_publish',
+            parsedOutput: {
+                status: 'published',
+                cid: 'bafyintent-deposit-dispatch-restart',
+                uri: 'ipfs://bafyintent-deposit-dispatch-restart',
+                pinned: true,
+            },
+            config: buildModuleConfig(),
+        });
+        const depositDispatchOrderCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(depositDispatchOrderCalls.length, 1);
+        await onToolOutput({
+            name: 'polymarket_clob_build_sign_and_place_order',
+            parsedOutput: {
+                status: 'submitted',
+                result: {
+                    order: {
+                        id: 'order-deposit-dispatch-restart',
+                        status: 'LIVE',
+                    },
+                },
+            },
+            config: buildModuleConfig(),
+        });
+        runtime.ctfBalances[`${TEST_AGENT.toLowerCase()}:${NO_TOKEN_ID}`] = 100_000_000n;
+        const depositDispatchCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(depositDispatchCalls.length, 1);
+        state = getTradeIntentState();
+        storedIntent =
+            state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-deposit-dispatch-restart`];
+        assert.equal(typeof storedIntent.depositDispatchAtMs, 'number');
+        setTradeIntentStatePathForTest(stateFilePath);
+        const restartDepositDispatchCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.deepEqual(restartDepositDispatchCalls, []);
+        const originalDepositDispatchDateNow = Date.now;
+        try {
+            Date.now = () => Number(storedIntent.depositDispatchAtMs) + 31_000;
+            setTradeIntentStatePathForTest(stateFilePath);
+            const depositDispatchTimeoutCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_SAFE,
+                agentAddress: TEST_AGENT,
+                publicClient,
+                config: buildModuleConfig(),
+            });
+            assert.deepEqual(depositDispatchTimeoutCalls, []);
+            state = getTradeIntentState();
+            storedIntent =
+                state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-deposit-dispatch-restart`];
+            assert.equal(storedIntent.depositDispatchAtMs, undefined);
+            assert.equal(typeof storedIntent.depositSubmittedAtMs, 'number');
+            assert.equal(storedIntent.depositSubmissionAmbiguous, true);
+        } finally {
+            Date.now = originalDepositDispatchDateNow;
+        }
 
         await resetTradeIntentState();
         runtime.latestBlock = 150n;

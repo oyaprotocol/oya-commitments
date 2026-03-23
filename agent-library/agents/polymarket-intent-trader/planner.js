@@ -20,8 +20,10 @@ export function hasActiveExecution({
         Boolean(pendingDepositSubmission?.intentKey) ||
         openIntents.some(
             (intent) =>
+                Boolean(intent.orderDispatchAtMs) ||
                 Boolean(intent.orderSubmittedAtMs) ||
                 Boolean(intent.orderId) ||
+                Boolean(intent.depositDispatchAtMs) ||
                 Boolean(intent.depositSubmittedAtMs) ||
                 Boolean(intent.depositTxHash) ||
                 Boolean(intent.reimbursementSubmittedAtMs) ||
@@ -51,6 +53,7 @@ export function planNextActionCandidates({
         }
         if (
             intent.depositTxHash ||
+            intent.depositDispatchAtMs ||
             intent.depositSubmittedAtMs ||
             pendingDepositSubmission?.intentKey === intent.intentKey
         ) {
@@ -109,6 +112,7 @@ export function planNextActionCandidates({
         if (
             !intent.artifactCid ||
             intent.orderId ||
+            intent.orderDispatchAtMs ||
             intent.orderSubmittedAtMs ||
             pendingOrderSubmission?.intentKey === intent.intentKey
         ) {
