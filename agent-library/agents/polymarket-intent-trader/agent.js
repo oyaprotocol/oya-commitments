@@ -1,4 +1,3 @@
-import { readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { decodeEventLog, erc1155Abi, getAddress, hexToString, isAddressEqual, parseUnits } from 'viem';
@@ -37,7 +36,23 @@ import {
     getDepositedCreditWeiForAddress,
     getReservedCreditWeiForAddress,
 } from './credit-ledger.js';
+import {
+    clearStageAmbiguity,
+    clearStageDispatchStarted,
+    clearStageSubmissionTracking,
+    getLifecycleStageFields,
+    markStageAmbiguity,
+    markStageDispatchStarted,
+    noteStageTimeoutAmbiguity,
+} from './lifecycle-stage.js';
 import { planNextActionCandidates } from './planner.js';
+import {
+    cloneJson,
+    createEmptyTradeIntentState,
+    deletePersistedTradeIntentState,
+    readPersistedTradeIntentState,
+    writePersistedTradeIntentState,
+} from './state-store.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -66,16 +81,7 @@ const DEFAULT_SIGNED_COMMANDS = [
     'polymarket_intent',
 ];
 
-const tradeIntentState = {
-    nextSequence: 1,
-    intents: {},
-    deposits: {},
-    reimbursementCommitments: {},
-    pendingExecutedProposalHashes: [],
-    pendingDeletedProposalHashes: [],
-    backfilledDepositsThroughBlock: null,
-    backfilledReimbursementCommitmentsThroughBlock: null,
-};
+const tradeIntentState = createEmptyTradeIntentState();
 
 let tradeIntentStateHydrated = false;
 let statePathOverride = null;
@@ -89,24 +95,21 @@ let depositBackfillStatusLogged = false;
 let reimbursementBackfillStatusLogged = false;
 const queuedProposalEventUpdates = [];
 
-function cloneJson(value) {
-    if (value === undefined) return undefined;
-    return JSON.parse(JSON.stringify(value));
-}
-
 function markStateDirty() {
     // State writes are infrequent and the runtime is single-threaded enough for direct writes.
 }
 
 function resetInMemoryState({ hydrated = false, preserveQueuedProposalEventUpdates = false } = {}) {
-    tradeIntentState.nextSequence = 1;
-    tradeIntentState.intents = {};
-    tradeIntentState.deposits = {};
-    tradeIntentState.reimbursementCommitments = {};
-    tradeIntentState.pendingExecutedProposalHashes = [];
-    tradeIntentState.pendingDeletedProposalHashes = [];
-    tradeIntentState.backfilledDepositsThroughBlock = null;
-    tradeIntentState.backfilledReimbursementCommitmentsThroughBlock = null;
+    const emptyState = createEmptyTradeIntentState();
+    tradeIntentState.nextSequence = emptyState.nextSequence;
+    tradeIntentState.intents = emptyState.intents;
+    tradeIntentState.deposits = emptyState.deposits;
+    tradeIntentState.reimbursementCommitments = emptyState.reimbursementCommitments;
+    tradeIntentState.pendingExecutedProposalHashes = emptyState.pendingExecutedProposalHashes;
+    tradeIntentState.pendingDeletedProposalHashes = emptyState.pendingDeletedProposalHashes;
+    tradeIntentState.backfilledDepositsThroughBlock = emptyState.backfilledDepositsThroughBlock;
+    tradeIntentState.backfilledReimbursementCommitmentsThroughBlock =
+        emptyState.backfilledReimbursementCommitmentsThroughBlock;
     tradeIntentStateHydrated = hydrated;
     pendingArtifactPublish = null;
     pendingOrderSubmission = null;
@@ -371,73 +374,42 @@ function clearStalePendingProposalSubmission(nowMs = Date.now()) {
     return true;
 }
 
-function markDispatchStarted(intent, kind, nowMs = Date.now()) {
-    if (!intent) {
-        return;
-    }
-    if (kind === 'order') {
-        intent.orderDispatchAtMs = nowMs;
-    } else if (kind === 'deposit') {
-        intent.depositDispatchAtMs = nowMs;
-    } else if (kind === 'reimbursement') {
-        intent.reimbursementDispatchAtMs = nowMs;
-    } else {
-        throw new Error(`Unsupported dispatch kind: ${kind}`);
-    }
-    intent.updatedAtMs = nowMs;
-}
-
-function clearDispatchStarted(intent, kind) {
-    if (!intent) {
-        return;
-    }
-    if (kind === 'order') {
-        delete intent.orderDispatchAtMs;
-        return;
-    }
-    if (kind === 'deposit') {
-        delete intent.depositDispatchAtMs;
-        return;
-    }
-    if (kind === 'reimbursement') {
-        delete intent.reimbursementDispatchAtMs;
-        return;
-    }
-    throw new Error(`Unsupported dispatch kind: ${kind}`);
-}
-
 function reconcileDurableDispatchState(nowMs = Date.now()) {
     let changed = false;
+    const orderFields = getLifecycleStageFields('order');
+    const depositFields = getLifecycleStageFields('deposit');
+    const reimbursementFields = getLifecycleStageFields('reimbursement');
 
     for (const intent of getOpenIntents()) {
         if (
-            Number.isInteger(intent.orderDispatchAtMs) &&
-            !intent.orderId &&
-            !intent.orderSubmittedAtMs &&
-            hasTimedOut(intent.orderDispatchAtMs, PENDING_ORDER_DISPATCH_GRACE_MS, nowMs)
+            Number.isInteger(intent[orderFields.dispatchAt]) &&
+            !intent[orderFields.externalId] &&
+            !intent[orderFields.submittedAt] &&
+            hasTimedOut(intent[orderFields.dispatchAt], PENDING_ORDER_DISPATCH_GRACE_MS, nowMs)
         ) {
-            intent.orderSubmittedAtMs = intent.orderDispatchAtMs;
-            intent.lastOrderSubmissionStatus = intent.lastOrderSubmissionStatus ?? 'dispatch_pending';
-            intent.lastOrderSubmissionError =
-                intent.lastOrderSubmissionError ??
+            intent[orderFields.submittedAt] = intent[orderFields.dispatchAt];
+            intent[orderFields.status] = intent[orderFields.status] ?? 'dispatch_pending';
+            intent[orderFields.error] =
+                intent[orderFields.error] ??
                 'Polymarket order tool output was lost after dispatch; treating submission as ambiguous and refusing automatic retry.';
-            delete intent.nextOrderAttemptAtMs;
-            delete intent.orderDispatchAtMs;
+            delete intent[orderFields.backoffAt];
+            clearStageDispatchStarted(intent, 'order');
             intent.updatedAtMs = nowMs;
             changed = true;
         }
 
         if (
-            Number.isInteger(intent.depositDispatchAtMs) &&
-            !intent.depositTxHash &&
-            !intent.depositSubmittedAtMs &&
-            hasTimedOut(intent.depositDispatchAtMs, PENDING_DEPOSIT_DISPATCH_GRACE_MS, nowMs)
+            Number.isInteger(intent[depositFields.dispatchAt]) &&
+            !intent[depositFields.txHash] &&
+            !intent[depositFields.submittedAt] &&
+            hasTimedOut(intent[depositFields.dispatchAt], PENDING_DEPOSIT_DISPATCH_GRACE_MS, nowMs)
         ) {
-            intent.depositSubmittedAtMs = intent.depositDispatchAtMs;
-            delete intent.nextDepositAttemptAtMs;
-            delete intent.depositDispatchAtMs;
-            markAmbiguousDepositSubmission(
+            intent[depositFields.submittedAt] = intent[depositFields.dispatchAt];
+            delete intent[depositFields.backoffAt];
+            clearStageDispatchStarted(intent, 'deposit');
+            markStageAmbiguity(
                 intent,
+                'deposit',
                 'ERC1155 deposit tool output was lost after dispatch; treating submission as ambiguous and refusing automatic retry.',
                 nowMs
             );
@@ -445,18 +417,19 @@ function reconcileDurableDispatchState(nowMs = Date.now()) {
         }
 
         if (
-            Number.isInteger(intent.reimbursementDispatchAtMs) &&
+            Number.isInteger(intent[reimbursementFields.dispatchAt]) &&
             !intent.reimbursementProposalHash &&
-            !intent.reimbursementSubmissionTxHash &&
-            !intent.reimbursementSubmittedAtMs &&
-            hasTimedOut(intent.reimbursementDispatchAtMs, PENDING_PROPOSAL_DISPATCH_GRACE_MS, nowMs)
+            !intent[reimbursementFields.txHash] &&
+            !intent[reimbursementFields.submittedAt] &&
+            hasTimedOut(intent[reimbursementFields.dispatchAt], PENDING_PROPOSAL_DISPATCH_GRACE_MS, nowMs)
         ) {
-            intent.reimbursementSubmittedAtMs = intent.reimbursementDispatchAtMs;
+            intent[reimbursementFields.submittedAt] = intent[reimbursementFields.dispatchAt];
             intent.lastReimbursementSubmissionStatus =
                 intent.lastReimbursementSubmissionStatus ?? 'dispatch_pending';
-            delete intent.reimbursementDispatchAtMs;
-            markAmbiguousReimbursementSubmission(
+            clearStageDispatchStarted(intent, 'reimbursement');
+            markStageAmbiguity(
                 intent,
+                'reimbursement',
                 'Reimbursement proposal tool output was lost after dispatch; treating submission as ambiguous and refusing automatic retry.',
                 nowMs
             );
@@ -545,77 +518,24 @@ function hasConcurrentTokenSettlementDependency({ intent, tokenHolderAddress }) 
     });
 }
 
-const DEPOSIT_SUBMISSION_FIELDS = Object.freeze({
-    submittedAt: 'depositSubmittedAtMs',
-    txHash: 'depositTxHash',
-    dispatchAt: 'depositDispatchAtMs',
-    ambiguous: 'depositSubmissionAmbiguous',
-    ambiguousAt: 'depositSubmissionAmbiguousAtMs',
-    ambiguityDetail: 'lastDepositReceiptError',
-    clearAmbiguityDetail: true,
-});
-
-const REIMBURSEMENT_SUBMISSION_FIELDS = Object.freeze({
-    submittedAt: 'reimbursementSubmittedAtMs',
-    txHash: 'reimbursementSubmissionTxHash',
-    dispatchAt: 'reimbursementDispatchAtMs',
-    ambiguous: 'reimbursementSubmissionAmbiguous',
-    ambiguousAt: 'reimbursementSubmissionAmbiguousAtMs',
-    ambiguityDetail: 'lastReimbursementSubmissionError',
-    clearAmbiguityDetail: false,
-});
-
-function clearTrackedSubmissionAmbiguity(intent, fields) {
-    delete intent[fields.ambiguous];
-    delete intent[fields.ambiguousAt];
-    if (fields.clearAmbiguityDetail && fields.ambiguityDetail) {
-        delete intent[fields.ambiguityDetail];
-    }
-}
-
-function markTrackedSubmissionAmbiguity(intent, fields, detail, nowMs = Date.now()) {
-    intent[fields.ambiguous] = true;
-    if (!Number.isInteger(intent[fields.ambiguousAt])) {
-        intent[fields.ambiguousAt] = nowMs;
-    }
-    if (fields.ambiguityDetail) {
-        intent[fields.ambiguityDetail] = detail ?? null;
-    }
-    intent.updatedAtMs = nowMs;
-}
-
-function noteTrackedSubmissionTimeoutAmbiguity(intent, fields, nowMs = Date.now()) {
-    if (Number.isInteger(intent[fields.ambiguousAt])) {
-        return false;
-    }
-    intent[fields.ambiguousAt] = nowMs;
-    intent.updatedAtMs = nowMs;
-    return true;
-}
-
 function clearDepositSubmissionAmbiguity(intent) {
-    clearTrackedSubmissionAmbiguity(intent, DEPOSIT_SUBMISSION_FIELDS);
+    clearStageAmbiguity(intent, 'deposit');
 }
 
 function markAmbiguousDepositSubmission(intent, detail, nowMs = Date.now()) {
-    markTrackedSubmissionAmbiguity(intent, DEPOSIT_SUBMISSION_FIELDS, detail, nowMs);
+    markStageAmbiguity(intent, 'deposit', detail, nowMs);
 }
 
 function clearReimbursementSubmissionAmbiguity(intent) {
-    clearTrackedSubmissionAmbiguity(intent, REIMBURSEMENT_SUBMISSION_FIELDS);
+    clearStageAmbiguity(intent, 'reimbursement');
 }
 
 function markAmbiguousReimbursementSubmission(intent, detail, nowMs = Date.now()) {
-    markTrackedSubmissionAmbiguity(intent, REIMBURSEMENT_SUBMISSION_FIELDS, detail, nowMs);
+    markStageAmbiguity(intent, 'reimbursement', detail, nowMs);
 }
 
 function clearReimbursementSubmissionTracking(intent) {
-    delete intent.reimbursementDispatchAtMs;
-    delete intent.reimbursementSubmittedAtMs;
-    delete intent.reimbursementSubmissionTxHash;
-    clearReimbursementSubmissionAmbiguity(intent);
-    delete intent.lastReimbursementSubmissionStatus;
-    delete intent.lastReimbursementSubmissionError;
+    clearStageSubmissionTracking(intent, 'reimbursement');
 }
 
 function setPendingProposalLifecycleHashes({ executed = [], deleted = [] }) {
@@ -698,8 +618,10 @@ async function hydrateTradeIntentState() {
     if (tradeIntentStateHydrated) return;
     tradeIntentStateHydrated = true;
     try {
-        const raw = await readFile(getStatePath(), 'utf8');
-        const parsed = JSON.parse(raw);
+        const parsed = await readPersistedTradeIntentState(getStatePath());
+        if (!parsed) {
+            return;
+        }
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
             tradeIntentState.nextSequence =
                 Number.isInteger(parsed.nextSequence) && parsed.nextSequence > 0
@@ -740,30 +662,25 @@ async function hydrateTradeIntentState() {
         }
     } catch (error) {
         resetInMemoryState({ hydrated: true, preserveQueuedProposalEventUpdates: true });
+        throw new Error(
+            `Failed to hydrate polymarket-intent-trader state from ${getStatePath()}: ${error?.message ?? error}`
+        );
     }
 }
 
 async function persistTradeIntentState() {
-    await writeFile(
-        getStatePath(),
-        JSON.stringify(
-            {
-                version: STATE_VERSION,
-                nextSequence: tradeIntentState.nextSequence,
-                intents: tradeIntentState.intents,
-                deposits: tradeIntentState.deposits,
-                reimbursementCommitments: tradeIntentState.reimbursementCommitments,
-                pendingExecutedProposalHashes: tradeIntentState.pendingExecutedProposalHashes,
-                pendingDeletedProposalHashes: tradeIntentState.pendingDeletedProposalHashes,
-                backfilledDepositsThroughBlock: tradeIntentState.backfilledDepositsThroughBlock,
-                backfilledReimbursementCommitmentsThroughBlock:
-                    tradeIntentState.backfilledReimbursementCommitmentsThroughBlock,
-            },
-            null,
-            2
-        ),
-        'utf8'
-    );
+    await writePersistedTradeIntentState(getStatePath(), {
+        version: STATE_VERSION,
+        nextSequence: tradeIntentState.nextSequence,
+        intents: tradeIntentState.intents,
+        deposits: tradeIntentState.deposits,
+        reimbursementCommitments: tradeIntentState.reimbursementCommitments,
+        pendingExecutedProposalHashes: tradeIntentState.pendingExecutedProposalHashes,
+        pendingDeletedProposalHashes: tradeIntentState.pendingDeletedProposalHashes,
+        backfilledDepositsThroughBlock: tradeIntentState.backfilledDepositsThroughBlock,
+        backfilledReimbursementCommitmentsThroughBlock:
+            tradeIntentState.backfilledReimbursementCommitmentsThroughBlock,
+    });
 }
 
 async function maybePersistTradeIntentState() {
@@ -772,11 +689,7 @@ async function maybePersistTradeIntentState() {
 
 async function resetTradeIntentState() {
     resetInMemoryState({ hydrated: true });
-    try {
-        await unlink(getStatePath());
-    } catch (error) {
-        // Ignore missing state files during tests.
-    }
+    await deletePersistedTradeIntentState(getStatePath());
 }
 
 function setTradeIntentStatePathForTest(nextPath) {
@@ -2504,6 +2417,7 @@ async function refreshOrderStatus({
 
 async function refreshTrackedTxSubmissionStatus({
     publicClient,
+    kind,
     pendingTxTimeoutMs,
     fields,
     isComplete,
@@ -2526,7 +2440,7 @@ async function refreshTrackedTxSubmissionStatus({
                 continue;
             }
             if (intent[fields.ambiguous]) {
-                changed = noteTrackedSubmissionTimeoutAmbiguity(intent, fields, nowMs) || changed;
+                changed = noteStageTimeoutAmbiguity(intent, kind, nowMs) || changed;
                 continue;
             }
             changed = (await onMissingTxTimeout(intent, { nowMs })) || changed;
@@ -2565,8 +2479,9 @@ async function refreshTrackedTxSubmissionStatus({
 async function refreshDepositSubmissionStatus({ publicClient, latestBlock, policy }) {
     return refreshTrackedTxSubmissionStatus({
         publicClient,
+        kind: 'deposit',
         pendingTxTimeoutMs: policy.pendingTxTimeoutMs,
-        fields: DEPOSIT_SUBMISSION_FIELDS,
+        fields: getLifecycleStageFields('deposit'),
         isComplete: (intent) => intent.tokenDeposited,
         onMissingTxTimeout: (intent, { nowMs }) => {
             delete intent.depositSubmittedAtMs;
@@ -2608,8 +2523,9 @@ async function refreshDepositSubmissionStatus({ publicClient, latestBlock, polic
 async function refreshProposalSubmissionStatus({ publicClient, policy }) {
     return refreshTrackedTxSubmissionStatus({
         publicClient,
+        kind: 'reimbursement',
         pendingTxTimeoutMs: policy.pendingTxTimeoutMs,
-        fields: REIMBURSEMENT_SUBMISSION_FIELDS,
+        fields: getLifecycleStageFields('reimbursement'),
         isComplete: (intent) => Boolean(intent.reimbursementProposalHash),
         onMissingTxTimeout: (intent, { nowMs }) => {
             delete intent.reimbursementSubmittedAtMs;
@@ -3078,7 +2994,7 @@ async function getDeterministicToolCalls({
                 continue;
             }
 
-            markDispatchStarted(intent, 'deposit');
+            markStageDispatchStarted(intent, 'deposit');
             await maybePersistTradeIntentState();
             pendingDepositSubmission = {
                 intentKey: intent.intentKey,
@@ -3113,7 +3029,7 @@ async function getDeterministicToolCalls({
             delete intent.lastReimbursementCreditError;
             delete intent.reimbursementCreditBlockedAtMs;
             delete intent.nextReimbursementAttemptAtMs;
-            markDispatchStarted(intent, 'reimbursement');
+            markStageDispatchStarted(intent, 'reimbursement');
             await maybePersistTradeIntentState();
 
             pendingProposalSubmission = {
@@ -3187,7 +3103,7 @@ async function getDeterministicToolCalls({
         intent.preOrderTokenBalance =
             preOrderTokenBalance === null ? null : preOrderTokenBalance.toString();
         intent.reimbursementRecipientAddress = clobAuthAddress ?? normalizedAgentAddress;
-        markDispatchStarted(intent, 'order');
+        markStageDispatchStarted(intent, 'order');
         await maybePersistTradeIntentState();
         pendingOrderSubmission = {
             intentKey: intent.intentKey,
@@ -3305,7 +3221,7 @@ async function handleOrderToolOutput({ parsedOutput, policy }) {
     if (!intent) {
         return;
     }
-    clearDispatchStarted(intent, 'order');
+    clearStageDispatchStarted(intent, 'order');
 
     const status = getParsedToolOutputStatus(parsedOutput);
     if (status !== 'submitted') {
@@ -3357,7 +3273,7 @@ async function handleDepositToolOutput({ parsedOutput, policy }) {
     if (!intent) {
         return;
     }
-    clearDispatchStarted(intent, 'deposit');
+    clearStageDispatchStarted(intent, 'deposit');
 
     const status = getParsedToolOutputStatus(parsedOutput);
     if (status === 'confirmed' || status === 'submitted') {
@@ -3415,7 +3331,7 @@ async function handleReimbursementToolOutput({ parsedOutput, policy }) {
     if (!intent) {
         return;
     }
-    clearDispatchStarted(intent, 'reimbursement');
+    clearStageDispatchStarted(intent, 'reimbursement');
 
     const status = getParsedToolOutputStatus(parsedOutput);
     if (status !== 'submitted') {

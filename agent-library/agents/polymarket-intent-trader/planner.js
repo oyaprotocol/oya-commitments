@@ -1,3 +1,8 @@
+import {
+    getLifecycleStageFields,
+    hasStageFutureBackoff,
+} from './lifecycle-stage.js';
+
 function hasFutureBackoff(intent, fieldName, nowMs) {
     return Number.isInteger(intent?.[fieldName]) && intent[fieldName] > nowMs;
 }
@@ -15,20 +20,23 @@ export function hasActiveExecution({
     pendingOrderSubmission = null,
     pendingDepositSubmission = null,
 }) {
+    const orderFields = getLifecycleStageFields('order');
+    const depositFields = getLifecycleStageFields('deposit');
+    const reimbursementFields = getLifecycleStageFields('reimbursement');
     return (
         Boolean(pendingOrderSubmission?.intentKey) ||
         Boolean(pendingDepositSubmission?.intentKey) ||
         openIntents.some(
             (intent) =>
-                Boolean(intent.orderDispatchAtMs) ||
-                Boolean(intent.orderSubmittedAtMs) ||
-                Boolean(intent.orderId) ||
-                Boolean(intent.depositDispatchAtMs) ||
-                Boolean(intent.depositSubmittedAtMs) ||
-                Boolean(intent.depositTxHash) ||
-                Boolean(intent.reimbursementDispatchAtMs) ||
-                Boolean(intent.reimbursementSubmittedAtMs) ||
-                Boolean(intent.reimbursementSubmissionTxHash)
+                Boolean(intent[orderFields.dispatchAt]) ||
+                Boolean(intent[orderFields.submittedAt]) ||
+                Boolean(intent[orderFields.externalId]) ||
+                Boolean(intent[depositFields.dispatchAt]) ||
+                Boolean(intent[depositFields.submittedAt]) ||
+                Boolean(intent[depositFields.txHash]) ||
+                Boolean(intent[reimbursementFields.dispatchAt]) ||
+                Boolean(intent[reimbursementFields.submittedAt]) ||
+                Boolean(intent[reimbursementFields.txHash])
         )
     );
 }
@@ -49,13 +57,14 @@ export function planNextActionCandidates({
         if (!hasFilledSharesReady(intent)) {
             continue;
         }
-        if (hasFutureBackoff(intent, 'nextDepositAttemptAtMs', nowMs)) {
+        const depositFields = getLifecycleStageFields('deposit');
+        if (hasStageFutureBackoff(intent, 'deposit', nowMs)) {
             continue;
         }
         if (
-            intent.depositTxHash ||
-            intent.depositDispatchAtMs ||
-            intent.depositSubmittedAtMs ||
+            intent[depositFields.txHash] ||
+            intent[depositFields.dispatchAt] ||
+            intent[depositFields.submittedAt] ||
             pendingDepositSubmission?.intentKey === intent.intentKey
         ) {
             continue;
@@ -70,14 +79,15 @@ export function planNextActionCandidates({
         if (!intent.tokenDeposited) {
             continue;
         }
-        if (hasFutureBackoff(intent, 'nextReimbursementAttemptAtMs', nowMs)) {
+        const reimbursementFields = getLifecycleStageFields('reimbursement');
+        if (hasStageFutureBackoff(intent, 'reimbursement', nowMs)) {
             continue;
         }
         if (
-            intent.reimbursementDispatchAtMs ||
+            intent[reimbursementFields.dispatchAt] ||
             intent.reimbursementProposalHash ||
-            intent.reimbursementSubmissionTxHash ||
-            intent.reimbursementSubmittedAtMs
+            intent[reimbursementFields.txHash] ||
+            intent[reimbursementFields.submittedAt]
         ) {
             continue;
         }
@@ -114,11 +124,12 @@ export function planNextActionCandidates({
     }
 
     for (const intent of openIntents) {
+        const orderFields = getLifecycleStageFields('order');
         if (
             !intent.artifactCid ||
-            intent.orderId ||
-            intent.orderDispatchAtMs ||
-            intent.orderSubmittedAtMs ||
+            intent[orderFields.externalId] ||
+            intent[orderFields.dispatchAt] ||
+            intent[orderFields.submittedAt] ||
             pendingOrderSubmission?.intentKey === intent.intentKey
         ) {
             continue;
@@ -126,7 +137,7 @@ export function planNextActionCandidates({
         if (Number.isInteger(intent.expiryMs) && nowMs > intent.expiryMs) {
             continue;
         }
-        if (hasFutureBackoff(intent, 'nextOrderAttemptAtMs', nowMs)) {
+        if (hasStageFutureBackoff(intent, 'order', nowMs)) {
             continue;
         }
         candidates.push({
