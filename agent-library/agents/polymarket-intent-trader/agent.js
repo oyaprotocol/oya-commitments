@@ -864,12 +864,19 @@ function resolvePolicy(config = {}) {
         (Array.isArray(config?.watchAssets) && config.watchAssets.length > 0
             ? normalizeAddressOrNull(config.watchAssets[0])
             : normalizeAddressOrNull(DEFAULT_COLLATERAL_TOKEN));
+    const minimumTickSize =
+        normalizePriceToScaled(
+            candidate.minimumTickSize ?? candidate.tickSize ?? candidate.minimum_tick_size,
+            null
+        ) ?? null;
 
     const policy = {
         authorizedAgent: normalizeAddressOrNull(
             candidate.authorizedAgent ?? candidate.agentAddress ?? null
         ),
         marketId: normalizeNonEmptyString(candidate.marketId),
+        minimumTickSize: minimumTickSize?.decimal ?? null,
+        minimumTickSizeScaled: minimumTickSize?.scaled ?? null,
         yesTokenId: normalizeTokenId(candidate.yesTokenId),
         noTokenId: normalizeTokenId(candidate.noTokenId),
         collateralToken,
@@ -897,6 +904,11 @@ function resolvePolicy(config = {}) {
 
     if (!policy.marketId) {
         policy.errors.push('polymarketIntentTrader.marketId is required.');
+    }
+    if (!policy.minimumTickSizeScaled) {
+        policy.errors.push(
+            'polymarketIntentTrader.minimumTickSize is required (for example 0.01 or 0.001).'
+        );
     }
     if (!policy.authorizedAgent) {
         policy.errors.push('polymarketIntentTrader.authorizedAgent is required.');
@@ -959,10 +971,15 @@ function parseOutcomeFromText(text) {
 function parseMaxSpendFromText(text) {
     const patterns = [
         /\bfor\s+up\s+to\s+\$?((?:[\d,]+(?:\.\d+)?|\.\d+))\s*(?:usdc|usd|dollars?)\b/gi,
+        /\bfor\s+up\s+to\s+\$((?:[\d,]+(?:\.\d+)?|\.\d+))\b/gi,
         /\bup\s+to\s+\$?((?:[\d,]+(?:\.\d+)?|\.\d+))\s*(?:usdc|usd|dollars?)\b/gi,
+        /\bup\s+to\s+\$((?:[\d,]+(?:\.\d+)?|\.\d+))\b/gi,
         /\b(?:spend|use|risk)\s+up\s+to\s+\$?((?:[\d,]+(?:\.\d+)?|\.\d+))\s*(?:usdc|usd|dollars?)\b/gi,
+        /\b(?:spend|use|risk)\s+up\s+to\s+\$((?:[\d,]+(?:\.\d+)?|\.\d+))\b/gi,
         /\bmax(?:imum)?\s+(?:spend|cost|notional)?\s*\$?((?:[\d,]+(?:\.\d+)?|\.\d+))\s*(?:usdc|usd|dollars?)\b/gi,
+        /\bmax(?:imum)?\s+(?:spend|cost|notional)?\s*\$((?:[\d,]+(?:\.\d+)?|\.\d+))\b/gi,
         /\bfor\s+\$?((?:[\d,]+(?:\.\d+)?|\.\d+))\s*(?:usdc|usd|dollars?)\b/gi,
+        /\bfor\s+\$((?:[\d,]+(?:\.\d+)?|\.\d+))\b/gi,
     ];
 
     for (const pattern of patterns) {
@@ -1006,6 +1023,19 @@ function normalizePriceToScaled(value, unit) {
     }
 }
 
+function isPriceOnTick({ priceScaled, tickSizeScaled }) {
+    try {
+        const normalizedPriceScaled = BigInt(String(priceScaled));
+        const normalizedTickSizeScaled = BigInt(String(tickSizeScaled));
+        if (normalizedPriceScaled <= 0n || normalizedTickSizeScaled <= 0n) {
+            return false;
+        }
+        return normalizedPriceScaled % normalizedTickSizeScaled === 0n;
+    } catch (error) {
+        return false;
+    }
+}
+
 function parseMaxPriceFromText(text) {
     const patterns = [
         /\b(?:price\s*(?:is|<=|=<|<|under|at\s+most|up\s+to)|max(?:imum)?\s+price(?:\s+is)?|at)\s*\$?((?:[\d,]+(?:\.\d+)?|\.\d+))\s*(c|cent|cents|%)\b(?:\s+or\s+(?:better|less|lower))?/gi,
@@ -1036,7 +1066,7 @@ function buildArtifactFilename(requestId) {
     return `${FILENAME_PREFIX}${encodeRequestIdForFilename(requestId)}${FILENAME_SUFFIX}`;
 }
 
-function computeBuyOrderAmounts({ collateralAmountWei, price }) {
+function computeBuyOrderAmounts({ collateralAmountWei, price, tickSizeScaled = null }) {
     const normalizedCollateralAmountWei = BigInt(collateralAmountWei);
     if (normalizedCollateralAmountWei <= 0n) {
         throw new Error('collateralAmountWei must be > 0 for buy-order sizing.');
@@ -1050,6 +1080,9 @@ function computeBuyOrderAmounts({ collateralAmountWei, price }) {
     const priceScaled = BigInt(Math.round(normalizedPrice * Number(PRICE_SCALE)));
     if (priceScaled <= 0n) {
         throw new Error('price is too small for buy-order sizing.');
+    }
+    if (tickSizeScaled !== null && !isPriceOnTick({ priceScaled, tickSizeScaled })) {
+        throw new Error('price does not conform to the configured minimum tick size.');
     }
 
     // For BUY orders on Polymarket, makerAmount is the USDC spend and takerAmount is the
@@ -1133,6 +1166,15 @@ function interpretSignedTradeIntentSignal(
     if (!maxPrice) {
         return { ok: false, reason: 'missing_max_price' };
     }
+    if (
+        policy.minimumTickSizeScaled &&
+        !isPriceOnTick({
+            priceScaled: maxPrice.scaled,
+            tickSizeScaled: policy.minimumTickSizeScaled,
+        })
+    ) {
+        return { ok: false, reason: 'invalid_price_tick' };
+    }
 
     const expiryMs = resolveExpiryMs(signal);
     if (!expiryMs) {
@@ -1147,6 +1189,7 @@ function interpretSignedTradeIntentSignal(
         orderAmounts = computeBuyOrderAmounts({
             collateralAmountWei: maxSpend.wei,
             price: maxPrice.decimal,
+            tickSizeScaled: policy.minimumTickSizeScaled ?? null,
         });
     } catch (error) {
         return {

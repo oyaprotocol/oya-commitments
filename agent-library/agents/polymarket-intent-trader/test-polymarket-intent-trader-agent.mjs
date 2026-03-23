@@ -41,6 +41,7 @@ function buildModuleConfig(overrides = {}) {
         polymarketIntentTrader: {
             authorizedAgent: TEST_AGENT,
             marketId: 'market-123',
+            minimumTickSize: '0.01',
             yesTokenId: YES_TOKEN_ID,
             noTokenId: NO_TOKEN_ID,
             collateralToken: TEST_USDC,
@@ -1035,6 +1036,26 @@ async function run() {
         assert.equal(leadingDecimalInterpreted.intent.maxSpendWei, '500000');
         assert.equal(leadingDecimalInterpreted.intent.maxPriceScaled, '420000');
 
+        const dollarSignSpendSignal = buildSignedMessageSignal({
+            requestId: 'pm-intent-dollar-sign-spend',
+            text: 'Buy NO for up to $25 if the price is 42 cents or better before 6pm UTC.',
+        });
+        const dollarSignSpendInterpreted = interpretSignedTradeIntentSignal(dollarSignSpendSignal, {
+            policy: {
+                ready: true,
+                marketId: 'market-123',
+                minimumTickSizeScaled: '10000',
+                yesTokenId: YES_TOKEN_ID,
+                noTokenId: NO_TOKEN_ID,
+                collateralToken: TEST_USDC.toLowerCase(),
+                ctfContract: TEST_CTF.toLowerCase(),
+                signedCommands: new Set(['buy']),
+            },
+            nowMs: dollarSignSpendSignal.receivedAtMs,
+        });
+        assert.equal(dollarSignSpendInterpreted.ok, true);
+        assert.equal(dollarSignSpendInterpreted.intent.maxSpendWei, '25000000');
+
         const ttlOnlySignal = buildSignedMessageSignal({
             requestId: 'pm-intent-ttl-only',
         });
@@ -1152,6 +1173,36 @@ async function run() {
             state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-boundary-price`],
             undefined
         );
+
+        const offTickSignal = buildSignedMessageSignal({
+            requestId: 'pm-intent-off-tick',
+            text: 'Buy NO for up to 25 USDC if the price is 0.421 or better before 6pm UTC.',
+        });
+        const offTickInterpreted = interpretSignedTradeIntentSignal(offTickSignal, {
+            policy: {
+                ready: true,
+                marketId: 'market-123',
+                minimumTickSizeScaled: '10000',
+                yesTokenId: YES_TOKEN_ID,
+                noTokenId: NO_TOKEN_ID,
+                collateralToken: TEST_USDC.toLowerCase(),
+                ctfContract: TEST_CTF.toLowerCase(),
+                signedCommands: new Set(['buy']),
+            },
+            nowMs: offTickSignal.receivedAtMs,
+        });
+        assert.equal(offTickInterpreted.ok, false);
+        assert.equal(offTickInterpreted.reason, 'invalid_price_tick');
+        const offTickCalls = await getDeterministicToolCalls({
+            signals: [offTickSignal],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.deepEqual(offTickCalls, []);
+        state = getTradeIntentState();
+        assert.equal(state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-off-tick`], undefined);
 
         const enrichedSignals = await enrichSignals([validSignal], {
             config: buildModuleConfig(),
