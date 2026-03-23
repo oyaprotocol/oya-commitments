@@ -1718,13 +1718,8 @@ async function refreshOrderStatus({
                 orderSummary,
                 relatedTrades,
             });
-            const orderSummaryFillReady =
-                orderFilled &&
-                relatedStatuses.length === 0 &&
-                Boolean(reimbursementAmountWei) &&
-                Boolean(filledShareAmount);
 
-            if ((allConfirmedTrades && orderFilled) || orderSummaryFillReady) {
+            if (allConfirmedTrades && orderFilled) {
                 if (!reimbursementAmountWei) {
                     throw new Error(
                         `Unable to determine actual USDC spent for filled Polymarket BUY order ${intent.orderId}.`
