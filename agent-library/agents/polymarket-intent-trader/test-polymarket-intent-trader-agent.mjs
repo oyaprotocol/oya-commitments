@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, readFile } from 'node:fs/promises';
+import { encodeFunctionData, erc20Abi } from 'viem';
 import { buildSignedMessagePayload } from '../../../agent/src/lib/message-signing.js';
 import {
     buildSignedTradeIntentArchiveArtifact,
@@ -23,6 +24,7 @@ const TEST_AGENT = '0x2222222222222222222222222222222222222222';
 const TEST_SAFE = '0x3333333333333333333333333333333333333333';
 const TEST_OTHER_SIGNER = '0x5555555555555555555555555555555555555555';
 const TEST_OTHER_AGENT = '0x6666666666666666666666666666666666666666';
+const TEST_OTHER_SAFE = '0x7777777777777777777777777777777777777777';
 const TEST_USDC = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
 const TEST_CTF = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
 const TEST_OG_MODULE = '0x4444444444444444444444444444444444444444';
@@ -51,6 +53,7 @@ function buildModuleConfig(overrides = {}) {
     const overrideAgentConfig = overrides.agentConfig ?? {};
     return {
         commitmentSafe: TEST_SAFE,
+        chainId: 137,
         ogModule: TEST_OG_MODULE,
         startBlock: 0,
         ipfsEnabled: true,
@@ -84,6 +87,14 @@ function buildModuleConfig(overrides = {}) {
             },
         },
     };
+}
+
+function buildErc20TransferCalldata(to, amountWei) {
+    return encodeFunctionData({
+        abi: erc20Abi,
+        functionName: 'transfer',
+        args: [to, BigInt(amountWei)],
+    });
 }
 
 function buildSignedMessageSignal(overrides = {}) {
@@ -3504,6 +3515,263 @@ async function run() {
         } finally {
             Date.now = depositTimeoutNow;
         }
+
+        await resetTradeIntentState();
+        setTradeIntentStatePathForTest(stateFilePath);
+        runtime.latestBlock = 540n;
+        runtime.depositLogs = [
+            {
+                args: {
+                    from: TEST_SIGNER,
+                    value: 50_000_000n,
+                },
+                blockNumber: 10n,
+                transactionHash: `0x${'d'.repeat(64)}`,
+                logIndex: 0,
+            },
+        ];
+        runtime.orderPayload = {
+            order: {
+                id: TEST_ORDER_ID,
+                status: 'MATCHED',
+                original_size: '25',
+                size_matched: '25',
+                maker_amount_filled: '20000000',
+            },
+        };
+        runtime.tradesPayload = [
+            {
+                id: 'trade-recipient-recovery',
+                status: 'CONFIRMED',
+                taker_order_id: TEST_ORDER_ID,
+                price: '0.32',
+                size: '62.5',
+            },
+        ];
+        runtime.ctfBalances = {
+            [`${TEST_AGENT.toLowerCase()}:${NO_TOKEN_ID}`]: 100_000_000n,
+        };
+        runtime.proposedProposalLogs = [];
+        runtime.executedProposalLogs = [];
+        runtime.deletedProposalLogs = [];
+        runtime.receipts = {};
+        const wrongRecipientRequestId = 'pm-intent-recipient-recovery';
+        const wrongRecipientSignal = buildSignedMessageSignal({
+            requestId: wrongRecipientRequestId,
+        });
+        const wrongRecipientArchiveCalls = await getDeterministicToolCalls({
+            signals: [wrongRecipientSignal],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(wrongRecipientArchiveCalls.length, 1);
+        await onToolOutput({
+            name: 'ipfs_publish',
+            parsedOutput: {
+                status: 'published',
+                cid: 'bafyintent-recipient-recovery',
+                uri: 'ipfs://bafyintent-recipient-recovery',
+                pinned: true,
+            },
+            config: buildModuleConfig(),
+        });
+        const wrongRecipientOrderCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(wrongRecipientOrderCalls.length, 1);
+        await onToolOutput({
+            name: 'polymarket_clob_build_sign_and_place_order',
+            parsedOutput: {
+                status: 'submitted',
+                result: {
+                    order: {
+                        id: TEST_ORDER_ID,
+                        status: 'LIVE',
+                    },
+                },
+            },
+            config: buildModuleConfig(),
+        });
+        await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        await onToolOutput({
+            name: 'make_erc1155_deposit',
+            parsedOutput: {
+                status: 'confirmed',
+                transactionHash: TEST_DEPOSIT_TX_HASH,
+            },
+            config: buildModuleConfig(),
+        });
+        const wrongRecipientProposalCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(wrongRecipientProposalCalls.length, 1);
+        await onToolOutput({
+            name: 'post_bond_and_propose',
+            parsedOutput: {
+                status: 'submitted',
+                transactionHash: TEST_REIMBURSE_TX_HASH,
+            },
+            config: buildModuleConfig(),
+        });
+
+        state = getTradeIntentState();
+        storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:${wrongRecipientRequestId}`];
+
+        const wrongRecipientProposalSignal = {
+            kind: 'proposal',
+            proposalHash: `0x${'e'.repeat(64)}`,
+            proposer: TEST_AGENT,
+            explanation: storedIntent.reimbursementExplanation,
+            transactions: [
+                {
+                    to: TEST_USDC,
+                    operation: 0,
+                    value: 0n,
+                    data: buildErc20TransferCalldata(
+                        TEST_OTHER_AGENT,
+                        storedIntent.reimbursementAmountWei
+                    ),
+                },
+            ],
+        };
+        const noRecoveryFromWrongRecipientSignal = await getDeterministicToolCalls({
+            signals: [wrongRecipientProposalSignal],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.deepEqual(noRecoveryFromWrongRecipientSignal, []);
+        state = getTradeIntentState();
+        storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:${wrongRecipientRequestId}`];
+        assert.equal(storedIntent.reimbursementProposalHash, undefined);
+
+        runtime.latestBlock = 542n;
+        runtime.proposedProposalLogs = [
+            {
+                args: {
+                    proposer: TEST_AGENT,
+                    proposalHash: TEST_PROPOSAL_HASH,
+                    explanation: storedIntent.reimbursementExplanation,
+                    proposal: {
+                        transactions: [
+                            {
+                                to: TEST_USDC,
+                                operation: 0,
+                                value: 0n,
+                                data: buildErc20TransferCalldata(
+                                    TEST_AGENT,
+                                    storedIntent.reimbursementAmountWei
+                                ),
+                            },
+                        ],
+                    },
+                },
+                blockNumber: 541n,
+                logIndex: 0,
+            },
+        ];
+        const recoveredFromMatchingBackfill = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.deepEqual(recoveredFromMatchingBackfill, []);
+        state = getTradeIntentState();
+        storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:${wrongRecipientRequestId}`];
+        assert.equal(storedIntent.reimbursementProposalHash, TEST_PROPOSAL_HASH.toLowerCase());
+
+        await resetTradeIntentState();
+        setTradeIntentStatePathForTest(null);
+        const contextStateDir = await mkdtemp(path.join(tmpDir, 'state-context-'));
+        const contextConfig = buildModuleConfig({
+            agentConfig: {
+                stateDir: contextStateDir,
+            },
+        });
+        const otherContextConfig = buildModuleConfig({
+            commitmentSafe: TEST_OTHER_SAFE,
+            agentConfig: {
+                stateDir: contextStateDir,
+            },
+        });
+        const contextArchiveCalls = await getDeterministicToolCalls({
+            signals: [
+                buildSignedMessageSignal({
+                    requestId: 'pm-intent-state-context',
+                }),
+            ],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: contextConfig,
+        });
+        assert.equal(contextArchiveCalls.length, 1);
+        const isolatedSignals = await enrichSignals([], {
+            publicClient,
+            config: otherContextConfig,
+            account: { address: TEST_AGENT },
+            nowMs: 1_930_000_000_000,
+        });
+        assert.equal(
+            isolatedSignals.some(
+                (signal) =>
+                    signal?.kind === 'polymarketTradeIntent' &&
+                    signal?.requestId === 'pm-intent-state-context'
+            ),
+            false
+        );
+
+        await resetTradeIntentState();
+        setTradeIntentStatePathForTest(stateFilePath);
+        const scopeArchiveCalls = await getDeterministicToolCalls({
+            signals: [
+                buildSignedMessageSignal({
+                    requestId: 'pm-intent-scope-mismatch',
+                }),
+            ],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(scopeArchiveCalls.length, 1);
+        setTradeIntentStatePathForTest(stateFilePath);
+        await assert.rejects(
+            () =>
+                getDeterministicToolCalls({
+                    signals: [],
+                    commitmentSafe: TEST_SAFE,
+                    agentAddress: TEST_AGENT,
+                    publicClient,
+                    config: buildModuleConfig({
+                        agentConfig: {
+                            polymarketIntentTrader: {
+                                marketId: 'market-999',
+                            },
+                        },
+                    }),
+                }),
+            /state scope/i
+        );
 
         console.log('[test] polymarket-intent-trader lifecycle OK');
     } finally {

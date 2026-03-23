@@ -84,6 +84,7 @@ export function createReimbursementCommitmentRecord(
                 ? signal.intentKey.trim()
                 : null,
         signer: normalizeAddress(signal.signer),
+        recipientAddress: normalizeAddress(signal.recipientAddress),
         amountWei: amountWei.toString(),
         status:
             typeof signal.status === 'string' && signal.status.trim()
