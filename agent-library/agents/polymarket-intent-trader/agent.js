@@ -349,6 +349,37 @@ async function readOutcomeTokenBalance({
     return BigInt(balance);
 }
 
+async function observeFilledTokenInventoryDelta({
+    publicClient,
+    policy,
+    tokenHolderAddress,
+    intent,
+}) {
+    const normalizedHolder = normalizeAddressOrNull(
+        tokenHolderAddress ?? intent?.preOrderTokenHolderAddress ?? null
+    );
+    const preOrderTokenBalance = parseOptionalNonNegativeIntegerString(intent?.preOrderTokenBalance);
+    if (!normalizedHolder || !preOrderTokenBalance) {
+        return null;
+    }
+    if (hasConcurrentTokenSettlementDependency({ intent, tokenHolderAddress: normalizedHolder })) {
+        return null;
+    }
+
+    const currentBalance = await readOutcomeTokenBalance({
+        publicClient,
+        policy,
+        tokenHolderAddress: normalizedHolder,
+        tokenId: intent.tokenId,
+    });
+    if (currentBalance === null) {
+        return null;
+    }
+
+    const observedDelta = currentBalance - BigInt(preOrderTokenBalance);
+    return observedDelta > 0n ? observedDelta.toString() : null;
+}
+
 function hasConcurrentTokenSettlementDependency({ intent, tokenHolderAddress }) {
     const normalizedHolder = normalizeAddressOrNull(
         tokenHolderAddress ?? intent?.preOrderTokenHolderAddress ?? null
@@ -375,40 +406,6 @@ function hasConcurrentTokenSettlementDependency({ intent, tokenHolderAddress }) 
         );
         return otherHolder === normalizedHolder;
     });
-}
-
-async function hasObservedFilledTokenInventory({
-    publicClient,
-    policy,
-    tokenHolderAddress,
-    intent,
-    filledShareAmount,
-}) {
-    const normalizedHolder = normalizeAddressOrNull(
-        tokenHolderAddress ?? intent?.preOrderTokenHolderAddress ?? null
-    );
-    const preOrderTokenBalance = parseOptionalNonNegativeIntegerString(intent?.preOrderTokenBalance);
-    const normalizedFilledShareAmount = parseOptionalNonNegativeIntegerString(filledShareAmount);
-    if (!normalizedHolder || !preOrderTokenBalance || !normalizedFilledShareAmount) {
-        return false;
-    }
-    if (hasConcurrentTokenSettlementDependency({ intent, tokenHolderAddress: normalizedHolder })) {
-        return false;
-    }
-
-    const currentBalance = await readOutcomeTokenBalance({
-        publicClient,
-        policy,
-        tokenHolderAddress: normalizedHolder,
-        tokenId: intent.tokenId,
-    });
-    if (currentBalance === null) {
-        return false;
-    }
-
-    const requiredBalance =
-        BigInt(preOrderTokenBalance) + BigInt(normalizedFilledShareAmount);
-    return currentBalance >= requiredBalance;
 }
 
 function clearDepositSubmissionAmbiguity(intent) {
@@ -1273,6 +1270,9 @@ function extractOrderSummary(payload) {
                 order.taking_amount_filled ??
                 order.takingAmountFilled
         ),
+        feeAmount: parseOptionalNonNegativeIntegerString(
+            order.fee ?? order.fee_amount ?? order.feeAmount
+        ),
     };
 }
 
@@ -1391,13 +1391,7 @@ function sumConfirmedTradeShareAmount({ relatedTrades }) {
             continue;
         }
 
-        const shareAmount = parseOptionalShareAmountString(
-            trade?.size ??
-                trade?.matched_size ??
-                trade?.matchedSize ??
-                trade?.size_matched ??
-                trade?.sizeMatched
-        );
+        const shareAmount = resolveConfirmedTradeShareAmount(trade);
         if (!shareAmount) {
             return null;
         }
@@ -1409,10 +1403,52 @@ function sumConfirmedTradeShareAmount({ relatedTrades }) {
     return sawConfirmedTrade ? total.toString() : null;
 }
 
+function subtractFilledShareFee(grossShareAmount, feeShareAmount) {
+    const normalizedGrossShareAmount = parseOptionalNonNegativeIntegerString(grossShareAmount);
+    if (!normalizedGrossShareAmount || BigInt(normalizedGrossShareAmount) <= 0n) {
+        return null;
+    }
+
+    const normalizedFeeShareAmount = parseOptionalNonNegativeIntegerString(feeShareAmount);
+    if (!normalizedFeeShareAmount || BigInt(normalizedFeeShareAmount) <= 0n) {
+        return normalizedGrossShareAmount;
+    }
+    if (BigInt(normalizedFeeShareAmount) > BigInt(normalizedGrossShareAmount)) {
+        return null;
+    }
+
+    return (BigInt(normalizedGrossShareAmount) - BigInt(normalizedFeeShareAmount)).toString();
+}
+
+function resolveConfirmedTradeShareAmount(trade) {
+    const grossShareAmount = parseOptionalShareAmountString(
+        trade?.size ??
+            trade?.matched_size ??
+            trade?.matchedSize ??
+            trade?.size_matched ??
+            trade?.sizeMatched
+    );
+    if (!grossShareAmount) {
+        return null;
+    }
+
+    const feeShareAmount = parseOptionalShareAmountString(
+        trade?.fee ??
+            trade?.fee_amount ??
+            trade?.feeAmount ??
+            trade?.fee_paid ??
+            trade?.feePaid
+    );
+    return subtractFilledShareFee(grossShareAmount, feeShareAmount);
+}
+
 function resolveFilledBuyShareAmount({ intent, orderSummary, relatedTrades }) {
-    const takerAmountFilled = parseOptionalNonNegativeIntegerString(orderSummary?.takerAmountFilled);
-    if (takerAmountFilled && BigInt(takerAmountFilled) > 0n) {
-        return takerAmountFilled;
+    const netTakerAmountFilled = subtractFilledShareFee(
+        orderSummary?.takerAmountFilled,
+        orderSummary?.feeAmount
+    );
+    if (netTakerAmountFilled && BigInt(netTakerAmountFilled) > 0n) {
+        return netTakerAmountFilled;
     }
 
     const confirmedTradeShares = sumConfirmedTradeShareAmount({ relatedTrades });
@@ -1747,23 +1783,37 @@ async function refreshOrderStatus({
                 orderSummary,
                 relatedTrades,
             });
-            const filledShareAmount = resolveFilledBuyShareAmount({
+            let filledShareAmount = resolveFilledBuyShareAmount({
                 intent,
                 orderSummary,
                 relatedTrades,
             });
+            const observedFilledShareAmount = await observeFilledTokenInventoryDelta({
+                publicClient,
+                policy,
+                tokenHolderAddress,
+                intent,
+            });
+            const configuredFeeRateBps = parseOptionalNonNegativeIntegerString(intent.feeRateBps);
+            const feeEnabledBuy =
+                (configuredFeeRateBps && BigInt(configuredFeeRateBps) > 0n) ||
+                Boolean(orderSummary?.feeAmount);
+            if (
+                feeEnabledBuy &&
+                observedFilledShareAmount &&
+                filledShareAmount &&
+                BigInt(observedFilledShareAmount) > 0n &&
+                BigInt(observedFilledShareAmount) < BigInt(filledShareAmount)
+            ) {
+                filledShareAmount = observedFilledShareAmount;
+            }
             const tokenBalanceSettlementReady =
                 orderFilled &&
                 relatedStatuses.length === 0 &&
                 Boolean(reimbursementAmountWei) &&
                 Boolean(filledShareAmount) &&
-                (await hasObservedFilledTokenInventory({
-                    publicClient,
-                    policy,
-                    tokenHolderAddress,
-                    intent,
-                    filledShareAmount,
-                }));
+                Boolean(observedFilledShareAmount) &&
+                BigInt(observedFilledShareAmount) >= BigInt(filledShareAmount);
 
             if ((allConfirmedTrades && orderFilled) || tokenBalanceSettlementReady) {
                 if (!reimbursementAmountWei) {
@@ -1987,13 +2037,27 @@ function buildArchiveToolCall(intent, commitmentSafe, agentAddress) {
     };
 }
 
-function buildOrderToolCall(intent, chainId) {
+function resolveClobOrderSignatureType(config) {
+    const configuredSignatureType = normalizeNonEmptyString(config?.polymarketClobSignatureType);
+    if (configuredSignatureType) {
+        return configuredSignatureType;
+    }
+    if (!config?.polymarketRelayerEnabled) {
+        return null;
+    }
+
+    const relayerTxType = normalizeNonEmptyString(config?.polymarketRelayerTxType)?.toUpperCase();
+    return relayerTxType === 'PROXY' ? 'POLY_PROXY' : 'POLY_GNOSIS_SAFE';
+}
+
+function buildOrderToolCall(intent, chainId, config) {
     const feeRateBps = parseOptionalNonNegativeIntegerString(intent.feeRateBps);
     if (!feeRateBps) {
         throw new Error(
             `Missing feeRateBps for signed Polymarket trade intent ${intent.intentKey}.`
         );
     }
+    const signatureType = resolveClobOrderSignatureType(config);
 
     return {
         callId: `place-polymarket-order-${intent.sequence}`,
@@ -2007,6 +2071,7 @@ function buildOrderToolCall(intent, chainId) {
             feeRateBps,
             expiration: String(Math.floor(intent.expiryMs / 1000)),
             chainId,
+            ...(signatureType ? { signatureType } : {}),
         }),
     };
 }
@@ -2385,7 +2450,7 @@ async function getDeterministicToolCalls({
             startedAtMs: Date.now(),
         };
         console.log(`[agent] Preparing Polymarket BUY order for ${intent.intentKey}.`);
-        return [buildOrderToolCall(intent, chainId)];
+        return [buildOrderToolCall(intent, chainId, config)];
     }
 
     return [];
