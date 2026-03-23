@@ -195,6 +195,8 @@ async function run() {
                 original_size: '25',
                 size_matched: '25',
                 maker_amount_filled: '20000000',
+                taker_amount_filled: '62500000',
+                fee: '100000',
             },
         },
         tradesPayload: [
@@ -204,6 +206,7 @@ async function run() {
                 taker_order_id: TEST_ORDER_ID,
                 price: '0.32',
                 size: '62.5',
+                fee: '0.1',
             },
         ],
         ctfBalances: {},
@@ -371,6 +374,58 @@ async function run() {
                 }),
             }),
             /POLYMARKET_CLOB_ADDRESS .* must match runtime signer address .* when POLYMARKET_RELAYER_ENABLED=false/
+        );
+
+        await resetTradeIntentState();
+        runtime.latestBlock = 150n;
+        runtime.depositLogs = [
+            {
+                args: {
+                    from: TEST_SIGNER,
+                    value: 50_000_000n,
+                },
+                blockNumber: 10n,
+                transactionHash: `0x${'d'.repeat(64)}`,
+                logIndex: 0,
+            },
+        ];
+        const relayerSignal = buildSignedMessageSignal({
+            requestId: 'pm-intent-relayer-signature',
+        });
+        const relayerConfig = buildModuleConfig({
+            polymarketRelayerEnabled: true,
+            polymarketRelayerFromAddress: TEST_AGENT,
+            polymarketClobAddress: TEST_AGENT,
+        });
+        const relayerArchiveCalls = await getDeterministicToolCalls({
+            signals: [relayerSignal],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: relayerConfig,
+        });
+        assert.equal(relayerArchiveCalls.length, 1);
+        await onToolOutput({
+            name: 'ipfs_publish',
+            parsedOutput: {
+                status: 'published',
+                cid: 'bafyintent-relayer-signature',
+                uri: 'ipfs://bafyintent-relayer-signature',
+                pinned: true,
+            },
+            config: relayerConfig,
+        });
+        const relayerOrderCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: relayerConfig,
+        });
+        assert.equal(relayerOrderCalls.length, 1);
+        assert.equal(
+            JSON.parse(relayerOrderCalls[0].arguments).signatureType,
+            'POLY_GNOSIS_SAFE'
         );
 
         await resetTradeIntentState();
@@ -570,7 +625,7 @@ async function run() {
         const depositArgs = JSON.parse(depositCalls[0].arguments);
         assert.equal(depositArgs.token, TEST_CTF.toLowerCase());
         assert.equal(depositArgs.tokenId, NO_TOKEN_ID);
-        assert.equal(depositArgs.amount, '62500000');
+        assert.equal(depositArgs.amount, '62400000');
         const duplicateDepositCalls = await getDeterministicToolCalls({
             signals: [],
             commitmentSafe: TEST_SAFE,
@@ -587,7 +642,7 @@ async function run() {
         storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-001`];
         assert.equal(storedIntent.reimbursementAmountWei, '20000000');
         assert.equal(storedIntent.reservedCreditAmountWei, '20000000');
-        assert.equal(storedIntent.filledShareAmount, '62500000');
+        assert.equal(storedIntent.filledShareAmount, '62400000');
         assert.equal(storedIntent.feeRateBps, '30');
         const creditStateSignal = (
             await enrichSignals([], {
