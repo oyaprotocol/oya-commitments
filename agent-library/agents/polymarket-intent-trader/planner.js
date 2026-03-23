@@ -26,6 +26,7 @@ export function hasActiveExecution({
                 Boolean(intent.depositDispatchAtMs) ||
                 Boolean(intent.depositSubmittedAtMs) ||
                 Boolean(intent.depositTxHash) ||
+                Boolean(intent.reimbursementDispatchAtMs) ||
                 Boolean(intent.reimbursementSubmittedAtMs) ||
                 Boolean(intent.reimbursementSubmissionTxHash)
         )
@@ -70,6 +71,7 @@ export function planNextActionCandidates({
             continue;
         }
         if (
+            intent.reimbursementDispatchAtMs ||
             intent.reimbursementProposalHash ||
             intent.reimbursementSubmissionTxHash ||
             intent.reimbursementSubmittedAtMs
