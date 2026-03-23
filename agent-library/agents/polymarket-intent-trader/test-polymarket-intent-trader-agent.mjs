@@ -808,6 +808,30 @@ async function run() {
         assert.equal(interpreted.intent.maxSpendWei, '25000000');
         assert.equal(interpreted.intent.maxPriceScaled, '420000');
 
+        const leadingDecimalSignal = buildSignedMessageSignal({
+            requestId: 'pm-intent-leading-decimal',
+            text: 'Buy NO for up to .5 USDC if the price is .42 or better before 6pm UTC.',
+        });
+        const leadingDecimalInterpreted = interpretSignedTradeIntentSignal(leadingDecimalSignal, {
+            policy: {
+                ready: true,
+                marketId: 'market-123',
+                yesTokenId: YES_TOKEN_ID,
+                noTokenId: NO_TOKEN_ID,
+                collateralToken: TEST_USDC.toLowerCase(),
+                ctfContract: TEST_CTF.toLowerCase(),
+                signedCommands: new Set(['buy']),
+            },
+            nowMs: leadingDecimalSignal.receivedAtMs,
+        });
+        assert.equal(leadingDecimalInterpreted.ok, true);
+        assert.equal(
+            leadingDecimalInterpreted.intent.intentKey,
+            `${TEST_SIGNER.toLowerCase()}:pm-intent-leading-decimal`
+        );
+        assert.equal(leadingDecimalInterpreted.intent.maxSpendWei, '500000');
+        assert.equal(leadingDecimalInterpreted.intent.maxPriceScaled, '420000');
+
         const sized = computeBuyOrderAmounts({
             collateralAmountWei: 25_000_000n,
             price: 0.42,
