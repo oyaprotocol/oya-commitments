@@ -34,6 +34,7 @@ const FILENAME_PREFIX = 'signed-trade-intent-';
 const FILENAME_SUFFIX = '.json';
 const PRICE_SCALE = 1_000_000n;
 const USDC_DECIMALS = 6;
+const SHARE_DECIMALS = 6;
 const DEFAULT_ARCHIVE_RETRY_DELAY_MS = 30_000;
 const DEFAULT_PENDING_TX_TIMEOUT_MS = 900_000;
 const PENDING_DEPOSIT_DISPATCH_GRACE_MS = 30_000;
@@ -210,6 +211,23 @@ function parseOptionalNonNegativeIntegerString(value) {
             return null;
         }
         return normalized.toString();
+    } catch (error) {
+        return null;
+    }
+}
+
+function parseOptionalShareAmountString(value) {
+    const normalized = normalizeDecimalText(value);
+    if (!normalized) {
+        return null;
+    }
+
+    try {
+        const parsed = parseUnits(normalized, SHARE_DECIMALS);
+        if (parsed < 0n) {
+            return null;
+        }
+        return parsed.toString();
     } catch (error) {
         return null;
     }
@@ -810,6 +828,7 @@ function interpretSignedTradeIntentSignal(
             maxSpendWei: maxSpend.wei,
             reservedCreditAmountWei: maxSpend.wei,
             reimbursementAmountWei: null,
+            filledShareAmount: null,
             maxPrice: maxPrice.decimal,
             maxPriceScaled: maxPrice.scaled,
             orderMakerAmount: orderAmounts.makerAmount,
@@ -1167,6 +1186,7 @@ function buildIntentSignal(record, nowMs = Date.now()) {
         depositTxHash: record.depositTxHash ?? null,
         tokenDeposited: Boolean(record.tokenDeposited),
         reimbursementAmountWei: record.reimbursementAmountWei ?? null,
+        filledShareAmount: record.filledShareAmount ?? null,
         reimbursementProposalHash: record.reimbursementProposalHash ?? null,
         reimbursementSubmissionTxHash: record.reimbursementSubmissionTxHash ?? null,
         archived: Boolean(record.artifactCid),
@@ -1275,6 +1295,57 @@ function resolveFilledBuySpendWei({ intent, orderSummary }) {
         parseOptionalNonNegativeIntegerString(intent?.orderMakerAmount) ??
         parseOptionalNonNegativeIntegerString(intent?.maxSpendWei)
     );
+}
+
+function sumConfirmedTradeShareAmount({ relatedTrades }) {
+    let total = 0n;
+    let sawConfirmedTrade = false;
+
+    for (const trade of Array.isArray(relatedTrades) ? relatedTrades : []) {
+        if (normalizeClobStatus(trade?.status) !== CLOB_SUCCESS_TERMINAL_STATUS) {
+            continue;
+        }
+
+        const shareAmount = parseOptionalShareAmountString(
+            trade?.size ??
+                trade?.matched_size ??
+                trade?.matchedSize ??
+                trade?.size_matched ??
+                trade?.sizeMatched
+        );
+        if (!shareAmount) {
+            return null;
+        }
+
+        total += BigInt(shareAmount);
+        sawConfirmedTrade = true;
+    }
+
+    return sawConfirmedTrade ? total.toString() : null;
+}
+
+function resolveFilledBuyShareAmount({ intent, orderSummary, relatedTrades }) {
+    const takerAmountFilled = parseOptionalNonNegativeIntegerString(orderSummary?.takerAmountFilled);
+    if (takerAmountFilled && BigInt(takerAmountFilled) > 0n) {
+        return takerAmountFilled;
+    }
+
+    const confirmedTradeShares = sumConfirmedTradeShareAmount({ relatedTrades });
+    if (confirmedTradeShares && BigInt(confirmedTradeShares) > 0n) {
+        return confirmedTradeShares;
+    }
+
+    const sizeMatchedShares = parseOptionalShareAmountString(orderSummary?.sizeMatched);
+    const minimumShareAmount = parseOptionalNonNegativeIntegerString(intent?.orderTakerAmount);
+    if (
+        sizeMatchedShares &&
+        BigInt(sizeMatchedShares) > 0n &&
+        (!minimumShareAmount || BigInt(sizeMatchedShares) >= BigInt(minimumShareAmount))
+    ) {
+        return sizeMatchedShares;
+    }
+
+    return null;
 }
 
 function normalizeClobHost(host) {
@@ -1545,6 +1616,12 @@ async function refreshOrderStatus({
                 clobAuthAddress,
                 submittedMs: intent.orderSubmittedAtMs,
             });
+            if (intent.lastOrderStatusRefreshError || intent.orderStatusRefreshFailedAtMs) {
+                delete intent.lastOrderStatusRefreshError;
+                delete intent.orderStatusRefreshFailedAtMs;
+                intent.updatedAtMs = nowMs;
+                changed = true;
+            }
             const relatedStatuses = relatedTrades
                 .map((trade) => normalizeClobStatus(trade?.status))
                 .filter(Boolean);
@@ -1575,15 +1652,26 @@ async function refreshOrderStatus({
                     intent,
                     orderSummary,
                 });
+                const filledShareAmount = resolveFilledBuyShareAmount({
+                    intent,
+                    orderSummary,
+                    relatedTrades,
+                });
                 if (!reimbursementAmountWei) {
                     throw new Error(
                         `Unable to determine actual USDC spent for filled Polymarket BUY order ${intent.orderId}.`
+                    );
+                }
+                if (!filledShareAmount) {
+                    throw new Error(
+                        `Unable to determine acquired share amount for filled Polymarket BUY order ${intent.orderId}.`
                     );
                 }
                 intent.orderFilled = true;
                 intent.orderFilledAtMs = nowMs;
                 intent.reimbursementAmountWei = reimbursementAmountWei;
                 intent.reservedCreditAmountWei = reimbursementAmountWei;
+                intent.filledShareAmount = filledShareAmount;
                 intent.updatedAtMs = nowMs;
                 changed = true;
             }
@@ -1591,13 +1679,16 @@ async function refreshOrderStatus({
             if (!hasTimedOut(intent.orderSubmittedAtMs, policy.pendingTxTimeoutMs, nowMs)) {
                 continue;
             }
-            markTerminalIntentFailure(intent, {
-                stage: 'order',
-                status: 'timeout',
-                detail: error?.message ?? String(error),
-                releaseCredit: true,
-            });
-            changed = true;
+            const detail = error?.message ?? String(error);
+            if (
+                intent.lastOrderStatusRefreshError !== detail ||
+                !Number.isInteger(intent.orderStatusRefreshFailedAtMs)
+            ) {
+                intent.lastOrderStatusRefreshError = detail;
+                intent.orderStatusRefreshFailedAtMs = nowMs;
+                intent.updatedAtMs = nowMs;
+                changed = true;
+            }
         }
     }
 
@@ -2033,6 +2124,10 @@ async function getDeterministicToolCalls({
         if (!intent.orderFilled || intent.tokenDeposited) {
             continue;
         }
+        const filledShareAmount = parseOptionalNonNegativeIntegerString(intent.filledShareAmount);
+        if (!filledShareAmount || BigInt(filledShareAmount) <= 0n) {
+            continue;
+        }
         if (
             intent.depositTxHash ||
             intent.depositSubmittedAtMs ||
@@ -2049,7 +2144,7 @@ async function getDeterministicToolCalls({
             functionName: 'balanceOf',
             args: [tokenHolderAddress, BigInt(intent.tokenId)],
         });
-        if (BigInt(tokenBalance) <= 0n) {
+        if (BigInt(tokenBalance) < BigInt(filledShareAmount)) {
             continue;
         }
 
@@ -2057,7 +2152,7 @@ async function getDeterministicToolCalls({
             intentKey: intent.intentKey,
             startedAtMs: Date.now(),
         };
-        return [buildDepositToolCall(intent, policy, BigInt(tokenBalance).toString())];
+        return [buildDepositToolCall(intent, policy, filledShareAmount)];
     }
 
     for (const intent of openIntents) {

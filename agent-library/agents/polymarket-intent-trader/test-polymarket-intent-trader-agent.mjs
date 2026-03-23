@@ -30,6 +30,7 @@ const NO_TOKEN_ID = '202';
 const TEST_SIGNATURE = `0x${'1a'.repeat(65)}`;
 const TEST_PROPOSAL_HASH = `0x${'a'.repeat(64)}`;
 const TEST_ORDER_ID = 'order-1';
+const TEST_TIMEOUT_ORDER_ID = 'order-timeout';
 const TEST_DEPOSIT_TX_HASH = `0x${'b'.repeat(64)}`;
 const TEST_REIMBURSE_TX_HASH = `0x${'c'.repeat(64)}`;
 
@@ -206,6 +207,8 @@ async function run() {
         ],
         ctfBalances: {},
         receipts: {},
+        orderFetchError: null,
+        tradesFetchError: null,
     };
 
     const publicClient = buildPublicClient(runtime);
@@ -215,10 +218,16 @@ async function run() {
         if (url.pathname === '/fee-rate') {
             return buildFetchResponse({ base_fee: 30 });
         }
-        if (url.pathname === `/data/order/${TEST_ORDER_ID}`) {
+        if (url.pathname.startsWith('/data/order/')) {
+            if (runtime.orderFetchError) {
+                throw new Error(runtime.orderFetchError);
+            }
             return buildFetchResponse(runtime.orderPayload);
         }
         if (url.pathname === '/data/trades') {
+            if (runtime.tradesFetchError) {
+                throw new Error(runtime.tradesFetchError);
+            }
             return buildFetchResponse(runtime.tradesPayload);
         }
         throw new Error(`Unexpected fetch URL: ${url.toString()}`);
@@ -471,7 +480,7 @@ async function run() {
             config: buildModuleConfig(),
         });
 
-        runtime.ctfBalances[`${TEST_AGENT.toLowerCase()}:${NO_TOKEN_ID}`] = 62_500_000n;
+        runtime.ctfBalances[`${TEST_AGENT.toLowerCase()}:${NO_TOKEN_ID}`] = 100_000_000n;
 
         const depositCalls = await getDeterministicToolCalls({
             signals: [],
@@ -502,6 +511,7 @@ async function run() {
         storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-001`];
         assert.equal(storedIntent.reimbursementAmountWei, '20000000');
         assert.equal(storedIntent.reservedCreditAmountWei, '20000000');
+        assert.equal(storedIntent.filledShareAmount, '62500000');
         assert.equal(storedIntent.feeRateBps, '30');
         const creditStateSignal = (
             await enrichSignals([], {
@@ -662,6 +672,129 @@ async function run() {
         assert.equal(storedIntent.lastOrderSubmissionStatus, 'error');
         assert.equal(storedIntent.lastOrderSubmissionError, 'socket hang up');
         assert.equal(typeof storedIntent.orderSubmittedAtMs, 'number');
+
+        await resetTradeIntentState();
+        runtime.latestBlock = 300n;
+        runtime.depositLogs = [
+            {
+                args: {
+                    from: TEST_SIGNER,
+                    value: 50_000_000n,
+                },
+                blockNumber: 10n,
+                transactionHash: `0x${'d'.repeat(64)}`,
+                logIndex: 0,
+            },
+        ];
+        runtime.orderFetchError = null;
+        runtime.tradesFetchError = null;
+        const originalDateNow = Date.now;
+        try {
+            const baseNowMs = 1_900_000_000_000;
+            Date.now = () => baseNowMs;
+            const timeoutSignal = buildSignedMessageSignal({
+                requestId: 'pm-intent-timeout',
+                receivedAtMs: baseNowMs,
+                signedAtMs: baseNowMs,
+                deadline: baseNowMs + 60_000,
+            });
+            const timeoutArchiveCalls = await getDeterministicToolCalls({
+                signals: [timeoutSignal],
+                commitmentSafe: TEST_SAFE,
+                agentAddress: TEST_AGENT,
+                publicClient,
+                config: buildModuleConfig({
+                    agentConfig: {
+                        polymarketIntentTrader: {
+                            pendingTxTimeoutMs: 1_000,
+                        },
+                    },
+                }),
+            });
+            assert.equal(timeoutArchiveCalls.length, 1);
+            assert.equal(timeoutArchiveCalls[0].name, 'ipfs_publish');
+            await onToolOutput({
+                name: 'ipfs_publish',
+                parsedOutput: {
+                    status: 'published',
+                    cid: 'bafyintent-timeout',
+                    uri: 'ipfs://bafyintent-timeout',
+                    pinned: true,
+                },
+                config: buildModuleConfig({
+                    agentConfig: {
+                        polymarketIntentTrader: {
+                            pendingTxTimeoutMs: 1_000,
+                        },
+                    },
+                }),
+            });
+            const timeoutOrderCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_SAFE,
+                agentAddress: TEST_AGENT,
+                publicClient,
+                config: buildModuleConfig({
+                    agentConfig: {
+                        polymarketIntentTrader: {
+                            pendingTxTimeoutMs: 1_000,
+                        },
+                    },
+                }),
+            });
+            assert.equal(timeoutOrderCalls.length, 1);
+            assert.equal(timeoutOrderCalls[0].name, 'polymarket_clob_build_sign_and_place_order');
+            await onToolOutput({
+                name: 'polymarket_clob_build_sign_and_place_order',
+                parsedOutput: {
+                    status: 'submitted',
+                    result: {
+                        order: {
+                            id: TEST_TIMEOUT_ORDER_ID,
+                            status: 'LIVE',
+                        },
+                    },
+                },
+                config: buildModuleConfig({
+                    agentConfig: {
+                        polymarketIntentTrader: {
+                            pendingTxTimeoutMs: 1_000,
+                        },
+                    },
+                }),
+            });
+
+            runtime.orderFetchError = 'CLOB unavailable';
+            Date.now = () => baseNowMs + 2_000;
+
+            const timeoutFollowupCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_SAFE,
+                agentAddress: TEST_AGENT,
+                publicClient,
+                config: buildModuleConfig({
+                    agentConfig: {
+                        polymarketIntentTrader: {
+                            pendingTxTimeoutMs: 1_000,
+                        },
+                    },
+                }),
+            });
+            assert.deepEqual(timeoutFollowupCalls, []);
+
+            state = getTradeIntentState();
+            storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-timeout`];
+            assert.equal(storedIntent.closedAtMs, undefined);
+            assert.equal(storedIntent.creditReleasedAtMs, undefined);
+            assert.equal(storedIntent.orderId, TEST_TIMEOUT_ORDER_ID);
+            assert.equal(storedIntent.reservedCreditAmountWei, '25000000');
+            assert.equal(storedIntent.lastOrderStatusRefreshError, 'CLOB unavailable');
+            assert.equal(typeof storedIntent.orderStatusRefreshFailedAtMs, 'number');
+        } finally {
+            Date.now = originalDateNow;
+            runtime.orderFetchError = null;
+            runtime.tradesFetchError = null;
+        }
 
         console.log('[test] polymarket-intent-trader lifecycle OK');
     } finally {
