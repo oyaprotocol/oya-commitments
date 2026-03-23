@@ -231,7 +231,7 @@ function normalizeDecimalText(value) {
     const normalized = String(value ?? '')
         .replace(/,/g, '')
         .trim();
-    if (!/^\d+(?:\.\d+)?$/.test(normalized)) {
+    if (!/^(?:\d+(?:\.\d+)?|\.\d+)$/.test(normalized)) {
         return null;
     }
     const [wholeRaw, fractionRaw = ''] = normalized.split('.');
@@ -871,11 +871,11 @@ function parseOutcomeFromText(text) {
 
 function parseMaxSpendFromText(text) {
     const patterns = [
-        /\bfor\s+up\s+to\s+\$?([\d,]+(?:\.\d+)?)\s*(?:usdc|usd|dollars?)\b/gi,
-        /\bup\s+to\s+\$?([\d,]+(?:\.\d+)?)\s*(?:usdc|usd|dollars?)\b/gi,
-        /\b(?:spend|use|risk)\s+up\s+to\s+\$?([\d,]+(?:\.\d+)?)\s*(?:usdc|usd|dollars?)\b/gi,
-        /\bmax(?:imum)?\s+(?:spend|cost|notional)?\s*\$?([\d,]+(?:\.\d+)?)\s*(?:usdc|usd|dollars?)\b/gi,
-        /\bfor\s+\$?([\d,]+(?:\.\d+)?)\s*(?:usdc|usd|dollars?)\b/gi,
+        /\bfor\s+up\s+to\s+\$?((?:[\d,]+(?:\.\d+)?|\.\d+))\s*(?:usdc|usd|dollars?)\b/gi,
+        /\bup\s+to\s+\$?((?:[\d,]+(?:\.\d+)?|\.\d+))\s*(?:usdc|usd|dollars?)\b/gi,
+        /\b(?:spend|use|risk)\s+up\s+to\s+\$?((?:[\d,]+(?:\.\d+)?|\.\d+))\s*(?:usdc|usd|dollars?)\b/gi,
+        /\bmax(?:imum)?\s+(?:spend|cost|notional)?\s*\$?((?:[\d,]+(?:\.\d+)?|\.\d+))\s*(?:usdc|usd|dollars?)\b/gi,
+        /\bfor\s+\$?((?:[\d,]+(?:\.\d+)?|\.\d+))\s*(?:usdc|usd|dollars?)\b/gi,
     ];
 
     for (const pattern of patterns) {
@@ -921,8 +921,8 @@ function normalizePriceToScaled(value, unit) {
 
 function parseMaxPriceFromText(text) {
     const patterns = [
-        /\b(?:price\s*(?:is|<=|=<|<|under|at\s+most|up\s+to)|max(?:imum)?\s+price(?:\s+is)?|at)\s*\$?([\d,]+(?:\.\d+)?)\s*(c|cent|cents|%)\b(?:\s+or\s+(?:better|less|lower))?/gi,
-        /\b(?:price\s*(?:is|<=|=<|<|under|at\s+most|up\s+to)|max(?:imum)?\s+price(?:\s+is)?|at)\s*\$?([\d,]+(?:\.\d+)?)\b(?:\s+or\s+(?:better|less|lower))?/gi,
+        /\b(?:price\s*(?:is|<=|=<|<|under|at\s+most|up\s+to)|max(?:imum)?\s+price(?:\s+is)?|at)\s*\$?((?:[\d,]+(?:\.\d+)?|\.\d+))\s*(c|cent|cents|%)\b(?:\s+or\s+(?:better|less|lower))?/gi,
+        /\b(?:price\s*(?:is|<=|=<|<|under|at\s+most|up\s+to)|max(?:imum)?\s+price(?:\s+is)?|at)\s*\$?((?:[\d,]+(?:\.\d+)?|\.\d+))\b(?:\s+or\s+(?:better|less|lower))?/gi,
     ];
 
     for (const pattern of patterns) {
