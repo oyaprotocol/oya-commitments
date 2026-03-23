@@ -2206,6 +2206,7 @@ function recoverProposalHashesFromBackfilledCommitments() {
         const matchingCommitments = Object.values(tradeIntentState.reimbursementCommitments).filter(
             (commitment) =>
                 commitment?.proposalHash &&
+                commitment?.status !== 'deleted' &&
                 commitment?.intentKey &&
                 commitment.intentKey === intent.intentKey
         );
@@ -3068,6 +3069,7 @@ async function getDeterministicToolCalls({
             intent.reimbursementExplanation = buildReimbursementExplanation(intent);
             delete intent.lastReimbursementCreditError;
             delete intent.reimbursementCreditBlockedAtMs;
+            delete intent.nextReimbursementAttemptAtMs;
             markDispatchStarted(intent, 'reimbursement');
             await maybePersistTradeIntentState();
 
@@ -3387,10 +3389,22 @@ async function handleReimbursementToolOutput({ parsedOutput, policy }) {
             return;
         }
 
+        if (status === 'skipped' || parsedOutput?.retryable === false) {
+            markTerminalIntentFailure(intent, {
+                stage: 'reimbursement_submission',
+                status,
+                detail,
+                releaseCredit: false,
+            });
+            await maybePersistTradeIntentState();
+            return;
+        }
+
         delete intent.reimbursementSubmittedAtMs;
         delete intent.reimbursementDispatchAtMs;
         delete intent.reimbursementSubmissionAmbiguous;
         delete intent.reimbursementSubmissionAmbiguousAtMs;
+        intent.nextReimbursementAttemptAtMs = Date.now() + policy.archiveRetryDelayMs;
         intent.updatedAtMs = Date.now();
         await maybePersistTradeIntentState();
         return;

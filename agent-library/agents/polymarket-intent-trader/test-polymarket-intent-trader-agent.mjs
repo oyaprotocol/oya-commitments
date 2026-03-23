@@ -2005,6 +2005,134 @@ async function run() {
         }
 
         await resetTradeIntentState();
+        runtime.latestBlock = 425n;
+        runtime.depositLogs = [
+            {
+                args: {
+                    from: TEST_SIGNER,
+                    value: 50_000_000n,
+                },
+                blockNumber: 10n,
+                transactionHash: `0x${'d'.repeat(64)}`,
+                logIndex: 0,
+            },
+        ];
+        runtime.proposedProposalLogs = [];
+        runtime.executedProposalLogs = [];
+        runtime.deletedProposalLogs = [];
+        runtime.orderPayload = {
+            order: {
+                id: TEST_ORDER_ID,
+                status: 'MATCHED',
+                original_size: '25',
+                size_matched: '25',
+                maker_amount_filled: '20000000',
+            },
+        };
+        runtime.tradesPayload = [
+            {
+                id: 'trade-1',
+                status: 'CONFIRMED',
+                taker_order_id: TEST_ORDER_ID,
+                price: '0.32',
+                size: '62.5',
+            },
+        ];
+        runtime.ctfBalances = {
+            [`${TEST_AGENT.toLowerCase()}:${NO_TOKEN_ID}`]: 100_000_000n,
+        };
+        const reimbursementFailureSignal = buildSignedMessageSignal({
+            requestId: 'pm-intent-reimbursement-terminal-failure',
+        });
+        const reimbursementFailureArchiveCalls = await getDeterministicToolCalls({
+            signals: [reimbursementFailureSignal],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(reimbursementFailureArchiveCalls.length, 1);
+        await onToolOutput({
+            name: 'ipfs_publish',
+            parsedOutput: {
+                status: 'published',
+                cid: 'bafyintent-reimbursement-terminal-failure',
+                uri: 'ipfs://bafyintent-reimbursement-terminal-failure',
+                pinned: true,
+            },
+            config: buildModuleConfig(),
+        });
+        const reimbursementFailureOrderCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(reimbursementFailureOrderCalls.length, 1);
+        await onToolOutput({
+            name: 'polymarket_clob_build_sign_and_place_order',
+            parsedOutput: {
+                status: 'submitted',
+                result: {
+                    order: {
+                        id: TEST_ORDER_ID,
+                        status: 'LIVE',
+                    },
+                },
+            },
+            config: buildModuleConfig(),
+        });
+        await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        await onToolOutput({
+            name: 'make_erc1155_deposit',
+            parsedOutput: {
+                status: 'confirmed',
+                transactionHash: TEST_DEPOSIT_TX_HASH,
+            },
+            config: buildModuleConfig(),
+        });
+        const reimbursementFailureCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(reimbursementFailureCalls.length, 1);
+        assert.equal(reimbursementFailureCalls[0].name, 'post_bond_and_propose');
+        await onToolOutput({
+            name: 'post_bond_and_propose',
+            parsedOutput: {
+                status: 'skipped',
+                message: 'proposal already exists',
+                retryable: false,
+            },
+            config: buildModuleConfig(),
+        });
+        const noRetryAfterTerminalReimbursementFailure = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.deepEqual(noRetryAfterTerminalReimbursementFailure, []);
+        state = getTradeIntentState();
+        storedIntent =
+            state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-reimbursement-terminal-failure`];
+        assert.equal(typeof storedIntent.closedAtMs, 'number');
+        assert.equal(storedIntent.terminalFailureStage, 'reimbursement_submission');
+        assert.equal(storedIntent.terminalFailureStatus, 'skipped');
+        assert.equal(storedIntent.creditReleasedAtMs, undefined);
+
+        await resetTradeIntentState();
         runtime.latestBlock = 450n;
         runtime.depositLogs = [
             {
@@ -2411,8 +2539,28 @@ async function run() {
         assert.equal(storedIntent.reimbursedAtMs, undefined);
         assert.deepEqual(state.pendingExecutedProposalHashes, [TEST_PROPOSAL_HASH.toLowerCase()]);
 
-        runtime.latestBlock = 491n;
+        const deletedProposalHash = `0x${'8'.repeat(64)}`;
+        runtime.latestBlock = 493n;
         runtime.proposedProposalLogs = [
+            {
+                args: {
+                    proposer: TEST_AGENT,
+                    proposalHash: deletedProposalHash,
+                    explanation: storedIntent.reimbursementExplanation,
+                    proposal: {
+                        transactions: [
+                            {
+                                to: TEST_USDC,
+                                operation: 0,
+                                value: 0n,
+                                data: '0xa9059cbb00000000000000000000000022222222222222222222222222222222222222220000000000000000000000000000000000000000000000000000000001312d00',
+                            },
+                        ],
+                    },
+                },
+                blockNumber: 491n,
+                logIndex: 0,
+            },
             {
                 args: {
                     proposer: TEST_AGENT,
@@ -2429,7 +2577,16 @@ async function run() {
                         ],
                     },
                 },
-                blockNumber: 491n,
+                blockNumber: 492n,
+                logIndex: 0,
+            },
+        ];
+        runtime.deletedProposalLogs = [
+            {
+                args: {
+                    proposalHash: deletedProposalHash,
+                },
+                blockNumber: 493n,
                 logIndex: 0,
             },
         ];
@@ -2461,6 +2618,9 @@ async function run() {
                 logIndex: 0,
             },
         ];
+        runtime.proposedProposalLogs = [];
+        runtime.executedProposalLogs = [];
+        runtime.deletedProposalLogs = [];
         runtime.orderPayload = {
             order: {
                 id: TEST_REJECTED_ORDER_ID,

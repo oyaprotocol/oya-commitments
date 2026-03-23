@@ -70,6 +70,9 @@ export function planNextActionCandidates({
         if (!intent.tokenDeposited) {
             continue;
         }
+        if (hasFutureBackoff(intent, 'nextReimbursementAttemptAtMs', nowMs)) {
+            continue;
+        }
         if (
             intent.reimbursementDispatchAtMs ||
             intent.reimbursementProposalHash ||
