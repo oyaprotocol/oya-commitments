@@ -1706,40 +1706,109 @@ function recoverProposalHashesFromSignals({ signals, agentAddress, policy }) {
 
 function recoverProposalHashesFromBackfilledCommitments() {
     let changed = false;
+    const nowMs = Date.now();
 
     for (const intent of getOpenIntents()) {
-        if (intent.reimbursementProposalHash || !intent.reimbursementExplanation) {
+        if (!intent.reimbursementExplanation) {
             continue;
         }
 
         const matchingCommitments = Object.values(tradeIntentState.reimbursementCommitments).filter(
             (commitment) =>
                 commitment?.proposalHash &&
-                commitment?.status !== 'deleted' &&
                 commitment?.intentKey &&
                 commitment.intentKey === intent.intentKey
         );
-        const matchingProposalHashes = Array.from(
+        if (matchingCommitments.length === 0) {
+            continue;
+        }
+
+        const currentProposalHash = normalizeHash(intent.reimbursementProposalHash);
+        const executedProposalHashes = Array.from(
             new Set(
                 matchingCommitments
+                    .filter((commitment) => commitment?.status === 'executed')
                     .map((commitment) => normalizeHash(commitment?.proposalHash))
                     .filter(Boolean)
             )
         );
-        if (matchingProposalHashes.length !== 1) {
+        const liveProposalHashes = Array.from(
+            new Set(
+                matchingCommitments
+                    .filter(
+                        (commitment) =>
+                            commitment?.status !== 'deleted' && commitment?.status !== 'executed'
+                    )
+                    .map((commitment) => normalizeHash(commitment?.proposalHash))
+                    .filter(Boolean)
+            )
+        );
+        const deletedProposalHashes = new Set(
+            matchingCommitments
+                .filter((commitment) => commitment?.status === 'deleted')
+                .map((commitment) => normalizeHash(commitment?.proposalHash))
+                .filter(Boolean)
+        );
+
+        const resolvedExecutedProposalHash =
+            (currentProposalHash && executedProposalHashes.includes(currentProposalHash)
+                ? currentProposalHash
+                : null) ??
+            (executedProposalHashes.length === 1 ? executedProposalHashes[0] : null);
+        if (resolvedExecutedProposalHash) {
+            intent.reimbursementProposalHash = resolvedExecutedProposalHash;
+            intent.reimbursedAtMs = nowMs;
+            clearReimbursementSubmissionTracking(intent);
+            clearReimbursementSubmissionAmbiguity(intent);
+            delete intent.lastReimbursementSubmissionStatus;
+            delete intent.lastReimbursementSubmissionError;
+            if (pendingProposalSubmission?.intentKey === intent.intentKey) {
+                pendingProposalSubmission = null;
+            }
+            intent.updatedAtMs = nowMs;
+            changed = true;
             continue;
         }
 
-        intent.reimbursementProposalHash = matchingProposalHashes[0];
-        delete intent.reimbursementDispatchAtMs;
-        delete intent.reimbursementSubmittedAtMs;
+        const resolvedLiveProposalHash =
+            (currentProposalHash && liveProposalHashes.includes(currentProposalHash)
+                ? currentProposalHash
+                : null) ??
+            (liveProposalHashes.length === 1 ? liveProposalHashes[0] : null);
+        if (resolvedLiveProposalHash) {
+            intent.reimbursementProposalHash = resolvedLiveProposalHash;
+            delete intent.reimbursementDispatchAtMs;
+            delete intent.reimbursementSubmittedAtMs;
+            if (pendingProposalSubmission?.intentKey === intent.intentKey) {
+                pendingProposalSubmission = null;
+            }
+            clearReimbursementSubmissionAmbiguity(intent);
+            delete intent.lastReimbursementSubmissionStatus;
+            delete intent.lastReimbursementSubmissionError;
+            intent.updatedAtMs = nowMs;
+            changed = true;
+            continue;
+        }
+
+        const deletedCurrentProposal =
+            currentProposalHash !== null && deletedProposalHashes.has(currentProposalHash);
+        const deletedOnlyBackfill =
+            liveProposalHashes.length === 0 &&
+            executedProposalHashes.length === 0 &&
+            deletedProposalHashes.size > 0;
+        if (!deletedCurrentProposal && !deletedOnlyBackfill) {
+            continue;
+        }
+
+        clearReimbursementSubmissionTracking(intent);
+        delete intent.reimbursementProposalHash;
+        delete intent.nextReimbursementAttemptAtMs;
         if (pendingProposalSubmission?.intentKey === intent.intentKey) {
             pendingProposalSubmission = null;
         }
-        clearReimbursementSubmissionAmbiguity(intent);
         delete intent.lastReimbursementSubmissionStatus;
         delete intent.lastReimbursementSubmissionError;
-        intent.updatedAtMs = Date.now();
+        intent.updatedAtMs = nowMs;
         changed = true;
     }
 
@@ -1929,6 +1998,7 @@ function applyProposalEventUpdate({ executedProposals = [], deletedProposals = [
 
         if (executedHashes.has(proposalHash)) {
             intent.reimbursedAtMs = nowMs;
+            clearReimbursementSubmissionTracking(intent);
             intent.updatedAtMs = nowMs;
             clearReimbursementSubmissionAmbiguity(intent);
             delete intent.lastReimbursementSubmissionStatus;

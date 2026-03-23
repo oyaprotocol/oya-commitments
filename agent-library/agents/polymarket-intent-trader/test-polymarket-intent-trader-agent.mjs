@@ -2768,6 +2768,331 @@ async function run() {
         assert.deepEqual(state.pendingExecutedProposalHashes, []);
 
         await resetTradeIntentState();
+        runtime.latestBlock = 520n;
+        runtime.depositLogs = [
+            {
+                args: {
+                    from: TEST_SIGNER,
+                    value: 50_000_000n,
+                },
+                blockNumber: 10n,
+                transactionHash: `0x${'d'.repeat(64)}`,
+                logIndex: 0,
+            },
+        ];
+        runtime.orderPayload = {
+            order: {
+                id: TEST_ORDER_ID,
+                status: 'MATCHED',
+                original_size: '25',
+                size_matched: '25',
+                maker_amount_filled: '20000000',
+            },
+        };
+        runtime.tradesPayload = [
+            {
+                id: 'trade-1',
+                status: 'CONFIRMED',
+                taker_order_id: TEST_ORDER_ID,
+                price: '0.32',
+                size: '62.5',
+            },
+        ];
+        runtime.ctfBalances = {
+            [`${TEST_AGENT.toLowerCase()}:${NO_TOKEN_ID}`]: 100_000_000n,
+        };
+        runtime.proposedProposalLogs = [];
+        runtime.executedProposalLogs = [];
+        runtime.deletedProposalLogs = [];
+        const deletedBackfillProposalHash = `0x${'9'.repeat(64)}`;
+        const deletedBackfillSignal = buildSignedMessageSignal({
+            requestId: 'pm-intent-backfilled-deleted-proposal',
+        });
+        const deletedBackfillArchiveCalls = await getDeterministicToolCalls({
+            signals: [deletedBackfillSignal],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(deletedBackfillArchiveCalls.length, 1);
+        await onToolOutput({
+            name: 'ipfs_publish',
+            parsedOutput: {
+                status: 'published',
+                cid: 'bafyintent-backfilled-deleted-proposal',
+                uri: 'ipfs://bafyintent-backfilled-deleted-proposal',
+                pinned: true,
+            },
+            config: buildModuleConfig(),
+        });
+        const deletedBackfillOrderCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(deletedBackfillOrderCalls.length, 1);
+        await onToolOutput({
+            name: 'polymarket_clob_build_sign_and_place_order',
+            parsedOutput: {
+                status: 'submitted',
+                result: {
+                    order: {
+                        id: TEST_ORDER_ID,
+                        status: 'LIVE',
+                    },
+                },
+            },
+            config: buildModuleConfig(),
+        });
+        await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        await onToolOutput({
+            name: 'make_erc1155_deposit',
+            parsedOutput: {
+                status: 'confirmed',
+                transactionHash: TEST_DEPOSIT_TX_HASH,
+            },
+            config: buildModuleConfig(),
+        });
+        const deletedBackfillProposalCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(deletedBackfillProposalCalls.length, 1);
+        await onToolOutput({
+            name: 'post_bond_and_propose',
+            parsedOutput: {
+                status: 'submitted',
+                ogProposalHash: deletedBackfillProposalHash,
+                transactionHash: TEST_REIMBURSE_TX_HASH,
+            },
+            config: buildModuleConfig(),
+        });
+        state = getTradeIntentState();
+        storedIntent =
+            state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-backfilled-deleted-proposal`];
+        runtime.latestBlock = 522n;
+        runtime.proposedProposalLogs = [
+            {
+                args: {
+                    proposer: TEST_AGENT,
+                    proposalHash: deletedBackfillProposalHash,
+                    explanation: storedIntent.reimbursementExplanation,
+                    proposal: {
+                        transactions: [
+                            {
+                                to: TEST_USDC,
+                                operation: 0,
+                                value: 0n,
+                                data: '0xa9059cbb00000000000000000000000022222222222222222222222222222222222222220000000000000000000000000000000000000000000000000000000001312d00',
+                            },
+                        ],
+                    },
+                },
+                blockNumber: 521n,
+                logIndex: 0,
+            },
+        ];
+        runtime.deletedProposalLogs = [
+            {
+                args: {
+                    proposalHash: deletedBackfillProposalHash,
+                },
+                blockNumber: 522n,
+                logIndex: 0,
+            },
+        ];
+        setTradeIntentStatePathForTest(stateFilePath);
+        const replacementProposalCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(replacementProposalCalls.length, 1);
+        assert.equal(replacementProposalCalls[0].name, 'post_bond_and_propose');
+        state = getTradeIntentState();
+        storedIntent =
+            state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-backfilled-deleted-proposal`];
+        assert.equal(storedIntent.reimbursementProposalHash, undefined);
+        assert.equal(typeof storedIntent.reimbursementDispatchAtMs, 'number');
+
+        await resetTradeIntentState();
+        runtime.latestBlock = 530n;
+        runtime.depositLogs = [
+            {
+                args: {
+                    from: TEST_SIGNER,
+                    value: 50_000_000n,
+                },
+                blockNumber: 10n,
+                transactionHash: `0x${'d'.repeat(64)}`,
+                logIndex: 0,
+            },
+        ];
+        runtime.orderPayload = {
+            order: {
+                id: TEST_ORDER_ID,
+                status: 'MATCHED',
+                original_size: '25',
+                size_matched: '25',
+                maker_amount_filled: '20000000',
+            },
+        };
+        runtime.tradesPayload = [
+            {
+                id: 'trade-1',
+                status: 'CONFIRMED',
+                taker_order_id: TEST_ORDER_ID,
+                price: '0.32',
+                size: '62.5',
+            },
+        ];
+        runtime.ctfBalances = {
+            [`${TEST_AGENT.toLowerCase()}:${NO_TOKEN_ID}`]: 100_000_000n,
+        };
+        runtime.proposedProposalLogs = [];
+        runtime.executedProposalLogs = [];
+        runtime.deletedProposalLogs = [];
+        const executedBackfillProposalHash = `0x${'7'.repeat(64)}`;
+        const executedBackfillSignal = buildSignedMessageSignal({
+            requestId: 'pm-intent-backfilled-executed-proposal',
+        });
+        const executedBackfillArchiveCalls = await getDeterministicToolCalls({
+            signals: [executedBackfillSignal],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(executedBackfillArchiveCalls.length, 1);
+        await onToolOutput({
+            name: 'ipfs_publish',
+            parsedOutput: {
+                status: 'published',
+                cid: 'bafyintent-backfilled-executed-proposal',
+                uri: 'ipfs://bafyintent-backfilled-executed-proposal',
+                pinned: true,
+            },
+            config: buildModuleConfig(),
+        });
+        const executedBackfillOrderCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(executedBackfillOrderCalls.length, 1);
+        await onToolOutput({
+            name: 'polymarket_clob_build_sign_and_place_order',
+            parsedOutput: {
+                status: 'submitted',
+                result: {
+                    order: {
+                        id: TEST_ORDER_ID,
+                        status: 'LIVE',
+                    },
+                },
+            },
+            config: buildModuleConfig(),
+        });
+        await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        await onToolOutput({
+            name: 'make_erc1155_deposit',
+            parsedOutput: {
+                status: 'confirmed',
+                transactionHash: TEST_DEPOSIT_TX_HASH,
+            },
+            config: buildModuleConfig(),
+        });
+        const executedBackfillProposalCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(executedBackfillProposalCalls.length, 1);
+        await onToolOutput({
+            name: 'post_bond_and_propose',
+            parsedOutput: {
+                status: 'submitted',
+                ogProposalHash: executedBackfillProposalHash,
+                transactionHash: TEST_REIMBURSE_TX_HASH,
+            },
+            config: buildModuleConfig(),
+        });
+        state = getTradeIntentState();
+        storedIntent =
+            state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-backfilled-executed-proposal`];
+        runtime.latestBlock = 532n;
+        runtime.proposedProposalLogs = [
+            {
+                args: {
+                    proposer: TEST_AGENT,
+                    proposalHash: executedBackfillProposalHash,
+                    explanation: storedIntent.reimbursementExplanation,
+                    proposal: {
+                        transactions: [
+                            {
+                                to: TEST_USDC,
+                                operation: 0,
+                                value: 0n,
+                                data: '0xa9059cbb00000000000000000000000022222222222222222222222222222222222222220000000000000000000000000000000000000000000000000000000001312d00',
+                            },
+                        ],
+                    },
+                },
+                blockNumber: 531n,
+                logIndex: 0,
+            },
+        ];
+        runtime.executedProposalLogs = [
+            {
+                args: {
+                    proposalHash: executedBackfillProposalHash,
+                },
+                blockNumber: 532n,
+                logIndex: 0,
+            },
+        ];
+        runtime.deletedProposalLogs = [];
+        setTradeIntentStatePathForTest(stateFilePath);
+        const noReplacementAfterExecutedBackfill = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.deepEqual(noReplacementAfterExecutedBackfill, []);
+        state = getTradeIntentState();
+        storedIntent =
+            state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-backfilled-executed-proposal`];
+        assert.equal(storedIntent.reimbursementProposalHash, executedBackfillProposalHash.toLowerCase());
+        assert.equal(typeof storedIntent.reimbursedAtMs, 'number');
+        assert.equal(storedIntent.reimbursementSubmittedAtMs, undefined);
+
+        await resetTradeIntentState();
         runtime.latestBlock = 500n;
         runtime.depositLogs = [
             {
