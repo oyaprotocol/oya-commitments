@@ -1,10 +1,15 @@
 import { readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { decodeEventLog, erc1155Abi, getAddress, isAddressEqual, parseUnits } from 'viem';
+import { decodeEventLog, erc1155Abi, getAddress, hexToString, isAddressEqual, parseUnits } from 'viem';
 import { findContractDeploymentBlock, getLogsChunked } from '../../../agent/src/lib/chain-history.js';
 import { buildSignedMessagePayload } from '../../../agent/src/lib/message-signing.js';
-import { transactionsProposedEvent, transferEvent } from '../../../agent/src/lib/og.js';
+import {
+    proposalDeletedEvent,
+    proposalExecutedEvent,
+    transactionsProposedEvent,
+    transferEvent,
+} from '../../../agent/src/lib/og.js';
 import { getAlwaysEmitBalanceSnapshotPollingOptions } from '../../../agent/src/lib/polling.js';
 import {
     CLOB_FAILURE_TERMINAL_STATUS,
@@ -27,6 +32,7 @@ import {
 import {
     buildCreditSnapshot,
     createDepositRecord,
+    createReimbursementCommitmentRecord,
     getAvailableCreditWeiForAddress,
 } from './credit-ledger.js';
 import { planNextActionCandidates } from './planner.js';
@@ -34,7 +40,7 @@ import { planNextActionCandidates } from './planner.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const STATE_VERSION = 3;
+const STATE_VERSION = 4;
 const ARTIFACT_VERSION = 'oya-polymarket-signed-intent-archive-v1';
 const FILENAME_PREFIX = 'signed-trade-intent-';
 const FILENAME_SUFFIX = '.json';
@@ -62,7 +68,9 @@ const tradeIntentState = {
     nextSequence: 1,
     intents: {},
     deposits: {},
+    reimbursementCommitments: {},
     backfilledDepositsThroughBlock: null,
+    backfilledReimbursementCommitmentsThroughBlock: null,
 };
 
 let tradeIntentStateHydrated = false;
@@ -74,6 +82,7 @@ let pendingOrderSubmission = null;
 let pendingDepositSubmission = null;
 let pendingProposalSubmission = null;
 let depositBackfillStatusLogged = false;
+let reimbursementBackfillStatusLogged = false;
 const queuedProposalEventUpdates = [];
 
 function cloneJson(value) {
@@ -89,13 +98,16 @@ function resetInMemoryState({ hydrated = false, preserveQueuedProposalEventUpdat
     tradeIntentState.nextSequence = 1;
     tradeIntentState.intents = {};
     tradeIntentState.deposits = {};
+    tradeIntentState.reimbursementCommitments = {};
     tradeIntentState.backfilledDepositsThroughBlock = null;
+    tradeIntentState.backfilledReimbursementCommitmentsThroughBlock = null;
     tradeIntentStateHydrated = hydrated;
     pendingArtifactPublish = null;
     pendingOrderSubmission = null;
     pendingDepositSubmission = null;
     pendingProposalSubmission = null;
     depositBackfillStatusLogged = false;
+    reimbursementBackfillStatusLogged = false;
     if (!preserveQueuedProposalEventUpdates) {
         queuedProposalEventUpdates.length = 0;
     }
@@ -654,10 +666,21 @@ async function hydrateTradeIntentState() {
                 !Array.isArray(parsed.deposits)
                     ? parsed.deposits
                     : {};
+            tradeIntentState.reimbursementCommitments =
+                parsed.reimbursementCommitments &&
+                typeof parsed.reimbursementCommitments === 'object' &&
+                !Array.isArray(parsed.reimbursementCommitments)
+                    ? parsed.reimbursementCommitments
+                    : {};
             tradeIntentState.backfilledDepositsThroughBlock =
                 typeof parsed.backfilledDepositsThroughBlock === 'string' &&
                 parsed.backfilledDepositsThroughBlock.trim()
                     ? parsed.backfilledDepositsThroughBlock.trim()
+                    : null;
+            tradeIntentState.backfilledReimbursementCommitmentsThroughBlock =
+                typeof parsed.backfilledReimbursementCommitmentsThroughBlock === 'string' &&
+                parsed.backfilledReimbursementCommitmentsThroughBlock.trim()
+                    ? parsed.backfilledReimbursementCommitmentsThroughBlock.trim()
                     : null;
         }
     } catch (error) {
@@ -674,7 +697,10 @@ async function persistTradeIntentState() {
                 nextSequence: tradeIntentState.nextSequence,
                 intents: tradeIntentState.intents,
                 deposits: tradeIntentState.deposits,
+                reimbursementCommitments: tradeIntentState.reimbursementCommitments,
                 backfilledDepositsThroughBlock: tradeIntentState.backfilledDepositsThroughBlock,
+                backfilledReimbursementCommitmentsThroughBlock:
+                    tradeIntentState.backfilledReimbursementCommitmentsThroughBlock,
             },
             null,
             2
@@ -1130,7 +1156,7 @@ function interpretSignedTradeIntentSignal(
 
 async function resolveInitialDepositBackfillStartBlock({
     publicClient,
-    commitmentSafe,
+    address,
     startBlock,
     latestBlock,
 }) {
@@ -1141,7 +1167,7 @@ async function resolveInitialDepositBackfillStartBlock({
     try {
         const discovered = await findContractDeploymentBlock({
             publicClient,
-            address: commitmentSafe,
+            address,
             latestBlock,
         });
         if (discovered !== null) {
@@ -1187,7 +1213,7 @@ async function maybeBackfillDeposits({
             ? previousBackfilledThroughBlock + 1n
             : await resolveInitialDepositBackfillStartBlock({
                   publicClient,
-                  commitmentSafe,
+                  address: commitmentSafe,
                   startBlock: config?.startBlock,
                   latestBlock,
               });
@@ -1240,6 +1266,243 @@ async function maybeBackfillDeposits({
         );
     }
     markStateDirty();
+    return changed;
+}
+
+function decodeOgExplanationText(value) {
+    if (typeof value !== 'string' || !value.trim()) {
+        return null;
+    }
+    if (!value.startsWith('0x')) {
+        return value.trim();
+    }
+    try {
+        return hexToString(value).trim() || null;
+    } catch (error) {
+        return null;
+    }
+}
+
+function parseReimbursementExplanationFields(explanation) {
+    const normalized = normalizeWhitespace(explanation);
+    if (!normalized.startsWith('polymarket-intent-trader reimbursement')) {
+        return null;
+    }
+
+    const fields = {};
+    for (const segment of normalized.split('|').slice(1)) {
+        const trimmed = segment.trim();
+        if (!trimmed) {
+            continue;
+        }
+        const separator = trimmed.indexOf('=');
+        if (separator <= 0) {
+            continue;
+        }
+        const key = trimmed.slice(0, separator).trim();
+        const rawValue = trimmed.slice(separator + 1).trim();
+        if (!key) {
+            continue;
+        }
+        try {
+            fields[key] = decodeURIComponent(rawValue);
+        } catch (error) {
+            fields[key] = rawValue;
+        }
+    }
+
+    return fields;
+}
+
+function buildBackfilledReimbursementCommitmentRecord({ proposalHash, transactions, explanation, policy }) {
+    const fields = parseReimbursementExplanationFields(explanation);
+    if (!fields) {
+        return null;
+    }
+    if (!Array.isArray(transactions) || transactions.length !== 1) {
+        return null;
+    }
+
+    const [transaction] = transactions;
+    if (!transaction?.to || !isAddressEqual(transaction.to, policy.collateralToken)) {
+        return null;
+    }
+
+    const decoded = decodeErc20TransferCallData(transaction.data);
+    if (!decoded || BigInt(decoded.amount ?? 0) <= 0n) {
+        return null;
+    }
+
+    const explanationSpendWei = parseOptionalNonNegativeIntegerString(fields.spentWei);
+    const amountWei = String(decoded.amount);
+    if (explanationSpendWei && explanationSpendWei !== amountWei) {
+        return null;
+    }
+
+    return createReimbursementCommitmentRecord(
+        {
+            signer: fields.signer,
+            amountWei,
+            proposalHash,
+            intentKey: fields.intent ?? null,
+            status: 'proposed',
+        },
+        {
+            proposalHash,
+        }
+    );
+}
+
+function compareLogOrder(left, right) {
+    const leftBlock = BigInt(left?.log?.blockNumber ?? 0n);
+    const rightBlock = BigInt(right?.log?.blockNumber ?? 0n);
+    if (leftBlock !== rightBlock) {
+        return leftBlock < rightBlock ? -1 : 1;
+    }
+    const leftIndex = Number(left?.log?.logIndex ?? 0);
+    const rightIndex = Number(right?.log?.logIndex ?? 0);
+    return leftIndex - rightIndex;
+}
+
+async function maybeBackfillReimbursementCommitments({
+    publicClient,
+    latestBlock,
+    policy,
+    config,
+}) {
+    if (!policy.ogModule) {
+        return false;
+    }
+
+    const previousBackfilledThroughBlock =
+        tradeIntentState.backfilledReimbursementCommitmentsThroughBlock !== null
+            ? BigInt(tradeIntentState.backfilledReimbursementCommitmentsThroughBlock)
+            : null;
+
+    if (
+        previousBackfilledThroughBlock !== null &&
+        previousBackfilledThroughBlock >= latestBlock
+    ) {
+        if (!reimbursementBackfillStatusLogged) {
+            console.log(
+                `[agent] polymarket-intent-trader reimbursement backfill already complete through block ${tradeIntentState.backfilledReimbursementCommitmentsThroughBlock}.`
+            );
+            reimbursementBackfillStatusLogged = true;
+        }
+        return false;
+    }
+
+    const fromBlock =
+        previousBackfilledThroughBlock !== null
+            ? previousBackfilledThroughBlock + 1n
+            : await resolveInitialDepositBackfillStartBlock({
+                  publicClient,
+                  address: policy.ogModule,
+                  startBlock: config?.startBlock,
+                  latestBlock,
+              });
+
+    const [proposedLogs, executedLogs, deletedLogs] = await Promise.all([
+        getLogsChunked({
+            publicClient,
+            address: policy.ogModule,
+            event: transactionsProposedEvent,
+            fromBlock,
+            toBlock: latestBlock,
+            chunkSize: policy.logChunkSize,
+        }),
+        getLogsChunked({
+            publicClient,
+            address: policy.ogModule,
+            event: proposalExecutedEvent,
+            fromBlock,
+            toBlock: latestBlock,
+            chunkSize: policy.logChunkSize,
+        }),
+        getLogsChunked({
+            publicClient,
+            address: policy.ogModule,
+            event: proposalDeletedEvent,
+            fromBlock,
+            toBlock: latestBlock,
+            chunkSize: policy.logChunkSize,
+        }),
+    ]);
+
+    const lifecycleEvents = [
+        ...proposedLogs.map((log) => ({ kind: 'proposed', log })),
+        ...executedLogs.map((log) => ({ kind: 'executed', log })),
+        ...deletedLogs.map((log) => ({ kind: 'deleted', log })),
+    ].sort(compareLogOrder);
+
+    let changed = false;
+    for (const event of lifecycleEvents) {
+        const proposalHash = normalizeHash(event.log?.args?.proposalHash);
+        if (!proposalHash) {
+            continue;
+        }
+
+        if (event.kind === 'proposed') {
+            const explanation = decodeOgExplanationText(event.log?.args?.explanation);
+            const transactions = Array.isArray(event.log?.args?.proposal?.transactions)
+                ? event.log.args.proposal.transactions
+                : [];
+            const record = buildBackfilledReimbursementCommitmentRecord({
+                proposalHash,
+                transactions,
+                explanation,
+                policy,
+            });
+            if (!record) {
+                continue;
+            }
+            const existing = tradeIntentState.reimbursementCommitments[record.commitmentKey];
+            const nextRecord = existing
+                ? {
+                      ...existing,
+                      ...record,
+                      status: existing.status === 'executed' ? 'executed' : record.status,
+                  }
+                : record;
+            if (JSON.stringify(existing) !== JSON.stringify(nextRecord)) {
+                tradeIntentState.reimbursementCommitments[record.commitmentKey] = nextRecord;
+                changed = true;
+            }
+            continue;
+        }
+
+        const commitmentKey = `proposal:${proposalHash}`;
+        const existing = tradeIntentState.reimbursementCommitments[commitmentKey];
+        if (!existing) {
+            continue;
+        }
+
+        if (event.kind === 'executed') {
+            if (existing.status !== 'executed') {
+                tradeIntentState.reimbursementCommitments[commitmentKey] = {
+                    ...existing,
+                    status: 'executed',
+                };
+                changed = true;
+            }
+            continue;
+        }
+
+        delete tradeIntentState.reimbursementCommitments[commitmentKey];
+        changed = true;
+    }
+
+    tradeIntentState.backfilledReimbursementCommitmentsThroughBlock = latestBlock.toString();
+    reimbursementBackfillStatusLogged = false;
+    if (lifecycleEvents.length > 0 && previousBackfilledThroughBlock === null) {
+        console.log(
+            `[agent] Rebuilt ${lifecycleEvents.length} historical reimbursement lifecycle records for ${policy.ogModule}.`
+        );
+    } else if (lifecycleEvents.length > 0) {
+        console.log(
+            `[agent] Recovered ${lifecycleEvents.length} incremental reimbursement lifecycle records for ${policy.ogModule} through block ${latestBlock.toString()}.`
+        );
+    }
     return changed;
 }
 
@@ -1348,6 +1611,7 @@ function getIntentLifecycleStatus(record, nowMs = Date.now()) {
     if (record.depositDispatchAtMs) return 'deposit_dispatching';
     if (record.depositTxHash) return 'deposit_submitted';
     if (record.orderFilled) return 'order_filled';
+    if (record.orderSubmittedAtMs) return 'order_submitted';
     if (record.orderDispatchAtMs) return 'order_dispatching';
     if (record.orderId) return 'order_submitted';
     if (record.artifactCid) return 'archived';
@@ -1914,15 +2178,20 @@ async function refreshOrderStatus({
         }
         if (!intent.orderId) {
             if (hasTimedOut(intent.orderSubmittedAtMs, policy.pendingTxTimeoutMs, nowMs)) {
-                markTerminalIntentFailure(intent, {
-                    stage: 'order_submission',
-                    status: 'unknown_result_timeout',
-                    detail:
-                        intent.lastOrderSubmissionError ??
-                        'Polymarket order submission outcome remained ambiguous until timeout; refusing automatic retry.',
-                    sideEffectsLikelyCommitted: true,
-                    releaseCredit: false,
-                });
+                const detail =
+                    intent.lastOrderSubmissionStatus === 'missing_order_id'
+                        ? 'Polymarket order submission returned submitted without an order id; refusing automatic retry and waiting for manual reconciliation.'
+                        : intent.lastOrderSubmissionError ??
+                          'Polymarket order submission outcome remained ambiguous until timeout; refusing automatic retry.';
+                if (
+                    intent.lastOrderStatusRefreshError !== detail ||
+                    !Number.isInteger(intent.orderStatusRefreshFailedAtMs)
+                ) {
+                    intent.lastOrderStatusRefreshError = detail;
+                    intent.orderStatusRefreshFailedAtMs = nowMs;
+                    intent.updatedAtMs = nowMs;
+                    changed = true;
+                }
                 changed = true;
             }
             continue;
@@ -2481,6 +2750,13 @@ async function getDeterministicToolCalls({
             policy,
             config,
         })) || changed;
+    changed =
+        (await maybeBackfillReimbursementCommitments({
+            publicClient,
+            latestBlock,
+            policy,
+            config,
+        })) || changed;
     changed = ingestSignals(signals, policy) || changed;
 
     const clobAuthAddress = getClobAuthAddress({
@@ -2855,13 +3131,12 @@ async function handleOrderToolOutput({ parsedOutput, policy }) {
     intent.orderId = extractOrderIdFromSubmission(parsedOutput);
     intent.orderStatus = extractOrderStatusFromSubmission(parsedOutput);
     if (!intent.orderId) {
-        markTerminalIntentFailure(intent, {
-            stage: 'order_submission',
-            status: 'missing_order_id',
-            detail: 'Polymarket order submission did not return an order id.',
-            sideEffectsLikelyCommitted: true,
-            releaseCredit: false,
-        });
+        intent.lastOrderSubmissionStatus = 'missing_order_id';
+        intent.lastOrderSubmissionError =
+            'Polymarket order submission returned submitted without an order id; refusing automatic retry until reconciled.';
+        intent.orderSubmittedAtMs = Date.now();
+        delete intent.nextOrderAttemptAtMs;
+        intent.updatedAtMs = Date.now();
         await maybePersistTradeIntentState();
         return;
     }

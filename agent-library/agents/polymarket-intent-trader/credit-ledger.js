@@ -62,6 +62,37 @@ export function createDepositRecord(signal, { collateralToken, nowMs = Date.now(
     };
 }
 
+export function createReimbursementCommitmentRecord(
+    signal,
+    { proposalHash, nowMs = Date.now() } = {}
+) {
+    if (typeof signal?.signer !== 'string' || !signal.signer.trim()) {
+        return null;
+    }
+
+    const amountWei = normalizePositiveBigInt(signal.amountWei, 'reimbursement amount');
+    const normalizedProposalHash = normalizeHashOrNull(signal.proposalHash ?? proposalHash);
+    if (!normalizedProposalHash) {
+        return null;
+    }
+
+    return {
+        commitmentKey: `proposal:${normalizedProposalHash}`,
+        proposalHash: normalizedProposalHash,
+        intentKey:
+            typeof signal.intentKey === 'string' && signal.intentKey.trim()
+                ? signal.intentKey.trim()
+                : null,
+        signer: normalizeAddress(signal.signer),
+        amountWei: amountWei.toString(),
+        status:
+            typeof signal.status === 'string' && signal.status.trim()
+                ? signal.status.trim()
+                : 'proposed',
+        createdAtMs: nowMs,
+    };
+}
+
 export function getDepositedCreditWeiForAddress(state, address) {
     let total = 0n;
     for (const deposit of Object.values(state?.deposits ?? {})) {
@@ -73,6 +104,31 @@ export function getDepositedCreditWeiForAddress(state, address) {
     return total;
 }
 
+function hasMatchingIntentReservation(state, commitment) {
+    const normalizedIntentKey =
+        typeof commitment?.intentKey === 'string' && commitment.intentKey.trim()
+            ? commitment.intentKey.trim()
+            : null;
+    const normalizedProposalHash = normalizeHashOrNull(commitment?.proposalHash);
+
+    for (const intent of Object.values(state?.intents ?? {})) {
+        if (!intent || typeof intent !== 'object') {
+            continue;
+        }
+        if (normalizedIntentKey && intent.intentKey === normalizedIntentKey) {
+            return true;
+        }
+        if (
+            normalizedProposalHash &&
+            normalizeHashOrNull(intent.reimbursementProposalHash) === normalizedProposalHash
+        ) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 export function getReservedCreditWeiForAddress(state, address) {
     let total = 0n;
     for (const intent of Object.values(state?.intents ?? {})) {
@@ -80,6 +136,15 @@ export function getReservedCreditWeiForAddress(state, address) {
             continue;
         }
         total += BigInt(intent.reservedCreditAmountWei ?? 0);
+    }
+    for (const commitment of Object.values(state?.reimbursementCommitments ?? {})) {
+        if (!commitment?.signer || !isAddressEqual(commitment.signer, address)) {
+            continue;
+        }
+        if (hasMatchingIntentReservation(state, commitment)) {
+            continue;
+        }
+        total += BigInt(commitment.amountWei ?? 0);
     }
     return total;
 }
@@ -101,6 +166,11 @@ export function buildCreditSnapshot(state) {
     for (const intent of Object.values(state?.intents ?? {})) {
         if (typeof intent?.signer === 'string' && intent.signer.trim()) {
             addresses.add(normalizeAddress(intent.signer));
+        }
+    }
+    for (const commitment of Object.values(state?.reimbursementCommitments ?? {})) {
+        if (typeof commitment?.signer === 'string' && commitment.signer.trim()) {
+            addresses.add(normalizeAddress(commitment.signer));
         }
     }
 

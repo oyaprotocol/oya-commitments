@@ -25,6 +25,7 @@ const TEST_OTHER_SIGNER = '0x5555555555555555555555555555555555555555';
 const TEST_OTHER_AGENT = '0x6666666666666666666666666666666666666666';
 const TEST_USDC = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
 const TEST_CTF = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
+const TEST_OG_MODULE = '0x4444444444444444444444444444444444444444';
 const YES_TOKEN_ID = '101';
 const NO_TOKEN_ID = '202';
 const TEST_SIGNATURE = `0x${'1a'.repeat(65)}`;
@@ -49,7 +50,7 @@ function buildModuleConfig(overrides = {}) {
     const overrideAgentConfig = overrides.agentConfig ?? {};
     return {
         commitmentSafe: TEST_SAFE,
-        ogModule: '0x4444444444444444444444444444444444444444',
+        ogModule: TEST_OG_MODULE,
         startBlock: 0,
         ipfsEnabled: true,
         proposeEnabled: true,
@@ -129,22 +130,35 @@ function buildPublicClient(runtime) {
         async getCode({ address }) {
             return String(address).toLowerCase() === TEST_SAFE.toLowerCase() ? '0x1' : '0x';
         },
-        async getLogs({ address, args, fromBlock, toBlock }) {
-            if (String(address).toLowerCase() !== TEST_USDC.toLowerCase()) {
-                return [];
-            }
-            if (String(args?.to ?? '').toLowerCase() !== TEST_SAFE.toLowerCase()) {
-                return [];
-            }
+        async getLogs({ address, args, fromBlock, toBlock, event }) {
+            const normalizedAddress = String(address).toLowerCase();
             const normalizedFromBlock = BigInt(fromBlock ?? 0n);
             const normalizedToBlock = BigInt(toBlock ?? runtime.latestBlock);
-            return runtime.depositLogs.filter((log) => {
-                const blockNumber = BigInt(log.blockNumber ?? 0n);
-                return (
-                    blockNumber >= normalizedFromBlock &&
-                    blockNumber <= normalizedToBlock
-                );
-            });
+            if (normalizedAddress === TEST_USDC.toLowerCase()) {
+                if (String(args?.to ?? '').toLowerCase() !== TEST_SAFE.toLowerCase()) {
+                    return [];
+                }
+                return runtime.depositLogs.filter((log) => {
+                    const blockNumber = BigInt(log.blockNumber ?? 0n);
+                    return blockNumber >= normalizedFromBlock && blockNumber <= normalizedToBlock;
+                });
+            }
+            if (normalizedAddress === TEST_OG_MODULE.toLowerCase()) {
+                const eventName = String(event?.name ?? '');
+                const sourceLogs =
+                    eventName === 'TransactionsProposed'
+                        ? runtime.proposedProposalLogs
+                        : eventName === 'ProposalExecuted'
+                            ? runtime.executedProposalLogs
+                            : eventName === 'ProposalDeleted'
+                                ? runtime.deletedProposalLogs
+                                : [];
+                return sourceLogs.filter((log) => {
+                    const blockNumber = BigInt(log.blockNumber ?? 0n);
+                    return blockNumber >= normalizedFromBlock && blockNumber <= normalizedToBlock;
+                });
+            }
+            return [];
         },
         async readContract({ address, functionName, args }) {
             if (
@@ -214,6 +228,9 @@ async function run() {
         receipts: {},
         orderFetchError: null,
         tradesFetchError: null,
+        proposedProposalLogs: [],
+        executedProposalLogs: [],
+        deletedProposalLogs: [],
     };
 
     const publicClient = buildPublicClient(runtime);
@@ -310,6 +327,69 @@ async function run() {
         assert.deepEqual(incrementalBackfillCalls, []);
         state = getTradeIntentState();
         assert.equal(Object.keys(state.deposits).length, 2);
+
+        await resetTradeIntentState();
+        runtime.latestBlock = 120n;
+        runtime.depositLogs = [
+            {
+                args: {
+                    from: TEST_SIGNER,
+                    value: 50_000_000n,
+                },
+                blockNumber: 10n,
+                transactionHash: `0x${'d'.repeat(64)}`,
+                logIndex: 0,
+            },
+        ];
+        runtime.proposedProposalLogs = [
+            {
+                args: {
+                    proposalHash: TEST_PROPOSAL_HASH,
+                    explanation:
+                        'polymarket-intent-trader reimbursement | intent=legacy-intent-1 | signer=0x1111111111111111111111111111111111111111 | spentWei=20000000',
+                    proposal: {
+                        transactions: [
+                            {
+                                to: TEST_USDC,
+                                operation: 0,
+                                value: 0n,
+                                data: '0xa9059cbb00000000000000000000000022222222222222222222222222222222222222220000000000000000000000000000000000000000000000000000000001312d00',
+                            },
+                        ],
+                    },
+                },
+                blockNumber: 100n,
+                logIndex: 0,
+            },
+        ];
+        runtime.executedProposalLogs = [
+            {
+                args: {
+                    proposalHash: TEST_PROPOSAL_HASH,
+                },
+                blockNumber: 110n,
+                logIndex: 0,
+            },
+        ];
+        runtime.deletedProposalLogs = [];
+        const overcommittedRestartSignal = buildSignedMessageSignal({
+            requestId: 'pm-intent-overcommitted-restart',
+            text: 'Buy NO for up to 35 USDC if the price is 0.42 or better before 6pm UTC.',
+        });
+        const overcommittedRestartCalls = await getDeterministicToolCalls({
+            signals: [overcommittedRestartSignal],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.deepEqual(overcommittedRestartCalls, []);
+        state = getTradeIntentState();
+        assert.equal(Object.keys(state.intents).length, 0);
+        assert.equal(Object.keys(state.reimbursementCommitments).length, 1);
+        runtime.proposedProposalLogs = [];
+        runtime.executedProposalLogs = [];
+        runtime.deletedProposalLogs = [];
 
         const validSignal = buildSignedMessageSignal();
         const inactiveCalls = await getDeterministicToolCalls({
@@ -1262,6 +1342,131 @@ async function run() {
         assert.equal(storedIntent.lastOrderSubmissionError, 'socket hang up');
         assert.equal(storedIntent.orderSubmittedAtMs, undefined);
         assert.equal(typeof storedIntent.nextOrderAttemptAtMs, 'number');
+
+        await resetTradeIntentState();
+        runtime.latestBlock = 250n;
+        runtime.depositLogs = [
+            {
+                args: {
+                    from: TEST_SIGNER,
+                    value: 50_000_000n,
+                },
+                blockNumber: 10n,
+                transactionHash: `0x${'d'.repeat(64)}`,
+                logIndex: 0,
+            },
+        ];
+        const missingOrderIdSignal = buildSignedMessageSignal({
+            requestId: 'pm-intent-missing-order-id',
+        });
+        const missingOrderIdArchiveCalls = await getDeterministicToolCalls({
+            signals: [missingOrderIdSignal],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig({
+                agentConfig: {
+                    polymarketIntentTrader: {
+                        pendingTxTimeoutMs: 1_000,
+                    },
+                },
+            }),
+        });
+        assert.equal(missingOrderIdArchiveCalls.length, 1);
+        await onToolOutput({
+            name: 'ipfs_publish',
+            parsedOutput: {
+                status: 'published',
+                cid: 'bafyintent-missing-order-id',
+                uri: 'ipfs://bafyintent-missing-order-id',
+                pinned: true,
+            },
+            config: buildModuleConfig({
+                agentConfig: {
+                    polymarketIntentTrader: {
+                        pendingTxTimeoutMs: 1_000,
+                    },
+                },
+            }),
+        });
+        const missingOrderIdOrderCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig({
+                agentConfig: {
+                    polymarketIntentTrader: {
+                        pendingTxTimeoutMs: 1_000,
+                    },
+                },
+            }),
+        });
+        assert.equal(missingOrderIdOrderCalls.length, 1);
+        await onToolOutput({
+            name: 'polymarket_clob_build_sign_and_place_order',
+            parsedOutput: {
+                status: 'submitted',
+                result: {
+                    order: {
+                        status: 'LIVE',
+                    },
+                },
+            },
+            config: buildModuleConfig({
+                agentConfig: {
+                    polymarketIntentTrader: {
+                        pendingTxTimeoutMs: 1_000,
+                    },
+                },
+            }),
+        });
+        let missingOrderIdFollowupCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig({
+                agentConfig: {
+                    polymarketIntentTrader: {
+                        pendingTxTimeoutMs: 1_000,
+                    },
+                },
+            }),
+        });
+        assert.deepEqual(missingOrderIdFollowupCalls, []);
+        state = getTradeIntentState();
+        storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-missing-order-id`];
+        assert.equal(storedIntent.closedAtMs, undefined);
+        assert.equal(storedIntent.orderId ?? null, null);
+        assert.equal(typeof storedIntent.orderSubmittedAtMs, 'number');
+        assert.equal(storedIntent.lastOrderSubmissionStatus, 'missing_order_id');
+        const missingOrderIdDateNow = Date.now;
+        try {
+            Date.now = () => Number(storedIntent.orderSubmittedAtMs) + 2_000;
+            missingOrderIdFollowupCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_SAFE,
+                agentAddress: TEST_AGENT,
+                publicClient,
+                config: buildModuleConfig({
+                    agentConfig: {
+                        polymarketIntentTrader: {
+                            pendingTxTimeoutMs: 1_000,
+                        },
+                    },
+                }),
+            });
+            assert.deepEqual(missingOrderIdFollowupCalls, []);
+            state = getTradeIntentState();
+            storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-missing-order-id`];
+            assert.equal(storedIntent.closedAtMs, undefined);
+            assert.equal(storedIntent.creditReleasedAtMs, undefined);
+            assert.equal(storedIntent.lastOrderSubmissionStatus, 'missing_order_id');
+            assert.equal(typeof storedIntent.orderStatusRefreshFailedAtMs, 'number');
+        } finally {
+            Date.now = missingOrderIdDateNow;
+        }
 
         await resetTradeIntentState();
         runtime.latestBlock = 300n;
