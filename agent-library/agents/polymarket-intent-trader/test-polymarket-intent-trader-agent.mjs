@@ -265,17 +265,41 @@ async function run() {
         assert.deepEqual(initialBackfillCalls, []);
         let state = getTradeIntentState();
         assert.equal(Object.keys(state.deposits).length, 1);
+        runtime.depositLogs = [];
+        setTradeIntentStatePathForTest(stateFilePath);
+        const persistedBackfillRestartCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.deepEqual(persistedBackfillRestartCalls, []);
+        state = getTradeIntentState();
+        assert.equal(Object.keys(state.deposits).length, 1);
+        assert.equal(state.backfilledDepositsThroughBlock, '100');
 
         runtime.latestBlock = 101n;
-        runtime.depositLogs.push({
-            args: {
-                from: TEST_OTHER_SIGNER,
-                value: 30_000_000n,
+        runtime.depositLogs = [
+            {
+                args: {
+                    from: TEST_SIGNER,
+                    value: 50_000_000n,
+                },
+                blockNumber: 10n,
+                transactionHash: `0x${'d'.repeat(64)}`,
+                logIndex: 0,
             },
-            blockNumber: 101n,
-            transactionHash: `0x${'e'.repeat(64)}`,
-            logIndex: 0,
-        });
+            {
+                args: {
+                    from: TEST_OTHER_SIGNER,
+                    value: 30_000_000n,
+                },
+                blockNumber: 101n,
+                transactionHash: `0x${'e'.repeat(64)}`,
+                logIndex: 0,
+            },
+        ];
         const incrementalBackfillCalls = await getDeterministicToolCalls({
             signals: [],
             commitmentSafe: TEST_SAFE,
@@ -690,6 +714,38 @@ async function run() {
             nowMs: invalidSignal.receivedAtMs,
         });
         assert.equal(invalidInterpreted.ok, false);
+
+        const boundaryPriceSignal = buildSignedMessageSignal({
+            requestId: 'pm-intent-boundary-price',
+            text: 'Buy NO for up to 25 USDC if the price is 100 cents or better before 6pm UTC.',
+        });
+        const boundaryPriceInterpreted = interpretSignedTradeIntentSignal(boundaryPriceSignal, {
+            policy: {
+                ready: true,
+                marketId: 'market-123',
+                yesTokenId: YES_TOKEN_ID,
+                noTokenId: NO_TOKEN_ID,
+                collateralToken: TEST_USDC.toLowerCase(),
+                ctfContract: TEST_CTF.toLowerCase(),
+                signedCommands: new Set(['buy']),
+            },
+            nowMs: boundaryPriceSignal.receivedAtMs,
+        });
+        assert.equal(boundaryPriceInterpreted.ok, false);
+        assert.equal(boundaryPriceInterpreted.reason, 'invalid_order_price');
+        const boundaryPriceCalls = await getDeterministicToolCalls({
+            signals: [boundaryPriceSignal],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.deepEqual(boundaryPriceCalls, []);
+        state = getTradeIntentState();
+        assert.equal(
+            state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-boundary-price`],
+            undefined
+        );
 
         const enrichedSignals = await enrichSignals([validSignal], {
             config: buildModuleConfig(),

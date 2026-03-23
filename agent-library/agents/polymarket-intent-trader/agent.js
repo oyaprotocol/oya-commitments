@@ -978,10 +978,19 @@ function interpretSignedTradeIntentSignal(
         return { ok: false, reason: 'expired' };
     }
 
-    const orderAmounts = computeBuyOrderAmounts({
-        collateralAmountWei: maxSpend.wei,
-        price: maxPrice.decimal,
-    });
+    let orderAmounts;
+    try {
+        orderAmounts = computeBuyOrderAmounts({
+            collateralAmountWei: maxSpend.wei,
+            price: maxPrice.decimal,
+        });
+    } catch (error) {
+        return {
+            ok: false,
+            reason: 'invalid_order_price',
+            detail: error?.message ?? String(error),
+        };
+    }
     const tokenId = outcome === 'YES' ? policy.yesTokenId : policy.noTokenId;
     const canonicalMessage = buildSignedMessagePayload({
         address: signer,
@@ -2296,17 +2305,18 @@ async function getDeterministicToolCalls({
     let changed = reconcileDurableDispatchState();
 
     while (queuedProposalEventUpdates.length > 0) {
-        applyProposalEventUpdate(queuedProposalEventUpdates.shift());
+        changed = applyProposalEventUpdate(queuedProposalEventUpdates.shift()) || changed;
     }
 
-    await maybeBackfillDeposits({
-        publicClient,
-        commitmentSafe: normalizedCommitmentSafe,
-        latestBlock,
-        policy,
-        config,
-    });
-    ingestSignals(signals, policy);
+    changed =
+        (await maybeBackfillDeposits({
+            publicClient,
+            commitmentSafe: normalizedCommitmentSafe,
+            latestBlock,
+            policy,
+            config,
+        })) || changed;
+    changed = ingestSignals(signals, policy) || changed;
 
     const clobAuthAddress = getClobAuthAddress({
         config,
