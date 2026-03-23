@@ -1,4 +1,4 @@
-Only the following agent address is authorized to serve this commitment: <AUTHORIZED_AGENT_ADDRESS>.
+Only the following agent address is authorized to serve this commitment: 0x2967C076182F0303037072670e744e26Ed4A830f.
 
 This commitment accepts USDC deposits from multiple users for one configured Polymarket market.
 

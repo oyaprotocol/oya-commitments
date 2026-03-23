@@ -1106,20 +1106,107 @@ async function run() {
             },
             config: buildModuleConfig(),
         });
-        const noTradesDepositCalls = await getDeterministicToolCalls({
+        const noTradesFollowupCalls = await getDeterministicToolCalls({
             signals: [],
             commitmentSafe: TEST_SAFE,
             agentAddress: TEST_AGENT,
             publicClient,
             config: buildModuleConfig(),
         });
-        assert.equal(noTradesDepositCalls.length, 1);
-        assert.equal(noTradesDepositCalls[0].name, 'make_erc1155_deposit');
-        assert.equal(JSON.parse(noTradesDepositCalls[0].arguments).amount, '62500000');
+        assert.deepEqual(noTradesFollowupCalls, []);
         state = getTradeIntentState();
         storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-filled-no-trades`];
-        assert.equal(storedIntent.reimbursementAmountWei, '20000000');
-        assert.equal(storedIntent.filledShareAmount, '62500000');
+        assert.equal(storedIntent.orderFilled, undefined);
+        assert.equal(storedIntent.reimbursementAmountWei, null);
+        assert.equal(storedIntent.filledShareAmount, null);
+
+        await resetTradeIntentState();
+        runtime.latestBlock = 700n;
+        runtime.depositLogs = [
+            {
+                args: {
+                    from: TEST_SIGNER,
+                    value: 50_000_000n,
+                },
+                blockNumber: 10n,
+                transactionHash: `0x${'d'.repeat(64)}`,
+                logIndex: 0,
+            },
+        ];
+        runtime.orderPayload = {
+            order: {
+                id: 'order-deposit-failure',
+                status: 'MATCHED',
+                original_size: '25',
+                size_matched: '25',
+                maker_amount_filled: '20000000',
+            },
+        };
+        runtime.tradesPayload = [
+            {
+                id: 'trade-deposit-failure',
+                status: 'CONFIRMED',
+                taker_order_id: 'order-deposit-failure',
+                price: '0.32',
+                size: '62.5',
+            },
+        ];
+        runtime.ctfBalances = {
+            [`${TEST_AGENT.toLowerCase()}:${NO_TOKEN_ID}`]: 100_000_000n,
+        };
+        runtime.orderFetchError = null;
+        runtime.tradesFetchError = null;
+        const depositFailureSignal = buildSignedMessageSignal({
+            requestId: 'pm-intent-deposit-failure',
+        });
+        const depositFailureArchiveCalls = await getDeterministicToolCalls({
+            signals: [depositFailureSignal],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(depositFailureArchiveCalls.length, 1);
+        await onToolOutput({
+            name: 'ipfs_publish',
+            parsedOutput: {
+                status: 'published',
+                cid: 'bafyintent-deposit-failure',
+                uri: 'ipfs://bafyintent-deposit-failure',
+                pinned: true,
+            },
+            config: buildModuleConfig(),
+        });
+        const depositFailureOrderCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(depositFailureOrderCalls.length, 1);
+        await onToolOutput({
+            name: 'polymarket_clob_build_sign_and_place_order',
+            parsedOutput: {
+                status: 'submitted',
+                result: {
+                    order: {
+                        id: 'order-deposit-failure',
+                        status: 'LIVE',
+                    },
+                },
+            },
+            config: buildModuleConfig(),
+        });
+        const depositFailureCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(depositFailureCalls.length, 1);
+        assert.equal(depositFailureCalls[0].name, 'make_erc1155_deposit');
         await onToolOutput({
             name: 'make_erc1155_deposit',
             parsedOutput: {
@@ -1138,7 +1225,7 @@ async function run() {
         });
         assert.deepEqual(noRetryAfterDeterministicDepositFailure, []);
         state = getTradeIntentState();
-        storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-filled-no-trades`];
+        storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-deposit-failure`];
         assert.equal(typeof storedIntent.closedAtMs, 'number');
         assert.equal(storedIntent.terminalFailureStage, 'deposit');
         assert.equal(storedIntent.terminalFailureStatus, 'error');
