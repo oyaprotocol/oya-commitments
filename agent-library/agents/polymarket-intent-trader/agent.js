@@ -69,6 +69,8 @@ const tradeIntentState = {
     intents: {},
     deposits: {},
     reimbursementCommitments: {},
+    pendingExecutedProposalHashes: [],
+    pendingDeletedProposalHashes: [],
     backfilledDepositsThroughBlock: null,
     backfilledReimbursementCommitmentsThroughBlock: null,
 };
@@ -99,6 +101,8 @@ function resetInMemoryState({ hydrated = false, preserveQueuedProposalEventUpdat
     tradeIntentState.intents = {};
     tradeIntentState.deposits = {};
     tradeIntentState.reimbursementCommitments = {};
+    tradeIntentState.pendingExecutedProposalHashes = [];
+    tradeIntentState.pendingDeletedProposalHashes = [];
     tradeIntentState.backfilledDepositsThroughBlock = null;
     tradeIntentState.backfilledReimbursementCommitmentsThroughBlock = null;
     tradeIntentStateHydrated = hydrated;
@@ -184,6 +188,13 @@ function normalizeAddress(value) {
 
 function normalizeHash(value) {
     return normalizeHashOrNull(value);
+}
+
+function normalizeHashArray(values) {
+    if (!Array.isArray(values)) {
+        return [];
+    }
+    return Array.from(new Set(values.map((value) => normalizeHash(value)).filter(Boolean)));
 }
 
 function normalizeNonEmptyString(value) {
@@ -596,6 +607,31 @@ function markAmbiguousReimbursementSubmission(intent, detail, nowMs = Date.now()
     markTrackedSubmissionAmbiguity(intent, REIMBURSEMENT_SUBMISSION_FIELDS, detail, nowMs);
 }
 
+function clearReimbursementSubmissionTracking(intent) {
+    delete intent.reimbursementDispatchAtMs;
+    delete intent.reimbursementSubmittedAtMs;
+    delete intent.reimbursementSubmissionTxHash;
+    clearReimbursementSubmissionAmbiguity(intent);
+    delete intent.lastReimbursementSubmissionStatus;
+    delete intent.lastReimbursementSubmissionError;
+}
+
+function setPendingProposalLifecycleHashes({ executed = [], deleted = [] }) {
+    const nextExecuted = normalizeHashArray(executed);
+    const nextDeleted = normalizeHashArray(deleted);
+    const executedChanged =
+        JSON.stringify(tradeIntentState.pendingExecutedProposalHashes) !== JSON.stringify(nextExecuted);
+    const deletedChanged =
+        JSON.stringify(tradeIntentState.pendingDeletedProposalHashes) !== JSON.stringify(nextDeleted);
+    if (!executedChanged && !deletedChanged) {
+        return false;
+    }
+    tradeIntentState.pendingExecutedProposalHashes = nextExecuted;
+    tradeIntentState.pendingDeletedProposalHashes = nextDeleted;
+    markStateDirty();
+    return true;
+}
+
 function getClobExecutionPreflightError(config) {
     if (!config?.polymarketClobEnabled) {
         return 'polymarketClobEnabled=true is required before placing Polymarket orders.';
@@ -672,6 +708,12 @@ async function hydrateTradeIntentState() {
                 !Array.isArray(parsed.reimbursementCommitments)
                     ? parsed.reimbursementCommitments
                     : {};
+            tradeIntentState.pendingExecutedProposalHashes = normalizeHashArray(
+                parsed.pendingExecutedProposalHashes
+            );
+            tradeIntentState.pendingDeletedProposalHashes = normalizeHashArray(
+                parsed.pendingDeletedProposalHashes
+            );
             tradeIntentState.backfilledDepositsThroughBlock =
                 typeof parsed.backfilledDepositsThroughBlock === 'string' &&
                 parsed.backfilledDepositsThroughBlock.trim()
@@ -698,6 +740,8 @@ async function persistTradeIntentState() {
                 intents: tradeIntentState.intents,
                 deposits: tradeIntentState.deposits,
                 reimbursementCommitments: tradeIntentState.reimbursementCommitments,
+                pendingExecutedProposalHashes: tradeIntentState.pendingExecutedProposalHashes,
+                pendingDeletedProposalHashes: tradeIntentState.pendingDeletedProposalHashes,
                 backfilledDepositsThroughBlock: tradeIntentState.backfilledDepositsThroughBlock,
                 backfilledReimbursementCommitmentsThroughBlock:
                     tradeIntentState.backfilledReimbursementCommitmentsThroughBlock,
@@ -1255,7 +1299,10 @@ async function maybeBackfillDeposits({
         changed = true;
     }
 
-    tradeIntentState.backfilledDepositsThroughBlock = latestBlock.toString();
+    const nextBackfilledThroughBlock = latestBlock.toString();
+    const watermarkChanged =
+        tradeIntentState.backfilledDepositsThroughBlock !== nextBackfilledThroughBlock;
+    tradeIntentState.backfilledDepositsThroughBlock = nextBackfilledThroughBlock;
     depositBackfillStatusLogged = false;
     if (logs.length > 0 && previousBackfilledThroughBlock === null) {
         console.log(
@@ -1267,7 +1314,7 @@ async function maybeBackfillDeposits({
         );
     }
     markStateDirty();
-    return changed;
+    return changed || watermarkChanged;
 }
 
 function decodeOgExplanationText(value) {
@@ -1493,7 +1540,11 @@ async function maybeBackfillReimbursementCommitments({
         changed = true;
     }
 
-    tradeIntentState.backfilledReimbursementCommitmentsThroughBlock = latestBlock.toString();
+    const nextBackfilledThroughBlock = latestBlock.toString();
+    const watermarkChanged =
+        tradeIntentState.backfilledReimbursementCommitmentsThroughBlock !==
+        nextBackfilledThroughBlock;
+    tradeIntentState.backfilledReimbursementCommitmentsThroughBlock = nextBackfilledThroughBlock;
     reimbursementBackfillStatusLogged = false;
     if (lifecycleEvents.length > 0 && previousBackfilledThroughBlock === null) {
         console.log(
@@ -1504,7 +1555,7 @@ async function maybeBackfillReimbursementCommitments({
             `[agent] Recovered ${lifecycleEvents.length} incremental reimbursement lifecycle records for ${policy.ogModule} through block ${latestBlock.toString()}.`
         );
     }
-    return changed;
+    return changed || watermarkChanged;
 }
 
 function ingestSignals(signals, policy) {
@@ -2514,17 +2565,19 @@ async function refreshProposalSubmissionStatus({ publicClient, policy }) {
 }
 
 function applyProposalEventUpdate({ executedProposals = [], deletedProposals = [] }) {
-    const executedHashes = new Set(
-        Array.isArray(executedProposals)
-            ? executedProposals.map((value) => normalizeHash(value)).filter(Boolean)
-            : []
-    );
-    const deletedHashes = new Set(
-        Array.isArray(deletedProposals)
-            ? deletedProposals.map((value) => normalizeHash(value)).filter(Boolean)
-            : []
-    );
-    let changed = false;
+    const executedHashes = new Set([
+        ...normalizeHashArray(tradeIntentState.pendingExecutedProposalHashes),
+        ...normalizeHashArray(executedProposals),
+    ]);
+    const deletedHashes = new Set([
+        ...normalizeHashArray(tradeIntentState.pendingDeletedProposalHashes),
+        ...normalizeHashArray(deletedProposals),
+    ]);
+    let changed = setPendingProposalLifecycleHashes({
+        executed: Array.from(executedHashes),
+        deleted: Array.from(deletedHashes),
+    });
+    const nowMs = Date.now();
 
     for (const intent of getTrackedIntents()) {
         const proposalHash = normalizeHash(intent?.reimbursementProposalHash);
@@ -2533,20 +2586,71 @@ function applyProposalEventUpdate({ executedProposals = [], deletedProposals = [
         }
 
         if (executedHashes.has(proposalHash)) {
-            intent.reimbursedAtMs = Date.now();
-            intent.updatedAtMs = Date.now();
+            intent.reimbursedAtMs = nowMs;
+            intent.updatedAtMs = nowMs;
+            clearReimbursementSubmissionAmbiguity(intent);
+            delete intent.lastReimbursementSubmissionStatus;
+            delete intent.lastReimbursementSubmissionError;
+            if (pendingProposalSubmission?.intentKey === intent.intentKey) {
+                pendingProposalSubmission = null;
+            }
+            executedHashes.delete(proposalHash);
             changed = true;
             continue;
         }
 
         if (deletedHashes.has(proposalHash)) {
+            clearReimbursementSubmissionTracking(intent);
             delete intent.reimbursementProposalHash;
-            delete intent.reimbursementSubmissionTxHash;
-            delete intent.reimbursementSubmittedAtMs;
-            intent.updatedAtMs = Date.now();
+            intent.updatedAtMs = nowMs;
+            if (pendingProposalSubmission?.intentKey === intent.intentKey) {
+                pendingProposalSubmission = null;
+            }
+            deletedHashes.delete(proposalHash);
             changed = true;
         }
     }
+
+    const unresolvedIntents = getOpenIntents().filter(
+        (intent) =>
+            !intent.reimbursementProposalHash &&
+            (intent.reimbursementSubmissionTxHash ||
+                intent.reimbursementSubmittedAtMs ||
+                intent.reimbursementDispatchAtMs)
+    );
+
+    if (unresolvedIntents.length === 1 && executedHashes.size === 1 && deletedHashes.size === 0) {
+        const [proposalHash] = Array.from(executedHashes);
+        const [intent] = unresolvedIntents;
+        intent.reimbursementProposalHash = proposalHash;
+        intent.reimbursedAtMs = nowMs;
+        intent.updatedAtMs = nowMs;
+        clearReimbursementSubmissionAmbiguity(intent);
+        delete intent.lastReimbursementSubmissionStatus;
+        delete intent.lastReimbursementSubmissionError;
+        if (pendingProposalSubmission?.intentKey === intent.intentKey) {
+            pendingProposalSubmission = null;
+        }
+        executedHashes.delete(proposalHash);
+        changed = true;
+    }
+
+    if (unresolvedIntents.length === 1 && deletedHashes.size === 1 && executedHashes.size === 0) {
+        const [intent] = unresolvedIntents;
+        clearReimbursementSubmissionTracking(intent);
+        intent.updatedAtMs = nowMs;
+        if (pendingProposalSubmission?.intentKey === intent.intentKey) {
+            pendingProposalSubmission = null;
+        }
+        deletedHashes.clear();
+        changed = true;
+    }
+
+    changed =
+        setPendingProposalLifecycleHashes({
+            executed: Array.from(executedHashes),
+            deleted: Array.from(deletedHashes),
+        }) || changed;
 
     return changed;
 }
@@ -2814,6 +2918,7 @@ async function getDeterministicToolCalls({
             agentAddress: normalizedAgentAddress,
             policy,
         }) || changed;
+    changed = applyProposalEventUpdate({}) || changed;
 
     for (const signal of Array.isArray(signals) ? signals : []) {
         const interpreted = interpretSignedTradeIntentSignal(signal, {
