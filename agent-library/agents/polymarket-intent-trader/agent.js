@@ -34,6 +34,8 @@ import {
     createDepositRecord,
     createReimbursementCommitmentRecord,
     getAvailableCreditWeiForAddress,
+    getDepositedCreditWeiForAddress,
+    getReservedCreditWeiForAddress,
 } from './credit-ledger.js';
 import { planNextActionCandidates } from './planner.js';
 
@@ -672,6 +674,17 @@ function getOpenIntents() {
     return getTrackedIntents().filter(
         (intent) => !intent?.closedAtMs && !intent?.reimbursedAtMs && !intent?.creditReleasedAtMs
     );
+}
+
+function getReimbursementHeadroomWei(intent) {
+    if (!intent?.signer) {
+        return 0n;
+    }
+    const depositedWei = getDepositedCreditWeiForAddress(tradeIntentState, intent.signer);
+    const reservedWei = getReservedCreditWeiForAddress(tradeIntentState, intent.signer);
+    const ownReservedWei = BigInt(intent.reservedCreditAmountWei ?? 0);
+    const otherReservedWei = reservedWei > ownReservedWei ? reservedWei - ownReservedWei : 0n;
+    return depositedWei - otherReservedWei;
 }
 
 function allocateSequence() {
@@ -3035,8 +3048,26 @@ async function getDeterministicToolCalls({
             if (!reimbursementRecipientAddress) {
                 throw new Error('Unable to resolve reimbursement recipient address.');
             }
+            const reimbursementAmountWei = BigInt(intent.reimbursementAmountWei ?? 0);
+            const reimbursementHeadroomWei = getReimbursementHeadroomWei(intent);
+            if (reimbursementAmountWei <= 0n || reimbursementHeadroomWei < reimbursementAmountWei) {
+                const detail =
+                    `Insufficient committed collateral credit remains for reimbursement (headroomWei=${reimbursementHeadroomWei.toString()} requiredWei=${reimbursementAmountWei.toString()}).`;
+                if (
+                    intent.lastReimbursementCreditError !== detail ||
+                    !Number.isInteger(intent.reimbursementCreditBlockedAtMs)
+                ) {
+                    intent.lastReimbursementCreditError = detail;
+                    intent.reimbursementCreditBlockedAtMs = Date.now();
+                    intent.updatedAtMs = Date.now();
+                    await maybePersistTradeIntentState();
+                }
+                continue;
+            }
             intent.reimbursementRecipientAddress = reimbursementRecipientAddress;
             intent.reimbursementExplanation = buildReimbursementExplanation(intent);
+            delete intent.lastReimbursementCreditError;
+            delete intent.reimbursementCreditBlockedAtMs;
             markDispatchStarted(intent, 'reimbursement');
             await maybePersistTradeIntentState();
 

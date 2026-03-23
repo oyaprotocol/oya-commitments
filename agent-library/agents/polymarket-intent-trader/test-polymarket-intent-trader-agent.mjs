@@ -1715,6 +1715,140 @@ async function run() {
         }
 
         await resetTradeIntentState();
+        runtime.latestBlock = 390n;
+        runtime.depositLogs = [
+            {
+                args: {
+                    from: TEST_SIGNER,
+                    value: 25_000_000n,
+                },
+                blockNumber: 10n,
+                transactionHash: `0x${'d'.repeat(64)}`,
+                logIndex: 0,
+            },
+        ];
+        runtime.proposedProposalLogs = [];
+        runtime.executedProposalLogs = [];
+        runtime.deletedProposalLogs = [];
+        runtime.orderPayload = {
+            order: {
+                id: TEST_ORDER_ID,
+                status: 'MATCHED',
+                original_size: '25',
+                size_matched: '25',
+                maker_amount_filled: '20000000',
+            },
+        };
+        runtime.tradesPayload = [
+            {
+                id: 'trade-1',
+                status: 'CONFIRMED',
+                taker_order_id: TEST_ORDER_ID,
+                price: '0.32',
+                size: '62.5',
+            },
+        ];
+        runtime.ctfBalances = {
+            [`${TEST_AGENT.toLowerCase()}:${NO_TOKEN_ID}`]: 100_000_000n,
+        };
+        runtime.receipts = {};
+        const reimbursementCreditBlockedSignal = buildSignedMessageSignal({
+            requestId: 'pm-intent-reimbursement-credit-blocked',
+        });
+        const reimbursementCreditBlockedArchiveCalls = await getDeterministicToolCalls({
+            signals: [reimbursementCreditBlockedSignal],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(reimbursementCreditBlockedArchiveCalls.length, 1);
+        await onToolOutput({
+            name: 'ipfs_publish',
+            parsedOutput: {
+                status: 'published',
+                cid: 'bafyintent-reimbursement-credit-blocked',
+                uri: 'ipfs://bafyintent-reimbursement-credit-blocked',
+                pinned: true,
+            },
+            config: buildModuleConfig(),
+        });
+        const reimbursementCreditBlockedOrderCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(reimbursementCreditBlockedOrderCalls.length, 1);
+        await onToolOutput({
+            name: 'polymarket_clob_build_sign_and_place_order',
+            parsedOutput: {
+                status: 'submitted',
+                result: {
+                    order: {
+                        id: TEST_ORDER_ID,
+                        status: 'LIVE',
+                    },
+                },
+            },
+            config: buildModuleConfig(),
+        });
+        await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        await onToolOutput({
+            name: 'make_erc1155_deposit',
+            parsedOutput: {
+                status: 'confirmed',
+                transactionHash: TEST_DEPOSIT_TX_HASH,
+            },
+            config: buildModuleConfig(),
+        });
+        runtime.latestBlock = 391n;
+        runtime.proposedProposalLogs = [
+            {
+                args: {
+                    proposer: TEST_AGENT,
+                    proposalHash: `0x${'9'.repeat(64)}`,
+                    explanation:
+                        'polymarket-intent-trader reimbursement | intent=external-intent | signer=0x1111111111111111111111111111111111111111 | spentWei=25000000',
+                    proposal: {
+                        transactions: [
+                            {
+                                to: TEST_USDC,
+                                operation: 0,
+                                value: 0n,
+                                data: '0xa9059cbb000000000000000000000000222222222222222222222222222222222222222200000000000000000000000000000000000000000000000000000000017d7840',
+                            },
+                        ],
+                    },
+                },
+                blockNumber: 391n,
+                logIndex: 0,
+            },
+        ];
+        const reimbursementCreditBlockedCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.deepEqual(reimbursementCreditBlockedCalls, []);
+        state = getTradeIntentState();
+        storedIntent =
+            state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-reimbursement-credit-blocked`];
+        assert.equal(storedIntent.reimbursementProposalHash, undefined);
+        assert.equal(storedIntent.reimbursementDispatchAtMs, undefined);
+        assert.equal(storedIntent.lastReimbursementCreditError.includes('headroomWei=0'), true);
+        assert.equal(Object.keys(state.reimbursementCommitments).length, 1);
+
+        await resetTradeIntentState();
         runtime.latestBlock = 400n;
         runtime.depositLogs = [
             {
@@ -1727,6 +1861,9 @@ async function run() {
                 logIndex: 0,
             },
         ];
+        runtime.proposedProposalLogs = [];
+        runtime.executedProposalLogs = [];
+        runtime.deletedProposalLogs = [];
         runtime.orderPayload = {
             order: {
                 id: TEST_ORDER_ID,
