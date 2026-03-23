@@ -588,6 +588,9 @@ function getClobExecutionPreflightError(config) {
     if (!config?.polymarketClobEnabled) {
         return 'polymarketClobEnabled=true is required before placing Polymarket orders.';
     }
+    if (!config?.proposeEnabled) {
+        return 'proposeEnabled=true is required before placing Polymarket orders, because filled intents must deposit outcome tokens and submit reimbursement proposals onchain.';
+    }
     if (
         !config?.polymarketClobApiKey ||
         !config?.polymarketClobApiSecret ||
