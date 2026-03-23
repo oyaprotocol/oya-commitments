@@ -8,6 +8,7 @@ import {
 } from '../../../agent/src/lib/og.js';
 import {
     decodeErc20TransferCallData,
+    normalizeAddressOrNull,
     normalizeHashOrNull,
 } from '../../../agent/src/lib/utils.js';
 import {
@@ -139,10 +140,15 @@ function buildBackfilledReimbursementCommitmentRecord({
     if (explanationSpendWei && explanationSpendWei !== amountWei) {
         return null;
     }
+    const normalizedExplanationRecipient = normalizeAddressOrNull(fields.recipient ?? null);
+    if (fields.recipient && (!normalizedExplanationRecipient || normalizedExplanationRecipient !== decoded.to)) {
+        return null;
+    }
 
     return createReimbursementCommitmentRecord(
         {
             signer: fields.signer,
+            recipientAddress: decoded.to,
             amountWei,
             proposalHash,
             intentKey: fields.intent ?? null,

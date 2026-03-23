@@ -112,6 +112,7 @@ let tradeIntentStateHydrated = false;
 let statePathOverride = null;
 let runtimeStatePath = null;
 let runtimeStateNamespaceKey = null;
+let runtimeStateScope = null;
 let pendingArtifactPublish = null;
 let pendingOrderSubmission = null;
 let pendingDepositSubmission = null;
@@ -174,20 +175,81 @@ function getStatePath() {
     return path.join(__dirname, '.trade-intent-state.json');
 }
 
+async function resolveRuntimeChainId({ publicClient, config }) {
+    if (typeof publicClient?.getChainId === 'function') {
+        try {
+            return String(await publicClient.getChainId());
+        } catch (error) {
+            // Fall back to config.chainId below.
+        }
+    }
+
+    const configuredChainId = parseOptionalPositiveInteger(config?.chainId);
+    return configuredChainId ? String(configuredChainId) : 'unknown';
+}
+
+function buildRuntimeStateScope({ chainId, commitmentSafe, config }) {
+    const policy = resolvePolicy(config);
+    return {
+        chainId: chainId ? String(chainId) : 'unknown',
+        commitmentSafe: commitmentSafe ? normalizeAddress(commitmentSafe) : null,
+        policyName: normalizeNonEmptyString(config?.policyName)?.toLowerCase() ?? null,
+        authorizedAgent: policy.authorizedAgent ?? null,
+        marketId: normalizeNonEmptyString(policy.marketId)?.toLowerCase() ?? null,
+        yesTokenId: policy.yesTokenId ?? null,
+        noTokenId: policy.noTokenId ?? null,
+        collateralToken: policy.collateralToken ?? null,
+        ogModule: policy.ogModule ?? null,
+        ctfContract: policy.ctfContract ?? null,
+    };
+}
+
+function normalizeRuntimeStateScope(scope) {
+    if (!scope || typeof scope !== 'object' || Array.isArray(scope)) {
+        return null;
+    }
+    return {
+        chainId: normalizeNonEmptyString(scope.chainId) ?? 'unknown',
+        commitmentSafe: normalizeAddressOrNull(scope.commitmentSafe),
+        policyName: normalizeNonEmptyString(scope.policyName)?.toLowerCase() ?? null,
+        authorizedAgent: normalizeAddressOrNull(scope.authorizedAgent),
+        marketId: normalizeNonEmptyString(scope.marketId)?.toLowerCase() ?? null,
+        yesTokenId: normalizeTokenId(scope.yesTokenId),
+        noTokenId: normalizeTokenId(scope.noTokenId),
+        collateralToken: normalizeAddressOrNull(scope.collateralToken),
+        ogModule: normalizeAddressOrNull(scope.ogModule),
+        ctfContract: normalizeAddressOrNull(scope.ctfContract),
+    };
+}
+
+function runtimeStateScopesMatch(left, right) {
+    const normalizedLeft = normalizeRuntimeStateScope(left);
+    const normalizedRight = normalizeRuntimeStateScope(right);
+    if (!normalizedLeft || !normalizedRight) {
+        return normalizedLeft === normalizedRight;
+    }
+    return JSON.stringify(normalizedLeft) === JSON.stringify(normalizedRight);
+}
+
 async function configureRuntimeStateContext({ publicClient, commitmentSafe, config }) {
+    const nextChainId = await resolveRuntimeChainId({ publicClient, config });
+    const nextStateScope = buildRuntimeStateScope({
+        chainId: nextChainId,
+        commitmentSafe: commitmentSafe ?? config?.commitmentSafe,
+        config,
+    });
+    const scopeChanged = !runtimeStateScopesMatch(runtimeStateScope, nextStateScope);
+
     if (typeof statePathOverride === 'string' && statePathOverride.trim()) {
+        runtimeStateScope = nextStateScope;
+        if (scopeChanged && tradeIntentStateHydrated) {
+            resetInMemoryState({ preserveQueuedProposalEventUpdates: true });
+        }
         return;
     }
 
-    const normalizedSafe = normalizeAddress(commitmentSafe);
-    let chainId = 'unknown';
-    if (typeof publicClient?.getChainId === 'function') {
-        try {
-            chainId = String(await publicClient.getChainId());
-        } catch (error) {
-            chainId = 'unknown';
-        }
-    }
+    const normalizedSafe = normalizeAddress(commitmentSafe ?? config?.commitmentSafe);
+    const chainId = nextChainId;
 
     const namespaceKey = `chain-${chainId}-safe-${normalizedSafe.toLowerCase()}`;
     const agentConfig = config?.agentConfig ?? {};
@@ -207,6 +269,10 @@ async function configureRuntimeStateContext({ publicClient, commitmentSafe, conf
         );
 
     if (runtimeStateNamespaceKey === namespaceKey && runtimeStatePath === nextStatePath) {
+        runtimeStateScope = nextStateScope;
+        if (scopeChanged && tradeIntentStateHydrated) {
+            resetInMemoryState({ preserveQueuedProposalEventUpdates: true });
+        }
         return;
     }
 
@@ -214,6 +280,7 @@ async function configureRuntimeStateContext({ publicClient, commitmentSafe, conf
         runtimeStateNamespaceKey === null && runtimeStatePath === null;
     runtimeStateNamespaceKey = namespaceKey;
     runtimeStatePath = nextStatePath;
+    runtimeStateScope = nextStateScope;
     resetInMemoryState({ preserveQueuedProposalEventUpdates });
 }
 
@@ -765,6 +832,42 @@ function setPendingProposalLifecycleHashes({ executed = [], deleted = [] }) {
     return true;
 }
 
+function getExpectedReimbursementRecipientAddress(intent, fallbackAgentAddress = null) {
+    return normalizeAddressOrNull(
+        intent?.reimbursementRecipientAddress ??
+            intent?.tradingWalletAddress ??
+            fallbackAgentAddress ??
+            null
+    );
+}
+
+function matchesReimbursementTransferTransaction({
+    transaction,
+    intent,
+    policy,
+    fallbackAgentAddress = null,
+}) {
+    if (!transaction?.to || !isAddressEqual(transaction.to, policy.collateralToken)) {
+        return false;
+    }
+    if (BigInt(transaction.value ?? 0) !== 0n) {
+        return false;
+    }
+
+    const decoded = decodeErc20TransferCallData(transaction.data);
+    if (!decoded) {
+        return false;
+    }
+
+    const recipient = getExpectedReimbursementRecipientAddress(intent, fallbackAgentAddress);
+    const amountWei = parseOptionalNonNegativeIntegerString(intent?.reimbursementAmountWei ?? null);
+    if (!recipient || !amountWei) {
+        return false;
+    }
+
+    return decoded.to === recipient && decoded.amount === BigInt(amountWei);
+}
+
 function getClobExecutionPreflightError(config) {
     if (!config?.polymarketClobEnabled) {
         return 'polymarketClobEnabled=true is required before placing Polymarket orders.';
@@ -833,6 +936,13 @@ async function hydrateTradeIntentState() {
         if (!parsed) {
             return;
         }
+        const persistedScope = normalizeRuntimeStateScope(parsed.scope);
+        if (persistedScope && runtimeStateScope && !runtimeStateScopesMatch(persistedScope, runtimeStateScope)) {
+            resetInMemoryState({ hydrated: true, preserveQueuedProposalEventUpdates: true });
+            throw new Error(
+                `Persisted polymarket-intent-trader state scope ${JSON.stringify(persistedScope)} does not match runtime scope ${JSON.stringify(runtimeStateScope)}.`
+            );
+        }
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
             tradeIntentState.nextSequence =
                 Number.isInteger(parsed.nextSequence) && parsed.nextSequence > 0
@@ -882,6 +992,7 @@ async function hydrateTradeIntentState() {
 async function persistTradeIntentState() {
     await writePersistedTradeIntentState(getStatePath(), {
         version: STATE_VERSION,
+        scope: runtimeStateScope,
         nextSequence: tradeIntentState.nextSequence,
         intents: tradeIntentState.intents,
         deposits: tradeIntentState.deposits,
@@ -908,6 +1019,7 @@ function setTradeIntentStatePathForTest(nextPath) {
         typeof nextPath === 'string' && nextPath.trim() ? nextPath.trim() : null;
     runtimeStatePath = null;
     runtimeStateNamespaceKey = null;
+    runtimeStateScope = null;
     resetInMemoryState();
 }
 
@@ -1395,12 +1507,38 @@ async function maybeBackfillDeposits({
     return result.changed;
 }
 
+function invalidateLegacyReimbursementCommitmentBackfill(policy) {
+    if (!policy?.ogModule) {
+        return false;
+    }
+    const hasLegacyCommitmentRecord = Object.values(
+        tradeIntentState.reimbursementCommitments ?? {}
+    ).some(
+        (commitment) =>
+            commitment?.proposalHash &&
+            !normalizeAddressOrNull(commitment?.recipientAddress ?? null)
+    );
+    if (!hasLegacyCommitmentRecord) {
+        return false;
+    }
+
+    tradeIntentState.reimbursementCommitments = {};
+    tradeIntentState.backfilledReimbursementCommitmentsThroughBlock = null;
+    reimbursementBackfillStatusLogged = false;
+    console.warn(
+        '[agent] Clearing legacy reimbursement commitment backfill cache to rebuild recipient-aware proposal records.'
+    );
+    markStateDirty();
+    return true;
+}
+
 async function maybeBackfillReimbursementCommitments({
     publicClient,
     latestBlock,
     policy,
     config,
 }) {
+    const invalidatedLegacyState = invalidateLegacyReimbursementCommitmentBackfill(policy);
     const result = await backfillReimbursementCommitments({
         state: tradeIntentState,
         publicClient,
@@ -1410,10 +1548,10 @@ async function maybeBackfillReimbursementCommitments({
         statusLogged: reimbursementBackfillStatusLogged,
     });
     reimbursementBackfillStatusLogged = result.statusLogged;
-    if (result.changed) {
+    if (result.changed || invalidatedLegacyState) {
         markStateDirty();
     }
-    return result.changed;
+    return result.changed || invalidatedLegacyState;
 }
 
 function ingestSignals(signals, policy) {
@@ -1499,6 +1637,7 @@ function buildReimbursementExplanation(record) {
         `intent=${encodeExplanationFieldValue(record.intentKey)}`,
         `requestId=${encodeExplanationFieldValue(record.requestId ?? 'n/a')}`,
         `signer=${encodeExplanationFieldValue(record.signer ?? 'unknown')}`,
+        `recipient=${encodeExplanationFieldValue(record.reimbursementRecipientAddress ?? record.tradingWalletAddress ?? 'unknown')}`,
         `outcome=${encodeExplanationFieldValue(record.outcome ?? 'unknown')}`,
         `market=${encodeExplanationFieldValue(record.marketId ?? 'unknown')}`,
         `tokenId=${encodeExplanationFieldValue(record.tokenId ?? 'unknown')}`,
@@ -1636,30 +1775,23 @@ function matchesReimbursementProposalSignal({ signal, intent, agentAddress, poli
     if (signal.proposer && !isAddressEqual(signal.proposer, agentAddress)) {
         return false;
     }
-    if (intent.reimbursementExplanation) {
-        if (typeof signal.explanation !== 'string') {
-            return false;
-        }
-        return signal.explanation.trim() === intent.reimbursementExplanation;
-    }
-
     const [transaction] = signal.transactions;
-    if (!transaction?.to || !isAddressEqual(transaction.to, policy.collateralToken)) {
+    if (
+        !matchesReimbursementTransferTransaction({
+            transaction,
+            intent,
+            policy,
+            fallbackAgentAddress: agentAddress,
+        })
+    ) {
         return false;
     }
-    if (BigInt(transaction.value ?? 0) !== 0n) {
-        return false;
+    if (!intent.reimbursementExplanation) {
+        return true;
     }
-
-    const decoded = decodeErc20TransferCallData(transaction.data);
-    if (!decoded) {
-        return false;
-    }
-    const recipient = intent.reimbursementRecipientAddress ?? agentAddress;
     return (
-        Boolean(recipient) &&
-        decoded.to === normalizeAddress(recipient) &&
-        decoded.amount === BigInt(intent.reimbursementAmountWei ?? 0)
+        typeof signal.explanation === 'string' &&
+        signal.explanation.trim() === intent.reimbursementExplanation
     );
 }
 
@@ -1717,7 +1849,9 @@ function recoverProposalHashesFromBackfilledCommitments() {
             (commitment) =>
                 commitment?.proposalHash &&
                 commitment?.intentKey &&
-                commitment.intentKey === intent.intentKey
+                commitment.intentKey === intent.intentKey &&
+                commitment.recipientAddress ===
+                    getExpectedReimbursementRecipientAddress(intent, intent.tradingWalletAddress)
         );
         if (matchingCommitments.length === 0) {
             continue;
@@ -2148,11 +2282,17 @@ const getPollingOptions = getAlwaysEmitBalanceSnapshotPollingOptions;
 async function enrichSignals(
     signals,
     {
+        publicClient,
         config,
         account,
         nowMs,
     } = {}
 ) {
+    await configureRuntimeStateContext({
+        publicClient,
+        commitmentSafe: config?.commitmentSafe,
+        config,
+    });
     await hydrateTradeIntentState();
     const policy = await resolveEffectivePolicy(config);
     const effectiveNowMs = parseOptionalPositiveInteger(nowMs) ?? Date.now();
@@ -2199,12 +2339,11 @@ async function getDeterministicToolCalls({
     onchainPendingProposal = false,
 }) {
     await configureRuntimeStateContext({ publicClient, commitmentSafe, config });
-    await hydrateTradeIntentState();
-
     const policy = await resolveEffectivePolicy(config);
     if (!policy.ready) {
         return [];
     }
+    await hydrateTradeIntentState();
 
     const normalizedAgentAddress = normalizeAddress(agentAddress);
     if (policy.authorizedAgent && normalizedAgentAddress !== policy.authorizedAgent) {
@@ -2615,7 +2754,11 @@ async function handleReimbursementToolOutput({ parsedOutput, policy }) {
     await maybePersistTradeIntentState();
 }
 
-async function onToolOutput({ name, parsedOutput, config }) {
+async function onToolOutput({ name, parsedOutput, config, commitmentSafe }) {
+    await configureRuntimeStateContext({
+        commitmentSafe: commitmentSafe ?? config?.commitmentSafe,
+        config,
+    });
     await hydrateTradeIntentState();
     const policy = resolvePolicy(config);
 
