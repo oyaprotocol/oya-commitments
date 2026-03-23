@@ -388,6 +388,67 @@ async function run() {
         );
         assert.equal(typeof storedIntent.nextOrderAttemptAtMs, 'number');
 
+        await resetTradeIntentState();
+        runtime.latestBlock = 150n;
+        runtime.depositLogs = [
+            {
+                args: {
+                    from: TEST_SIGNER,
+                    value: 50_000_000n,
+                },
+                blockNumber: 10n,
+                transactionHash: `0x${'d'.repeat(64)}`,
+                logIndex: 0,
+            },
+        ];
+        const proposalsDisabledSignal = buildSignedMessageSignal({
+            requestId: 'pm-intent-proposals-disabled',
+        });
+        const proposalsDisabledArchiveCalls = await getDeterministicToolCalls({
+            signals: [proposalsDisabledSignal],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig({
+                proposeEnabled: false,
+                disputeEnabled: true,
+            }),
+        });
+        assert.equal(proposalsDisabledArchiveCalls.length, 1);
+        assert.equal(proposalsDisabledArchiveCalls[0].name, 'ipfs_publish');
+        await onToolOutput({
+            name: 'ipfs_publish',
+            parsedOutput: {
+                status: 'published',
+                cid: 'bafyintent-proposals-disabled',
+                uri: 'ipfs://bafyintent-proposals-disabled',
+                pinned: true,
+            },
+            config: buildModuleConfig({
+                proposeEnabled: false,
+                disputeEnabled: true,
+            }),
+        });
+        const proposalsDisabledOrderCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig({
+                proposeEnabled: false,
+                disputeEnabled: true,
+            }),
+        });
+        assert.deepEqual(proposalsDisabledOrderCalls, []);
+        state = getTradeIntentState();
+        storedIntent =
+            state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-proposals-disabled`];
+        assert.equal(storedIntent.orderSubmittedAtMs, undefined);
+        assert.equal(storedIntent.orderId, undefined);
+        assert.equal(storedIntent.lastOrderSubmissionStatus, 'unavailable');
+        assert.match(storedIntent.lastOrderSubmissionError, /proposeEnabled=true is required/);
+        assert.equal(typeof storedIntent.nextOrderAttemptAtMs, 'number');
+
         await assert.rejects(
             getDeterministicToolCalls({
                 signals: [],
