@@ -865,14 +865,7 @@ function resolvePolicy(config = {}) {
 }
 
 function resolveExpiryMs(signal) {
-    const candidates = [
-        parseOptionalPositiveInteger(signal?.expiresAtMs),
-        parseOptionalPositiveInteger(signal?.deadline),
-    ].filter(Boolean);
-    if (candidates.length === 0) {
-        return null;
-    }
-    return Math.min(...candidates);
+    return parseOptionalPositiveInteger(signal?.deadline);
 }
 
 function containsBuyVerb(text) {
@@ -883,7 +876,15 @@ function containsSellVerb(text) {
     return /\b(sell|short)\b/i.test(text);
 }
 
+function containsNegatedBuyInstruction(text) {
+    return /\b(?:do\s+not|don't|dont|never|not)\s+(?:buy|purchase)\b/i.test(text);
+}
+
 function parseOutcomeFromText(text) {
+    if (containsNegatedBuyInstruction(text)) {
+        return null;
+    }
+
     const actionMatch = text.match(/\b(?:buy|purchase)\s+(?:the\s+)?(yes|no)\b/i);
     if (actionMatch?.[1]) {
         return actionMatch[1].trim().toUpperCase();
@@ -2138,7 +2139,7 @@ function markTerminalIntentFailure(
 function expireUnsubmittedIntents(nowMs = Date.now()) {
     let changed = false;
     for (const intent of getOpenIntents()) {
-        if (intent.orderId || intent.tokenDeposited) {
+        if (intent.orderId || intent.tokenDeposited || intent.orderSubmittedAtMs) {
             continue;
         }
         if (!Number.isInteger(intent.expiryMs) || nowMs <= intent.expiryMs) {

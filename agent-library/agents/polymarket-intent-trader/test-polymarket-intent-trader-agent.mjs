@@ -973,6 +973,45 @@ async function run() {
         assert.equal(leadingDecimalInterpreted.intent.maxSpendWei, '500000');
         assert.equal(leadingDecimalInterpreted.intent.maxPriceScaled, '420000');
 
+        const ttlOnlySignal = buildSignedMessageSignal({
+            requestId: 'pm-intent-ttl-only',
+        });
+        delete ttlOnlySignal.deadline;
+        ttlOnlySignal.expiresAtMs = ttlOnlySignal.receivedAtMs + 60_000;
+        const ttlOnlyInterpreted = interpretSignedTradeIntentSignal(ttlOnlySignal, {
+            policy: {
+                ready: true,
+                marketId: 'market-123',
+                yesTokenId: YES_TOKEN_ID,
+                noTokenId: NO_TOKEN_ID,
+                collateralToken: TEST_USDC.toLowerCase(),
+                ctfContract: TEST_CTF.toLowerCase(),
+                signedCommands: new Set(['buy']),
+            },
+            nowMs: ttlOnlySignal.receivedAtMs,
+        });
+        assert.equal(ttlOnlyInterpreted.ok, false);
+        assert.equal(ttlOnlyInterpreted.reason, 'missing_expiry');
+
+        const negatedBuySignal = buildSignedMessageSignal({
+            requestId: 'pm-intent-negated-buy',
+            text: "Don't buy YES for 25 USDC at 42 cents before 6pm UTC.",
+        });
+        const negatedBuyInterpreted = interpretSignedTradeIntentSignal(negatedBuySignal, {
+            policy: {
+                ready: true,
+                marketId: 'market-123',
+                yesTokenId: YES_TOKEN_ID,
+                noTokenId: NO_TOKEN_ID,
+                collateralToken: TEST_USDC.toLowerCase(),
+                ctfContract: TEST_CTF.toLowerCase(),
+                signedCommands: new Set(['buy']),
+            },
+            nowMs: negatedBuySignal.receivedAtMs,
+        });
+        assert.equal(negatedBuyInterpreted.ok, false);
+        assert.equal(negatedBuyInterpreted.reason, 'missing_or_ambiguous_outcome');
+
         const sized = computeBuyOrderAmounts({
             collateralAmountWei: 25_000_000n,
             price: 0.42,
@@ -1464,6 +1503,28 @@ async function run() {
             assert.equal(storedIntent.creditReleasedAtMs, undefined);
             assert.equal(storedIntent.lastOrderSubmissionStatus, 'missing_order_id');
             assert.equal(typeof storedIntent.orderStatusRefreshFailedAtMs, 'number');
+
+            Date.now = () => Number(storedIntent.expiryMs) + 2_000;
+            missingOrderIdFollowupCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_SAFE,
+                agentAddress: TEST_AGENT,
+                publicClient,
+                config: buildModuleConfig({
+                    agentConfig: {
+                        polymarketIntentTrader: {
+                            pendingTxTimeoutMs: 1_000,
+                        },
+                    },
+                }),
+            });
+            assert.deepEqual(missingOrderIdFollowupCalls, []);
+            state = getTradeIntentState();
+            storedIntent = state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-missing-order-id`];
+            assert.equal(storedIntent.closedAtMs, undefined);
+            assert.equal(storedIntent.creditReleasedAtMs, undefined);
+            assert.equal(typeof storedIntent.orderSubmittedAtMs, 'number');
+            assert.equal(storedIntent.lastOrderSubmissionStatus, 'missing_order_id');
         } finally {
             Date.now = missingOrderIdDateNow;
         }
