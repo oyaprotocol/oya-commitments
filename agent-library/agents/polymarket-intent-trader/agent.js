@@ -24,6 +24,12 @@ import {
     normalizeTokenId,
     parseFiniteNumber,
 } from '../../../agent/src/lib/utils.js';
+import {
+    buildCreditSnapshot,
+    createDepositRecord,
+    getAvailableCreditWeiForAddress,
+} from './credit-ledger.js';
+import { planNextActionCandidates } from './planner.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -171,26 +177,6 @@ function normalizeNonEmptyString(value) {
     if (typeof value !== 'string') return null;
     const normalized = value.trim();
     return normalized.length > 0 ? normalized : null;
-}
-
-function normalizePositiveBigInt(value, fieldName) {
-    try {
-        const normalized = BigInt(String(value));
-        if (normalized <= 0n) {
-            throw new Error(`${fieldName} must be positive.`);
-        }
-        return normalized;
-    } catch (error) {
-        throw new Error(`${fieldName} must be a positive integer string.`);
-    }
-}
-
-function normalizePositiveInteger(value, fieldName = 'value') {
-    const normalized = Number(value);
-    if (!Number.isInteger(normalized) || normalized <= 0) {
-        throw new Error(`${fieldName} must be a positive integer.`);
-    }
-    return normalized;
 }
 
 function parseOptionalPositiveInteger(value) {
@@ -985,103 +971,6 @@ function interpretSignedTradeIntentSignal(
     };
 }
 
-function createDepositRecord(signal, policy) {
-    if (signal?.kind !== 'erc20Deposit') {
-        return null;
-    }
-    if (!signal.asset || !isAddressEqual(signal.asset, policy.collateralToken)) {
-        return null;
-    }
-    if (typeof signal.from !== 'string' || !signal.from.trim()) {
-        return null;
-    }
-
-    const amountWei = normalizePositiveBigInt(signal.amount, 'collateral amount');
-    const transactionHash = normalizeHash(signal.transactionHash);
-    const logIndex =
-        signal.logIndex === undefined || signal.logIndex === null ? null : String(signal.logIndex);
-    const signalId =
-        typeof signal.id === 'string' && signal.id.trim() ? signal.id.trim() : null;
-    const depositKey =
-        transactionHash && logIndex !== null
-            ? `tx:${transactionHash}:${logIndex}`
-            : signalId
-                ? `signal:${signalId}`
-                : null;
-    if (!depositKey) {
-        return null;
-    }
-
-    return {
-        depositKey,
-        depositId: signalId,
-        depositor: normalizeAddress(signal.from),
-        amountWei: amountWei.toString(),
-        transactionHash,
-        logIndex,
-        blockNumber:
-            signal.blockNumber !== undefined && signal.blockNumber !== null
-                ? BigInt(signal.blockNumber).toString()
-                : null,
-        createdAtMs: Date.now(),
-    };
-}
-
-function getDepositedCreditWeiForAddress(address) {
-    let total = 0n;
-    for (const deposit of Object.values(tradeIntentState.deposits)) {
-        if (!deposit?.depositor || !isAddressEqual(deposit.depositor, address)) {
-            continue;
-        }
-        total += BigInt(deposit.amountWei ?? 0);
-    }
-    return total;
-}
-
-function getReservedCreditWeiForAddress(address) {
-    let total = 0n;
-    for (const intent of Object.values(tradeIntentState.intents)) {
-        if (!intent?.signer || !isAddressEqual(intent.signer, address) || intent?.creditReleasedAtMs) {
-            continue;
-        }
-        total += BigInt(intent.reservedCreditAmountWei ?? 0);
-    }
-    return total;
-}
-
-function getAvailableCreditWeiForAddress(address) {
-    const available =
-        getDepositedCreditWeiForAddress(address) - getReservedCreditWeiForAddress(address);
-    return available > 0n ? available : 0n;
-}
-
-function buildCreditSnapshot() {
-    const addresses = new Set();
-    for (const deposit of Object.values(tradeIntentState.deposits)) {
-        if (typeof deposit?.depositor === 'string' && deposit.depositor.trim()) {
-            addresses.add(normalizeAddress(deposit.depositor));
-        }
-    }
-    for (const intent of Object.values(tradeIntentState.intents)) {
-        if (typeof intent?.signer === 'string' && intent.signer.trim()) {
-            addresses.add(normalizeAddress(intent.signer));
-        }
-    }
-
-    const snapshot = {};
-    for (const address of addresses) {
-        const depositedWei = getDepositedCreditWeiForAddress(address);
-        const reservedWei = getReservedCreditWeiForAddress(address);
-        const availableWei = depositedWei - reservedWei;
-        snapshot[address] = {
-            depositedWei: depositedWei.toString(),
-            reservedWei: reservedWei.toString(),
-            availableWei: (availableWei > 0n ? availableWei : 0n).toString(),
-        };
-    }
-    return snapshot;
-}
-
 async function resolveInitialDepositBackfillStartBlock({
     publicClient,
     commitmentSafe,
@@ -1171,7 +1060,9 @@ async function maybeBackfillDeposits({
                     ? `${log.transactionHash}:${log.logIndex ?? '0'}`
                     : `${log.blockNumber?.toString?.() ?? '0'}:${log.logIndex ?? '0'}`,
             },
-            policy
+            {
+                collateralToken: policy.collateralToken,
+            }
         );
         if (!deposit || tradeIntentState.deposits[deposit.depositKey]) {
             continue;
@@ -1200,7 +1091,9 @@ function ingestSignals(signals, policy) {
 
     for (const signal of Array.isArray(signals) ? signals : []) {
         try {
-            const deposit = createDepositRecord(signal, policy);
+            const deposit = createDepositRecord(signal, {
+                collateralToken: policy.collateralToken,
+            });
             if (deposit && !tradeIntentState.deposits[deposit.depositKey]) {
                 tradeIntentState.deposits[deposit.depositKey] = deposit;
                 console.log(
@@ -2215,7 +2108,7 @@ async function enrichSignals(
     out.push({
         kind: 'polymarketTradeIntentState',
         policy,
-        credits: buildCreditSnapshot(),
+        credits: buildCreditSnapshot(tradeIntentState),
     });
 
     return out;
@@ -2333,7 +2226,10 @@ async function getDeterministicToolCalls({
             continue;
         }
 
-        const availableCreditWei = getAvailableCreditWeiForAddress(interpreted.intent.signer);
+        const availableCreditWei = getAvailableCreditWeiForAddress(
+            tradeIntentState,
+            interpreted.intent.signer
+        );
         if (availableCreditWei < BigInt(interpreted.intent.reservedCreditAmountWei)) {
             console.warn(
                 `[agent] Ignoring signed Polymarket trade intent ${interpreted.intent.intentKey}: insufficient deposited collateral credit for signer ${interpreted.intent.signer} (availableWei=${availableCreditWei.toString()} requiredWei=${interpreted.intent.reservedCreditAmountWei}).`
@@ -2364,108 +2260,69 @@ async function getDeterministicToolCalls({
 
     const openIntents = getOpenIntents();
 
-    for (const intent of openIntents) {
-        if (!intent.orderFilled || intent.tokenDeposited) {
-            continue;
-        }
-        const filledShareAmount = parseOptionalNonNegativeIntegerString(intent.filledShareAmount);
-        if (!filledShareAmount || BigInt(filledShareAmount) <= 0n) {
-            continue;
-        }
-        if (
-            Number.isInteger(intent.nextDepositAttemptAtMs) &&
-            intent.nextDepositAttemptAtMs > Date.now()
-        ) {
-            continue;
-        }
-        if (
-            intent.depositTxHash ||
-            intent.depositSubmittedAtMs ||
-            pendingDepositSubmission?.intentKey === intent.intentKey
-        ) {
-            continue;
-        }
-        if (!tokenHolderAddress) {
-            continue;
-        }
-        const tokenBalance = await readOutcomeTokenBalance({
-            publicClient,
-            policy,
-            tokenHolderAddress,
-            tokenId: intent.tokenId,
-        });
-        if (tokenBalance === null || tokenBalance < BigInt(filledShareAmount)) {
+    const actionCandidates = planNextActionCandidates({
+        openIntents,
+        pendingOrderSubmission,
+        pendingDepositSubmission,
+        onchainPendingProposal,
+        nowMs: Date.now(),
+    });
+    let chainId;
+
+    for (const action of actionCandidates) {
+        const intent = tradeIntentState.intents[action.intentKey];
+        if (!intent) {
             continue;
         }
 
-        pendingDepositSubmission = {
-            intentKey: intent.intentKey,
-            startedAtMs: Date.now(),
-        };
-        return [buildDepositToolCall(intent, policy, filledShareAmount)];
-    }
-
-    for (const intent of openIntents) {
-        if (!intent.tokenDeposited) {
-            continue;
-        }
-        if (
-            intent.reimbursementProposalHash ||
-            intent.reimbursementSubmissionTxHash ||
-            intent.reimbursementSubmittedAtMs
-        ) {
-            continue;
-        }
-        if (onchainPendingProposal) {
-            continue;
-        }
-
-        const reimbursementRecipientAddress = clobAuthAddress ?? normalizedAgentAddress;
-        if (!reimbursementRecipientAddress) {
-            throw new Error('Unable to resolve reimbursement recipient address.');
-        }
-        intent.reimbursementRecipientAddress = reimbursementRecipientAddress;
-        intent.reimbursementExplanation = buildReimbursementExplanation(intent);
-        intent.reimbursementSubmittedAtMs = Date.now();
-        intent.updatedAtMs = Date.now();
-        await maybePersistTradeIntentState();
-
-        pendingProposalSubmission = {
-            intentKey: intent.intentKey,
-            explanation: intent.reimbursementExplanation,
-        };
-        const reimbursementCall = buildReimbursementToolCall(intent, policy, config);
-        return [
-            {
-                callId: reimbursementCall.callId,
-                name: reimbursementCall.name,
-                arguments: reimbursementCall.arguments,
-            },
-        ];
-    }
-
-    const hasActiveExecution =
-        Boolean(pendingOrderSubmission?.intentKey) ||
-        Boolean(pendingDepositSubmission?.intentKey) ||
-        openIntents.some(
-            (intent) =>
-                Boolean(intent.orderSubmittedAtMs) ||
-                Boolean(intent.orderId) ||
-                Boolean(intent.depositSubmittedAtMs) ||
-                Boolean(intent.depositTxHash) ||
-                Boolean(intent.reimbursementSubmittedAtMs) ||
-                Boolean(intent.reimbursementSubmissionTxHash)
-        );
-
-    if (!hasActiveExecution) {
-        for (const intent of openIntents) {
-            if (intent.artifactCid) {
+        if (action.kind === 'deposit') {
+            const filledShareAmount = parseOptionalNonNegativeIntegerString(intent.filledShareAmount);
+            if (!filledShareAmount || BigInt(filledShareAmount) <= 0n || !tokenHolderAddress) {
                 continue;
             }
-            if (Number.isInteger(intent.nextArchiveAttemptAtMs) && intent.nextArchiveAttemptAtMs > Date.now()) {
+            const tokenBalance = await readOutcomeTokenBalance({
+                publicClient,
+                policy,
+                tokenHolderAddress,
+                tokenId: intent.tokenId,
+            });
+            if (tokenBalance === null || tokenBalance < BigInt(filledShareAmount)) {
                 continue;
             }
 
+            pendingDepositSubmission = {
+                intentKey: intent.intentKey,
+                startedAtMs: Date.now(),
+            };
+            return [buildDepositToolCall(intent, policy, filledShareAmount)];
+        }
+
+        if (action.kind === 'reimbursement') {
+            const reimbursementRecipientAddress = clobAuthAddress ?? normalizedAgentAddress;
+            if (!reimbursementRecipientAddress) {
+                throw new Error('Unable to resolve reimbursement recipient address.');
+            }
+            intent.reimbursementRecipientAddress = reimbursementRecipientAddress;
+            intent.reimbursementExplanation = buildReimbursementExplanation(intent);
+            intent.reimbursementSubmittedAtMs = Date.now();
+            intent.updatedAtMs = Date.now();
+            await maybePersistTradeIntentState();
+
+            pendingProposalSubmission = {
+                intentKey: intent.intentKey,
+                explanation: intent.reimbursementExplanation,
+            };
+            const reimbursementCall = buildReimbursementToolCall(intent, policy, config);
+            return [
+                {
+                    callId: reimbursementCall.callId,
+                    name: reimbursementCall.name,
+                    arguments: reimbursementCall.arguments,
+                },
+            ];
+        }
+
+        if (action.kind === 'archive') {
             intent.lastArchiveAttemptAtMs = Date.now();
             intent.nextArchiveAttemptAtMs = Date.now() + policy.archiveRetryDelayMs;
             intent.updatedAtMs = Date.now();
@@ -2477,71 +2334,58 @@ async function getDeterministicToolCalls({
             return [buildArchiveToolCall(intent, normalizedCommitmentSafe, normalizedAgentAddress)];
         }
 
-        const chainId =
-            typeof publicClient?.getChainId === 'function'
-                ? await publicClient.getChainId()
-                : undefined;
-        for (const intent of openIntents) {
-            if (
-                !intent.artifactCid ||
-                intent.orderId ||
-                intent.orderSubmittedAtMs ||
-                pendingOrderSubmission?.intentKey === intent.intentKey
-            ) {
-                continue;
-            }
-            if (Number.isInteger(intent.expiryMs) && Date.now() > intent.expiryMs) {
-                continue;
-            }
-            if (
-                Number.isInteger(intent.nextOrderAttemptAtMs) &&
-                intent.nextOrderAttemptAtMs > Date.now()
-            ) {
-                continue;
-            }
-            const clobExecutionPreflightError = getClobExecutionPreflightError(config);
-            if (clobExecutionPreflightError) {
-                intent.lastOrderSubmissionStatus = 'unavailable';
-                intent.lastOrderSubmissionError = clobExecutionPreflightError;
-                intent.nextOrderAttemptAtMs = Date.now() + policy.archiveRetryDelayMs;
-                intent.updatedAtMs = Date.now();
-                await maybePersistTradeIntentState();
-                continue;
-            }
+        if (action.kind !== 'order') {
+            continue;
+        }
 
-            const feeRateBps = await fetchClobFeeRateBps({
-                config,
-                tokenId: intent.tokenId,
-            });
-            let preOrderTokenBalance = null;
-            if (tokenHolderAddress) {
-                try {
-                    preOrderTokenBalance = await readOutcomeTokenBalance({
-                        publicClient,
-                        policy,
-                        tokenHolderAddress,
-                        tokenId: intent.tokenId,
-                    });
-                } catch (error) {
-                    preOrderTokenBalance = null;
-                }
-            }
-            intent.feeRateBps = feeRateBps;
-            intent.feeRateFetchedAtMs = Date.now();
-            intent.tradingWalletAddress = clobAuthAddress ?? normalizedAgentAddress;
-            intent.preOrderTokenHolderAddress = tokenHolderAddress ?? null;
-            intent.preOrderTokenBalance =
-                preOrderTokenBalance === null ? null : preOrderTokenBalance.toString();
-            intent.reimbursementRecipientAddress = clobAuthAddress ?? normalizedAgentAddress;
+        const clobExecutionPreflightError = getClobExecutionPreflightError(config);
+        if (clobExecutionPreflightError) {
+            intent.lastOrderSubmissionStatus = 'unavailable';
+            intent.lastOrderSubmissionError = clobExecutionPreflightError;
+            intent.nextOrderAttemptAtMs = Date.now() + policy.archiveRetryDelayMs;
             intent.updatedAtMs = Date.now();
             await maybePersistTradeIntentState();
-            pendingOrderSubmission = {
-                intentKey: intent.intentKey,
-                startedAtMs: Date.now(),
-            };
-            console.log(`[agent] Preparing Polymarket BUY order for ${intent.intentKey}.`);
-            return [buildOrderToolCall(intent, chainId)];
+            continue;
         }
+
+        const feeRateBps = await fetchClobFeeRateBps({
+            config,
+            tokenId: intent.tokenId,
+        });
+        let preOrderTokenBalance = null;
+        if (tokenHolderAddress) {
+            try {
+                preOrderTokenBalance = await readOutcomeTokenBalance({
+                    publicClient,
+                    policy,
+                    tokenHolderAddress,
+                    tokenId: intent.tokenId,
+                });
+            } catch (error) {
+                preOrderTokenBalance = null;
+            }
+        }
+        if (chainId === undefined) {
+            chainId =
+                typeof publicClient?.getChainId === 'function'
+                    ? await publicClient.getChainId()
+                    : undefined;
+        }
+        intent.feeRateBps = feeRateBps;
+        intent.feeRateFetchedAtMs = Date.now();
+        intent.tradingWalletAddress = clobAuthAddress ?? normalizedAgentAddress;
+        intent.preOrderTokenHolderAddress = tokenHolderAddress ?? null;
+        intent.preOrderTokenBalance =
+            preOrderTokenBalance === null ? null : preOrderTokenBalance.toString();
+        intent.reimbursementRecipientAddress = clobAuthAddress ?? normalizedAgentAddress;
+        intent.updatedAtMs = Date.now();
+        await maybePersistTradeIntentState();
+        pendingOrderSubmission = {
+            intentKey: intent.intentKey,
+            startedAtMs: Date.now(),
+        };
+        console.log(`[agent] Preparing Polymarket BUY order for ${intent.intentKey}.`);
+        return [buildOrderToolCall(intent, chainId)];
     }
 
     return [];
