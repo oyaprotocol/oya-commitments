@@ -681,6 +681,62 @@ async function run() {
 
         await resetTradeIntentState();
         runtime.latestBlock = 46n;
+        runtime.depositLogs = [
+            {
+                args: {
+                    from: TEST_SIGNER,
+                    value: 50_000_000n,
+                },
+                blockNumber: 10n,
+                transactionHash: `0x${'d'.repeat(64)}`,
+                logIndex: 0,
+            },
+        ];
+        runtime.safeCollateralBalance = 100_000_000n;
+        runtime.chainIdError = 'chain id rpc unavailable';
+        const chainIdFallbackSignal = buildSignedMessageSignal({
+            requestId: 'pm-intent-chainid-config-fallback',
+        });
+        const chainIdFallbackArchiveCalls = await getDeterministicToolCalls({
+            signals: [chainIdFallbackSignal],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(chainIdFallbackArchiveCalls.length, 1);
+        assert.equal(chainIdFallbackArchiveCalls[0].name, 'ipfs_publish');
+        await onToolOutput({
+            name: 'ipfs_publish',
+            parsedOutput: {
+                status: 'published',
+                cid: 'bafy-chainid-config-fallback',
+                uri: 'ipfs://bafy-chainid-config-fallback',
+                pinned: true,
+            },
+            config: buildModuleConfig(),
+        });
+        const chainIdFallbackOrderCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.equal(chainIdFallbackOrderCalls.length, 1);
+        assert.equal(
+            chainIdFallbackOrderCalls[0].name,
+            'polymarket_clob_build_sign_and_place_order'
+        );
+        assert.equal(
+            JSON.parse(chainIdFallbackOrderCalls[0].arguments).chainId,
+            '137'
+        );
+        runtime.chainIdError = null;
+        runtime.safeCollateralBalance = null;
+
+        await resetTradeIntentState();
+        runtime.latestBlock = 46n;
         runtime.ctfBalanceReadError = 'ctf balance RPC unavailable';
         runtime.ctfBalances = {};
         await writeTradeIntentStateFixture(stateFilePath, {
@@ -2602,7 +2658,7 @@ async function run() {
         assert.equal(orderArgs.makerAmount, '25000000');
         assert.equal(orderArgs.takerAmount, '59523810');
         assert.equal(orderArgs.feeRateBps, '30');
-        assert.equal(orderArgs.chainId, 137);
+        assert.equal(orderArgs.chainId, '137');
         const duplicateOrderCalls = await getDeterministicToolCalls({
             signals: [],
             commitmentSafe: TEST_SAFE,
