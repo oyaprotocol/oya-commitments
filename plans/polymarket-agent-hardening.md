@@ -27,6 +27,9 @@ The user-visible outcome is a Polymarket agent that can be run for long periods 
 - [x] 2026-03-24 02:43Z: Completed clean review pass 1 on stage/recovery code after the latest fixes; no new issues found.
 - [x] 2026-03-24 02:48Z: Completed clean review pass 2 on credit, actual-balance gating, and backfill accounting after the latest fixes; no new issues found.
 - [x] 2026-03-24 02:52Z: Completed clean review pass 3 on the final diff and regression suite after the latest fixes; no new issues found.
+- [x] 2026-03-24 03:08Z: Re-opened the hardening pass after later review feedback on lossy intent acceptance during Safe-balance read failures and malformed reimbursement backfill records.
+- [x] 2026-03-24 03:25Z: Fixed lossy acceptance, order/deposit pre-dispatch RPC failure handling, released-intent commitment accounting, receipt-timeout handling for generic RPC errors, and archive-signal enrichment for malformed legacy intents; added regression coverage and re-ran module validation.
+- [x] 2026-03-24 03:34Z: Completed three consecutive clean review passes over the updated branch without finding a new concrete issue.
 
 ## Surprises & Discoveries
 
@@ -62,6 +65,12 @@ The user-visible outcome is a Polymarket agent that can be run for long periods 
 - Decision: Deposited or filled intents must not count as active order execution for later archive/order scheduling.
   Rationale: treating any open intent with an `orderId` as globally active serialized the whole agent behind long reimbursement windows and could block later depositors from progressing even after the prior trade had already settled.
   Date/Author: 2026-03-24 / Codex.
+- Decision: Valid signed intents should be persisted even when the Safe collateral balance cannot be read at acceptance time; actual Safe headroom must instead gate order placement.
+  Rationale: message-driven signed intents are otherwise lossy under transient RPC failures, while order-stage gating still prevents overcommit against actual Safe collateral.
+  Date/Author: 2026-03-24 / Codex.
+- Decision: Stage-prep reads such as fee-rate lookup, ERC1155 balance checks, and receipt polling must fail into persisted retryable or ambiguous lifecycle state rather than throwing out of the deterministic loop.
+  Rationale: long-running agents need transient RPC/API failures to preserve intent state and retry/back off safely instead of dropping work or spinning indefinitely.
+  Date/Author: 2026-03-24 / Codex.
 
 ## Outcomes & Retrospective
 
@@ -79,6 +88,11 @@ The hardening pass fixed the largest remaining concrete issues I found:
 - state signals now include a collateral summary with modeled vs actual availability and shortfall
 - recovered duplicate ERC1155 deposits now resolve full compatible groups one-to-one when enough evidence exists, while insufficient evidence remains fail-closed
 - deposited intents no longer block unrelated later intents from reaching archive/order stages just because they still carry a historical `orderId`
+- valid signed intents are no longer dropped when Safe collateral reads fail; they persist and retry once actual Safe balance reads recover
+- malformed historical reimbursement proposals no longer abort the full reimbursement backfill pass
+- order placement now treats the current intent's own reservation as usable headroom instead of subtracting it away
+- fee-rate fetch failures, ERC1155 balance-read failures, and generic post-submit receipt RPC failures now persist retryable or ambiguous stage state rather than aborting the loop
+- archive-signal enrichment now tolerates malformed legacy persisted intents instead of crashing `enrichSignals()`
 
 Remaining concerns after the second review are operational rather than obviously broken code paths. The main one is that the `token_balance` order-settlement fallback is safest when the trading wallet is dedicated to this agent, because unrelated same-token wallet inflows could otherwise confuse attribution. That is a narrower residual assumption than the concrete lifecycle and state bugs fixed in this run.
 

@@ -559,17 +559,20 @@ async function readCollateralBalanceWei({
     }
 }
 
-function getActualReservationHeadroomWei(actualCollateralBalanceWei) {
+function getEffectiveOrderReservationHeadroomWei(intent, actualCollateralBalanceWei) {
     if (actualCollateralBalanceWei === null || actualCollateralBalanceWei === undefined) {
         return null;
     }
 
     const normalizedActualCollateralBalanceWei = BigInt(actualCollateralBalanceWei);
-    const reservedWei = getTotalReservedCreditWei(tradeIntentState);
-    if (normalizedActualCollateralBalanceWei <= reservedWei) {
+    const ownReservedWei = BigInt(intent?.reservedCreditAmountWei ?? 0);
+    const totalReservedWei = getTotalReservedCreditWei(tradeIntentState);
+    const otherReservedWei =
+        totalReservedWei > ownReservedWei ? totalReservedWei - ownReservedWei : 0n;
+    if (normalizedActualCollateralBalanceWei <= otherReservedWei) {
         return 0n;
     }
-    return normalizedActualCollateralBalanceWei - reservedWei;
+    return normalizedActualCollateralBalanceWei - otherReservedWei;
 }
 
 async function observeFilledTokenInventoryDelta({
@@ -2021,16 +2024,25 @@ function buildIntentSignal(record, nowMs = Date.now()) {
 }
 
 function buildArchiveSignal(record, commitmentSafe, agentAddress) {
+    let archiveArtifact = null;
+    let archiveArtifactError = null;
+    try {
+        archiveArtifact = buildSignedTradeIntentArchiveArtifact({
+            record,
+            commitmentSafe,
+            agentAddress,
+        });
+    } catch (error) {
+        archiveArtifactError = error?.message ?? String(error);
+    }
+
     return {
         kind: 'polymarketSignedIntentArchive',
         intentKey: record.intentKey,
         requestId: record.requestId,
         archiveFilename: record.archiveFilename,
-        archiveArtifact: buildSignedTradeIntentArchiveArtifact({
-            record,
-            commitmentSafe,
-            agentAddress,
-        }),
+        archiveArtifact,
+        archiveArtifactError,
         archived: Boolean(record.artifactCid),
         artifactCid: record.artifactCid ?? null,
         artifactUri: record.artifactUri ?? null,
@@ -2353,9 +2365,6 @@ async function refreshTrackedTxSubmissionStatus({
             }
             changed = (await onConfirmedReceipt(intent, { nowMs, receipt })) || changed;
         } catch (error) {
-            if (!isReceiptUnavailableError(error)) {
-                continue;
-            }
             if (!hasTimedOut(intent[fields.submittedAt], pendingTxTimeoutMs, nowMs)) {
                 continue;
             }
@@ -2808,21 +2817,9 @@ async function getDeterministicToolCalls({
             tradeIntentState,
             interpreted.intent.signer
         );
-        const actualReservationHeadroomWei = getActualReservationHeadroomWei(
-            actualCollateralBalanceWei
-        );
         if (availableCreditWei < BigInt(interpreted.intent.reservedCreditAmountWei)) {
             console.warn(
                 `[agent] Ignoring signed Polymarket trade intent ${interpreted.intent.intentKey}: insufficient deposited collateral credit for signer ${interpreted.intent.signer} (availableWei=${availableCreditWei.toString()} requiredWei=${interpreted.intent.reservedCreditAmountWei}).`
-            );
-            continue;
-        }
-        if (
-            actualReservationHeadroomWei === null ||
-            actualReservationHeadroomWei < BigInt(interpreted.intent.reservedCreditAmountWei)
-        ) {
-            console.warn(
-                `[agent] Ignoring signed Polymarket trade intent ${interpreted.intent.intentKey}: insufficient actual Safe collateral remains unreserved (actualHeadroomWei=${actualReservationHeadroomWei === null ? 'unknown' : actualReservationHeadroomWei.toString()} requiredWei=${interpreted.intent.reservedCreditAmountWei}).`
             );
             continue;
         }
@@ -2870,16 +2867,30 @@ async function getDeterministicToolCalls({
             if (!filledShareAmount || BigInt(filledShareAmount) <= 0n || !tokenHolderAddress) {
                 continue;
             }
-            const tokenBalance = await readOutcomeTokenBalance({
-                publicClient,
-                policy,
-                tokenHolderAddress,
-                tokenId: intent.tokenId,
-            });
+            let tokenBalance;
+            try {
+                tokenBalance = await readOutcomeTokenBalance({
+                    publicClient,
+                    policy,
+                    tokenHolderAddress,
+                    tokenId: intent.tokenId,
+                });
+            } catch (error) {
+                intent.lastDepositStatus = 'unavailable';
+                intent.lastDepositError =
+                    `Failed to read outcome-token balance before deposit: ${error?.message ?? error}`;
+                intent.nextDepositAttemptAtMs = Date.now() + policy.archiveRetryDelayMs;
+                intent.updatedAtMs = Date.now();
+                await maybePersistTradeIntentState();
+                continue;
+            }
             if (tokenBalance === null || tokenBalance < BigInt(filledShareAmount)) {
                 continue;
             }
 
+            delete intent.lastDepositStatus;
+            delete intent.lastDepositError;
+            delete intent.nextDepositAttemptAtMs;
             markStageDispatchStarted(intent, 'deposit');
             intent.depositSourceAddress = tokenHolderAddress;
             intent.depositExpectedAmount = filledShareAmount;
@@ -2956,6 +2967,39 @@ async function getDeterministicToolCalls({
             continue;
         }
 
+        const requiredReservationWei = BigInt(intent.reservedCreditAmountWei ?? 0);
+        const actualReservationHeadroomWei = getEffectiveOrderReservationHeadroomWei(
+            intent,
+            actualCollateralBalanceWei
+        );
+        let actualCollateralHeadroomError = null;
+        if (requiredReservationWei > 0n) {
+            if (actualReservationHeadroomWei === null) {
+                actualCollateralHeadroomError =
+                    'Unable to confirm actual Safe collateral headroom; refusing to place a Polymarket order until the Safe collateral balance can be read.';
+            } else if (actualReservationHeadroomWei < requiredReservationWei) {
+                actualCollateralHeadroomError =
+                    `Insufficient actual Safe collateral remains unreserved for order placement (headroomWei=${actualReservationHeadroomWei.toString()} requiredWei=${requiredReservationWei.toString()}).`;
+            }
+        }
+        if (actualCollateralHeadroomError) {
+            if (
+                intent.lastOrderSubmissionStatus !== 'unavailable' ||
+                intent.lastOrderSubmissionError !== actualCollateralHeadroomError ||
+                !Number.isInteger(intent.nextOrderAttemptAtMs) ||
+                intent.nextOrderAttemptAtMs <= Date.now()
+            ) {
+                intent.lastOrderSubmissionStatus = 'unavailable';
+                intent.lastOrderSubmissionError = actualCollateralHeadroomError;
+                intent.nextOrderAttemptAtMs = Date.now() + policy.archiveRetryDelayMs;
+                intent.updatedAtMs = Date.now();
+                await maybePersistTradeIntentState();
+            }
+            continue;
+        }
+        delete intent.lastOrderSubmissionStatus;
+        delete intent.lastOrderSubmissionError;
+
         const clobExecutionPreflightError = getClobExecutionPreflightError(config);
         if (clobExecutionPreflightError) {
             intent.lastOrderSubmissionStatus = 'unavailable';
@@ -2966,10 +3010,21 @@ async function getDeterministicToolCalls({
             continue;
         }
 
-        const feeRateBps = await fetchClobFeeRateBps({
-            config,
-            tokenId: intent.tokenId,
-        });
+        let feeRateBps;
+        try {
+            feeRateBps = await fetchClobFeeRateBps({
+                config,
+                tokenId: intent.tokenId,
+            });
+        } catch (error) {
+            intent.lastOrderSubmissionStatus = 'unavailable';
+            intent.lastOrderSubmissionError =
+                `Failed to fetch Polymarket fee rate before order placement: ${error?.message ?? error}`;
+            intent.nextOrderAttemptAtMs = Date.now() + policy.archiveRetryDelayMs;
+            intent.updatedAtMs = Date.now();
+            await maybePersistTradeIntentState();
+            continue;
+        }
         let preOrderTokenBalance = null;
         if (tokenHolderAddress) {
             try {
@@ -2984,10 +3039,20 @@ async function getDeterministicToolCalls({
             }
         }
         if (chainId === undefined) {
-            chainId =
-                typeof publicClient?.getChainId === 'function'
-                    ? await publicClient.getChainId()
-                    : undefined;
+            try {
+                chainId =
+                    typeof publicClient?.getChainId === 'function'
+                        ? await publicClient.getChainId()
+                        : undefined;
+            } catch (error) {
+                intent.lastOrderSubmissionStatus = 'unavailable';
+                intent.lastOrderSubmissionError =
+                    `Failed to resolve chainId before order placement: ${error?.message ?? error}`;
+                intent.nextOrderAttemptAtMs = Date.now() + policy.archiveRetryDelayMs;
+                intent.updatedAtMs = Date.now();
+                await maybePersistTradeIntentState();
+                continue;
+            }
         }
         intent.feeRateBps = feeRateBps;
         intent.feeRateFetchedAtMs = Date.now();

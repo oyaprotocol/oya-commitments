@@ -8,6 +8,14 @@ function normalizeAddress(value) {
     return getAddress(value.trim()).toLowerCase();
 }
 
+function normalizeAddressOrNull(value) {
+    try {
+        return normalizeAddress(value);
+    } catch (error) {
+        return null;
+    }
+}
+
 function normalizePositiveBigInt(value, fieldName) {
     try {
         const normalized = BigInt(String(value));
@@ -75,6 +83,11 @@ export function createReimbursementCommitmentRecord(
     if (!normalizedProposalHash) {
         return null;
     }
+    const signer = normalizeAddressOrNull(signal.signer);
+    const recipientAddress = normalizeAddressOrNull(signal.recipientAddress);
+    if (!signer || !recipientAddress) {
+        return null;
+    }
 
     return {
         commitmentKey: `proposal:${normalizedProposalHash}`,
@@ -83,8 +96,8 @@ export function createReimbursementCommitmentRecord(
             typeof signal.intentKey === 'string' && signal.intentKey.trim()
                 ? signal.intentKey.trim()
                 : null,
-        signer: normalizeAddress(signal.signer),
-        recipientAddress: normalizeAddress(signal.recipientAddress),
+        signer,
+        recipientAddress,
         amountWei: amountWei.toString(),
         status:
             typeof signal.status === 'string' && signal.status.trim()
@@ -122,6 +135,9 @@ function hasMatchingIntentReservation(state, commitment) {
 
     for (const intent of Object.values(state?.intents ?? {})) {
         if (!intent || typeof intent !== 'object') {
+            continue;
+        }
+        if (intent.creditReleasedAtMs) {
             continue;
         }
         if (normalizedIntentKey && intent.intentKey === normalizedIntentKey) {
