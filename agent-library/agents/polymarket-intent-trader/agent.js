@@ -2,6 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
     decodeEventLog,
+    erc20Abi,
     erc1155Abi,
     getAddress,
     isAddressEqual,
@@ -12,6 +13,7 @@ import { buildSignedMessagePayload } from '../../../agent/src/lib/message-signin
 import {
     transactionsProposedEvent,
 } from '../../../agent/src/lib/og.js';
+import { getLogsChunked } from '../../../agent/src/lib/chain-history.js';
 import { getAlwaysEmitBalanceSnapshotPollingOptions } from '../../../agent/src/lib/polling.js';
 import {
     DEFAULT_COLLATERAL_TOKEN,
@@ -25,11 +27,13 @@ import {
     normalizeTokenId,
 } from '../../../agent/src/lib/utils.js';
 import {
+    buildCollateralCreditSummary,
     buildCreditSnapshot,
     createDepositRecord,
     getAvailableCreditWeiForAddress,
     getDepositedCreditWeiForAddress,
     getReservedCreditWeiForAddress,
+    getTotalReservedCreditWei,
 } from './credit-ledger.js';
 import {
     backfillDeposits,
@@ -530,6 +534,44 @@ async function readOutcomeTokenBalance({
     return BigInt(balance);
 }
 
+async function readCollateralBalanceWei({
+    publicClient,
+    policy,
+    commitmentSafe,
+}) {
+    if (!publicClient || !policy?.collateralToken || !commitmentSafe) {
+        return null;
+    }
+
+    try {
+        const balance = await publicClient.readContract({
+            address: policy.collateralToken,
+            abi: erc20Abi,
+            functionName: 'balanceOf',
+            args: [commitmentSafe],
+        });
+        return BigInt(balance);
+    } catch (error) {
+        console.warn(
+            `[agent] Failed to read Safe collateral balance for ${commitmentSafe}: ${error?.message ?? error}`
+        );
+        return null;
+    }
+}
+
+function getActualReservationHeadroomWei(actualCollateralBalanceWei) {
+    if (actualCollateralBalanceWei === null || actualCollateralBalanceWei === undefined) {
+        return null;
+    }
+
+    const normalizedActualCollateralBalanceWei = BigInt(actualCollateralBalanceWei);
+    const reservedWei = getTotalReservedCreditWei(tradeIntentState);
+    if (normalizedActualCollateralBalanceWei <= reservedWei) {
+        return 0n;
+    }
+    return normalizedActualCollateralBalanceWei - reservedWei;
+}
+
 async function observeFilledTokenInventoryDelta({
     publicClient,
     policy,
@@ -577,136 +619,341 @@ function getExpectedDepositAmount(intent) {
     );
 }
 
-function matchesRecoveredDepositSignal({ signal, intent, policy }) {
+function buildRecoveredDepositMatchKey({
+    tokenId,
+    amount,
+    from,
+}) {
+    const normalizedTokenId = normalizeTokenId(tokenId);
+    const normalizedAmount = parseOptionalNonNegativeIntegerString(amount);
+    const normalizedFrom = normalizeAddressOrNull(from);
+    if (!normalizedTokenId || !normalizedAmount || !normalizedFrom) {
+        return null;
+    }
+    return `${normalizedFrom}:${normalizedTokenId}:${normalizedAmount}`;
+}
+
+function getRecoveredDepositIntentMatchKey(intent) {
+    return buildRecoveredDepositMatchKey({
+        tokenId: intent?.tokenId,
+        amount: getExpectedDepositAmount(intent),
+        from: getExpectedDepositSourceAddress(intent),
+    });
+}
+
+function getRecoveredDepositEvidenceMatchKey(evidence) {
+    return buildRecoveredDepositMatchKey({
+        tokenId: evidence?.tokenId,
+        amount: evidence?.amount,
+        from: evidence?.from,
+    });
+}
+
+function compareRecoveredDepositIntentPriority(left, right) {
+    const leftDispatchBlock = BigInt(left?.depositDispatchBlockNumber ?? 0);
+    const rightDispatchBlock = BigInt(right?.depositDispatchBlockNumber ?? 0);
+    if (leftDispatchBlock !== rightDispatchBlock) {
+        return leftDispatchBlock < rightDispatchBlock ? -1 : 1;
+    }
+
+    const leftSequence = Number(left?.sequence ?? 0);
+    const rightSequence = Number(right?.sequence ?? 0);
+    if (leftSequence !== rightSequence) {
+        return leftSequence - rightSequence;
+    }
+
+    return String(left?.intentKey ?? '').localeCompare(String(right?.intentKey ?? ''));
+}
+
+function isIntentAwaitingRecoveredDeposit(intent) {
+    return (
+        !intent?.tokenDeposited &&
+        (Number.isInteger(intent?.depositSubmittedAtMs) || Number.isInteger(intent?.depositDispatchAtMs))
+    );
+}
+
+function buildRecoveredDepositEvidenceKey({
+    transactionHash,
+    logIndex,
+    tokenId,
+    batchIndex = null,
+    signalId = null,
+    blockNumber = null,
+    from = null,
+    amount = null,
+}) {
+    const normalizedTransactionHash = normalizeHash(transactionHash);
+    const normalizedTokenId = normalizeTokenId(tokenId);
+    if (
+        normalizedTransactionHash &&
+        logIndex !== undefined &&
+        logIndex !== null &&
+        normalizedTokenId
+    ) {
+        return `tx:${normalizedTransactionHash}:${String(logIndex)}:${normalizedTokenId}:${batchIndex === null ? 'single' : String(batchIndex)}`;
+    }
+
+    const normalizedSignalId = normalizeNonEmptyString(signalId);
+    if (normalizedSignalId) {
+        return `signal:${normalizedSignalId}`;
+    }
+
+    const normalizedBlockNumber = parseOptionalNonNegativeIntegerString(blockNumber);
+    const normalizedFrom = normalizeAddressOrNull(from);
+    const normalizedAmount = parseOptionalNonNegativeIntegerString(amount);
+    if (normalizedBlockNumber && normalizedFrom && normalizedTokenId && normalizedAmount) {
+        return `fallback:${normalizedBlockNumber}:${normalizedFrom}:${normalizedTokenId}:${normalizedAmount}:${batchIndex === null ? 'single' : String(batchIndex)}`;
+    }
+
+    return null;
+}
+
+function buildRecoveredDepositEvidence({
+    tokenId,
+    amount,
+    from,
+    blockNumber,
+    transactionHash,
+    logIndex,
+    batchIndex = null,
+    signalId = null,
+    source,
+}) {
+    const evidenceKey = buildRecoveredDepositEvidenceKey({
+        transactionHash,
+        logIndex,
+        tokenId,
+        batchIndex,
+        signalId,
+        blockNumber,
+        from,
+        amount,
+    });
+    const normalizedTokenId = normalizeTokenId(tokenId);
+    const normalizedAmount = parseOptionalNonNegativeIntegerString(amount);
+    const normalizedFrom = normalizeAddressOrNull(from);
+    if (!evidenceKey || !normalizedTokenId || !normalizedAmount || !normalizedFrom) {
+        return null;
+    }
+
+    return {
+        evidenceKey,
+        source,
+        tokenId: normalizedTokenId,
+        amount: normalizedAmount,
+        from: normalizedFrom,
+        blockNumber:
+            blockNumber !== undefined && blockNumber !== null ? BigInt(blockNumber).toString() : null,
+        transactionHash: normalizeHash(transactionHash),
+        logIndex:
+            logIndex === undefined || logIndex === null ? null : String(logIndex),
+        batchIndex:
+            batchIndex === undefined || batchIndex === null ? null : String(batchIndex),
+    };
+}
+
+function buildRecoveredDepositEvidenceFromSignal({ signal, policy }) {
     if (signal?.kind !== 'erc1155Deposit') {
-        return false;
+        return null;
     }
     const signalToken = normalizeAddressOrNull(signal?.token ?? signal?.asset ?? null);
     if (!signalToken || !policy?.ctfContract || signalToken !== policy.ctfContract) {
-        return false;
+        return null;
     }
-    if (normalizeTokenId(signal?.tokenId) !== normalizeTokenId(intent?.tokenId)) {
-        return false;
+
+    return buildRecoveredDepositEvidence({
+        tokenId: signal?.tokenId,
+        amount: signal?.amount,
+        from: signal?.from,
+        blockNumber: signal?.blockNumber,
+        transactionHash: signal?.transactionHash,
+        logIndex: signal?.logIndex,
+        batchIndex: signal?.batchIndex ?? null,
+        signalId: signal?.id ?? null,
+        source: 'signal',
+    });
+}
+
+function buildRecoveredDepositEvidenceFromSingleLog(log) {
+    return buildRecoveredDepositEvidence({
+        tokenId: log?.args?.id,
+        amount: log?.args?.value,
+        from: log?.args?.from,
+        blockNumber: log?.blockNumber,
+        transactionHash: log?.transactionHash,
+        logIndex: log?.logIndex,
+        source: 'log',
+    });
+}
+
+function buildRecoveredDepositEvidenceFromBatchLog(log) {
+    const ids = Array.isArray(log?.args?.ids) ? log.args.ids : [];
+    const values = Array.isArray(log?.args?.values) ? log.args.values : [];
+    const evidence = [];
+    for (let index = 0; index < ids.length; index += 1) {
+        const amount = values[index];
+        if (amount === undefined) {
+            continue;
+        }
+        const entry = buildRecoveredDepositEvidence({
+            tokenId: ids[index],
+            amount,
+            from: log?.args?.from,
+            blockNumber: log?.blockNumber,
+            transactionHash: log?.transactionHash,
+            logIndex: log?.logIndex,
+            batchIndex: index,
+            source: 'log',
+        });
+        if (entry) {
+            evidence.push(entry);
+        }
     }
-    const expectedSourceAddress = getExpectedDepositSourceAddress(intent);
-    if (!expectedSourceAddress) {
-        return false;
+    return evidence;
+}
+
+function compareRecoveredDepositEvidence(left, right) {
+    const leftBlock = BigInt(left?.blockNumber ?? 0n);
+    const rightBlock = BigInt(right?.blockNumber ?? 0n);
+    if (leftBlock !== rightBlock) {
+        return leftBlock < rightBlock ? -1 : 1;
     }
-    const signalSourceAddress = normalizeAddressOrNull(signal?.from ?? null);
-    if (!signalSourceAddress || signalSourceAddress !== expectedSourceAddress) {
-        return false;
+    const leftLogIndex = BigInt(left?.logIndex ?? 0);
+    const rightLogIndex = BigInt(right?.logIndex ?? 0);
+    if (leftLogIndex !== rightLogIndex) {
+        return leftLogIndex < rightLogIndex ? -1 : 1;
     }
+    const leftBatchIndex = BigInt(left?.batchIndex ?? 0);
+    const rightBatchIndex = BigInt(right?.batchIndex ?? 0);
+    if (leftBatchIndex !== rightBatchIndex) {
+        return leftBatchIndex < rightBatchIndex ? -1 : 1;
+    }
+    return String(left?.evidenceKey ?? '').localeCompare(String(right?.evidenceKey ?? ''));
+}
+
+function matchesRecoveredDepositEvidence({ evidence, intent }) {
+    const expectedTokenId = normalizeTokenId(intent?.tokenId);
     const expectedAmount = getExpectedDepositAmount(intent);
-    const signalAmount = parseOptionalNonNegativeIntegerString(signal?.amount);
-    if (!expectedAmount || !signalAmount || signalAmount !== expectedAmount) {
+    const expectedSourceAddress = getExpectedDepositSourceAddress(intent);
+    if (!expectedTokenId || !expectedAmount || !expectedSourceAddress) {
         return false;
     }
+    if (
+        evidence?.tokenId !== expectedTokenId ||
+        evidence?.amount !== expectedAmount ||
+        evidence?.from !== expectedSourceAddress
+    ) {
+        return false;
+    }
+
+    const dispatchBlockNumber = parseOptionalNonNegativeIntegerString(intent?.depositDispatchBlockNumber);
+    const evidenceBlockNumber = parseOptionalNonNegativeIntegerString(evidence?.blockNumber);
+    if (dispatchBlockNumber && evidenceBlockNumber && BigInt(evidenceBlockNumber) < BigInt(dispatchBlockNumber)) {
+        return false;
+    }
+
     return true;
 }
 
-function findRecoveredDepositSignal({ signals, intent, policy }) {
+function collectRecoveredDepositSignalEvidence({ signals, policy }) {
+    const evidenceByKey = new Map();
     for (const signal of Array.isArray(signals) ? signals : []) {
-        if (matchesRecoveredDepositSignal({ signal, intent, policy })) {
-            return signal;
+        const evidence = buildRecoveredDepositEvidenceFromSignal({ signal, policy });
+        if (!evidence || evidenceByKey.has(evidence.evidenceKey)) {
+            continue;
         }
+        evidenceByKey.set(evidence.evidenceKey, evidence);
     }
-    return null;
+    return evidenceByKey;
 }
 
-function extractRecoveredDepositLogMatch({ intent, log }) {
-    if (!log?.args) {
-        return null;
-    }
-
-    const expectedTokenId = normalizeTokenId(intent?.tokenId);
-    const expectedAmount = getExpectedDepositAmount(intent);
-    if (!expectedTokenId || !expectedAmount) {
-        return null;
-    }
-
-    const logTokenId = parseOptionalNonNegativeIntegerString(log.args?.id);
-    const logAmount = parseOptionalNonNegativeIntegerString(log.args?.value);
-    if (logTokenId && logAmount && logTokenId === expectedTokenId && logAmount === expectedAmount) {
-        return log;
-    }
-
-    const ids = Array.isArray(log.args?.ids) ? log.args.ids : [];
-    const values = Array.isArray(log.args?.values) ? log.args.values : [];
-    for (let index = 0; index < ids.length; index += 1) {
-        const batchTokenId = parseOptionalNonNegativeIntegerString(ids[index]);
-        const batchAmount = parseOptionalNonNegativeIntegerString(values[index]);
-        if (
-            batchTokenId &&
-            batchAmount &&
-            batchTokenId === expectedTokenId &&
-            batchAmount === expectedAmount
-        ) {
-            return log;
-        }
-    }
-
-    return null;
-}
-
-async function findRecoveredDepositLog({
+async function collectRecoveredDepositLogEvidence({
     publicClient,
     policy,
     commitmentSafe,
     latestBlock,
-    intent,
+    intents,
 }) {
+    const evidenceByKey = new Map();
     if (!publicClient || !policy?.ctfContract || !commitmentSafe) {
-        return null;
+        return evidenceByKey;
     }
 
-    const depositSourceAddress = getExpectedDepositSourceAddress(intent);
-    const fromBlock = parseOptionalNonNegativeIntegerString(intent?.depositDispatchBlockNumber);
-    if (!depositSourceAddress || !fromBlock) {
-        return null;
-    }
+    const normalizedCommitmentSafe = normalizeAddress(commitmentSafe);
+    const normalizedLatestBlock = BigInt(latestBlock);
+    const queryGroups = new Map();
+    for (const intent of Array.isArray(intents) ? intents : []) {
+        const depositSourceAddress = getExpectedDepositSourceAddress(intent);
+        const fromBlock = parseOptionalNonNegativeIntegerString(intent?.depositDispatchBlockNumber);
+        if (!depositSourceAddress || !fromBlock) {
+            continue;
+        }
 
-    const toBlock = BigInt(latestBlock);
-    const normalizedFromBlock = BigInt(fromBlock);
-    if (normalizedFromBlock > toBlock) {
-        return null;
-    }
-
-    const [singleLogs, batchLogs] = await Promise.all([
-        publicClient.getLogs({
-            address: policy.ctfContract,
-            event: erc1155TransferSingleEvent,
-            args: {
+        const existing = queryGroups.get(depositSourceAddress);
+        const normalizedFromBlock = BigInt(fromBlock);
+        if (!existing || normalizedFromBlock < existing.fromBlock) {
+            queryGroups.set(depositSourceAddress, {
                 from: depositSourceAddress,
-                to: commitmentSafe,
-            },
-            fromBlock: normalizedFromBlock,
-            toBlock,
-        }),
-        publicClient.getLogs({
-            address: policy.ctfContract,
-            event: erc1155TransferBatchEvent,
-            args: {
-                from: depositSourceAddress,
-                to: commitmentSafe,
-            },
-            fromBlock: normalizedFromBlock,
-            toBlock,
-        }),
-    ]);
+                fromBlock: normalizedFromBlock,
+            });
+        }
+    }
 
-    const matches = [...singleLogs, ...batchLogs]
-        .map((log) => extractRecoveredDepositLogMatch({ intent, log }))
-        .filter(Boolean)
-        .sort((left, right) => {
-            const leftBlock = BigInt(left.blockNumber ?? 0n);
-            const rightBlock = BigInt(right.blockNumber ?? 0n);
-            if (leftBlock !== rightBlock) {
-                return leftBlock < rightBlock ? -1 : 1;
+    for (const group of queryGroups.values()) {
+        if (group.fromBlock > normalizedLatestBlock) {
+            continue;
+        }
+
+        try {
+            const [singleLogs, batchLogs] = await Promise.all([
+                getLogsChunked({
+                    publicClient,
+                    address: policy.ctfContract,
+                    event: erc1155TransferSingleEvent,
+                    args: {
+                        from: group.from,
+                        to: normalizedCommitmentSafe,
+                    },
+                    fromBlock: group.fromBlock,
+                    toBlock: normalizedLatestBlock,
+                    chunkSize: policy.logChunkSize,
+                }),
+                getLogsChunked({
+                    publicClient,
+                    address: policy.ctfContract,
+                    event: erc1155TransferBatchEvent,
+                    args: {
+                        from: group.from,
+                        to: normalizedCommitmentSafe,
+                    },
+                    fromBlock: group.fromBlock,
+                    toBlock: normalizedLatestBlock,
+                    chunkSize: policy.logChunkSize,
+                }),
+            ]);
+
+            for (const log of singleLogs) {
+                const evidence = buildRecoveredDepositEvidenceFromSingleLog(log);
+                if (evidence && !evidenceByKey.has(evidence.evidenceKey)) {
+                    evidenceByKey.set(evidence.evidenceKey, evidence);
+                }
             }
-            return Number(left.logIndex ?? 0) - Number(right.logIndex ?? 0);
-        });
 
-    return matches[0] ?? null;
+            for (const log of batchLogs) {
+                for (const evidence of buildRecoveredDepositEvidenceFromBatchLog(log)) {
+                    if (!evidenceByKey.has(evidence.evidenceKey)) {
+                        evidenceByKey.set(evidence.evidenceKey, evidence);
+                    }
+                }
+            }
+        } catch (error) {
+            console.warn(
+                `[agent] Failed to scan ERC1155 deposit recovery logs for ${group.from}: ${error?.message ?? error}`
+            );
+        }
+    }
+
+    return evidenceByKey;
 }
 
 function markRecoveredDepositTransfer(intent, recovered, nowMs = Date.now()) {
@@ -736,31 +983,80 @@ async function reconcileRecoveredDepositSubmissions({
 }) {
     let changed = false;
     const nowMs = Date.now();
+    const candidateIntents = getOpenIntents().filter((intent) =>
+        isIntentAwaitingRecoveredDeposit(intent)
+    );
+    if (candidateIntents.length === 0) {
+        return false;
+    }
 
-    for (const intent of getOpenIntents()) {
-        if (intent.tokenDeposited) {
+    const evidenceByKey = collectRecoveredDepositSignalEvidence({
+        signals,
+        policy,
+    });
+    const recoveredLogEvidence = await collectRecoveredDepositLogEvidence({
+        publicClient,
+        policy,
+        commitmentSafe,
+        latestBlock,
+        intents: candidateIntents,
+    });
+    for (const [evidenceKey, evidence] of recoveredLogEvidence.entries()) {
+        if (!evidenceByKey.has(evidenceKey)) {
+            evidenceByKey.set(evidenceKey, evidence);
+        }
+    }
+
+    const sortedEvidence = Array.from(evidenceByKey.values()).sort(compareRecoveredDepositEvidence);
+    const evidenceByMatchKey = new Map();
+    for (const evidence of sortedEvidence) {
+        const matchKey = getRecoveredDepositEvidenceMatchKey(evidence);
+        if (!matchKey) {
             continue;
         }
-        if (!Number.isInteger(intent.depositSubmittedAtMs) && !Number.isInteger(intent.depositDispatchAtMs)) {
+        const existing = evidenceByMatchKey.get(matchKey) ?? [];
+        existing.push(evidence);
+        evidenceByMatchKey.set(matchKey, existing);
+    }
+
+    const intentsByMatchKey = new Map();
+    for (const intent of candidateIntents) {
+        const matchKey = getRecoveredDepositIntentMatchKey(intent);
+        if (!matchKey) {
+            continue;
+        }
+        const existing = intentsByMatchKey.get(matchKey) ?? [];
+        existing.push(intent);
+        intentsByMatchKey.set(matchKey, existing);
+    }
+
+    for (const [matchKey, intents] of intentsByMatchKey.entries()) {
+        const matchingEvidence = evidenceByMatchKey.get(matchKey) ?? [];
+        if (matchingEvidence.length < intents.length) {
             continue;
         }
 
-        const recoveredSignal = findRecoveredDepositSignal({ signals, intent, policy });
-        if (recoveredSignal) {
-            markRecoveredDepositTransfer(intent, recoveredSignal, nowMs);
-            changed = true;
+        const sortedIntents = [...intents].sort(compareRecoveredDepositIntentPriority);
+        const matchedPairs = [];
+        let evidenceIndex = 0;
+        for (const intent of sortedIntents) {
+            while (evidenceIndex < matchingEvidence.length) {
+                const evidence = matchingEvidence[evidenceIndex];
+                evidenceIndex += 1;
+                if (!matchesRecoveredDepositEvidence({ evidence, intent })) {
+                    continue;
+                }
+                matchedPairs.push({ intent, evidence });
+                break;
+            }
+        }
+
+        if (matchedPairs.length !== sortedIntents.length) {
             continue;
         }
 
-        const recoveredLog = await findRecoveredDepositLog({
-            publicClient,
-            policy,
-            commitmentSafe,
-            latestBlock,
-            intent,
-        });
-        if (recoveredLog) {
-            markRecoveredDepositTransfer(intent, recoveredLog, nowMs);
+        for (const { intent, evidence } of matchedPairs) {
+            markRecoveredDepositTransfer(intent, evidence, nowMs);
             changed = true;
         }
     }
@@ -919,6 +1215,24 @@ function getReimbursementHeadroomWei(intent) {
     const ownReservedWei = BigInt(intent.reservedCreditAmountWei ?? 0);
     const otherReservedWei = reservedWei > ownReservedWei ? reservedWei - ownReservedWei : 0n;
     return depositedWei - otherReservedWei;
+}
+
+function getEffectiveReimbursementHeadroomWei(intent, actualCollateralBalanceWei = null) {
+    const modeledHeadroomWei = getReimbursementHeadroomWei(intent);
+    if (actualCollateralBalanceWei === null || actualCollateralBalanceWei === undefined) {
+        return modeledHeadroomWei;
+    }
+
+    const normalizedActualCollateralBalanceWei = BigInt(actualCollateralBalanceWei);
+    const ownReservedWei = BigInt(intent?.reservedCreditAmountWei ?? 0);
+    const totalReservedWei = getTotalReservedCreditWei(tradeIntentState);
+    const otherReservedWei =
+        totalReservedWei > ownReservedWei ? totalReservedWei - ownReservedWei : 0n;
+    const actualHeadroomWei =
+        normalizedActualCollateralBalanceWei > otherReservedWei
+            ? normalizedActualCollateralBalanceWei - otherReservedWei
+            : 0n;
+    return actualHeadroomWei < modeledHeadroomWei ? actualHeadroomWei : modeledHeadroomWei;
 }
 
 function allocateSequence() {
@@ -1971,8 +2285,14 @@ function markTerminalIntentFailure(
 
 function expireUnsubmittedIntents(nowMs = Date.now()) {
     let changed = false;
+    const orderFields = getLifecycleStageFields('order');
     for (const intent of getOpenIntents()) {
-        if (intent.orderId || intent.tokenDeposited || intent.orderSubmittedAtMs) {
+        if (
+            intent.orderId ||
+            intent.tokenDeposited ||
+            intent.orderSubmittedAtMs ||
+            intent[orderFields.dispatchAt]
+        ) {
             continue;
         }
         if (!Number.isInteger(intent.expiryMs) || nowMs <= intent.expiryMs) {
@@ -2298,6 +2618,14 @@ async function enrichSignals(
     const effectiveNowMs = parseOptionalPositiveInteger(nowMs) ?? Date.now();
     const commitmentSafe = config?.commitmentSafe ?? null;
     const agentAddress = account?.address ?? null;
+    const actualCollateralBalanceWei =
+        policy.ready && commitmentSafe
+            ? await readCollateralBalanceWei({
+                  publicClient,
+                  policy,
+                  commitmentSafe: normalizeAddress(commitmentSafe),
+              })
+            : null;
     const out = Array.isArray(signals) ? [...signals] : [];
     const emitted = new Set();
 
@@ -2325,6 +2653,9 @@ async function enrichSignals(
         kind: 'polymarketTradeIntentState',
         policy,
         credits: buildCreditSnapshot(tradeIntentState),
+        collateral: buildCollateralCreditSummary(tradeIntentState, {
+            actualCollateralBalanceWei,
+        }),
     });
 
     return out;
@@ -2354,6 +2685,11 @@ async function getDeterministicToolCalls({
 
     const latestBlock = await publicClient.getBlockNumber();
     const normalizedCommitmentSafe = normalizeAddress(commitmentSafe);
+    const actualCollateralBalanceWei = await readCollateralBalanceWei({
+        publicClient,
+        policy,
+        commitmentSafe: normalizedCommitmentSafe,
+    });
     clearStalePendingOrderSubmission();
     clearStalePendingDepositSubmission();
     clearStalePendingProposalSubmission();
@@ -2472,9 +2808,21 @@ async function getDeterministicToolCalls({
             tradeIntentState,
             interpreted.intent.signer
         );
+        const actualReservationHeadroomWei = getActualReservationHeadroomWei(
+            actualCollateralBalanceWei
+        );
         if (availableCreditWei < BigInt(interpreted.intent.reservedCreditAmountWei)) {
             console.warn(
                 `[agent] Ignoring signed Polymarket trade intent ${interpreted.intent.intentKey}: insufficient deposited collateral credit for signer ${interpreted.intent.signer} (availableWei=${availableCreditWei.toString()} requiredWei=${interpreted.intent.reservedCreditAmountWei}).`
+            );
+            continue;
+        }
+        if (
+            actualReservationHeadroomWei === null ||
+            actualReservationHeadroomWei < BigInt(interpreted.intent.reservedCreditAmountWei)
+        ) {
+            console.warn(
+                `[agent] Ignoring signed Polymarket trade intent ${interpreted.intent.intentKey}: insufficient actual Safe collateral remains unreserved (actualHeadroomWei=${actualReservationHeadroomWei === null ? 'unknown' : actualReservationHeadroomWei.toString()} requiredWei=${interpreted.intent.reservedCreditAmountWei}).`
             );
             continue;
         }
@@ -2551,7 +2899,10 @@ async function getDeterministicToolCalls({
                 throw new Error('Unable to resolve reimbursement recipient address.');
             }
             const reimbursementAmountWei = BigInt(intent.reimbursementAmountWei ?? 0);
-            const reimbursementHeadroomWei = getReimbursementHeadroomWei(intent);
+            const reimbursementHeadroomWei = getEffectiveReimbursementHeadroomWei(
+                intent,
+                actualCollateralBalanceWei
+            );
             if (reimbursementAmountWei <= 0n || reimbursementHeadroomWei < reimbursementAmountWei) {
                 const detail =
                     `Insufficient committed collateral credit remains for reimbursement (headroomWei=${reimbursementHeadroomWei.toString()} requiredWei=${reimbursementAmountWei.toString()}).`;

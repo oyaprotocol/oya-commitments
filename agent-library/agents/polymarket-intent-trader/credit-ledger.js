@@ -105,6 +105,14 @@ export function getDepositedCreditWeiForAddress(state, address) {
     return total;
 }
 
+export function getTotalDepositedCreditWei(state) {
+    let total = 0n;
+    for (const deposit of Object.values(state?.deposits ?? {})) {
+        total += BigInt(deposit?.amountWei ?? 0);
+    }
+    return total;
+}
+
 function hasMatchingIntentReservation(state, commitment) {
     const normalizedIntentKey =
         typeof commitment?.intentKey === 'string' && commitment.intentKey.trim()
@@ -153,6 +161,26 @@ export function getReservedCreditWeiForAddress(state, address) {
     return total;
 }
 
+export function getTotalReservedCreditWei(state) {
+    let total = 0n;
+    for (const intent of Object.values(state?.intents ?? {})) {
+        if (!intent?.signer || intent?.creditReleasedAtMs) {
+            continue;
+        }
+        total += BigInt(intent.reservedCreditAmountWei ?? 0);
+    }
+    for (const commitment of Object.values(state?.reimbursementCommitments ?? {})) {
+        if (!commitment?.signer || commitment.status === 'deleted') {
+            continue;
+        }
+        if (hasMatchingIntentReservation(state, commitment)) {
+            continue;
+        }
+        total += BigInt(commitment.amountWei ?? 0);
+    }
+    return total;
+}
+
 export function getAvailableCreditWeiForAddress(state, address) {
     const available =
         getDepositedCreditWeiForAddress(state, address) -
@@ -160,7 +188,7 @@ export function getAvailableCreditWeiForAddress(state, address) {
     return available > 0n ? available : 0n;
 }
 
-export function buildCreditSnapshot(state) {
+function collectTrackedCreditAddresses(state) {
     const addresses = new Set();
     for (const deposit of Object.values(state?.deposits ?? {})) {
         if (typeof deposit?.depositor === 'string' && deposit.depositor.trim()) {
@@ -177,7 +205,11 @@ export function buildCreditSnapshot(state) {
             addresses.add(normalizeAddress(commitment.signer));
         }
     }
+    return addresses;
+}
 
+export function buildCreditSnapshot(state) {
+    const addresses = collectTrackedCreditAddresses(state);
     const snapshot = {};
     for (const address of addresses) {
         const depositedWei = getDepositedCreditWeiForAddress(state, address);
@@ -190,4 +222,42 @@ export function buildCreditSnapshot(state) {
         };
     }
     return snapshot;
+}
+
+export function buildCollateralCreditSummary(
+    state,
+    { actualCollateralBalanceWei = null } = {}
+) {
+    const modeledDepositedWei = getTotalDepositedCreditWei(state);
+    const modeledReservedWei = getTotalReservedCreditWei(state);
+    const modeledAvailableWei =
+        modeledDepositedWei > modeledReservedWei ? modeledDepositedWei - modeledReservedWei : 0n;
+    const normalizedActualCollateralBalanceWei =
+        actualCollateralBalanceWei === null || actualCollateralBalanceWei === undefined
+            ? null
+            : BigInt(actualCollateralBalanceWei);
+    const actualAvailableWei =
+        normalizedActualCollateralBalanceWei === null
+            ? null
+            : normalizedActualCollateralBalanceWei > modeledReservedWei
+                ? normalizedActualCollateralBalanceWei - modeledReservedWei
+                : 0n;
+    const shortfallWei =
+        actualAvailableWei === null
+            ? null
+            : modeledAvailableWei > actualAvailableWei
+                ? modeledAvailableWei - actualAvailableWei
+                : 0n;
+
+    return {
+        modeledDepositedWei: modeledDepositedWei.toString(),
+        modeledReservedWei: modeledReservedWei.toString(),
+        modeledAvailableWei: modeledAvailableWei.toString(),
+        actualCollateralBalanceWei:
+            normalizedActualCollateralBalanceWei === null
+                ? null
+                : normalizedActualCollateralBalanceWei.toString(),
+        actualAvailableWei: actualAvailableWei === null ? null : actualAvailableWei.toString(),
+        shortfallWei: shortfallWei === null ? null : shortfallWei.toString(),
+    };
 }
