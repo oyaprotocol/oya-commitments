@@ -17,6 +17,16 @@ The user-visible outcome is a Polymarket agent that can be run for long periods 
 - [x] 2026-03-24 00:24Z: Fixed confirmed major issues in state-context loading, persisted state scoping, reimbursement proposal matching, and legacy backfill migration; added regression coverage.
 - [x] 2026-03-24 00:31Z: Re-ran module tests and validation after the hardening pass.
 - [x] 2026-03-24 00:37Z: Performed a second review pass on the updated code and reduced remaining concerns to minor/residual operational assumptions.
+- [x] 2026-03-24 01:08Z: Re-opened the hardening pass after later review findings in recovered ERC1155 deposit attribution and long-range deposit log scanning.
+- [x] 2026-03-24 01:26Z: Refactored recovered deposit reconciliation into evidence collection plus one-time assignment, added chunked ERC1155 recovery scans, and added regression coverage for duplicate-attribution and long-range scan recovery.
+- [x] 2026-03-24 01:30Z: Re-ran module tests and validation after the deposit-recovery hardening pass.
+- [x] 2026-03-24 01:34Z: Performed another targeted review pass on the updated deposit-recovery code; remaining concerns are again residual rather than concrete major bugs.
+- [x] 2026-03-24 02:04Z: Re-opened the hardening pass after a fresh review found dispatch-window expiry release, actual Safe-balance drift at intent acceptance/reimbursement time, and the remaining duplicate recovered-deposit wedge.
+- [x] 2026-03-24 02:22Z: Fixed dispatch-window expiry handling, added actual Safe collateral headroom gating plus collateral summary signals, and tightened recovered ERC1155 assignment to full-group one-to-one recovery with new regressions.
+- [x] 2026-03-24 02:36Z: Fixed planner throughput bugs where deposited intents could still re-emit BUY orders or block later intents behind stale `orderId` activity; added regressions and re-ran module tests and validation.
+- [x] 2026-03-24 02:43Z: Completed clean review pass 1 on stage/recovery code after the latest fixes; no new issues found.
+- [x] 2026-03-24 02:48Z: Completed clean review pass 2 on credit, actual-balance gating, and backfill accounting after the latest fixes; no new issues found.
+- [x] 2026-03-24 02:52Z: Completed clean review pass 3 on the final diff and regression suite after the latest fixes; no new issues found.
 
 ## Surprises & Discoveries
 
@@ -26,6 +36,8 @@ The user-visible outcome is a Polymarket agent that can be run for long periods 
   Evidence: `configureRuntimeStateContext()` was only called from `getDeterministicToolCalls()` before this pass; a new regression test now proves safe separation across two commitment Safes.
 - Observation: reimbursement proposal recovery trusted explanation text too much and did not require the recovered proposal’s ERC20 transfer recipient to match the intent.
   Evidence: the module matched proposal signals by explanation equality and backfilled commitments by `intentKey` without binding the decoded transfer recipient to the intended reimbursement target.
+- Observation: recovered ERC1155 deposits were still reconciled intent-by-intent, so one recovered transfer could satisfy multiple indistinguishable intents and the log path still used unchunked `getLogs` calls.
+  Evidence: the old `reconcileRecoveredDepositSubmissions()` loop matched each intent independently via `findRecoveredDepositSignal()` / `findRecoveredDepositLog()` and the log recovery helper queried the full ambiguity window in one request per event type.
 
 ## Decision Log
 
@@ -38,6 +50,18 @@ The user-visible outcome is a Polymarket agent that can be run for long periods 
 - Decision: Require reimbursement proposal recovery to match actual transfer semantics, not just explanation text.
   Rationale: explanation-only matching could attach the wrong authorized proposal or backfilled commitment to an intent even if the ERC20 transfer paid a different recipient.
   Date/Author: 2026-03-24 / Codex.
+- Decision: Recovered ERC1155 deposits should be assigned evidence-first and fail closed on ambiguous attribution, rather than being greedily matched per intent.
+  Rationale: if multiple unresolved intents are compatible with the same recovered transfer, auto-assigning that transfer to any one of them is not trustworthy enough to unlock reimbursement.
+  Date/Author: 2026-03-24 / Codex.
+- Decision: New intent acceptance and reimbursement proposal planning must be capped by the Safe's actual current collateral balance, not just the module's reconstructed deposit ledger.
+  Rationale: external Safe outflows cannot be attributed to a specific signer from this module alone, so the safe option is to block new reservations or reimbursements once actual unreserved collateral falls below modeled headroom.
+  Date/Author: 2026-03-24 / Codex.
+- Decision: Recovered ERC1155 deposit evidence should only be auto-assigned when the module can satisfy an entire compatible intent group one-to-one.
+  Rationale: partial assignment inside a duplicate group can choose the wrong economic intent when multiple orders share the same token/source/amount signature; requiring full-group matching avoids that unsafe guess while still resolving non-ambiguous duplicates.
+  Date/Author: 2026-03-24 / Codex.
+- Decision: Deposited or filled intents must not count as active order execution for later archive/order scheduling.
+  Rationale: treating any open intent with an `orderId` as globally active serialized the whole agent behind long reimbursement windows and could block later depositors from progressing even after the prior trade had already settled.
+  Date/Author: 2026-03-24 / Codex.
 
 ## Outcomes & Retrospective
 
@@ -48,6 +72,13 @@ The hardening pass fixed the largest remaining concrete issues I found:
 - reimbursement proposal recovery now requires the decoded USDC transfer recipient and amount to match the intent
 - reimbursement backfill records now carry recipient information, and legacy cached backfill data is rebuilt before being trusted
 - new regressions cover wrong-recipient proposal recovery, state-context isolation across Safes, and scope mismatch detection
+- recovered ERC1155 deposits are now reconciled through canonical recovery evidence, each recovered transfer can satisfy at most one intent, and ambiguous multi-match evidence is left unresolved rather than assigned unsafely
+- recovered ERC1155 log scans now use chunked history queries and warn/continue on scan failures instead of risking a full-loop wedge from a long ambiguity window
+- dispatched orders no longer expire and release credit during the pre-output grace window
+- new intent acceptance and reimbursement proposal emission are now capped by actual Safe collateral headroom, not just reconstructed historical deposits
+- state signals now include a collateral summary with modeled vs actual availability and shortfall
+- recovered duplicate ERC1155 deposits now resolve full compatible groups one-to-one when enough evidence exists, while insufficient evidence remains fail-closed
+- deposited intents no longer block unrelated later intents from reaching archive/order stages just because they still carry a historical `orderId`
 
 Remaining concerns after the second review are operational rather than obviously broken code paths. The main one is that the `token_balance` order-settlement fallback is safest when the trading wallet is dedicated to this agent, because unrelated same-token wallet inflows could otherwise confuse attribution. That is a narrower residual assumption than the concrete lifecycle and state bugs fixed in this run.
 

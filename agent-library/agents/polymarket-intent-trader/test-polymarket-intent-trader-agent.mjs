@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { encodeFunctionData, erc20Abi } from 'viem';
 import { buildSignedMessagePayload } from '../../../agent/src/lib/message-signing.js';
 import {
@@ -97,6 +97,32 @@ function buildErc20TransferCalldata(to, amountWei) {
     });
 }
 
+async function writeTradeIntentStateFixture(stateFilePath, partialState) {
+    const baseState = {
+        version: 4,
+        nextSequence: 3,
+        intents: {},
+        deposits: {},
+        reimbursementCommitments: {},
+        pendingExecutedProposalHashes: [],
+        pendingDeletedProposalHashes: [],
+        backfilledDepositsThroughBlock: '0',
+        backfilledReimbursementCommitmentsThroughBlock: '0',
+    };
+    await writeFile(
+        stateFilePath,
+        JSON.stringify(
+            {
+                ...baseState,
+                ...partialState,
+            },
+            null,
+            2
+        ),
+        'utf8'
+    );
+}
+
 function buildSignedMessageSignal(overrides = {}) {
     const requestId = overrides.requestId ?? 'pm-intent-001';
     const receivedAtMs = overrides.receivedAtMs ?? 1_800_000_000_000;
@@ -158,6 +184,16 @@ function buildPublicClient(runtime) {
             const normalizedAddress = String(address).toLowerCase();
             const normalizedFromBlock = BigInt(fromBlock ?? 0n);
             const normalizedToBlock = BigInt(toBlock ?? runtime.latestBlock);
+            const normalizedRange = normalizedToBlock - normalizedFromBlock + 1n;
+            if (
+                runtime.maxGetLogsRange !== null &&
+                runtime.maxGetLogsRange !== undefined &&
+                normalizedRange > BigInt(runtime.maxGetLogsRange)
+            ) {
+                throw new Error(
+                    `Requested log range ${normalizedRange.toString()} exceeds test RPC limit ${String(runtime.maxGetLogsRange)}`
+                );
+            }
             if (normalizedAddress === TEST_USDC.toLowerCase()) {
                 if (String(args?.to ?? '').toLowerCase() !== TEST_SAFE.toLowerCase()) {
                     return [];
@@ -210,6 +246,30 @@ function buildPublicClient(runtime) {
             return [];
         },
         async readContract({ address, functionName, args }) {
+            if (
+                String(address).toLowerCase() === TEST_USDC.toLowerCase() &&
+                functionName === 'balanceOf'
+            ) {
+                const owner = String(args?.[0] ?? '').toLowerCase();
+                const balanceKey = `${String(address).toLowerCase()}:${owner}`;
+                if (runtime.collateralBalances && Object.hasOwn(runtime.collateralBalances, balanceKey)) {
+                    return BigInt(runtime.collateralBalances[balanceKey]);
+                }
+                if (
+                    runtime.safeCollateralBalance !== undefined &&
+                    runtime.safeCollateralBalance !== null &&
+                    owner === TEST_SAFE.toLowerCase()
+                ) {
+                    return BigInt(runtime.safeCollateralBalance);
+                }
+                if (owner === TEST_SAFE.toLowerCase()) {
+                    return runtime.depositLogs.reduce(
+                        (total, log) => total + BigInt(log?.args?.value ?? 0n),
+                        0n
+                    );
+                }
+                return 0n;
+            }
             if (
                 String(address).toLowerCase() === TEST_CTF.toLowerCase() &&
                 functionName === 'balanceOf'
@@ -276,9 +336,12 @@ async function run() {
         bookPayload: {
             minimum_tick_size: '0.01',
         },
+        safeCollateralBalance: null,
+        collateralBalances: {},
         ctfBalances: {},
         ctfTransferSingleLogs: [],
         ctfTransferBatchLogs: [],
+        maxGetLogsRange: null,
         receipts: {},
         orderFetchError: null,
         tradesFetchError: null,
@@ -389,6 +452,45 @@ async function run() {
         assert.equal(state.backfilledDepositsThroughBlock, '42');
         assert.equal(state.backfilledReimbursementCommitmentsThroughBlock, '42');
 
+        await resetTradeIntentState();
+        runtime.latestBlock = 43n;
+        runtime.depositLogs = [
+            {
+                args: {
+                    from: TEST_SIGNER,
+                    value: 50_000_000n,
+                },
+                blockNumber: 10n,
+                transactionHash: `0x${'d'.repeat(64)}`,
+                logIndex: 0,
+            },
+        ];
+        runtime.safeCollateralBalance = 10_000_000n;
+        const insufficientSafeCollateralSignal = buildSignedMessageSignal({
+            requestId: 'pm-intent-safe-balance-blocked',
+        });
+        const insufficientSafeCollateralCalls = await getDeterministicToolCalls({
+            signals: [insufficientSafeCollateralSignal],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.deepEqual(insufficientSafeCollateralCalls, []);
+        state = getTradeIntentState();
+        assert.equal(
+            state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-safe-balance-blocked`],
+            undefined
+        );
+        runtime.safeCollateralBalance = null;
+
+        await resetTradeIntentState();
+        await writeTradeIntentStateFixture(stateFilePath, {
+            nextSequence: 1,
+            backfilledDepositsThroughBlock: '42',
+            backfilledReimbursementCommitmentsThroughBlock: '42',
+        });
+        setTradeIntentStatePathForTest(stateFilePath);
         runtime.latestBlock = 101n;
         runtime.depositLogs = [
             {
@@ -759,6 +861,23 @@ async function run() {
         storedIntent =
             state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-order-dispatch-restart`];
         assert.equal(typeof storedIntent.orderDispatchAtMs, 'number');
+        state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-order-dispatch-restart`].expiryMs =
+            Number(storedIntent.orderDispatchAtMs) - 1;
+        await writeTradeIntentStateFixture(stateFilePath, state);
+        setTradeIntentStatePathForTest(stateFilePath);
+        const expiredDispatchWindowCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.deepEqual(expiredDispatchWindowCalls, []);
+        state = getTradeIntentState();
+        storedIntent =
+            state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-order-dispatch-restart`];
+        assert.equal(storedIntent.closedAtMs, undefined);
+        assert.equal(storedIntent.creditReleasedAtMs, undefined);
         setTradeIntentStatePathForTest(stateFilePath);
         const restartOrderDispatchCalls = await getDeterministicToolCalls({
             signals: [],
@@ -920,6 +1039,287 @@ async function run() {
         assert.equal(storedIntent.depositTxHash, `0x${'e'.repeat(64)}`);
         assert.equal(storedIntent.depositBlockNumber, '151');
         runtime.ctfTransferSingleLogs = [];
+
+        await resetTradeIntentState();
+        runtime.latestBlock = 160n;
+        runtime.maxGetLogsRange = null;
+        await writeTradeIntentStateFixture(stateFilePath, {
+            nextSequence: 3,
+            intents: {
+                [`${TEST_SIGNER.toLowerCase()}:pm-intent-duplicate-recovery-a`]: {
+                    sourceKind: 'signed_trade_intent',
+                    sequence: 1,
+                    intentKey: `${TEST_SIGNER.toLowerCase()}:pm-intent-duplicate-recovery-a`,
+                    requestId: 'pm-intent-duplicate-recovery-a',
+                    signer: TEST_SIGNER.toLowerCase(),
+                    tokenId: NO_TOKEN_ID,
+                    outcome: 'NO',
+                    marketId: 'market-123',
+                    maxSpendWei: '25000000',
+                    reservedCreditAmountWei: '25000000',
+                    reimbursementAmountWei: '20000000',
+                    filledShareAmount: '62500000',
+                    orderFilled: true,
+                    orderFilledAtMs: 1_900_000_000_000,
+                    depositSubmittedAtMs: 1_900_000_010_000,
+                    depositDispatchBlockNumber: '140',
+                    depositSourceAddress: TEST_AGENT.toLowerCase(),
+                    depositExpectedAmount: '62500000',
+                    tradingWalletAddress: TEST_AGENT.toLowerCase(),
+                    preOrderTokenHolderAddress: TEST_AGENT.toLowerCase(),
+                    artifactCid: 'bafy-duplicate-a',
+                    createdAtMs: 1_900_000_000_000,
+                    updatedAtMs: 1_900_000_010_000,
+                },
+                [`${TEST_SIGNER.toLowerCase()}:pm-intent-duplicate-recovery-b`]: {
+                    sourceKind: 'signed_trade_intent',
+                    sequence: 2,
+                    intentKey: `${TEST_SIGNER.toLowerCase()}:pm-intent-duplicate-recovery-b`,
+                    requestId: 'pm-intent-duplicate-recovery-b',
+                    signer: TEST_SIGNER.toLowerCase(),
+                    tokenId: NO_TOKEN_ID,
+                    outcome: 'NO',
+                    marketId: 'market-123',
+                    maxSpendWei: '25000000',
+                    reservedCreditAmountWei: '25000000',
+                    reimbursementAmountWei: '20000000',
+                    filledShareAmount: '62500000',
+                    orderFilled: true,
+                    orderFilledAtMs: 1_900_000_020_000,
+                    depositSubmittedAtMs: 1_900_000_030_000,
+                    depositDispatchBlockNumber: '145',
+                    depositSourceAddress: TEST_AGENT.toLowerCase(),
+                    depositExpectedAmount: '62500000',
+                    tradingWalletAddress: TEST_AGENT.toLowerCase(),
+                    preOrderTokenHolderAddress: TEST_AGENT.toLowerCase(),
+                    artifactCid: 'bafy-duplicate-b',
+                    createdAtMs: 1_900_000_020_000,
+                    updatedAtMs: 1_900_000_030_000,
+                },
+            },
+            backfilledDepositsThroughBlock: '160',
+            backfilledReimbursementCommitmentsThroughBlock: '160',
+        });
+        setTradeIntentStatePathForTest(stateFilePath);
+        const duplicateRecoveredDepositCalls = await getDeterministicToolCalls({
+            signals: [
+                {
+                    kind: 'erc1155Deposit',
+                    asset: TEST_CTF,
+                    token: TEST_CTF,
+                    tokenId: NO_TOKEN_ID,
+                    from: TEST_AGENT,
+                    amount: '62500000',
+                    blockNumber: 160n,
+                    transactionHash: `0x${'f'.repeat(64)}`,
+                    logIndex: 0,
+                    id: `0x${'f'.repeat(64)}:0:${NO_TOKEN_ID}`,
+                },
+                {
+                    kind: 'erc1155Deposit',
+                    asset: TEST_CTF,
+                    token: TEST_CTF,
+                    tokenId: NO_TOKEN_ID,
+                    from: TEST_AGENT,
+                    amount: '62500000',
+                    blockNumber: 161n,
+                    transactionHash: `0x${'1'.repeat(64)}`,
+                    logIndex: 0,
+                    id: `0x${'1'.repeat(64)}:0:${NO_TOKEN_ID}`,
+                },
+            ],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+            onchainPendingProposal: true,
+        });
+        assert.deepEqual(duplicateRecoveredDepositCalls, []);
+        state = getTradeIntentState();
+        assert.equal(
+            state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-duplicate-recovery-a`]
+                .tokenDeposited,
+            true
+        );
+        assert.equal(
+            state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-duplicate-recovery-b`]
+                .tokenDeposited,
+            true
+        );
+        assert.equal(
+            state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-duplicate-recovery-a`]
+                .depositTxHash,
+            `0x${'f'.repeat(64)}`
+        );
+        assert.equal(
+            state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-duplicate-recovery-b`]
+                .depositTxHash,
+            `0x${'1'.repeat(64)}`
+        );
+
+        await resetTradeIntentState();
+        runtime.latestBlock = 162n;
+        await writeTradeIntentStateFixture(stateFilePath, {
+            nextSequence: 3,
+            intents: {
+                [`${TEST_SIGNER.toLowerCase()}:pm-intent-partial-recovery-a`]: {
+                    sourceKind: 'signed_trade_intent',
+                    sequence: 1,
+                    intentKey: `${TEST_SIGNER.toLowerCase()}:pm-intent-partial-recovery-a`,
+                    requestId: 'pm-intent-partial-recovery-a',
+                    signer: TEST_SIGNER.toLowerCase(),
+                    tokenId: NO_TOKEN_ID,
+                    outcome: 'NO',
+                    marketId: 'market-123',
+                    maxSpendWei: '25000000',
+                    reservedCreditAmountWei: '25000000',
+                    reimbursementAmountWei: '20000000',
+                    filledShareAmount: '62500000',
+                    orderFilled: true,
+                    orderFilledAtMs: 1_900_000_060_000,
+                    depositSubmittedAtMs: 1_900_000_070_000,
+                    depositDispatchBlockNumber: '140',
+                    depositSourceAddress: TEST_AGENT.toLowerCase(),
+                    depositExpectedAmount: '62500000',
+                    tradingWalletAddress: TEST_AGENT.toLowerCase(),
+                    preOrderTokenHolderAddress: TEST_AGENT.toLowerCase(),
+                    artifactCid: 'bafy-partial-a',
+                    createdAtMs: 1_900_000_060_000,
+                    updatedAtMs: 1_900_000_070_000,
+                },
+                [`${TEST_SIGNER.toLowerCase()}:pm-intent-partial-recovery-b`]: {
+                    sourceKind: 'signed_trade_intent',
+                    sequence: 2,
+                    intentKey: `${TEST_SIGNER.toLowerCase()}:pm-intent-partial-recovery-b`,
+                    requestId: 'pm-intent-partial-recovery-b',
+                    signer: TEST_SIGNER.toLowerCase(),
+                    tokenId: NO_TOKEN_ID,
+                    outcome: 'NO',
+                    marketId: 'market-123',
+                    maxSpendWei: '25000000',
+                    reservedCreditAmountWei: '25000000',
+                    reimbursementAmountWei: '25000000',
+                    filledShareAmount: '62500000',
+                    orderFilled: true,
+                    orderFilledAtMs: 1_900_000_080_000,
+                    depositSubmittedAtMs: 1_900_000_090_000,
+                    depositDispatchBlockNumber: '145',
+                    depositSourceAddress: TEST_AGENT.toLowerCase(),
+                    depositExpectedAmount: '62500000',
+                    tradingWalletAddress: TEST_AGENT.toLowerCase(),
+                    preOrderTokenHolderAddress: TEST_AGENT.toLowerCase(),
+                    artifactCid: 'bafy-partial-b',
+                    createdAtMs: 1_900_000_080_000,
+                    updatedAtMs: 1_900_000_090_000,
+                },
+            },
+            backfilledDepositsThroughBlock: '162',
+            backfilledReimbursementCommitmentsThroughBlock: '162',
+        });
+        setTradeIntentStatePathForTest(stateFilePath);
+        const partialRecoveredDepositCalls = await getDeterministicToolCalls({
+            signals: [
+                {
+                    kind: 'erc1155Deposit',
+                    asset: TEST_CTF,
+                    token: TEST_CTF,
+                    tokenId: NO_TOKEN_ID,
+                    from: TEST_AGENT,
+                    amount: '62500000',
+                    blockNumber: 162n,
+                    transactionHash: `0x${'2'.repeat(64)}`,
+                    logIndex: 0,
+                    id: `0x${'2'.repeat(64)}:0:${NO_TOKEN_ID}`,
+                },
+            ],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+            onchainPendingProposal: true,
+        });
+        assert.deepEqual(partialRecoveredDepositCalls, []);
+        state = getTradeIntentState();
+        assert.equal(
+            state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-partial-recovery-a`]
+                .tokenDeposited,
+            undefined
+        );
+        assert.equal(
+            state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-partial-recovery-b`]
+                .tokenDeposited,
+            undefined
+        );
+
+        await resetTradeIntentState();
+        runtime.latestBlock = 260n;
+        runtime.maxGetLogsRange = 50n;
+        runtime.ctfTransferSingleLogs = [
+            {
+                args: {
+                    operator: TEST_AGENT,
+                    from: TEST_AGENT,
+                    to: TEST_SAFE,
+                    id: BigInt(NO_TOKEN_ID),
+                    value: 62_500_000n,
+                },
+                blockNumber: 260n,
+                transactionHash: `0x${'f'.repeat(64)}`,
+                logIndex: 3,
+            },
+        ];
+        await writeTradeIntentStateFixture(stateFilePath, {
+            nextSequence: 2,
+            intents: {
+                [`${TEST_SIGNER.toLowerCase()}:pm-intent-recovery-chunked-logs`]: {
+                    sourceKind: 'signed_trade_intent',
+                    sequence: 1,
+                    intentKey: `${TEST_SIGNER.toLowerCase()}:pm-intent-recovery-chunked-logs`,
+                    requestId: 'pm-intent-recovery-chunked-logs',
+                    signer: TEST_SIGNER.toLowerCase(),
+                    tokenId: NO_TOKEN_ID,
+                    outcome: 'NO',
+                    marketId: 'market-123',
+                    maxSpendWei: '25000000',
+                    reservedCreditAmountWei: '25000000',
+                    reimbursementAmountWei: '20000000',
+                    filledShareAmount: '62500000',
+                    orderFilled: true,
+                    orderFilledAtMs: 1_900_000_040_000,
+                    depositSubmittedAtMs: 1_900_000_050_000,
+                    depositDispatchBlockNumber: '100',
+                    depositSourceAddress: TEST_AGENT.toLowerCase(),
+                    depositExpectedAmount: '62500000',
+                    tradingWalletAddress: TEST_AGENT.toLowerCase(),
+                    preOrderTokenHolderAddress: TEST_AGENT.toLowerCase(),
+                    artifactCid: 'bafy-chunked-recovery',
+                    createdAtMs: 1_900_000_040_000,
+                    updatedAtMs: 1_900_000_050_000,
+                },
+            },
+            backfilledDepositsThroughBlock: '260',
+            backfilledReimbursementCommitmentsThroughBlock: '260',
+        });
+        setTradeIntentStatePathForTest(stateFilePath);
+        const chunkedRecoveryCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig({
+                logChunkSize: 50,
+            }),
+            onchainPendingProposal: true,
+        });
+        assert.deepEqual(chunkedRecoveryCalls, []);
+        state = getTradeIntentState();
+        storedIntent =
+            state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-recovery-chunked-logs`];
+        assert.equal(storedIntent.tokenDeposited, true);
+        assert.equal(storedIntent.depositTxHash, `0x${'f'.repeat(64)}`);
+        assert.equal(storedIntent.depositBlockNumber, '260');
+        runtime.ctfTransferSingleLogs = [];
+        runtime.maxGetLogsRange = null;
 
         await resetTradeIntentState();
         runtime.latestBlock = 150n;
@@ -2020,6 +2420,136 @@ async function run() {
         assert.equal(storedIntent.reimbursementDispatchAtMs, undefined);
         assert.equal(storedIntent.lastReimbursementCreditError.includes('headroomWei=0'), true);
         assert.equal(Object.keys(state.reimbursementCommitments).length, 1);
+
+        await resetTradeIntentState();
+        runtime.latestBlock = 395n;
+        runtime.safeCollateralBalance = 0n;
+        runtime.depositLogs = [];
+        runtime.proposedProposalLogs = [];
+        runtime.executedProposalLogs = [];
+        runtime.deletedProposalLogs = [];
+        await writeTradeIntentStateFixture(stateFilePath, {
+            nextSequence: 2,
+            intents: {
+                [`${TEST_SIGNER.toLowerCase()}:pm-intent-reimbursement-safe-balance-blocked`]: {
+                    sourceKind: 'signed_trade_intent',
+                    sequence: 1,
+                    intentKey: `${TEST_SIGNER.toLowerCase()}:pm-intent-reimbursement-safe-balance-blocked`,
+                    requestId: 'pm-intent-reimbursement-safe-balance-blocked',
+                    signer: TEST_SIGNER.toLowerCase(),
+                    tokenId: NO_TOKEN_ID,
+                    outcome: 'NO',
+                    marketId: 'market-123',
+                    maxSpendWei: '25000000',
+                    reservedCreditAmountWei: '25000000',
+                    reimbursementAmountWei: '20000000',
+                    filledShareAmount: '62500000',
+                    orderFilled: true,
+                    tokenDeposited: true,
+                    tokenDepositedAtMs: 1_900_000_000_000,
+                    artifactCid: 'bafy-reimbursement-safe-balance-blocked',
+                    createdAtMs: 1_900_000_000_000,
+                    updatedAtMs: 1_900_000_000_000,
+                },
+            },
+            deposits: {
+                'tx:0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd:0': {
+                    depositKey:
+                        'tx:0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd:0',
+                    depositId: null,
+                    depositor: TEST_SIGNER.toLowerCase(),
+                    amountWei: '50000000',
+                    transactionHash: `0x${'d'.repeat(64)}`,
+                    logIndex: '0',
+                    blockNumber: '10',
+                    createdAtMs: 1_900_000_000_000,
+                },
+            },
+            backfilledDepositsThroughBlock: '395',
+            backfilledReimbursementCommitmentsThroughBlock: '395',
+        });
+        setTradeIntentStatePathForTest(stateFilePath);
+        const reimbursementSafeBalanceCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+        });
+        assert.deepEqual(reimbursementSafeBalanceCalls, []);
+        state = getTradeIntentState();
+        storedIntent =
+            state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-reimbursement-safe-balance-blocked`];
+        assert.equal(storedIntent.reimbursementProposalHash, undefined);
+        assert.equal(storedIntent.reimbursementDispatchAtMs, undefined);
+        assert.equal(storedIntent.lastReimbursementCreditError.includes('headroomWei=0'), true);
+        runtime.safeCollateralBalance = null;
+
+        await resetTradeIntentState();
+        runtime.latestBlock = 396n;
+        runtime.safeCollateralBalance = 100_000_000n;
+        runtime.depositLogs = [];
+        await writeTradeIntentStateFixture(stateFilePath, {
+            nextSequence: 2,
+            intents: {
+                [`${TEST_SIGNER.toLowerCase()}:pm-intent-deposited-does-not-block-next-order`]: {
+                    sourceKind: 'signed_trade_intent',
+                    sequence: 1,
+                    intentKey: `${TEST_SIGNER.toLowerCase()}:pm-intent-deposited-does-not-block-next-order`,
+                    requestId: 'pm-intent-deposited-does-not-block-next-order',
+                    signer: TEST_SIGNER.toLowerCase(),
+                    tokenId: NO_TOKEN_ID,
+                    outcome: 'NO',
+                    marketId: 'market-123',
+                    maxSpendWei: '25000000',
+                    reservedCreditAmountWei: '25000000',
+                    reimbursementAmountWei: '20000000',
+                    filledShareAmount: '62500000',
+                    orderId: 'order-deposited-does-not-block-next-order',
+                    orderFilled: true,
+                    tokenDeposited: true,
+                    tokenDepositedAtMs: 1_900_000_100_000,
+                    artifactCid: 'bafy-deposited-does-not-block-next-order',
+                    createdAtMs: 1_900_000_100_000,
+                    updatedAtMs: 1_900_000_100_000,
+                },
+            },
+            deposits: {
+                'tx:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:0': {
+                    depositKey:
+                        'tx:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:0',
+                    depositId: null,
+                    depositor: TEST_SIGNER.toLowerCase(),
+                    amountWei: '100000000',
+                    transactionHash: `0x${'a'.repeat(64)}`,
+                    logIndex: '0',
+                    blockNumber: '10',
+                    createdAtMs: 1_900_000_100_000,
+                },
+            },
+            backfilledDepositsThroughBlock: '396',
+            backfilledReimbursementCommitmentsThroughBlock: '396',
+        });
+        setTradeIntentStatePathForTest(stateFilePath);
+        const nextIntentWhileDepositedCalls = await getDeterministicToolCalls({
+            signals: [
+                buildSignedMessageSignal({
+                    requestId: 'pm-intent-after-deposited-order',
+                }),
+            ],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: buildModuleConfig(),
+            onchainPendingProposal: true,
+        });
+        assert.equal(nextIntentWhileDepositedCalls.length, 1);
+        assert.equal(nextIntentWhileDepositedCalls[0].name, 'ipfs_publish');
+        state = getTradeIntentState();
+        assert.ok(
+            state.intents[`${TEST_SIGNER.toLowerCase()}:pm-intent-after-deposited-order`]
+        );
+        runtime.safeCollateralBalance = null;
 
         await resetTradeIntentState();
         runtime.latestBlock = 400n;

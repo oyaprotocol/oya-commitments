@@ -30,13 +30,18 @@ export function hasActiveExecution({
             (intent) =>
                 Boolean(intent[orderFields.dispatchAt]) ||
                 Boolean(intent[orderFields.submittedAt]) ||
-                Boolean(intent[orderFields.externalId]) ||
-                Boolean(intent[depositFields.dispatchAt]) ||
-                Boolean(intent[depositFields.submittedAt]) ||
-                Boolean(intent[depositFields.txHash]) ||
-                Boolean(intent[reimbursementFields.dispatchAt]) ||
-                Boolean(intent[reimbursementFields.submittedAt]) ||
-                Boolean(intent[reimbursementFields.txHash])
+                (Boolean(intent[orderFields.externalId]) &&
+                    !intent.orderFilled &&
+                    !intent.tokenDeposited) ||
+                ((Boolean(intent[depositFields.dispatchAt]) ||
+                    Boolean(intent[depositFields.submittedAt]) ||
+                    Boolean(intent[depositFields.txHash])) &&
+                    !intent.tokenDeposited) ||
+                ((Boolean(intent[reimbursementFields.dispatchAt]) ||
+                    Boolean(intent[reimbursementFields.submittedAt]) ||
+                    Boolean(intent[reimbursementFields.txHash])) &&
+                    !intent.reimbursementProposalHash &&
+                    !intent.reimbursedAtMs)
         )
     );
 }
@@ -127,6 +132,8 @@ export function planNextActionCandidates({
         const orderFields = getLifecycleStageFields('order');
         if (
             !intent.artifactCid ||
+            intent.orderFilled ||
+            intent.tokenDeposited ||
             intent[orderFields.externalId] ||
             intent[orderFields.dispatchAt] ||
             intent[orderFields.submittedAt] ||
