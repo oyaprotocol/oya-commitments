@@ -124,6 +124,19 @@ function extractOrderSummary(payload) {
     };
 }
 
+function isOrderSummaryEmpty(orderSummary) {
+    return Boolean(
+        orderSummary &&
+            !orderSummary.id &&
+            !orderSummary.status &&
+            orderSummary.originalSize === null &&
+            orderSummary.sizeMatched === null &&
+            !orderSummary.makerAmountFilled &&
+            !orderSummary.takerAmountFilled &&
+            !orderSummary.feeAmount
+    );
+}
+
 function isOrderFullyMatched(order) {
     if (!order) return false;
     if (order.originalSize === null || order.sizeMatched === null) return false;
@@ -579,7 +592,6 @@ export async function refreshOrderStatus({
                     intent.updatedAtMs = nowMs;
                     changed = true;
                 }
-                changed = true;
             }
             continue;
         }
@@ -591,6 +603,22 @@ export async function refreshOrderStatus({
                 orderId: intent.orderId,
             });
             const orderSummary = extractOrderSummary(orderPayload);
+            if (!orderSummary || isOrderSummaryEmpty(orderSummary)) {
+                if (!hasTimedOut(intent.orderSubmittedAtMs, policy.pendingTxTimeoutMs, nowMs)) {
+                    continue;
+                }
+                const detail = `Unable to parse Polymarket order status payload for submitted order ${intent.orderId}; refusing automatic retry until reconciled.`;
+                if (
+                    intent.lastOrderStatusRefreshError !== detail ||
+                    !Number.isInteger(intent.orderStatusRefreshFailedAtMs)
+                ) {
+                    intent.lastOrderStatusRefreshError = detail;
+                    intent.orderStatusRefreshFailedAtMs = nowMs;
+                    intent.updatedAtMs = nowMs;
+                    changed = true;
+                }
+                continue;
+            }
             if (orderSummary?.status && orderSummary.status !== intent.orderStatus) {
                 intent.orderStatus = orderSummary.status;
                 intent.updatedAtMs = nowMs;
@@ -680,15 +708,22 @@ export async function refreshOrderStatus({
                 BigInt(observedFilledShareAmount) >= BigInt(filledShareAmount);
 
             if ((allConfirmedTrades && orderFilled) || tokenBalanceSettlementReady) {
-                if (!reimbursementAmountWei) {
-                    throw new Error(
-                        `Unable to determine actual USDC spent for filled Polymarket BUY order ${intent.orderId}.`
-                    );
-                }
-                if (!filledShareAmount) {
-                    throw new Error(
-                        `Unable to determine acquired share amount for filled Polymarket BUY order ${intent.orderId}.`
-                    );
+                const settlementResolutionError = !reimbursementAmountWei
+                    ? `Unable to determine actual USDC spent for filled Polymarket BUY order ${intent.orderId}.`
+                    : !filledShareAmount
+                        ? `Unable to determine acquired share amount for filled Polymarket BUY order ${intent.orderId}.`
+                        : null;
+                if (settlementResolutionError) {
+                    if (
+                        intent.lastOrderStatusRefreshError !== settlementResolutionError ||
+                        !Number.isInteger(intent.orderStatusRefreshFailedAtMs)
+                    ) {
+                        intent.lastOrderStatusRefreshError = settlementResolutionError;
+                        intent.orderStatusRefreshFailedAtMs = nowMs;
+                        intent.updatedAtMs = nowMs;
+                        changed = true;
+                    }
+                    continue;
                 }
                 intent.orderFilled = true;
                 intent.orderFilledAtMs = nowMs;

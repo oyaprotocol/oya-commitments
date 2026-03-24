@@ -29,8 +29,26 @@ function parseOptionalNonNegativeIntegerString(value) {
     }
 }
 
+function normalizeOperation(value) {
+    if (value === undefined || value === null || value === '') {
+        return 0;
+    }
+    try {
+        const normalized = Number(value);
+        return Number.isInteger(normalized) && normalized >= 0 ? normalized : null;
+    } catch (error) {
+        return null;
+    }
+}
+
 function normalizeHash(value) {
     return normalizeHashOrNull(value) ?? null;
+}
+
+function safeAddressEqual(left, right) {
+    const normalizedLeft = normalizeAddressOrNull(left);
+    const normalizedRight = normalizeAddressOrNull(right);
+    return Boolean(normalizedLeft && normalizedRight && isAddressEqual(normalizedLeft, normalizedRight));
 }
 
 async function resolveInitialBackfillStartBlock({
@@ -114,7 +132,7 @@ function buildBackfilledReimbursementCommitmentRecord({
     explanation,
     policy,
 }) {
-    if (!policy.authorizedAgent || !proposer || !isAddressEqual(proposer, policy.authorizedAgent)) {
+    if (!policy.authorizedAgent || !proposer || !safeAddressEqual(proposer, policy.authorizedAgent)) {
         return null;
     }
     const fields = parseReimbursementExplanationFields(explanation);
@@ -126,7 +144,13 @@ function buildBackfilledReimbursementCommitmentRecord({
     }
 
     const [transaction] = transactions;
-    if (!transaction?.to || !isAddressEqual(transaction.to, policy.collateralToken)) {
+    if (!transaction?.to || !safeAddressEqual(transaction.to, policy.collateralToken)) {
+        return null;
+    }
+    if (normalizeOperation(transaction.operation) !== 0) {
+        return null;
+    }
+    if (parseOptionalNonNegativeIntegerString(transaction.value ?? 0) !== '0') {
         return null;
     }
 

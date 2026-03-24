@@ -30,6 +30,15 @@ The user-visible outcome is a Polymarket agent that can be run for long periods 
 - [x] 2026-03-24 03:08Z: Re-opened the hardening pass after later review feedback on lossy intent acceptance during Safe-balance read failures and malformed reimbursement backfill records.
 - [x] 2026-03-24 03:25Z: Fixed lossy acceptance, order/deposit pre-dispatch RPC failure handling, released-intent commitment accounting, receipt-timeout handling for generic RPC errors, and archive-signal enrichment for malformed legacy intents; added regression coverage and re-ran module validation.
 - [x] 2026-03-24 03:34Z: Completed three consecutive clean review passes over the updated branch without finding a new concrete issue.
+- [x] 2026-03-24 13:18Z: Re-opened the hardening pass for another deep review cycle focused on planner, reducer, and restart recovery edges that were still likely to hide brittle behavior.
+- [x] 2026-03-24 13:52Z: Fixed recovered-deposit evidence deduplication, hardened live/backfilled proposal address matching, preserved valid intents across latest-block RPC failures, and added regressions for malformed signals, malformed persisted amounts, and duplicate recovery evidence.
+- [x] 2026-03-24 14:04Z: Fixed reverted-receipt retry loops for deposit and reimbursement stages by applying explicit lifecycle backoff after onchain reverts; added regressions and re-ran the full module validation suite.
+- [x] 2026-03-24 14:04Z: Completed two additional clean review passes after the latest fixes without finding another concrete issue.
+- [x] 2026-03-24 14:39Z: Re-opened the hardening pass after another review found that completed ERC1155 deposits were only recoverable when pending deposit markers survived restart/state loss.
+- [x] 2026-03-24 14:48Z: Added order-dispatch provenance for deposit recovery, widened recovered-deposit reconciliation to rediscover already-completed deposits after state loss, added regression coverage, and re-ran the module validation suite.
+- [x] 2026-03-24 14:52Z: Completed another clean review pass over the new deposit-recovery path without finding an adjacent regression.
+- [x] 2026-03-24 14:59Z: Found and fixed a silent-stall case where malformed-but-non-throwing CLOB order-status payloads could leave submitted orders active forever without surfacing a refresh failure; added regression coverage and re-ran validation.
+- [x] 2026-03-24 15:08Z: Tightened live proposal-hash recovery to require an authorized proposer on proposal signals instead of treating proposer as optional; added regression coverage and re-ran validation.
 
 ## Surprises & Discoveries
 
@@ -41,6 +50,16 @@ The user-visible outcome is a Polymarket agent that can be run for long periods 
   Evidence: the module matched proposal signals by explanation equality and backfilled commitments by `intentKey` without binding the decoded transfer recipient to the intended reimbursement target.
 - Observation: recovered ERC1155 deposits were still reconciled intent-by-intent, so one recovered transfer could satisfy multiple indistinguishable intents and the log path still used unchunked `getLogs` calls.
   Evidence: the old `reconcileRecoveredDepositSubmissions()` loop matched each intent independently via `findRecoveredDepositSignal()` / `findRecoveredDepositLog()` and the log recovery helper queried the full ambiguity window in one request per event type.
+- Observation: weak ERC1155 recovery signals can overlap the same onchain transfer later seen through log recovery, so recovery evidence needs cross-source deduplication rather than treating signal and log channels as independent sources of truth.
+  Evidence: a signal-only `erc1155Deposit` without tx/log identifiers can describe the same transfer later observed in chunked CTF logs, and without identity dedupe both pieces of evidence can be consumed by two otherwise identical unresolved intents.
+- Observation: reverted deposit and reimbursement receipts were clearing lifecycle tracking without any backoff, which made deterministic onchain failures immediately retry every poll.
+  Evidence: the old `reduceDepositSubmissionRevertedReceipt()` and `reduceReimbursementSubmissionRevertedReceipt()` removed submission markers but did not set `nextDepositAttemptAtMs` / `nextReimbursementAttemptAtMs`, so planner eligibility resumed on the next loop.
+- Observation: completed ERC1155 deposits were only rediscoverable when `depositDispatchAtMs` / `depositSubmittedAtMs` survived in state, so losing local state after a successful deposit could strand a filled intent even though the Safe already held the shares.
+  Evidence: recovered-deposit candidates were filtered by pending deposit markers only, and log scans started strictly from `depositDispatchBlockNumber`, which does not exist after a state rebuild that retained order settlement but not deposit-stage tracking.
+- Observation: the order-refresh path treated any object-shaped CLOB response as a valid order summary, so an empty/malformed payload could bypass the error path and spin forever with no visible reconciliation error.
+  Evidence: `extractOrderSummary()` returned an object full of nulls for arbitrary objects, and `refreshOrderStatus()` only treated thrown fetch errors or explicit terminal statuses as exceptional.
+- Observation: live proposal-hash recovery still treated `signal.proposer` as optional even though the shared polling path emits proposer on proposal signals.
+  Evidence: `matchesReimbursementProposalSignal()` only rejected mismatched proposers when the field was present, which meant a malformed proposer-less proposal signal with matching explanation and transfer semantics could still attach a proposal hash.
 
 ## Decision Log
 
@@ -71,6 +90,21 @@ The user-visible outcome is a Polymarket agent that can be run for long periods 
 - Decision: Stage-prep reads such as fee-rate lookup, ERC1155 balance checks, and receipt polling must fail into persisted retryable or ambiguous lifecycle state rather than throwing out of the deterministic loop.
   Rationale: long-running agents need transient RPC/API failures to preserve intent state and retry/back off safely instead of dropping work or spinning indefinitely.
   Date/Author: 2026-03-24 / Codex.
+- Decision: Recovery evidence from signals and CTF logs should be deduplicated by strong onchain identity first, then by weaker block/source/token/amount identity.
+  Rationale: the same real ERC1155 transfer can be observed through multiple recovery channels, and failing to collapse those views reintroduces double-attribution bugs across otherwise identical intents.
+  Date/Author: 2026-03-24 / Codex.
+- Decision: Mined-but-reverted deposit and reimbursement transactions should use retry backoff instead of becoming instantly eligible again.
+  Rationale: reverted receipts prove the previous submission reached chain, so retrying on every poll is both noisy and unsafe under deterministic onchain failures.
+  Date/Author: 2026-03-24 / Codex.
+- Decision: Persist `orderDispatchBlockNumber` and allow recovered-deposit reconciliation to use it when deposit-stage markers are missing.
+  Rationale: a filled intent still needs a deterministic lower bound for scanning Safe ERC1155 transfer logs after restart/state loss, and order dispatch is the earliest durable point that is both available locally and safely before any deposit could occur.
+  Date/Author: 2026-03-24 / Codex.
+- Decision: Treat empty/malformed CLOB order-status payloads as reconciliation failures after timeout rather than silently continuing.
+  Rationale: once a submitted order times out, the safe behavior is to surface manual-recovery state explicitly instead of leaving the order indefinitely active with no error signal.
+  Date/Author: 2026-03-24 / Codex.
+- Decision: Require `proposer` on live proposal signals before recovering a reimbursement proposal hash.
+  Rationale: proposer is available from the shared polling layer, so allowing proposer-less live signals to recover hashes weakens the trust boundary for no upside.
+  Date/Author: 2026-03-24 / Codex.
 
 ## Outcomes & Retrospective
 
@@ -93,6 +127,17 @@ The hardening pass fixed the largest remaining concrete issues I found:
 - order placement now treats the current intent's own reservation as usable headroom instead of subtracting it away
 - fee-rate fetch failures, ERC1155 balance-read failures, and generic post-submit receipt RPC failures now persist retryable or ambiguous stage state rather than aborting the loop
 - archive-signal enrichment now tolerates malformed legacy persisted intents instead of crashing `enrichSignals()`
+- recovered ERC1155 evidence is now deduplicated across weak signal and strong log sources before intent assignment, so one real transfer cannot be counted twice through different recovery channels
+- malformed proposal-signal / backfill addresses no longer crash proposal recovery, and hashless matching proposal signals no longer mask later valid hashed ones
+- reverted ERC1155 deposit receipts and reverted reimbursement proposal receipts now back off before retrying instead of spinning every poll on deterministic onchain failures
+- already-completed ERC1155 deposits can now be rediscovered after restart/state loss even when no deposit submission marker survives, because the module reuses persisted order dispatch provenance during recovery scans
+- malformed-but-non-throwing CLOB order-status payloads now transition into explicit manual-recovery refresh error state instead of silently spinning forever
+- live reimbursement proposal recovery now requires an authorized proposer on proposal signals instead of treating proposer as optional
+- reimbursement proposal-hash recovery now requires exact signer/recipient/amount matches for both live signals and backfilled proposal commitments, instead of trusting intentKey/recipient alone
+- duplicate live or backfilled reimbursement proposals now fail closed during hash recovery instead of silently attaching the first matching hash
+- duplicate executed reimbursement proposals found during restart backfill now settle the intent as reimbursed instead of leaving it open forever
+- the credit ledger no longer suppresses malformed or cross-signer backfilled reimbursement commitments just because they reuse an intent key; unmatched commitments continue to reserve the appropriate signer’s credit
+- new regressions cover wrong-signer reimbursement backfills, duplicate live proposal recovery ambiguity, and duplicate executed reimbursement backfills
 
 Remaining concerns after the second review are operational rather than obviously broken code paths. The main one is that the `token_balance` order-settlement fallback is safest when the trading wallet is dedicated to this agent, because unrelated same-token wallet inflows could otherwise confuse attribution. That is a narrower residual assumption than the concrete lifecycle and state bugs fixed in this run.
 
@@ -174,6 +219,18 @@ Validation transcript:
   `node agent-library/agents/polymarket-intent-trader/test-polymarket-intent-trader-agent.mjs`
   `node agent-library/agents/polymarket-intent-trader/test-start-with-preflight.mjs`
   `node agent/scripts/validate-agent.mjs --module=polymarket-intent-trader`
+
+Latest hardening additions:
+
+- signed intents now require their signed `chainId` to match the runtime chain before the module will accept or even enrich them as candidate trades
+- if the runtime cannot determine its own chain id from RPC or config, signed-intent processing now fails retryably instead of silently becoming cross-chain permissive
+- already-persisted open intents now also require a known runtime chain before execution resumes, instead of only guarding newly arrived signed messages
+- expiry can now be inferred from signed UTC time text as well as the signed envelope, matching the commitment instead of rejecting text-only expiries
+- conflicting signed expiry sources now fail closed as `ambiguous_expiry` instead of silently preferring `deadline`
+- new intent admission now uses actual Safe USDC headroom when that balance read succeeds, so over-budget intents are ignored up front instead of being accepted and wedged later
+- ERC1155 deposit submissions that return `submitted` without a transaction hash now fail closed as ambiguous instead of becoming retryable duplicate deposits after timeout
+- Polymarket order submissions that are already manual-recovery-only (`missing_order_id` or side-effects-likely-committed without an order id) now stop globally blocking later archive/order work immediately instead of for the full pending-tx timeout
+- regressions were added for wrong-chain signed messages, unknown runtime chain handling, text-only expiry parsing, conflicting expiry rejection, actual-balance admission blocking, missing ERC1155 tx hashes, immediate unblocking after `missing_order_id`, and immediate unblocking after ambiguous committed order submissions
 
 ## Interfaces and Dependencies
 

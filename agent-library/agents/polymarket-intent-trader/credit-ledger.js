@@ -16,6 +16,12 @@ function normalizeAddressOrNull(value) {
     }
 }
 
+function safeAddressEqual(left, right) {
+    const normalizedLeft = normalizeAddressOrNull(left);
+    const normalizedRight = normalizeAddressOrNull(right);
+    return Boolean(normalizedLeft && normalizedRight && isAddressEqual(normalizedLeft, normalizedRight));
+}
+
 function normalizePositiveBigInt(value, fieldName) {
     try {
         const normalized = BigInt(String(value));
@@ -28,11 +34,62 @@ function normalizePositiveBigInt(value, fieldName) {
     }
 }
 
+function parseNonNegativeBigIntOrZero(value) {
+    try {
+        const normalized = BigInt(String(value ?? 0));
+        return normalized >= 0n ? normalized : 0n;
+    } catch (error) {
+        return 0n;
+    }
+}
+
+function getExpectedIntentRecipientAddress(intent) {
+    return normalizeAddressOrNull(
+        intent?.reimbursementRecipientAddress ?? intent?.tradingWalletAddress ?? null
+    );
+}
+
+function intentReservationMatchesCommitment(intent, commitment) {
+    if (!intent || typeof intent !== 'object' || !commitment || typeof commitment !== 'object') {
+        return false;
+    }
+
+    const normalizedIntentKey =
+        typeof commitment?.intentKey === 'string' && commitment.intentKey.trim()
+            ? commitment.intentKey.trim()
+            : null;
+    const normalizedProposalHash = normalizeHashOrNull(commitment?.proposalHash);
+    const matchesIdentity =
+        (normalizedIntentKey && intent.intentKey === normalizedIntentKey) ||
+        (normalizedProposalHash &&
+            normalizeHashOrNull(intent.reimbursementProposalHash) === normalizedProposalHash);
+    if (!matchesIdentity) {
+        return false;
+    }
+
+    if (!safeAddressEqual(intent.signer, commitment.signer)) {
+        return false;
+    }
+
+    const expectedRecipient = getExpectedIntentRecipientAddress(intent);
+    if (!expectedRecipient || !safeAddressEqual(expectedRecipient, commitment.recipientAddress)) {
+        return false;
+    }
+
+    const intentAmountWei = parseNonNegativeBigIntOrZero(intent.reimbursementAmountWei);
+    const commitmentAmountWei = parseNonNegativeBigIntOrZero(commitment.amountWei);
+    if (intentAmountWei <= 0n || commitmentAmountWei <= 0n) {
+        return false;
+    }
+
+    return intentAmountWei === commitmentAmountWei;
+}
+
 export function createDepositRecord(signal, { collateralToken, nowMs = Date.now() } = {}) {
     if (signal?.kind !== 'erc20Deposit') {
         return null;
     }
-    if (!signal.asset || !isAddressEqual(signal.asset, collateralToken)) {
+    if (!signal.asset || !safeAddressEqual(signal.asset, collateralToken)) {
         return null;
     }
     if (typeof signal.from !== 'string' || !signal.from.trim()) {
@@ -110,10 +167,10 @@ export function createReimbursementCommitmentRecord(
 export function getDepositedCreditWeiForAddress(state, address) {
     let total = 0n;
     for (const deposit of Object.values(state?.deposits ?? {})) {
-        if (!deposit?.depositor || !isAddressEqual(deposit.depositor, address)) {
+        if (!deposit?.depositor || !safeAddressEqual(deposit.depositor, address)) {
             continue;
         }
-        total += BigInt(deposit.amountWei ?? 0);
+        total += parseNonNegativeBigIntOrZero(deposit.amountWei);
     }
     return total;
 }
@@ -121,18 +178,12 @@ export function getDepositedCreditWeiForAddress(state, address) {
 export function getTotalDepositedCreditWei(state) {
     let total = 0n;
     for (const deposit of Object.values(state?.deposits ?? {})) {
-        total += BigInt(deposit?.amountWei ?? 0);
+        total += parseNonNegativeBigIntOrZero(deposit?.amountWei);
     }
     return total;
 }
 
 function hasMatchingIntentReservation(state, commitment) {
-    const normalizedIntentKey =
-        typeof commitment?.intentKey === 'string' && commitment.intentKey.trim()
-            ? commitment.intentKey.trim()
-            : null;
-    const normalizedProposalHash = normalizeHashOrNull(commitment?.proposalHash);
-
     for (const intent of Object.values(state?.intents ?? {})) {
         if (!intent || typeof intent !== 'object') {
             continue;
@@ -140,13 +191,7 @@ function hasMatchingIntentReservation(state, commitment) {
         if (intent.creditReleasedAtMs) {
             continue;
         }
-        if (normalizedIntentKey && intent.intentKey === normalizedIntentKey) {
-            return true;
-        }
-        if (
-            normalizedProposalHash &&
-            normalizeHashOrNull(intent.reimbursementProposalHash) === normalizedProposalHash
-        ) {
+        if (intentReservationMatchesCommitment(intent, commitment)) {
             return true;
         }
     }
@@ -157,13 +202,13 @@ function hasMatchingIntentReservation(state, commitment) {
 export function getReservedCreditWeiForAddress(state, address) {
     let total = 0n;
     for (const intent of Object.values(state?.intents ?? {})) {
-        if (!intent?.signer || !isAddressEqual(intent.signer, address) || intent?.creditReleasedAtMs) {
+        if (!intent?.signer || !safeAddressEqual(intent.signer, address) || intent?.creditReleasedAtMs) {
             continue;
         }
-        total += BigInt(intent.reservedCreditAmountWei ?? 0);
+        total += parseNonNegativeBigIntOrZero(intent.reservedCreditAmountWei);
     }
     for (const commitment of Object.values(state?.reimbursementCommitments ?? {})) {
-        if (!commitment?.signer || !isAddressEqual(commitment.signer, address)) {
+        if (!commitment?.signer || !safeAddressEqual(commitment.signer, address)) {
             continue;
         }
         if (commitment.status === 'deleted') {
@@ -172,7 +217,7 @@ export function getReservedCreditWeiForAddress(state, address) {
         if (hasMatchingIntentReservation(state, commitment)) {
             continue;
         }
-        total += BigInt(commitment.amountWei ?? 0);
+        total += parseNonNegativeBigIntOrZero(commitment.amountWei);
     }
     return total;
 }
@@ -183,7 +228,7 @@ export function getTotalReservedCreditWei(state) {
         if (!intent?.signer || intent?.creditReleasedAtMs) {
             continue;
         }
-        total += BigInt(intent.reservedCreditAmountWei ?? 0);
+        total += parseNonNegativeBigIntOrZero(intent.reservedCreditAmountWei);
     }
     for (const commitment of Object.values(state?.reimbursementCommitments ?? {})) {
         if (!commitment?.signer || commitment.status === 'deleted') {
@@ -192,7 +237,7 @@ export function getTotalReservedCreditWei(state) {
         if (hasMatchingIntentReservation(state, commitment)) {
             continue;
         }
-        total += BigInt(commitment.amountWei ?? 0);
+        total += parseNonNegativeBigIntOrZero(commitment.amountWei);
     }
     return total;
 }
@@ -208,17 +253,26 @@ function collectTrackedCreditAddresses(state) {
     const addresses = new Set();
     for (const deposit of Object.values(state?.deposits ?? {})) {
         if (typeof deposit?.depositor === 'string' && deposit.depositor.trim()) {
-            addresses.add(normalizeAddress(deposit.depositor));
+            const normalized = normalizeAddressOrNull(deposit.depositor);
+            if (normalized) {
+                addresses.add(normalized);
+            }
         }
     }
     for (const intent of Object.values(state?.intents ?? {})) {
         if (typeof intent?.signer === 'string' && intent.signer.trim()) {
-            addresses.add(normalizeAddress(intent.signer));
+            const normalized = normalizeAddressOrNull(intent.signer);
+            if (normalized) {
+                addresses.add(normalized);
+            }
         }
     }
     for (const commitment of Object.values(state?.reimbursementCommitments ?? {})) {
         if (typeof commitment?.signer === 'string' && commitment.signer.trim()) {
-            addresses.add(normalizeAddress(commitment.signer));
+            const normalized = normalizeAddressOrNull(commitment.signer);
+            if (normalized) {
+                addresses.add(normalized);
+            }
         }
     }
     return addresses;
