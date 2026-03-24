@@ -3299,7 +3299,7 @@ async function getDeterministicToolCalls({
         onchainPendingProposal,
         nowMs: Date.now(),
     });
-    let chainId;
+    let chainId = normalizeChainIdValue(runtimeChainId) ?? undefined;
 
     for (const action of actionCandidates) {
         const intent = tradeIntentState.intents[action.intentKey];
@@ -3503,10 +3503,9 @@ async function getDeterministicToolCalls({
         }
         if (chainId === undefined) {
             try {
-                chainId =
-                    typeof publicClient?.getChainId === 'function'
-                        ? await publicClient.getChainId()
-                        : undefined;
+                chainId = normalizeChainIdValue(
+                    await resolveRuntimeChainId({ publicClient, config })
+                ) ?? undefined;
             } catch (error) {
                 intent.lastOrderSubmissionStatus = 'unavailable';
                 intent.lastOrderSubmissionError =

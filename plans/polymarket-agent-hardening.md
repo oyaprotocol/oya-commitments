@@ -39,6 +39,7 @@ The user-visible outcome is a Polymarket agent that can be run for long periods 
 - [x] 2026-03-24 14:52Z: Completed another clean review pass over the new deposit-recovery path without finding an adjacent regression.
 - [x] 2026-03-24 14:59Z: Found and fixed a silent-stall case where malformed-but-non-throwing CLOB order-status payloads could leave submitted orders active forever without surfacing a refresh failure; added regression coverage and re-ran validation.
 - [x] 2026-03-24 15:08Z: Tightened live proposal-hash recovery to require an authorized proposer on proposal signals instead of treating proposer as optional; added regression coverage and re-ran validation.
+- [x] 2026-03-24 15:22Z: Fixed order-call chainId fallback so CLOB order payloads reuse the already-resolved runtime/config chain ID when direct RPC chain-id lookup is unavailable; added regression coverage and re-ran validation.
 
 ## Surprises & Discoveries
 
@@ -104,6 +105,9 @@ The user-visible outcome is a Polymarket agent that can be run for long periods 
   Date/Author: 2026-03-24 / Codex.
 - Decision: Require `proposer` on live proposal signals before recovering a reimbursement proposal hash.
   Rationale: proposer is available from the shared polling layer, so allowing proposer-less live signals to recover hashes weakens the trust boundary for no upside.
+  Date/Author: 2026-03-24 / Codex.
+- Decision: Order payload construction should reuse the module's already-resolved runtime/config chain ID instead of re-querying `publicClient.getChainId()` ad hoc.
+  Rationale: intermittent chain-id RPC failures should not prevent CLOB order signing when the runtime chain was already resolved earlier in the same loop or provided by config.
   Date/Author: 2026-03-24 / Codex.
 
 ## Outcomes & Retrospective
