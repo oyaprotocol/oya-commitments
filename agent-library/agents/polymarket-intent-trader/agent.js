@@ -299,6 +299,12 @@ function normalizeHash(value) {
     return normalizeHashOrNull(value);
 }
 
+function safeAddressEqual(left, right) {
+    const normalizedLeft = normalizeAddressOrNull(left);
+    const normalizedRight = normalizeAddressOrNull(right);
+    return Boolean(normalizedLeft && normalizedRight && isAddressEqual(normalizedLeft, normalizedRight));
+}
+
 function normalizeHashArray(values) {
     if (!Array.isArray(values)) {
         return [];
@@ -320,6 +326,39 @@ function parseOptionalPositiveInteger(value) {
     return normalized;
 }
 
+function normalizeChainIdValue(value) {
+    if (value === null || value === undefined || value === '') {
+        return null;
+    }
+    if (typeof value === 'bigint') {
+        return value > 0n ? value.toString() : null;
+    }
+    const normalized = Number(value);
+    if (!Number.isInteger(normalized) || normalized <= 0) {
+        return null;
+    }
+    return String(normalized);
+}
+
+function hasSignedUserMessageSignal(signals) {
+    return Array.isArray(signals) && signals.some((signal) => isSignedUserMessage(signal));
+}
+
+function assertRuntimeChainIdKnown(runtimeChainId, { signals, hasTrackedWork = false } = {}) {
+    const requiresKnownChainId = hasSignedUserMessageSignal(signals) || hasTrackedWork === true;
+    if (!requiresKnownChainId) {
+        return;
+    }
+    if (normalizeChainIdValue(runtimeChainId)) {
+        return;
+    }
+    const error = new Error(
+        'Unable to determine runtime chain id from RPC or config; refusing to process signed Polymarket intents until chain identity is known.'
+    );
+    error.name = 'RpcChainIdUnavailableError';
+    throw error;
+}
+
 function parseOptionalNonNegativeIntegerString(value) {
     if (value === null || value === undefined || value === '') {
         return null;
@@ -334,6 +373,11 @@ function parseOptionalNonNegativeIntegerString(value) {
     } catch (error) {
         return null;
     }
+}
+
+function parseNonNegativeBigIntOrZero(value) {
+    const normalized = parseOptionalNonNegativeIntegerString(value);
+    return normalized === null ? 0n : BigInt(normalized);
 }
 
 function normalizeWhitespace(value) {
@@ -565,7 +609,7 @@ function getEffectiveOrderReservationHeadroomWei(intent, actualCollateralBalance
     }
 
     const normalizedActualCollateralBalanceWei = BigInt(actualCollateralBalanceWei);
-    const ownReservedWei = BigInt(intent?.reservedCreditAmountWei ?? 0);
+    const ownReservedWei = parseNonNegativeBigIntOrZero(intent?.reservedCreditAmountWei);
     const totalReservedWei = getTotalReservedCreditWei(tradeIntentState);
     const otherReservedWei =
         totalReservedWei > ownReservedWei ? totalReservedWei - ownReservedWei : 0n;
@@ -622,6 +666,12 @@ function getExpectedDepositAmount(intent) {
     );
 }
 
+function getRecoveredDepositSearchFromBlock(intent) {
+    return parseOptionalNonNegativeIntegerString(
+        intent?.depositDispatchBlockNumber ?? intent?.orderDispatchBlockNumber ?? null
+    );
+}
+
 function buildRecoveredDepositMatchKey({
     tokenId,
     amount,
@@ -653,8 +703,8 @@ function getRecoveredDepositEvidenceMatchKey(evidence) {
 }
 
 function compareRecoveredDepositIntentPriority(left, right) {
-    const leftDispatchBlock = BigInt(left?.depositDispatchBlockNumber ?? 0);
-    const rightDispatchBlock = BigInt(right?.depositDispatchBlockNumber ?? 0);
+    const leftDispatchBlock = BigInt(getRecoveredDepositSearchFromBlock(left) ?? 0);
+    const rightDispatchBlock = BigInt(getRecoveredDepositSearchFromBlock(right) ?? 0);
     if (leftDispatchBlock !== rightDispatchBlock) {
         return leftDispatchBlock < rightDispatchBlock ? -1 : 1;
     }
@@ -671,7 +721,13 @@ function compareRecoveredDepositIntentPriority(left, right) {
 function isIntentAwaitingRecoveredDeposit(intent) {
     return (
         !intent?.tokenDeposited &&
-        (Number.isInteger(intent?.depositSubmittedAtMs) || Number.isInteger(intent?.depositDispatchAtMs))
+        intent?.orderFilled === true &&
+        Boolean(getExpectedDepositSourceAddress(intent)) &&
+        Boolean(getExpectedDepositAmount(intent)) &&
+        Boolean(getRecoveredDepositSearchFromBlock(intent)) &&
+        (Number.isInteger(intent?.depositSubmittedAtMs) ||
+            Number.isInteger(intent?.depositDispatchAtMs) ||
+            (!intent?.depositTxHash && !intent?.closedAtMs && !intent?.creditReleasedAtMs))
     );
 }
 
@@ -753,6 +809,69 @@ function buildRecoveredDepositEvidence({
         batchIndex:
             batchIndex === undefined || batchIndex === null ? null : String(batchIndex),
     };
+}
+
+function getRecoveredDepositStrongIdentityKey(evidence) {
+    const transactionHash = normalizeHash(evidence?.transactionHash);
+    const normalizedTokenId = normalizeTokenId(evidence?.tokenId);
+    if (
+        !transactionHash ||
+        evidence?.logIndex === undefined ||
+        evidence?.logIndex === null ||
+        !normalizedTokenId
+    ) {
+        return null;
+    }
+    return `tx:${transactionHash}:${String(evidence.logIndex)}:${normalizedTokenId}:${evidence?.batchIndex === undefined || evidence?.batchIndex === null ? 'single' : String(evidence.batchIndex)}`;
+}
+
+function getRecoveredDepositWeakIdentityKey(evidence) {
+    const blockNumber = parseOptionalNonNegativeIntegerString(evidence?.blockNumber);
+    const normalizedFrom = normalizeAddressOrNull(evidence?.from);
+    const normalizedTokenId = normalizeTokenId(evidence?.tokenId);
+    const normalizedAmount = parseOptionalNonNegativeIntegerString(evidence?.amount);
+    if (!blockNumber || !normalizedFrom || !normalizedTokenId || !normalizedAmount) {
+        return null;
+    }
+    return `weak:${blockNumber}:${normalizedFrom}:${normalizedTokenId}:${normalizedAmount}:${evidence?.batchIndex === undefined || evidence?.batchIndex === null ? 'single' : String(evidence.batchIndex)}`;
+}
+
+function dedupeRecoveredDepositEvidence(evidenceList) {
+    const deduped = [];
+    const occupiedWeakIdentityKeys = new Set();
+
+    for (const evidence of Array.isArray(evidenceList) ? evidenceList : []) {
+        const strongIdentityKey = getRecoveredDepositStrongIdentityKey(evidence);
+        if (!strongIdentityKey) {
+            continue;
+        }
+        const weakIdentityKey = getRecoveredDepositWeakIdentityKey(evidence);
+        if (weakIdentityKey) {
+            occupiedWeakIdentityKeys.add(weakIdentityKey);
+        }
+    }
+
+    const emittedStrongIdentityKeys = new Set();
+    for (const evidence of Array.isArray(evidenceList) ? evidenceList : []) {
+        const strongIdentityKey = getRecoveredDepositStrongIdentityKey(evidence);
+        if (strongIdentityKey) {
+            if (emittedStrongIdentityKeys.has(strongIdentityKey)) {
+                continue;
+            }
+            emittedStrongIdentityKeys.add(strongIdentityKey);
+            deduped.push(evidence);
+            continue;
+        }
+        const weakIdentityKey = getRecoveredDepositWeakIdentityKey(evidence);
+        const fallbackIdentityKey = weakIdentityKey ?? evidence?.evidenceKey ?? null;
+        if (!fallbackIdentityKey || occupiedWeakIdentityKeys.has(fallbackIdentityKey)) {
+            continue;
+        }
+        occupiedWeakIdentityKeys.add(fallbackIdentityKey);
+        deduped.push(evidence);
+    }
+
+    return deduped;
 }
 
 function buildRecoveredDepositEvidenceFromSignal({ signal, policy }) {
@@ -849,7 +968,7 @@ function matchesRecoveredDepositEvidence({ evidence, intent }) {
         return false;
     }
 
-    const dispatchBlockNumber = parseOptionalNonNegativeIntegerString(intent?.depositDispatchBlockNumber);
+    const dispatchBlockNumber = getRecoveredDepositSearchFromBlock(intent);
     const evidenceBlockNumber = parseOptionalNonNegativeIntegerString(evidence?.blockNumber);
     if (dispatchBlockNumber && evidenceBlockNumber && BigInt(evidenceBlockNumber) < BigInt(dispatchBlockNumber)) {
         return false;
@@ -887,7 +1006,7 @@ async function collectRecoveredDepositLogEvidence({
     const queryGroups = new Map();
     for (const intent of Array.isArray(intents) ? intents : []) {
         const depositSourceAddress = getExpectedDepositSourceAddress(intent);
-        const fromBlock = parseOptionalNonNegativeIntegerString(intent?.depositDispatchBlockNumber);
+        const fromBlock = getRecoveredDepositSearchFromBlock(intent);
         if (!depositSourceAddress || !fromBlock) {
             continue;
         }
@@ -1010,7 +1129,9 @@ async function reconcileRecoveredDepositSubmissions({
         }
     }
 
-    const sortedEvidence = Array.from(evidenceByKey.values()).sort(compareRecoveredDepositEvidence);
+    const sortedEvidence = dedupeRecoveredDepositEvidence(
+        Array.from(evidenceByKey.values()).sort(compareRecoveredDepositEvidence)
+    );
     const evidenceByMatchKey = new Map();
     for (const evidence of sortedEvidence) {
         const matchKey = getRecoveredDepositEvidenceMatchKey(evidence);
@@ -1140,16 +1261,31 @@ function getExpectedReimbursementRecipientAddress(intent, fallbackAgentAddress =
     );
 }
 
+function normalizeTransactionOperation(value) {
+    if (value === undefined || value === null || value === '') {
+        return 0;
+    }
+    try {
+        const normalized = Number(value);
+        return Number.isInteger(normalized) && normalized >= 0 ? normalized : null;
+    } catch (error) {
+        return null;
+    }
+}
+
 function matchesReimbursementTransferTransaction({
     transaction,
     intent,
     policy,
     fallbackAgentAddress = null,
 }) {
-    if (!transaction?.to || !isAddressEqual(transaction.to, policy.collateralToken)) {
+    if (!transaction?.to || !safeAddressEqual(transaction.to, policy.collateralToken)) {
         return false;
     }
-    if (BigInt(transaction.value ?? 0) !== 0n) {
+    if (normalizeTransactionOperation(transaction.operation) !== 0) {
+        return false;
+    }
+    if (parseOptionalNonNegativeIntegerString(transaction.value ?? 0) !== '0') {
         return false;
     }
 
@@ -1165,6 +1301,41 @@ function matchesReimbursementTransferTransaction({
     }
 
     return decoded.to === recipient && decoded.amount === BigInt(amountWei);
+}
+
+function matchesReimbursementCommitmentIntent({
+    commitment,
+    intent,
+    fallbackAgentAddress = null,
+}) {
+    const expectedIntentKey = normalizeNonEmptyString(intent?.intentKey);
+    const commitmentIntentKey = normalizeNonEmptyString(commitment?.intentKey);
+    if (!expectedIntentKey || !commitmentIntentKey || commitmentIntentKey !== expectedIntentKey) {
+        return false;
+    }
+
+    const expectedSigner = normalizeAddressOrNull(intent?.signer);
+    const commitmentSigner = normalizeAddressOrNull(commitment?.signer);
+    if (!expectedSigner || !commitmentSigner || commitmentSigner !== expectedSigner) {
+        return false;
+    }
+
+    const expectedRecipient = getExpectedReimbursementRecipientAddress(
+        intent,
+        fallbackAgentAddress
+    );
+    const commitmentRecipient = normalizeAddressOrNull(commitment?.recipientAddress);
+    if (!expectedRecipient || !commitmentRecipient || commitmentRecipient !== expectedRecipient) {
+        return false;
+    }
+
+    const expectedAmountWei = parseOptionalNonNegativeIntegerString(intent?.reimbursementAmountWei);
+    const commitmentAmountWei = parseOptionalNonNegativeIntegerString(commitment?.amountWei);
+    if (!expectedAmountWei || !commitmentAmountWei || commitmentAmountWei !== expectedAmountWei) {
+        return false;
+    }
+
+    return true;
 }
 
 function getClobExecutionPreflightError(config) {
@@ -1215,7 +1386,7 @@ function getReimbursementHeadroomWei(intent) {
     }
     const depositedWei = getDepositedCreditWeiForAddress(tradeIntentState, intent.signer);
     const reservedWei = getReservedCreditWeiForAddress(tradeIntentState, intent.signer);
-    const ownReservedWei = BigInt(intent.reservedCreditAmountWei ?? 0);
+    const ownReservedWei = parseNonNegativeBigIntOrZero(intent.reservedCreditAmountWei);
     const otherReservedWei = reservedWei > ownReservedWei ? reservedWei - ownReservedWei : 0n;
     return depositedWei - otherReservedWei;
 }
@@ -1227,7 +1398,7 @@ function getEffectiveReimbursementHeadroomWei(intent, actualCollateralBalanceWei
     }
 
     const normalizedActualCollateralBalanceWei = BigInt(actualCollateralBalanceWei);
-    const ownReservedWei = BigInt(intent?.reservedCreditAmountWei ?? 0);
+    const ownReservedWei = parseNonNegativeBigIntOrZero(intent?.reservedCreditAmountWei);
     const totalReservedWei = getTotalReservedCreditWei(tradeIntentState);
     const otherReservedWei =
         totalReservedWei > ownReservedWei ? totalReservedWei - ownReservedWei : 0n;
@@ -1479,8 +1650,141 @@ function resolvePolicy(config = {}) {
     return policy;
 }
 
-function resolveExpiryMs(signal) {
-    return parseOptionalPositiveInteger(signal?.deadline);
+function resolveExpiry(signal) {
+    const signedDeadlineMs = parseOptionalPositiveInteger(signal?.deadline);
+    const referenceMs =
+        parseOptionalPositiveInteger(signal?.sender?.signedAtMs) ??
+        parseOptionalPositiveInteger(signal?.receivedAtMs) ??
+        Date.now();
+    const textExpiryMs = resolveTextExpiryMs(signal?.text, { referenceMs });
+
+    if (
+        signedDeadlineMs &&
+        textExpiryMs &&
+        Math.abs(signedDeadlineMs - textExpiryMs) > 999
+    ) {
+        return {
+            expiryMs: null,
+            conflict: true,
+        };
+    }
+
+    return {
+        expiryMs: signedDeadlineMs ?? textExpiryMs ?? null,
+        conflict: false,
+    };
+}
+
+function normalizeUtcLabel(value) {
+    const normalized = normalizeNonEmptyString(value)?.toUpperCase() ?? null;
+    if (!normalized) {
+        return null;
+    }
+    if (normalized === 'UTC' || normalized === 'GMT' || normalized === 'Z') {
+        return 'UTC';
+    }
+    return null;
+}
+
+function parseAbsoluteTextExpiryMs(text) {
+    const normalizedText = normalizeWhitespace(text);
+    if (!normalizedText) {
+        return null;
+    }
+
+    const isoMatch = normalizedText.match(
+        /\b(?:before|by|until|til|expires?(?:\s+at|\s+on)?|expiring(?:\s+at|\s+on)?)\s+(\d{4}-\d{2}-\d{2})[ t](\d{1,2}):(\d{2})(?::(\d{2}))?\s*(utc|gmt|z)\b/i
+    );
+    if (isoMatch) {
+        const [, datePart, hourRaw, minuteRaw, secondRaw, zoneRaw] = isoMatch;
+        if (normalizeUtcLabel(zoneRaw)) {
+            const parsed = Date.parse(
+                `${datePart}T${hourRaw.padStart(2, '0')}:${minuteRaw}:${(secondRaw ?? '00').padStart(2, '0')}Z`
+            );
+            if (Number.isFinite(parsed) && parsed > 0) {
+                return parsed;
+            }
+        }
+    }
+
+    const namedDateMatch = normalizedText.match(
+        /\b(?:before|by|until|til|expires?(?:\s+at|\s+on)?|expiring(?:\s+at|\s+on)?)\s+([A-Za-z]{3,9}\s+\d{1,2},\s*\d{4}\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)\s*(?:utc|gmt))\b/i
+    );
+    if (namedDateMatch) {
+        const candidate = namedDateMatch[1].replace(/\butc\b/i, 'GMT');
+        const parsed = Date.parse(candidate);
+        if (Number.isFinite(parsed) && parsed > 0) {
+            return parsed;
+        }
+    }
+
+    return null;
+}
+
+function parseUtcTimeOnlyExpiryMs(text, { referenceMs }) {
+    const normalizedText = normalizeWhitespace(text);
+    if (!normalizedText) {
+        return null;
+    }
+
+    const timeOnlyMatch = normalizedText.match(
+        /\b(?:before|by|until|til|expires?(?:\s+at)?|expiring(?:\s+at)?)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(utc|gmt|z)\b/i
+    );
+    if (!timeOnlyMatch) {
+        return null;
+    }
+
+    const [, hourRaw, minuteRaw, meridiemRaw, zoneRaw] = timeOnlyMatch;
+    if (!normalizeUtcLabel(zoneRaw)) {
+        return null;
+    }
+
+    const hourValue = Number(hourRaw);
+    const minuteValue = Number(minuteRaw ?? '0');
+    if (
+        !Number.isInteger(hourValue) ||
+        !Number.isInteger(minuteValue) ||
+        minuteValue < 0 ||
+        minuteValue > 59
+    ) {
+        return null;
+    }
+
+    let normalizedHour = hourValue;
+    const meridiem = normalizeNonEmptyString(meridiemRaw)?.toLowerCase() ?? null;
+    if (meridiem) {
+        if (normalizedHour < 1 || normalizedHour > 12) {
+            return null;
+        }
+        if (meridiem === 'pm' && normalizedHour !== 12) {
+            normalizedHour += 12;
+        } else if (meridiem === 'am' && normalizedHour === 12) {
+            normalizedHour = 0;
+        }
+    } else if (normalizedHour < 0 || normalizedHour > 23) {
+        return null;
+    }
+
+    const referenceDate = new Date(referenceMs);
+    return Date.UTC(
+        referenceDate.getUTCFullYear(),
+        referenceDate.getUTCMonth(),
+        referenceDate.getUTCDate(),
+        normalizedHour,
+        minuteValue,
+        0,
+        0
+    );
+}
+
+function resolveTextExpiryMs(text, { referenceMs } = {}) {
+    const absoluteExpiryMs = parseAbsoluteTextExpiryMs(text);
+    if (absoluteExpiryMs) {
+        return absoluteExpiryMs;
+    }
+
+    const normalizedReferenceMs = parseOptionalPositiveInteger(referenceMs) ?? Date.now();
+    return parseUtcTimeOnlyExpiryMs(text, { referenceMs: normalizedReferenceMs });
 }
 
 function containsBuyVerb(text) {
@@ -1666,6 +1970,7 @@ function interpretSignedTradeIntentSignal(
         policy = resolvePolicy({}),
         commitmentSafe = null,
         agentAddress = null,
+        runtimeChainId = null,
         nowMs = Date.now(),
     } = {}
 ) {
@@ -1676,7 +1981,20 @@ function interpretSignedTradeIntentSignal(
         return { ok: false, reason: 'not_signed_user_message' };
     }
 
-    const signer = normalizeAddress(signal.sender.address);
+    let signer;
+    try {
+        signer = normalizeAddress(signal.sender.address);
+    } catch (error) {
+        return { ok: false, reason: 'invalid_signer' };
+    }
+    const signedChainId = normalizeChainIdValue(signal.chainId);
+    if (!signedChainId) {
+        return { ok: false, reason: 'missing_chain_id' };
+    }
+    const normalizedRuntimeChainId = normalizeChainIdValue(runtimeChainId);
+    if (normalizedRuntimeChainId && signedChainId !== normalizedRuntimeChainId) {
+        return { ok: false, reason: 'wrong_chain_id' };
+    }
     const requestId = signal.requestId.trim();
     const normalizedCommand = normalizeNonEmptyString(signal.command)?.toLowerCase() ?? '';
     if (
@@ -1722,7 +2040,11 @@ function interpretSignedTradeIntentSignal(
         return { ok: false, reason: 'invalid_price_tick' };
     }
 
-    const expiryMs = resolveExpiryMs(signal);
+    const resolvedExpiry = resolveExpiry(signal);
+    if (resolvedExpiry.conflict) {
+        return { ok: false, reason: 'ambiguous_expiry' };
+    }
+    const expiryMs = resolvedExpiry.expiryMs;
     if (!expiryMs) {
         return { ok: false, reason: 'missing_expiry' };
     }
@@ -1889,6 +2211,85 @@ function ingestSignals(signals, policy) {
         } catch (error) {
             continue;
         }
+    }
+
+    if (changed) {
+        markStateDirty();
+    }
+    return changed;
+}
+
+function acceptSignedTradeIntentSignals(
+    signals,
+    {
+        policy,
+        commitmentSafe,
+        agentAddress,
+        runtimeChainId = null,
+        actualCollateralBalanceWei = null,
+        nowMs = Date.now(),
+        config,
+    } = {}
+) {
+    let changed = false;
+
+    for (const signal of Array.isArray(signals) ? signals : []) {
+        const interpreted = interpretSignedTradeIntentSignal(signal, {
+            policy,
+            commitmentSafe,
+            agentAddress,
+            runtimeChainId,
+            nowMs,
+        });
+        if (!interpreted.ok) {
+            continue;
+        }
+
+        if (tradeIntentState.intents[interpreted.intent.intentKey]) {
+            continue;
+        }
+
+        const availableCreditWei = getAvailableCreditWeiForAddress(
+            tradeIntentState,
+            interpreted.intent.signer
+        );
+        if (availableCreditWei < BigInt(interpreted.intent.reservedCreditAmountWei)) {
+            console.warn(
+                `[agent] Ignoring signed Polymarket trade intent ${interpreted.intent.intentKey}: insufficient deposited collateral credit for signer ${interpreted.intent.signer} (availableWei=${availableCreditWei.toString()} requiredWei=${interpreted.intent.reservedCreditAmountWei}).`
+            );
+            continue;
+        }
+        if (actualCollateralBalanceWei !== null && actualCollateralBalanceWei !== undefined) {
+            const actualReservationHeadroomWei = getEffectiveOrderReservationHeadroomWei(
+                interpreted.intent,
+                actualCollateralBalanceWei
+            );
+            if (
+                actualReservationHeadroomWei <
+                BigInt(interpreted.intent.reservedCreditAmountWei)
+            ) {
+                console.warn(
+                    `[agent] Ignoring signed Polymarket trade intent ${interpreted.intent.intentKey}: insufficient actual Safe collateral remains unreserved (headroomWei=${actualReservationHeadroomWei.toString()} requiredWei=${interpreted.intent.reservedCreditAmountWei}).`
+                );
+                continue;
+            }
+        }
+        if (!config?.ipfsEnabled) {
+            throw new Error(
+                'polymarket-intent-trader requires ipfsEnabled=true in module config to archive signed trade intents before execution.'
+            );
+        }
+
+        tradeIntentState.intents[interpreted.intent.intentKey] = {
+            ...interpreted.intent,
+            sequence: allocateSequence(),
+            creditReservedAtMs: nowMs,
+            updatedAtMs: nowMs,
+        };
+        console.log(
+            `[agent] Accepted signed Polymarket trade intent ${interpreted.intent.intentKey}: outcome=${interpreted.intent.outcome} maxSpendWei=${interpreted.intent.maxSpendWei} maxPrice=${interpreted.intent.maxPrice}.`
+        );
+        changed = true;
     }
 
     if (changed) {
@@ -2067,7 +2468,7 @@ function extractProposalHashFromReceipt({ receipt, ogModule }) {
     }
 
     for (const log of receipt.logs) {
-        if (!isAddressEqual(log?.address, normalizedOgModule)) {
+        if (!safeAddressEqual(log?.address, normalizedOgModule)) {
             continue;
         }
 
@@ -2098,7 +2499,7 @@ function matchesReimbursementProposalSignal({ signal, intent, agentAddress, poli
     if (signal?.kind !== 'proposal' || !Array.isArray(signal.transactions) || signal.transactions.length !== 1) {
         return false;
     }
-    if (signal.proposer && !isAddressEqual(signal.proposer, agentAddress)) {
+    if (!signal.proposer || !safeAddressEqual(signal.proposer, agentAddress)) {
         return false;
     }
     const [transaction] = signal.transactions;
@@ -2124,27 +2525,52 @@ function matchesReimbursementProposalSignal({ signal, intent, agentAddress, poli
 function recoverProposalHashesFromSignals({ signals, agentAddress, policy }) {
     let changed = false;
     const normalizedAgentAddress = normalizeAddress(agentAddress);
+    const nowMs = Date.now();
 
     for (const intent of getOpenIntents()) {
-        if (intent.reimbursementProposalHash) {
+        if (intent.reimbursementProposalHash || !intent.reimbursementExplanation) {
             continue;
         }
-        if (!intent.reimbursementSubmissionTxHash && !intent.reimbursementExplanation) {
+        if (!intent.reimbursementSubmissionTxHash && !intent.reimbursementSubmittedAtMs) {
             continue;
         }
 
-        const matchingSignal = (Array.isArray(signals) ? signals : []).find((signal) =>
-            matchesReimbursementProposalSignal({
-                signal,
-                intent,
-                agentAddress: normalizedAgentAddress,
-                policy,
-            })
-        );
-        const proposalHash = normalizeHash(matchingSignal?.proposalHash);
-        if (!proposalHash) {
+        const matchingProposalHashes = new Set();
+        for (const signal of Array.isArray(signals) ? signals : []) {
+            if (
+                !matchesReimbursementProposalSignal({
+                    signal,
+                    intent,
+                    agentAddress: normalizedAgentAddress,
+                    policy,
+                })
+            ) {
+                continue;
+            }
+            const proposalHash = normalizeHash(signal?.proposalHash);
+            if (proposalHash) {
+                matchingProposalHashes.add(proposalHash);
+            }
+        }
+        if (matchingProposalHashes.size === 0) {
             continue;
         }
+        if (matchingProposalHashes.size > 1) {
+            const detail =
+                'Multiple live reimbursement proposals matched this intent; refusing automatic proposal-hash recovery until manual reconciliation.';
+            if (
+                intent.lastReimbursementSubmissionError !== detail ||
+                !intent.reimbursementSubmissionAmbiguous
+            ) {
+                if (!Number.isInteger(intent.reimbursementSubmittedAtMs)) {
+                    intent.reimbursementSubmittedAtMs = nowMs;
+                }
+                markAmbiguousReimbursementSubmission(intent, detail, nowMs);
+                changed = true;
+            }
+            continue;
+        }
+        const [proposalHash] = Array.from(matchingProposalHashes);
 
         intent.reimbursementProposalHash = proposalHash;
         delete intent.reimbursementDispatchAtMs;
@@ -2174,10 +2600,11 @@ function recoverProposalHashesFromBackfilledCommitments() {
         const matchingCommitments = Object.values(tradeIntentState.reimbursementCommitments).filter(
             (commitment) =>
                 commitment?.proposalHash &&
-                commitment?.intentKey &&
-                commitment.intentKey === intent.intentKey &&
-                commitment.recipientAddress ===
-                    getExpectedReimbursementRecipientAddress(intent, intent.tradingWalletAddress)
+                matchesReimbursementCommitmentIntent({
+                    commitment,
+                    intent,
+                    fallbackAgentAddress: intent.tradingWalletAddress,
+                })
         );
         if (matchingCommitments.length === 0) {
             continue;
@@ -2214,7 +2641,7 @@ function recoverProposalHashesFromBackfilledCommitments() {
             (currentProposalHash && executedProposalHashes.includes(currentProposalHash)
                 ? currentProposalHash
                 : null) ??
-            (executedProposalHashes.length === 1 ? executedProposalHashes[0] : null);
+            (executedProposalHashes.length > 0 ? executedProposalHashes[0] : null);
         if (resolvedExecutedProposalHash) {
             intent.reimbursementProposalHash = resolvedExecutedProposalHash;
             intent.reimbursedAtMs = nowMs;
@@ -2247,6 +2674,22 @@ function recoverProposalHashesFromBackfilledCommitments() {
             delete intent.lastReimbursementSubmissionError;
             intent.updatedAtMs = nowMs;
             changed = true;
+            continue;
+        }
+
+        if (liveProposalHashes.length > 1) {
+            const detail =
+                'Multiple backfilled reimbursement proposals matched this intent; refusing automatic proposal-hash recovery until manual reconciliation.';
+            if (
+                intent.lastReimbursementSubmissionError !== detail ||
+                !intent.reimbursementSubmissionAmbiguous
+            ) {
+                if (!Number.isInteger(intent.reimbursementSubmittedAtMs)) {
+                    intent.reimbursementSubmittedAtMs = nowMs;
+                }
+                markAmbiguousReimbursementSubmission(intent, detail, nowMs);
+                changed = true;
+            }
             continue;
         }
 
@@ -2395,7 +2838,10 @@ async function refreshDepositSubmissionStatus({ publicClient, latestBlock, polic
                 latestBlock,
             }),
         onRevertedReceipt: (intent, { nowMs }) =>
-            reduceDepositSubmissionRevertedReceipt(intent, { nowMs }),
+            reduceDepositSubmissionRevertedReceipt(intent, {
+                nowMs,
+                retryDelayMs: policy.archiveRetryDelayMs,
+            }),
         onReceiptUnavailableAfterTimeout: (intent, { nowMs, error }) => {
             const detail = error?.message ?? String(error);
             return reduceDepositSubmissionReceiptTimeout(intent, { detail, nowMs });
@@ -2425,7 +2871,10 @@ async function refreshProposalSubmissionStatus({ publicClient, policy }) {
             return result.changed;
         },
         onRevertedReceipt: (intent, { nowMs }) => {
-            const changed = reduceReimbursementSubmissionRevertedReceipt(intent, { nowMs });
+            const changed = reduceReimbursementSubmissionRevertedReceipt(intent, {
+                nowMs,
+                retryDelayMs: policy.archiveRetryDelayMs,
+            });
             if (pendingProposalSubmission?.intentKey === intent.intentKey) {
                 pendingProposalSubmission = null;
             }
@@ -2624,6 +3073,7 @@ async function enrichSignals(
     });
     await hydrateTradeIntentState();
     const policy = await resolveEffectivePolicy(config);
+    const runtimeChainId = await resolveRuntimeChainId({ publicClient, config });
     const effectiveNowMs = parseOptionalPositiveInteger(nowMs) ?? Date.now();
     const commitmentSafe = config?.commitmentSafe ?? null;
     const agentAddress = account?.address ?? null;
@@ -2649,6 +3099,7 @@ async function enrichSignals(
             policy,
             commitmentSafe,
             agentAddress,
+            runtimeChainId,
             nowMs: effectiveNowMs,
         });
         if (!interpreted.ok || emitted.has(interpreted.intent.intentKey)) {
@@ -2691,9 +3142,32 @@ async function getDeterministicToolCalls({
             `polymarket-intent-trader may only be served by authorized agent ${policy.authorizedAgent}.`
         );
     }
+    const runtimeChainId = await resolveRuntimeChainId({ publicClient, config });
+    assertRuntimeChainIdKnown(runtimeChainId, {
+        signals,
+        hasTrackedWork: getOpenIntents().length > 0,
+    });
 
-    const latestBlock = await publicClient.getBlockNumber();
     const normalizedCommitmentSafe = normalizeAddress(commitmentSafe);
+    let latestBlock;
+    try {
+        latestBlock = await publicClient.getBlockNumber();
+    } catch (error) {
+        let emergencyChanged = ingestSignals(signals, policy);
+        emergencyChanged =
+            acceptSignedTradeIntentSignals(signals, {
+                policy,
+                commitmentSafe: normalizedCommitmentSafe,
+                agentAddress: normalizedAgentAddress,
+                runtimeChainId,
+                actualCollateralBalanceWei: null,
+                config,
+            }) || emergencyChanged;
+        if (emergencyChanged) {
+            await maybePersistTradeIntentState();
+        }
+        throw error;
+    }
     const actualCollateralBalanceWei = await readCollateralBalanceWei({
         publicClient,
         policy,
@@ -2725,6 +3199,20 @@ async function getDeterministicToolCalls({
         })) || changed;
     changed = recoverProposalHashesFromBackfilledCommitments() || changed;
     changed = ingestSignals(signals, policy) || changed;
+    changed =
+        acceptSignedTradeIntentSignals(signals, {
+            policy,
+            commitmentSafe: normalizedCommitmentSafe,
+            agentAddress: normalizedAgentAddress,
+            runtimeChainId,
+            actualCollateralBalanceWei,
+            config,
+        }) || changed;
+
+    if (changed) {
+        await maybePersistTradeIntentState();
+        changed = false;
+    }
 
     const clobAuthAddress = getClobAuthAddress({
         config,
@@ -2798,49 +3286,6 @@ async function getDeterministicToolCalls({
         }) || changed;
     changed = applyProposalEventUpdate({}) || changed;
 
-    for (const signal of Array.isArray(signals) ? signals : []) {
-        const interpreted = interpretSignedTradeIntentSignal(signal, {
-            policy,
-            commitmentSafe: normalizedCommitmentSafe,
-            agentAddress: normalizedAgentAddress,
-            nowMs: Date.now(),
-        });
-        if (!interpreted.ok) {
-            continue;
-        }
-
-        if (tradeIntentState.intents[interpreted.intent.intentKey]) {
-            continue;
-        }
-
-        const availableCreditWei = getAvailableCreditWeiForAddress(
-            tradeIntentState,
-            interpreted.intent.signer
-        );
-        if (availableCreditWei < BigInt(interpreted.intent.reservedCreditAmountWei)) {
-            console.warn(
-                `[agent] Ignoring signed Polymarket trade intent ${interpreted.intent.intentKey}: insufficient deposited collateral credit for signer ${interpreted.intent.signer} (availableWei=${availableCreditWei.toString()} requiredWei=${interpreted.intent.reservedCreditAmountWei}).`
-            );
-            continue;
-        }
-        if (!config?.ipfsEnabled) {
-            throw new Error(
-                'polymarket-intent-trader requires ipfsEnabled=true in module config to archive signed trade intents before execution.'
-            );
-        }
-
-        tradeIntentState.intents[interpreted.intent.intentKey] = {
-            ...interpreted.intent,
-            sequence: allocateSequence(),
-            creditReservedAtMs: Date.now(),
-            updatedAtMs: Date.now(),
-        };
-        console.log(
-            `[agent] Accepted signed Polymarket trade intent ${interpreted.intent.intentKey}: outcome=${interpreted.intent.outcome} maxSpendWei=${interpreted.intent.maxSpendWei} maxPrice=${interpreted.intent.maxPrice}.`
-        );
-        changed = true;
-    }
-
     if (changed) {
         await maybePersistTradeIntentState();
     }
@@ -2909,7 +3354,23 @@ async function getDeterministicToolCalls({
             if (!reimbursementRecipientAddress) {
                 throw new Error('Unable to resolve reimbursement recipient address.');
             }
-            const reimbursementAmountWei = BigInt(intent.reimbursementAmountWei ?? 0);
+            const reimbursementAmountWei = parseNonNegativeBigIntOrZero(
+                intent.reimbursementAmountWei
+            );
+            if (actualCollateralBalanceWei === null) {
+                const detail =
+                    'Unable to confirm actual Safe collateral headroom; refusing to submit a reimbursement proposal until the Safe collateral balance can be read.';
+                if (
+                    intent.lastReimbursementCreditError !== detail ||
+                    !Number.isInteger(intent.reimbursementCreditBlockedAtMs)
+                ) {
+                    intent.lastReimbursementCreditError = detail;
+                    intent.reimbursementCreditBlockedAtMs = Date.now();
+                    intent.updatedAtMs = Date.now();
+                    await maybePersistTradeIntentState();
+                }
+                continue;
+            }
             const reimbursementHeadroomWei = getEffectiveReimbursementHeadroomWei(
                 intent,
                 actualCollateralBalanceWei
@@ -2967,7 +3428,9 @@ async function getDeterministicToolCalls({
             continue;
         }
 
-        const requiredReservationWei = BigInt(intent.reservedCreditAmountWei ?? 0);
+        const requiredReservationWei = parseNonNegativeBigIntOrZero(
+            intent.reservedCreditAmountWei
+        );
         const actualReservationHeadroomWei = getEffectiveOrderReservationHeadroomWei(
             intent,
             actualCollateralBalanceWei
@@ -3057,6 +3520,7 @@ async function getDeterministicToolCalls({
         intent.feeRateBps = feeRateBps;
         intent.feeRateFetchedAtMs = Date.now();
         intent.tradingWalletAddress = clobAuthAddress ?? normalizedAgentAddress;
+        intent.orderDispatchBlockNumber = latestBlock.toString();
         intent.preOrderTokenHolderAddress = tokenHolderAddress ?? null;
         intent.preOrderTokenBalance =
             preOrderTokenBalance === null ? null : preOrderTokenBalance.toString();

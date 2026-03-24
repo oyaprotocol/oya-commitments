@@ -15,6 +15,43 @@ function hasFilledSharesReady(intent) {
     }
 }
 
+function blocksGlobalOrderPlanning(intent, orderFields) {
+    if (Boolean(intent?.[orderFields.dispatchAt])) {
+        return true;
+    }
+    if (
+        Boolean(intent?.[orderFields.externalId]) &&
+        !intent?.orderFilled &&
+        !intent?.tokenDeposited
+    ) {
+        return true;
+    }
+    if (!Boolean(intent?.[orderFields.submittedAt])) {
+        return false;
+    }
+    if (intent?.orderFilled || intent?.tokenDeposited) {
+        return false;
+    }
+    return !Number.isInteger(intent?.orderStatusRefreshFailedAtMs);
+}
+
+function blocksGlobalTxStagePlanning(intent, fields, isComplete) {
+    if (!intent || isComplete(intent)) {
+        return false;
+    }
+    if (
+        !Boolean(intent?.[fields.dispatchAt]) &&
+        !Boolean(intent?.[fields.submittedAt]) &&
+        !Boolean(intent?.[fields.txHash])
+    ) {
+        return false;
+    }
+    if (fields.ambiguous && Boolean(intent?.[fields.ambiguous])) {
+        return false;
+    }
+    return true;
+}
+
 export function hasActiveExecution({
     openIntents,
     pendingOrderSubmission = null,
@@ -28,20 +65,19 @@ export function hasActiveExecution({
         Boolean(pendingDepositSubmission?.intentKey) ||
         openIntents.some(
             (intent) =>
-                Boolean(intent[orderFields.dispatchAt]) ||
-                Boolean(intent[orderFields.submittedAt]) ||
-                (Boolean(intent[orderFields.externalId]) &&
-                    !intent.orderFilled &&
-                    !intent.tokenDeposited) ||
-                ((Boolean(intent[depositFields.dispatchAt]) ||
-                    Boolean(intent[depositFields.submittedAt]) ||
-                    Boolean(intent[depositFields.txHash])) &&
-                    !intent.tokenDeposited) ||
-                ((Boolean(intent[reimbursementFields.dispatchAt]) ||
-                    Boolean(intent[reimbursementFields.submittedAt]) ||
-                    Boolean(intent[reimbursementFields.txHash])) &&
-                    !intent.reimbursementProposalHash &&
-                    !intent.reimbursedAtMs)
+                blocksGlobalOrderPlanning(intent, orderFields) ||
+                blocksGlobalTxStagePlanning(
+                    intent,
+                    depositFields,
+                    (candidate) => Boolean(candidate?.tokenDeposited)
+                ) ||
+                blocksGlobalTxStagePlanning(
+                    intent,
+                    reimbursementFields,
+                    (candidate) =>
+                        Boolean(candidate?.reimbursementProposalHash) ||
+                        Boolean(candidate?.reimbursedAtMs)
+                )
         )
     );
 }

@@ -96,6 +96,7 @@ export function reduceOrderToolOutput(
         intent.nextOrderAttemptAtMs = nowMs + retryDelayMs;
         if (sideEffectsLikelyCommitted) {
             intent.orderSubmittedAtMs = nowMs;
+            intent.orderStatusRefreshFailedAtMs = nowMs;
             delete intent.nextOrderAttemptAtMs;
         }
         intent.updatedAtMs = nowMs;
@@ -109,6 +110,7 @@ export function reduceOrderToolOutput(
         intent.lastOrderSubmissionError =
             'Polymarket order submission returned submitted without an order id; refusing automatic retry until reconciled.';
         intent.orderSubmittedAtMs = nowMs;
+        intent.orderStatusRefreshFailedAtMs = nowMs;
         delete intent.nextOrderAttemptAtMs;
         intent.updatedAtMs = nowMs;
         return { changed: true };
@@ -132,6 +134,15 @@ export function reduceDepositToolOutput(
     const status = getParsedToolOutputStatus(parsedOutput);
     if (status === 'confirmed' || status === 'submitted') {
         const txHash = normalizeHash(parsedOutput?.transactionHash);
+        if (status === 'submitted' && !txHash) {
+            intent.lastDepositStatus = 'missing_tx_hash';
+            intent.lastDepositError =
+                'ERC1155 deposit returned submitted without a transaction hash; refusing automatic retry until reconciled.';
+            intent.depositSubmittedAtMs = nowMs;
+            delete intent.nextDepositAttemptAtMs;
+            markStageAmbiguity(intent, 'deposit', intent.lastDepositError, nowMs);
+            return { changed: true };
+        }
         intent.depositTxHash = txHash;
         intent.depositSubmittedAtMs = nowMs;
         delete intent.lastDepositStatus;
@@ -267,11 +278,19 @@ export function reduceDepositSubmissionConfirmedReceipt(
     return true;
 }
 
-export function reduceDepositSubmissionRevertedReceipt(intent, { nowMs = Date.now() } = {}) {
+export function reduceDepositSubmissionRevertedReceipt(
+    intent,
+    { nowMs = Date.now(), retryDelayMs = null } = {}
+) {
     delete intent.depositTxHash;
     delete intent.depositSubmittedAtMs;
     clearStageDispatchStarted(intent, 'deposit');
     clearStageAmbiguity(intent, 'deposit');
+    intent.lastDepositStatus = 'reverted';
+    intent.lastDepositError = 'ERC1155 deposit transaction reverted onchain.';
+    if (Number.isInteger(retryDelayMs) && retryDelayMs > 0) {
+        intent.nextDepositAttemptAtMs = nowMs + retryDelayMs;
+    }
     intent.updatedAtMs = nowMs;
     return true;
 }
@@ -336,8 +355,16 @@ export function reduceReimbursementSubmissionConfirmedReceipt(
     return { changed: true, recoveredProposalHash: null };
 }
 
-export function reduceReimbursementSubmissionRevertedReceipt(intent, { nowMs = Date.now() } = {}) {
+export function reduceReimbursementSubmissionRevertedReceipt(
+    intent,
+    { nowMs = Date.now(), retryDelayMs = null } = {}
+) {
     clearStageSubmissionTracking(intent, 'reimbursement');
+    intent.lastReimbursementSubmissionStatus = 'reverted';
+    intent.lastReimbursementSubmissionError = 'Reimbursement proposal transaction reverted onchain.';
+    if (Number.isInteger(retryDelayMs) && retryDelayMs > 0) {
+        intent.nextReimbursementAttemptAtMs = nowMs + retryDelayMs;
+    }
     intent.updatedAtMs = nowMs;
     return true;
 }
