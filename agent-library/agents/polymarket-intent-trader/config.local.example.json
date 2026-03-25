@@ -1,0 +1,45 @@
+{
+  "proposeEnabled": true,
+  "polymarketClobEnabled": true,
+  "ipfsEnabled": true,
+  "byChain": {
+    "137": {
+      "commitmentSafe": "0xYourCommitmentSafe",
+      "ogModule": "0xYourOptimisticGovernorModule",
+      "startBlock": 0,
+      "watchAssets": [
+        "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+      ],
+      "watchErc1155Assets": [
+        {
+          "token": "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
+          "tokenId": "0",
+          "symbol": "YES"
+        },
+        {
+          "token": "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
+          "tokenId": "0",
+          "symbol": "NO"
+        }
+      ]
+    }
+  },
+  "polymarketIntentTrader": {
+    "authorizedAgent": "0x2967C076182F0303037072670e744e26Ed4A830f",
+    "marketId": "0xYourPolymarketConditionId",
+    "minimumTickSize": "0.01",
+    "yesTokenId": "0",
+    "noTokenId": "0",
+    "ctfContract": "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
+    "signedCommands": [
+      "buy",
+      "trade",
+      "intent",
+      "polymarket_buy",
+      "polymarket_trade",
+      "polymarket_intent"
+    ],
+    "archiveRetryDelayMs": 30000,
+    "pendingTxTimeoutMs": 900000
+  }
+}
