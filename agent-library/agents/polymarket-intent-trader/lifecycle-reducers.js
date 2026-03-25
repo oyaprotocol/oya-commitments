@@ -134,10 +134,10 @@ export function reduceDepositToolOutput(
     const status = getParsedToolOutputStatus(parsedOutput);
     if (status === 'confirmed' || status === 'submitted') {
         const txHash = normalizeHash(parsedOutput?.transactionHash);
-        if (status === 'submitted' && !txHash) {
+        if (!txHash) {
             intent.lastDepositStatus = 'missing_tx_hash';
             intent.lastDepositError =
-                'ERC1155 deposit returned submitted without a transaction hash; refusing automatic retry until reconciled.';
+                `ERC1155 deposit returned ${status} without a transaction hash; refusing automatic retry until reconciled.`;
             intent.depositSubmittedAtMs = nowMs;
             delete intent.nextDepositAttemptAtMs;
             markStageAmbiguity(intent, 'deposit', intent.lastDepositError, nowMs);
