@@ -3,6 +3,7 @@
 ## Documentation Hierarchy
 - Keep contribution guidance in both human docs and machine-readable instructions.
 - `AGENTS.md`: normative instructions for coding agents and automation.
+- `PLANS.md`: requirements for long-running execution plans ("ExecPlans") that agents should use for complex work.
 - `README.md`: architecture, intent, and operational context for humans.
 - `CONTRIBUTING.md`: shared contributor workflow and policy across the repo.
 - `skills/add-agent-commitment/SKILL.md`: reusable workflow for adding new agent/commitment combos.
@@ -10,6 +11,19 @@
 1. Closest file to the changed code path wins.
 2. `AGENTS.md` is authoritative for agent behavior.
 3. Root-level files apply unless overridden by a closer area-level file.
+
+## ExecPlans
+- For complex features, significant refactors, migrations, multi-hour debugging sessions, or work expected to require substantial research and iteration, use an ExecPlan from design through implementation.
+- An ExecPlan is a living, self-contained Markdown document that lets a stateless agent or a new contributor resume the work from the plan alone.
+- Read `PLANS.md` before creating, updating, or executing an ExecPlan.
+- Create an ExecPlan when any of the following are true:
+1. The task is likely to take more than one focused session.
+2. The task spans multiple subsystems, contracts, agents, or deployment surfaces.
+3. The task has meaningful technical uncertainty that should be researched or prototyped before full implementation.
+4. The user explicitly asks for a plan, longer autonomous execution, or end-to-end iteration until completion.
+- When executing from an ExecPlan, continue milestone by milestone without asking the user for routine "next steps". Stop only for true blockers, missing secrets/access, or decisions that would cause irreversible risk.
+- Keep the ExecPlan current as work proceeds. At every meaningful stopping point, update progress, discoveries, decisions, validation status, and remaining work before yielding control.
+- For repository-wide or cross-cutting work, keep the ExecPlan in a clearly named Markdown file at the repo root or in a dedicated `plans/` subdirectory. For tightly scoped work, place it near the affected area when that improves locality.
 
 ## Project Structure & Module Organization
 - **`src/`**: Core Solidity contracts (e.g., `Counter.sol`). Keep new modules grouped by domain and include SPDX + pragma headers.

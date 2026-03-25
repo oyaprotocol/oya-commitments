@@ -1,0 +1,3685 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+    decodeEventLog,
+    erc20Abi,
+    erc1155Abi,
+    getAddress,
+    isAddressEqual,
+    parseAbiItem,
+    parseUnits,
+} from 'viem';
+import { buildSignedMessagePayload } from '../../../agent/src/lib/message-signing.js';
+import {
+    transactionsProposedEvent,
+} from '../../../agent/src/lib/og.js';
+import { getLogsChunked } from '../../../agent/src/lib/chain-history.js';
+import { getAlwaysEmitBalanceSnapshotPollingOptions } from '../../../agent/src/lib/polling.js';
+import {
+    DEFAULT_COLLATERAL_TOKEN,
+} from '../../../agent/src/lib/polymarket.js';
+import { resolveRelayerProxyWallet } from '../../../agent/src/lib/polymarket-relayer.js';
+import { buildOgTransactions } from '../../../agent/src/lib/tx.js';
+import {
+    decodeErc20TransferCallData,
+    normalizeAddressOrNull,
+    normalizeHashOrNull,
+    normalizeTokenId,
+} from '../../../agent/src/lib/utils.js';
+import {
+    buildCollateralCreditSummary,
+    buildCreditSnapshot,
+    createDepositRecord,
+    getAvailableCreditWeiForAddress,
+    getDepositedCreditWeiForAddress,
+    getReservedCreditWeiForAddress,
+    getTotalReservedCreditWei,
+} from './credit-ledger.js';
+import {
+    backfillDeposits,
+    backfillReimbursementCommitments,
+} from './history-backfill.js';
+import {
+    clearStageAmbiguity,
+    clearStageDispatchStarted,
+    clearStageSubmissionTracking,
+    getLifecycleStageFields,
+    markStageAmbiguity,
+    markStageDispatchStarted,
+    noteStageTimeoutAmbiguity,
+} from './lifecycle-stage.js';
+import {
+    reduceArchiveToolOutput,
+    reduceDepositSubmissionConfirmedReceipt,
+    reduceDepositSubmissionMissingTxTimeout,
+    reduceDepositSubmissionReceiptTimeout,
+    reduceDepositSubmissionRevertedReceipt,
+    reduceDepositToolOutput,
+    reduceOrderToolOutput,
+    reduceReimbursementSubmissionConfirmedReceipt,
+    reduceReimbursementSubmissionMissingTxTimeout,
+    reduceReimbursementSubmissionReceiptTimeout,
+    reduceReimbursementSubmissionRevertedReceipt,
+    reduceReimbursementToolOutput,
+} from './lifecycle-reducers.js';
+import { planNextActionCandidates } from './planner.js';
+import {
+    extractOrderIdFromSubmission,
+    extractOrderStatusFromSubmission,
+    fetchClobFeeRateBps,
+    getClobAuthAddress,
+    refreshPolicyMarketConstraints,
+    refreshOrderStatus,
+} from './polymarket-reconciliation.js';
+import {
+    cloneJson,
+    createEmptyTradeIntentState,
+    deletePersistedTradeIntentState,
+    readPersistedTradeIntentState,
+    writePersistedTradeIntentState,
+} from './state-store.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const STATE_VERSION = 4;
+const ARTIFACT_VERSION = 'oya-polymarket-signed-intent-archive-v1';
+const FILENAME_PREFIX = 'signed-trade-intent-';
+const FILENAME_SUFFIX = '.json';
+const PRICE_SCALE = 1_000_000n;
+const USDC_DECIMALS = 6;
+const SHARE_DECIMALS = 6;
+const DEFAULT_ARCHIVE_RETRY_DELAY_MS = 30_000;
+const DEFAULT_PENDING_TX_TIMEOUT_MS = 900_000;
+const PENDING_ORDER_DISPATCH_GRACE_MS = 30_000;
+const PENDING_DEPOSIT_DISPATCH_GRACE_MS = 30_000;
+const PENDING_PROPOSAL_DISPATCH_GRACE_MS = 30_000;
+const DEFAULT_LOG_CHUNK_SIZE = 5_000n;
+const DEFAULT_SIGNED_COMMANDS = [
+    'buy',
+    'trade',
+    'intent',
+    'polymarket_buy',
+    'polymarket_trade',
+    'polymarket_intent',
+];
+const erc1155TransferSingleEvent = parseAbiItem(
+    'event TransferSingle(address indexed operator, address indexed from, address indexed to, uint256 id, uint256 value)'
+);
+const erc1155TransferBatchEvent = parseAbiItem(
+    'event TransferBatch(address indexed operator, address indexed from, address indexed to, uint256[] ids, uint256[] values)'
+);
+
+const tradeIntentState = createEmptyTradeIntentState();
+
+let tradeIntentStateHydrated = false;
+let statePathOverride = null;
+let runtimeStatePath = null;
+let runtimeStateNamespaceKey = null;
+let runtimeStateScope = null;
+let pendingArtifactPublish = null;
+let pendingOrderSubmission = null;
+let pendingDepositSubmission = null;
+let pendingProposalSubmission = null;
+let depositBackfillStatusLogged = false;
+let reimbursementBackfillStatusLogged = false;
+const queuedProposalEventUpdates = [];
+
+function markStateDirty() {
+    // State writes are infrequent and the runtime is single-threaded enough for direct writes.
+}
+
+async function resolveEffectivePolicy(config = {}) {
+    const policy = resolvePolicy(config);
+    if (!policy.ready) {
+        return policy;
+    }
+    return refreshPolicyMarketConstraints({ policy, config });
+}
+
+function resetInMemoryState({ hydrated = false, preserveQueuedProposalEventUpdates = false } = {}) {
+    const emptyState = createEmptyTradeIntentState();
+    tradeIntentState.nextSequence = emptyState.nextSequence;
+    tradeIntentState.intents = emptyState.intents;
+    tradeIntentState.deposits = emptyState.deposits;
+    tradeIntentState.reimbursementCommitments = emptyState.reimbursementCommitments;
+    tradeIntentState.pendingExecutedProposalHashes = emptyState.pendingExecutedProposalHashes;
+    tradeIntentState.pendingDeletedProposalHashes = emptyState.pendingDeletedProposalHashes;
+    tradeIntentState.backfilledDepositsThroughBlock = emptyState.backfilledDepositsThroughBlock;
+    tradeIntentState.backfilledReimbursementCommitmentsThroughBlock =
+        emptyState.backfilledReimbursementCommitmentsThroughBlock;
+    tradeIntentStateHydrated = hydrated;
+    pendingArtifactPublish = null;
+    pendingOrderSubmission = null;
+    pendingDepositSubmission = null;
+    pendingProposalSubmission = null;
+    depositBackfillStatusLogged = false;
+    reimbursementBackfillStatusLogged = false;
+    if (!preserveQueuedProposalEventUpdates) {
+        queuedProposalEventUpdates.length = 0;
+    }
+}
+
+function sanitizeStatePathSegment(value) {
+    const sanitized = String(value)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    return sanitized || 'default';
+}
+
+function getStatePath() {
+    if (typeof statePathOverride === 'string' && statePathOverride.trim()) {
+        return path.resolve(statePathOverride.trim());
+    }
+    if (typeof runtimeStatePath === 'string' && runtimeStatePath.trim()) {
+        return runtimeStatePath;
+    }
+    return path.join(__dirname, '.trade-intent-state.json');
+}
+
+async function resolveRuntimeChainId({ publicClient, config }) {
+    if (typeof publicClient?.getChainId === 'function') {
+        try {
+            return String(await publicClient.getChainId());
+        } catch (error) {
+            // Fall back to config.chainId below.
+        }
+    }
+
+    const configuredChainId = parseOptionalPositiveInteger(config?.chainId);
+    return configuredChainId ? String(configuredChainId) : 'unknown';
+}
+
+function buildRuntimeStateScope({ chainId, commitmentSafe, config }) {
+    const policy = resolvePolicy(config);
+    return {
+        chainId: chainId ? String(chainId) : 'unknown',
+        commitmentSafe: commitmentSafe ? normalizeAddress(commitmentSafe) : null,
+        policyName: normalizeNonEmptyString(config?.policyName)?.toLowerCase() ?? null,
+        authorizedAgent: policy.authorizedAgent ?? null,
+        marketId: normalizeNonEmptyString(policy.marketId)?.toLowerCase() ?? null,
+        yesTokenId: policy.yesTokenId ?? null,
+        noTokenId: policy.noTokenId ?? null,
+        collateralToken: policy.collateralToken ?? null,
+        ogModule: policy.ogModule ?? null,
+        ctfContract: policy.ctfContract ?? null,
+    };
+}
+
+function normalizeRuntimeStateScope(scope) {
+    if (!scope || typeof scope !== 'object' || Array.isArray(scope)) {
+        return null;
+    }
+    return {
+        chainId: normalizeNonEmptyString(scope.chainId) ?? 'unknown',
+        commitmentSafe: normalizeAddressOrNull(scope.commitmentSafe),
+        policyName: normalizeNonEmptyString(scope.policyName)?.toLowerCase() ?? null,
+        authorizedAgent: normalizeAddressOrNull(scope.authorizedAgent),
+        marketId: normalizeNonEmptyString(scope.marketId)?.toLowerCase() ?? null,
+        yesTokenId: normalizeTokenId(scope.yesTokenId),
+        noTokenId: normalizeTokenId(scope.noTokenId),
+        collateralToken: normalizeAddressOrNull(scope.collateralToken),
+        ogModule: normalizeAddressOrNull(scope.ogModule),
+        ctfContract: normalizeAddressOrNull(scope.ctfContract),
+    };
+}
+
+function runtimeStateScopesMatch(left, right) {
+    const normalizedLeft = normalizeRuntimeStateScope(left);
+    const normalizedRight = normalizeRuntimeStateScope(right);
+    if (!normalizedLeft || !normalizedRight) {
+        return normalizedLeft === normalizedRight;
+    }
+    return JSON.stringify(normalizedLeft) === JSON.stringify(normalizedRight);
+}
+
+async function configureRuntimeStateContext({ publicClient, commitmentSafe, config }) {
+    const nextChainId = await resolveRuntimeChainId({ publicClient, config });
+    const nextStateScope = buildRuntimeStateScope({
+        chainId: nextChainId,
+        commitmentSafe: commitmentSafe ?? config?.commitmentSafe,
+        config,
+    });
+    const scopeChanged = !runtimeStateScopesMatch(runtimeStateScope, nextStateScope);
+
+    if (typeof statePathOverride === 'string' && statePathOverride.trim()) {
+        runtimeStateScope = nextStateScope;
+        if (scopeChanged && tradeIntentStateHydrated) {
+            resetInMemoryState({ preserveQueuedProposalEventUpdates: true });
+        }
+        return;
+    }
+
+    const normalizedSafe = normalizeAddress(commitmentSafe ?? config?.commitmentSafe);
+    const chainId = nextChainId;
+
+    const namespaceKey = `chain-${chainId}-safe-${normalizedSafe.toLowerCase()}`;
+    const agentConfig = config?.agentConfig ?? {};
+    const configuredStatePath =
+        typeof agentConfig.statePath === 'string' && agentConfig.statePath.trim()
+            ? path.resolve(agentConfig.statePath.trim())
+            : null;
+    const configuredStateDir =
+        typeof agentConfig.stateDir === 'string' && agentConfig.stateDir.trim()
+            ? path.resolve(agentConfig.stateDir.trim())
+            : __dirname;
+    const nextStatePath =
+        configuredStatePath ??
+        path.join(
+            configuredStateDir,
+            `.trade-intent-state-${sanitizeStatePathSegment(namespaceKey)}.json`
+        );
+
+    if (runtimeStateNamespaceKey === namespaceKey && runtimeStatePath === nextStatePath) {
+        runtimeStateScope = nextStateScope;
+        if (scopeChanged && tradeIntentStateHydrated) {
+            resetInMemoryState({ preserveQueuedProposalEventUpdates: true });
+        }
+        return;
+    }
+
+    const preserveQueuedProposalEventUpdates =
+        runtimeStateNamespaceKey === null && runtimeStatePath === null;
+    runtimeStateNamespaceKey = namespaceKey;
+    runtimeStatePath = nextStatePath;
+    runtimeStateScope = nextStateScope;
+    resetInMemoryState({ preserveQueuedProposalEventUpdates });
+}
+
+function normalizeAddress(value) {
+    if (typeof value !== 'string' || !value.trim()) {
+        throw new Error('Address must be a non-empty string.');
+    }
+    return getAddress(value.trim()).toLowerCase();
+}
+
+function normalizeHash(value) {
+    return normalizeHashOrNull(value);
+}
+
+function safeAddressEqual(left, right) {
+    const normalizedLeft = normalizeAddressOrNull(left);
+    const normalizedRight = normalizeAddressOrNull(right);
+    return Boolean(normalizedLeft && normalizedRight && isAddressEqual(normalizedLeft, normalizedRight));
+}
+
+function normalizeHashArray(values) {
+    if (!Array.isArray(values)) {
+        return [];
+    }
+    return Array.from(new Set(values.map((value) => normalizeHash(value)).filter(Boolean)));
+}
+
+function normalizeNonEmptyString(value) {
+    if (typeof value !== 'string') return null;
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+}
+
+function parseOptionalPositiveInteger(value) {
+    const normalized = Number(value);
+    if (!Number.isInteger(normalized) || normalized <= 0) {
+        return null;
+    }
+    return normalized;
+}
+
+function normalizeChainIdValue(value) {
+    if (value === null || value === undefined || value === '') {
+        return null;
+    }
+    if (typeof value === 'bigint') {
+        return value > 0n ? value.toString() : null;
+    }
+    const normalized = Number(value);
+    if (!Number.isInteger(normalized) || normalized <= 0) {
+        return null;
+    }
+    return String(normalized);
+}
+
+function hasSignedUserMessageSignal(signals) {
+    return Array.isArray(signals) && signals.some((signal) => isSignedUserMessage(signal));
+}
+
+function assertRuntimeChainIdKnown(runtimeChainId, { signals, hasTrackedWork = false } = {}) {
+    const requiresKnownChainId = hasSignedUserMessageSignal(signals) || hasTrackedWork === true;
+    if (!requiresKnownChainId) {
+        return;
+    }
+    if (normalizeChainIdValue(runtimeChainId)) {
+        return;
+    }
+    const error = new Error(
+        'Unable to determine runtime chain id from RPC or config; refusing to process signed Polymarket intents until chain identity is known.'
+    );
+    error.name = 'RpcChainIdUnavailableError';
+    throw error;
+}
+
+function parseOptionalNonNegativeIntegerString(value) {
+    if (value === null || value === undefined || value === '') {
+        return null;
+    }
+
+    try {
+        const normalized = BigInt(String(value));
+        if (normalized < 0n) {
+            return null;
+        }
+        return normalized.toString();
+    } catch (error) {
+        return null;
+    }
+}
+
+function parseNonNegativeBigIntOrZero(value) {
+    const normalized = parseOptionalNonNegativeIntegerString(value);
+    return normalized === null ? 0n : BigInt(normalized);
+}
+
+function normalizeWhitespace(value) {
+    return String(value ?? '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function normalizeDecimalText(value) {
+    const normalized = String(value ?? '')
+        .replace(/,/g, '')
+        .trim();
+    if (!/^(?:\d+(?:\.\d+)?|\.\d+)$/.test(normalized)) {
+        return null;
+    }
+    const [wholeRaw, fractionRaw = ''] = normalized.split('.');
+    const whole = wholeRaw.replace(/^0+(?=\d)/, '') || '0';
+    const fraction = fractionRaw.replace(/0+$/, '');
+    return fraction.length > 0 ? `${whole}.${fraction}` : whole;
+}
+
+function formatScaledDecimal(value, decimals) {
+    const normalized = BigInt(value);
+    const negative = normalized < 0n;
+    const absolute = negative ? -normalized : normalized;
+    const scale = 10n ** BigInt(decimals);
+    const whole = absolute / scale;
+    const fraction = (absolute % scale).toString().padStart(decimals, '0').replace(/0+$/, '');
+    const sign = negative ? '-' : '';
+    return fraction.length > 0 ? `${sign}${whole}.${fraction}` : `${sign}${whole}`;
+}
+
+function computeCeilDiv(numerator, denominator) {
+    const normalizedNumerator = BigInt(numerator);
+    const normalizedDenominator = BigInt(denominator);
+    if (normalizedDenominator <= 0n) {
+        throw new Error('denominator must be > 0.');
+    }
+    return (normalizedNumerator + normalizedDenominator - 1n) / normalizedDenominator;
+}
+
+function normalizeTradePrice(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0 || parsed >= 1) {
+        return null;
+    }
+    return parsed;
+}
+
+function isReceiptUnavailableError(error) {
+    const name = String(error?.name ?? '');
+    if (
+        name.includes('TransactionReceiptNotFoundError') ||
+        name.includes('TransactionNotFoundError')
+    ) {
+        return true;
+    }
+
+    const message = String(error?.shortMessage ?? error?.message ?? '').toLowerCase();
+    return message.includes('transaction receipt') && message.includes('not found');
+}
+
+function hasTimedOut(submittedAtMs, timeoutMs, nowMs = Date.now()) {
+    const normalizedSubmittedAtMs = Number(submittedAtMs ?? 0);
+    if (!Number.isFinite(normalizedSubmittedAtMs) || normalizedSubmittedAtMs <= 0) {
+        return false;
+    }
+    return nowMs - normalizedSubmittedAtMs >= timeoutMs;
+}
+
+function clearStalePendingDepositSubmission(nowMs = Date.now()) {
+    if (
+        !pendingDepositSubmission?.intentKey ||
+        !hasTimedOut(
+            pendingDepositSubmission.startedAtMs,
+            PENDING_DEPOSIT_DISPATCH_GRACE_MS,
+            nowMs
+        )
+    ) {
+        return false;
+    }
+    pendingDepositSubmission = null;
+    return true;
+}
+
+function clearStalePendingOrderSubmission(nowMs = Date.now()) {
+    if (
+        !pendingOrderSubmission?.intentKey ||
+        !hasTimedOut(
+            pendingOrderSubmission.startedAtMs,
+            PENDING_ORDER_DISPATCH_GRACE_MS,
+            nowMs
+        )
+    ) {
+        return false;
+    }
+    pendingOrderSubmission = null;
+    return true;
+}
+
+function clearStalePendingProposalSubmission(nowMs = Date.now()) {
+    if (
+        !pendingProposalSubmission?.intentKey ||
+        !hasTimedOut(
+            pendingProposalSubmission.startedAtMs,
+            PENDING_PROPOSAL_DISPATCH_GRACE_MS,
+            nowMs
+        )
+    ) {
+        return false;
+    }
+    pendingProposalSubmission = null;
+    return true;
+}
+
+function reconcileDurableDispatchState(nowMs = Date.now()) {
+    let changed = false;
+    const orderFields = getLifecycleStageFields('order');
+    const depositFields = getLifecycleStageFields('deposit');
+    const reimbursementFields = getLifecycleStageFields('reimbursement');
+
+    for (const intent of getOpenIntents()) {
+        if (
+            Number.isInteger(intent[orderFields.dispatchAt]) &&
+            !intent[orderFields.externalId] &&
+            !intent[orderFields.submittedAt] &&
+            hasTimedOut(intent[orderFields.dispatchAt], PENDING_ORDER_DISPATCH_GRACE_MS, nowMs)
+        ) {
+            intent[orderFields.submittedAt] = intent[orderFields.dispatchAt];
+            intent[orderFields.status] = intent[orderFields.status] ?? 'dispatch_pending';
+            intent[orderFields.error] =
+                intent[orderFields.error] ??
+                'Polymarket order tool output was lost after dispatch; treating submission as ambiguous and refusing automatic retry.';
+            delete intent[orderFields.backoffAt];
+            clearStageDispatchStarted(intent, 'order');
+            intent.updatedAtMs = nowMs;
+            changed = true;
+        }
+
+        if (
+            Number.isInteger(intent[depositFields.dispatchAt]) &&
+            !intent[depositFields.txHash] &&
+            !intent[depositFields.submittedAt] &&
+            hasTimedOut(intent[depositFields.dispatchAt], PENDING_DEPOSIT_DISPATCH_GRACE_MS, nowMs)
+        ) {
+            intent[depositFields.submittedAt] = intent[depositFields.dispatchAt];
+            delete intent[depositFields.backoffAt];
+            clearStageDispatchStarted(intent, 'deposit');
+            markStageAmbiguity(
+                intent,
+                'deposit',
+                'ERC1155 deposit tool output was lost after dispatch; treating submission as ambiguous and refusing automatic retry.',
+                nowMs
+            );
+            changed = true;
+        }
+
+        if (
+            Number.isInteger(intent[reimbursementFields.dispatchAt]) &&
+            !intent.reimbursementProposalHash &&
+            !intent[reimbursementFields.txHash] &&
+            !intent[reimbursementFields.submittedAt] &&
+            hasTimedOut(intent[reimbursementFields.dispatchAt], PENDING_PROPOSAL_DISPATCH_GRACE_MS, nowMs)
+        ) {
+            intent[reimbursementFields.submittedAt] = intent[reimbursementFields.dispatchAt];
+            intent.lastReimbursementSubmissionStatus =
+                intent.lastReimbursementSubmissionStatus ?? 'dispatch_pending';
+            clearStageDispatchStarted(intent, 'reimbursement');
+            markStageAmbiguity(
+                intent,
+                'reimbursement',
+                'Reimbursement proposal tool output was lost after dispatch; treating submission as ambiguous and refusing automatic retry.',
+                nowMs
+            );
+            changed = true;
+        }
+    }
+
+    return changed;
+}
+
+async function readOutcomeTokenBalance({
+    publicClient,
+    policy,
+    tokenHolderAddress,
+    tokenId,
+}) {
+    if (!publicClient || !policy?.ctfContract || !tokenHolderAddress || tokenId === undefined || tokenId === null) {
+        return null;
+    }
+
+    const balance = await publicClient.readContract({
+        address: policy.ctfContract,
+        abi: erc1155Abi,
+        functionName: 'balanceOf',
+        args: [tokenHolderAddress, BigInt(tokenId)],
+    });
+    return BigInt(balance);
+}
+
+async function readCollateralBalanceWei({
+    publicClient,
+    policy,
+    commitmentSafe,
+}) {
+    if (!publicClient || !policy?.collateralToken || !commitmentSafe) {
+        return null;
+    }
+
+    try {
+        const balance = await publicClient.readContract({
+            address: policy.collateralToken,
+            abi: erc20Abi,
+            functionName: 'balanceOf',
+            args: [commitmentSafe],
+        });
+        return BigInt(balance);
+    } catch (error) {
+        console.warn(
+            `[agent] Failed to read Safe collateral balance for ${commitmentSafe}: ${error?.message ?? error}`
+        );
+        return null;
+    }
+}
+
+function getEffectiveOrderReservationHeadroomWei(intent, actualCollateralBalanceWei) {
+    if (actualCollateralBalanceWei === null || actualCollateralBalanceWei === undefined) {
+        return null;
+    }
+
+    const normalizedActualCollateralBalanceWei = BigInt(actualCollateralBalanceWei);
+    const ownReservedWei = parseNonNegativeBigIntOrZero(intent?.reservedCreditAmountWei);
+    const totalReservedWei = getTotalReservedCreditWei(tradeIntentState);
+    const otherReservedWei =
+        totalReservedWei > ownReservedWei ? totalReservedWei - ownReservedWei : 0n;
+    if (normalizedActualCollateralBalanceWei <= otherReservedWei) {
+        return 0n;
+    }
+    return normalizedActualCollateralBalanceWei - otherReservedWei;
+}
+
+async function observeFilledTokenInventoryDelta({
+    publicClient,
+    policy,
+    tokenHolderAddress,
+    intent,
+}) {
+    const normalizedHolder = normalizeAddressOrNull(
+        tokenHolderAddress ?? intent?.preOrderTokenHolderAddress ?? null
+    );
+    const preOrderTokenBalance = parseOptionalNonNegativeIntegerString(intent?.preOrderTokenBalance);
+    if (!normalizedHolder || !preOrderTokenBalance) {
+        return null;
+    }
+    if (hasConcurrentTokenSettlementDependency({ intent, tokenHolderAddress: normalizedHolder })) {
+        return null;
+    }
+
+    const currentBalance = await readOutcomeTokenBalance({
+        publicClient,
+        policy,
+        tokenHolderAddress: normalizedHolder,
+        tokenId: intent.tokenId,
+    });
+    if (currentBalance === null) {
+        return null;
+    }
+
+    const observedDelta = currentBalance - BigInt(preOrderTokenBalance);
+    return observedDelta > 0n ? observedDelta.toString() : null;
+}
+
+function getExpectedDepositSourceAddress(intent) {
+    return normalizeAddressOrNull(
+        intent?.depositSourceAddress ??
+            intent?.preOrderTokenHolderAddress ??
+            intent?.tradingWalletAddress ??
+            intent?.reimbursementRecipientAddress ??
+            null
+    );
+}
+
+function getExpectedDepositAmount(intent) {
+    return parseOptionalNonNegativeIntegerString(
+        intent?.depositExpectedAmount ?? intent?.filledShareAmount ?? null
+    );
+}
+
+function getRecoveredDepositSearchFromBlock(intent) {
+    return parseOptionalNonNegativeIntegerString(
+        intent?.depositDispatchBlockNumber ?? intent?.orderDispatchBlockNumber ?? null
+    );
+}
+
+function buildRecoveredDepositMatchKey({
+    tokenId,
+    amount,
+    from,
+}) {
+    const normalizedTokenId = normalizeTokenId(tokenId);
+    const normalizedAmount = parseOptionalNonNegativeIntegerString(amount);
+    const normalizedFrom = normalizeAddressOrNull(from);
+    if (!normalizedTokenId || !normalizedAmount || !normalizedFrom) {
+        return null;
+    }
+    return `${normalizedFrom}:${normalizedTokenId}:${normalizedAmount}`;
+}
+
+function getRecoveredDepositIntentMatchKey(intent) {
+    return buildRecoveredDepositMatchKey({
+        tokenId: intent?.tokenId,
+        amount: getExpectedDepositAmount(intent),
+        from: getExpectedDepositSourceAddress(intent),
+    });
+}
+
+function getRecoveredDepositEvidenceMatchKey(evidence) {
+    return buildRecoveredDepositMatchKey({
+        tokenId: evidence?.tokenId,
+        amount: evidence?.amount,
+        from: evidence?.from,
+    });
+}
+
+function compareRecoveredDepositIntentPriority(left, right) {
+    const leftDispatchBlock = BigInt(getRecoveredDepositSearchFromBlock(left) ?? 0);
+    const rightDispatchBlock = BigInt(getRecoveredDepositSearchFromBlock(right) ?? 0);
+    if (leftDispatchBlock !== rightDispatchBlock) {
+        return leftDispatchBlock < rightDispatchBlock ? -1 : 1;
+    }
+
+    const leftSequence = Number(left?.sequence ?? 0);
+    const rightSequence = Number(right?.sequence ?? 0);
+    if (leftSequence !== rightSequence) {
+        return leftSequence - rightSequence;
+    }
+
+    return String(left?.intentKey ?? '').localeCompare(String(right?.intentKey ?? ''));
+}
+
+function isIntentAwaitingRecoveredDeposit(intent) {
+    return (
+        !intent?.tokenDeposited &&
+        intent?.orderFilled === true &&
+        Boolean(getExpectedDepositSourceAddress(intent)) &&
+        Boolean(getExpectedDepositAmount(intent)) &&
+        Boolean(getRecoveredDepositSearchFromBlock(intent)) &&
+        (Number.isInteger(intent?.depositSubmittedAtMs) ||
+            Number.isInteger(intent?.depositDispatchAtMs) ||
+            (!intent?.depositTxHash && !intent?.closedAtMs && !intent?.creditReleasedAtMs))
+    );
+}
+
+function buildRecoveredDepositEvidenceKey({
+    transactionHash,
+    logIndex,
+    tokenId,
+    batchIndex = null,
+    signalId = null,
+    blockNumber = null,
+    from = null,
+    amount = null,
+}) {
+    const normalizedTransactionHash = normalizeHash(transactionHash);
+    const normalizedTokenId = normalizeTokenId(tokenId);
+    if (
+        normalizedTransactionHash &&
+        logIndex !== undefined &&
+        logIndex !== null &&
+        normalizedTokenId
+    ) {
+        return `tx:${normalizedTransactionHash}:${String(logIndex)}:${normalizedTokenId}:${batchIndex === null ? 'single' : String(batchIndex)}`;
+    }
+
+    const normalizedSignalId = normalizeNonEmptyString(signalId);
+    if (normalizedSignalId) {
+        return `signal:${normalizedSignalId}`;
+    }
+
+    const normalizedBlockNumber = parseOptionalNonNegativeIntegerString(blockNumber);
+    const normalizedFrom = normalizeAddressOrNull(from);
+    const normalizedAmount = parseOptionalNonNegativeIntegerString(amount);
+    if (normalizedBlockNumber && normalizedFrom && normalizedTokenId && normalizedAmount) {
+        return `fallback:${normalizedBlockNumber}:${normalizedFrom}:${normalizedTokenId}:${normalizedAmount}:${batchIndex === null ? 'single' : String(batchIndex)}`;
+    }
+
+    return null;
+}
+
+function buildRecoveredDepositEvidence({
+    tokenId,
+    amount,
+    from,
+    blockNumber,
+    transactionHash,
+    logIndex,
+    batchIndex = null,
+    signalId = null,
+    source,
+}) {
+    const evidenceKey = buildRecoveredDepositEvidenceKey({
+        transactionHash,
+        logIndex,
+        tokenId,
+        batchIndex,
+        signalId,
+        blockNumber,
+        from,
+        amount,
+    });
+    const normalizedTokenId = normalizeTokenId(tokenId);
+    const normalizedAmount = parseOptionalNonNegativeIntegerString(amount);
+    const normalizedFrom = normalizeAddressOrNull(from);
+    if (!evidenceKey || !normalizedTokenId || !normalizedAmount || !normalizedFrom) {
+        return null;
+    }
+
+    return {
+        evidenceKey,
+        source,
+        tokenId: normalizedTokenId,
+        amount: normalizedAmount,
+        from: normalizedFrom,
+        blockNumber:
+            blockNumber !== undefined && blockNumber !== null ? BigInt(blockNumber).toString() : null,
+        transactionHash: normalizeHash(transactionHash),
+        logIndex:
+            logIndex === undefined || logIndex === null ? null : String(logIndex),
+        batchIndex:
+            batchIndex === undefined || batchIndex === null ? null : String(batchIndex),
+    };
+}
+
+function getRecoveredDepositStrongIdentityKey(evidence) {
+    const transactionHash = normalizeHash(evidence?.transactionHash);
+    const normalizedTokenId = normalizeTokenId(evidence?.tokenId);
+    if (
+        !transactionHash ||
+        evidence?.logIndex === undefined ||
+        evidence?.logIndex === null ||
+        !normalizedTokenId
+    ) {
+        return null;
+    }
+    return `tx:${transactionHash}:${String(evidence.logIndex)}:${normalizedTokenId}:${evidence?.batchIndex === undefined || evidence?.batchIndex === null ? 'single' : String(evidence.batchIndex)}`;
+}
+
+function getRecoveredDepositWeakIdentityKey(evidence) {
+    const blockNumber = parseOptionalNonNegativeIntegerString(evidence?.blockNumber);
+    const normalizedFrom = normalizeAddressOrNull(evidence?.from);
+    const normalizedTokenId = normalizeTokenId(evidence?.tokenId);
+    const normalizedAmount = parseOptionalNonNegativeIntegerString(evidence?.amount);
+    if (!blockNumber || !normalizedFrom || !normalizedTokenId || !normalizedAmount) {
+        return null;
+    }
+    return `weak:${blockNumber}:${normalizedFrom}:${normalizedTokenId}:${normalizedAmount}:${evidence?.batchIndex === undefined || evidence?.batchIndex === null ? 'single' : String(evidence.batchIndex)}`;
+}
+
+function dedupeRecoveredDepositEvidence(evidenceList) {
+    const deduped = [];
+    const occupiedWeakIdentityKeys = new Set();
+
+    for (const evidence of Array.isArray(evidenceList) ? evidenceList : []) {
+        const strongIdentityKey = getRecoveredDepositStrongIdentityKey(evidence);
+        if (!strongIdentityKey) {
+            continue;
+        }
+        const weakIdentityKey = getRecoveredDepositWeakIdentityKey(evidence);
+        if (weakIdentityKey) {
+            occupiedWeakIdentityKeys.add(weakIdentityKey);
+        }
+    }
+
+    const emittedStrongIdentityKeys = new Set();
+    for (const evidence of Array.isArray(evidenceList) ? evidenceList : []) {
+        const strongIdentityKey = getRecoveredDepositStrongIdentityKey(evidence);
+        if (strongIdentityKey) {
+            if (emittedStrongIdentityKeys.has(strongIdentityKey)) {
+                continue;
+            }
+            emittedStrongIdentityKeys.add(strongIdentityKey);
+            deduped.push(evidence);
+            continue;
+        }
+        const weakIdentityKey = getRecoveredDepositWeakIdentityKey(evidence);
+        const fallbackIdentityKey = weakIdentityKey ?? evidence?.evidenceKey ?? null;
+        if (!fallbackIdentityKey || occupiedWeakIdentityKeys.has(fallbackIdentityKey)) {
+            continue;
+        }
+        occupiedWeakIdentityKeys.add(fallbackIdentityKey);
+        deduped.push(evidence);
+    }
+
+    return deduped;
+}
+
+function buildRecoveredDepositEvidenceFromSignal({ signal, policy }) {
+    if (signal?.kind !== 'erc1155Deposit') {
+        return null;
+    }
+    const signalToken = normalizeAddressOrNull(signal?.token ?? signal?.asset ?? null);
+    if (!signalToken || !policy?.ctfContract || signalToken !== policy.ctfContract) {
+        return null;
+    }
+
+    return buildRecoveredDepositEvidence({
+        tokenId: signal?.tokenId,
+        amount: signal?.amount,
+        from: signal?.from,
+        blockNumber: signal?.blockNumber,
+        transactionHash: signal?.transactionHash,
+        logIndex: signal?.logIndex,
+        batchIndex: signal?.batchIndex ?? null,
+        signalId: signal?.id ?? null,
+        source: 'signal',
+    });
+}
+
+function buildRecoveredDepositEvidenceFromSingleLog(log) {
+    return buildRecoveredDepositEvidence({
+        tokenId: log?.args?.id,
+        amount: log?.args?.value,
+        from: log?.args?.from,
+        blockNumber: log?.blockNumber,
+        transactionHash: log?.transactionHash,
+        logIndex: log?.logIndex,
+        source: 'log',
+    });
+}
+
+function buildRecoveredDepositEvidenceFromBatchLog(log) {
+    const ids = Array.isArray(log?.args?.ids) ? log.args.ids : [];
+    const values = Array.isArray(log?.args?.values) ? log.args.values : [];
+    const evidence = [];
+    for (let index = 0; index < ids.length; index += 1) {
+        const amount = values[index];
+        if (amount === undefined) {
+            continue;
+        }
+        const entry = buildRecoveredDepositEvidence({
+            tokenId: ids[index],
+            amount,
+            from: log?.args?.from,
+            blockNumber: log?.blockNumber,
+            transactionHash: log?.transactionHash,
+            logIndex: log?.logIndex,
+            batchIndex: index,
+            source: 'log',
+        });
+        if (entry) {
+            evidence.push(entry);
+        }
+    }
+    return evidence;
+}
+
+function compareRecoveredDepositEvidence(left, right) {
+    const leftBlock = BigInt(left?.blockNumber ?? 0n);
+    const rightBlock = BigInt(right?.blockNumber ?? 0n);
+    if (leftBlock !== rightBlock) {
+        return leftBlock < rightBlock ? -1 : 1;
+    }
+    const leftLogIndex = BigInt(left?.logIndex ?? 0);
+    const rightLogIndex = BigInt(right?.logIndex ?? 0);
+    if (leftLogIndex !== rightLogIndex) {
+        return leftLogIndex < rightLogIndex ? -1 : 1;
+    }
+    const leftBatchIndex = BigInt(left?.batchIndex ?? 0);
+    const rightBatchIndex = BigInt(right?.batchIndex ?? 0);
+    if (leftBatchIndex !== rightBatchIndex) {
+        return leftBatchIndex < rightBatchIndex ? -1 : 1;
+    }
+    return String(left?.evidenceKey ?? '').localeCompare(String(right?.evidenceKey ?? ''));
+}
+
+function matchesRecoveredDepositEvidence({ evidence, intent }) {
+    const expectedTokenId = normalizeTokenId(intent?.tokenId);
+    const expectedAmount = getExpectedDepositAmount(intent);
+    const expectedSourceAddress = getExpectedDepositSourceAddress(intent);
+    if (!expectedTokenId || !expectedAmount || !expectedSourceAddress) {
+        return false;
+    }
+    if (
+        evidence?.tokenId !== expectedTokenId ||
+        evidence?.amount !== expectedAmount ||
+        evidence?.from !== expectedSourceAddress
+    ) {
+        return false;
+    }
+
+    const dispatchBlockNumber = getRecoveredDepositSearchFromBlock(intent);
+    const evidenceBlockNumber = parseOptionalNonNegativeIntegerString(evidence?.blockNumber);
+    if (dispatchBlockNumber && evidenceBlockNumber && BigInt(evidenceBlockNumber) < BigInt(dispatchBlockNumber)) {
+        return false;
+    }
+
+    return true;
+}
+
+function collectRecoveredDepositSignalEvidence({ signals, policy }) {
+    const evidenceByKey = new Map();
+    for (const signal of Array.isArray(signals) ? signals : []) {
+        const evidence = buildRecoveredDepositEvidenceFromSignal({ signal, policy });
+        if (!evidence || evidenceByKey.has(evidence.evidenceKey)) {
+            continue;
+        }
+        evidenceByKey.set(evidence.evidenceKey, evidence);
+    }
+    return evidenceByKey;
+}
+
+async function collectRecoveredDepositLogEvidence({
+    publicClient,
+    policy,
+    commitmentSafe,
+    latestBlock,
+    intents,
+}) {
+    const evidenceByKey = new Map();
+    if (!publicClient || !policy?.ctfContract || !commitmentSafe) {
+        return evidenceByKey;
+    }
+
+    const normalizedCommitmentSafe = normalizeAddress(commitmentSafe);
+    const normalizedLatestBlock = BigInt(latestBlock);
+    const queryGroups = new Map();
+    for (const intent of Array.isArray(intents) ? intents : []) {
+        const depositSourceAddress = getExpectedDepositSourceAddress(intent);
+        const fromBlock = getRecoveredDepositSearchFromBlock(intent);
+        if (!depositSourceAddress || !fromBlock) {
+            continue;
+        }
+
+        const existing = queryGroups.get(depositSourceAddress);
+        const normalizedFromBlock = BigInt(fromBlock);
+        if (!existing || normalizedFromBlock < existing.fromBlock) {
+            queryGroups.set(depositSourceAddress, {
+                from: depositSourceAddress,
+                fromBlock: normalizedFromBlock,
+            });
+        }
+    }
+
+    for (const group of queryGroups.values()) {
+        if (group.fromBlock > normalizedLatestBlock) {
+            continue;
+        }
+
+        try {
+            const [singleLogs, batchLogs] = await Promise.all([
+                getLogsChunked({
+                    publicClient,
+                    address: policy.ctfContract,
+                    event: erc1155TransferSingleEvent,
+                    args: {
+                        from: group.from,
+                        to: normalizedCommitmentSafe,
+                    },
+                    fromBlock: group.fromBlock,
+                    toBlock: normalizedLatestBlock,
+                    chunkSize: policy.logChunkSize,
+                }),
+                getLogsChunked({
+                    publicClient,
+                    address: policy.ctfContract,
+                    event: erc1155TransferBatchEvent,
+                    args: {
+                        from: group.from,
+                        to: normalizedCommitmentSafe,
+                    },
+                    fromBlock: group.fromBlock,
+                    toBlock: normalizedLatestBlock,
+                    chunkSize: policy.logChunkSize,
+                }),
+            ]);
+
+            for (const log of singleLogs) {
+                const evidence = buildRecoveredDepositEvidenceFromSingleLog(log);
+                if (evidence && !evidenceByKey.has(evidence.evidenceKey)) {
+                    evidenceByKey.set(evidence.evidenceKey, evidence);
+                }
+            }
+
+            for (const log of batchLogs) {
+                for (const evidence of buildRecoveredDepositEvidenceFromBatchLog(log)) {
+                    if (!evidenceByKey.has(evidence.evidenceKey)) {
+                        evidenceByKey.set(evidence.evidenceKey, evidence);
+                    }
+                }
+            }
+        } catch (error) {
+            console.warn(
+                `[agent] Failed to scan ERC1155 deposit recovery logs for ${group.from}: ${error?.message ?? error}`
+            );
+        }
+    }
+
+    return evidenceByKey;
+}
+
+function markRecoveredDepositTransfer(intent, recovered, nowMs = Date.now()) {
+    const transactionHash = normalizeHash(recovered?.transactionHash);
+    if (transactionHash) {
+        intent.depositTxHash = transactionHash;
+    }
+    if (recovered?.blockNumber !== undefined && recovered?.blockNumber !== null) {
+        intent.depositBlockNumber = BigInt(recovered.blockNumber).toString();
+    }
+    if (!Number.isInteger(intent.depositSubmittedAtMs)) {
+        intent.depositSubmittedAtMs = intent.depositDispatchAtMs ?? nowMs;
+    }
+    intent.tokenDeposited = true;
+    intent.tokenDepositedAtMs = nowMs;
+    clearStageDispatchStarted(intent, 'deposit');
+    clearStageAmbiguity(intent, 'deposit');
+    intent.updatedAtMs = nowMs;
+}
+
+async function reconcileRecoveredDepositSubmissions({
+    signals,
+    publicClient,
+    commitmentSafe,
+    latestBlock,
+    policy,
+}) {
+    let changed = false;
+    const nowMs = Date.now();
+    const candidateIntents = getOpenIntents().filter((intent) =>
+        isIntentAwaitingRecoveredDeposit(intent)
+    );
+    if (candidateIntents.length === 0) {
+        return false;
+    }
+
+    const evidenceByKey = collectRecoveredDepositSignalEvidence({
+        signals,
+        policy,
+    });
+    const recoveredLogEvidence = await collectRecoveredDepositLogEvidence({
+        publicClient,
+        policy,
+        commitmentSafe,
+        latestBlock,
+        intents: candidateIntents,
+    });
+    for (const [evidenceKey, evidence] of recoveredLogEvidence.entries()) {
+        if (!evidenceByKey.has(evidenceKey)) {
+            evidenceByKey.set(evidenceKey, evidence);
+        }
+    }
+
+    const sortedEvidence = dedupeRecoveredDepositEvidence(
+        Array.from(evidenceByKey.values()).sort(compareRecoveredDepositEvidence)
+    );
+    const evidenceByMatchKey = new Map();
+    for (const evidence of sortedEvidence) {
+        const matchKey = getRecoveredDepositEvidenceMatchKey(evidence);
+        if (!matchKey) {
+            continue;
+        }
+        const existing = evidenceByMatchKey.get(matchKey) ?? [];
+        existing.push(evidence);
+        evidenceByMatchKey.set(matchKey, existing);
+    }
+
+    const intentsByMatchKey = new Map();
+    for (const intent of candidateIntents) {
+        const matchKey = getRecoveredDepositIntentMatchKey(intent);
+        if (!matchKey) {
+            continue;
+        }
+        const existing = intentsByMatchKey.get(matchKey) ?? [];
+        existing.push(intent);
+        intentsByMatchKey.set(matchKey, existing);
+    }
+
+    for (const [matchKey, intents] of intentsByMatchKey.entries()) {
+        const matchingEvidence = evidenceByMatchKey.get(matchKey) ?? [];
+        if (matchingEvidence.length < intents.length) {
+            continue;
+        }
+
+        const sortedIntents = [...intents].sort(compareRecoveredDepositIntentPriority);
+        const matchedPairs = [];
+        let evidenceIndex = 0;
+        for (const intent of sortedIntents) {
+            while (evidenceIndex < matchingEvidence.length) {
+                const evidence = matchingEvidence[evidenceIndex];
+                evidenceIndex += 1;
+                if (!matchesRecoveredDepositEvidence({ evidence, intent })) {
+                    continue;
+                }
+                matchedPairs.push({ intent, evidence });
+                break;
+            }
+        }
+
+        if (matchedPairs.length !== sortedIntents.length) {
+            continue;
+        }
+
+        for (const { intent, evidence } of matchedPairs) {
+            markRecoveredDepositTransfer(intent, evidence, nowMs);
+            changed = true;
+        }
+    }
+
+    return changed;
+}
+
+function hasConcurrentTokenSettlementDependency({ intent, tokenHolderAddress }) {
+    const normalizedHolder = normalizeAddressOrNull(
+        tokenHolderAddress ?? intent?.preOrderTokenHolderAddress ?? null
+    );
+    if (!normalizedHolder) {
+        return true;
+    }
+
+    return getOpenIntents().some((otherIntent) => {
+        if (!otherIntent || otherIntent.intentKey === intent?.intentKey) {
+            return false;
+        }
+        if (otherIntent.tokenDeposited || otherIntent.closedAtMs || otherIntent.creditReleasedAtMs) {
+            return false;
+        }
+        if (normalizeTokenId(otherIntent.tokenId) !== normalizeTokenId(intent?.tokenId)) {
+            return false;
+        }
+        const otherHolder = normalizeAddressOrNull(
+            otherIntent.preOrderTokenHolderAddress ??
+                otherIntent.tradingWalletAddress ??
+                otherIntent.reimbursementRecipientAddress ??
+                null
+        );
+        return otherHolder === normalizedHolder;
+    });
+}
+
+function clearDepositSubmissionAmbiguity(intent) {
+    clearStageAmbiguity(intent, 'deposit');
+}
+
+function markAmbiguousDepositSubmission(intent, detail, nowMs = Date.now()) {
+    markStageAmbiguity(intent, 'deposit', detail, nowMs);
+}
+
+function clearReimbursementSubmissionAmbiguity(intent) {
+    clearStageAmbiguity(intent, 'reimbursement');
+}
+
+function markAmbiguousReimbursementSubmission(intent, detail, nowMs = Date.now()) {
+    markStageAmbiguity(intent, 'reimbursement', detail, nowMs);
+}
+
+function clearReimbursementSubmissionTracking(intent) {
+    clearStageSubmissionTracking(intent, 'reimbursement');
+}
+
+function setPendingProposalLifecycleHashes({ executed = [], deleted = [] }) {
+    const nextExecuted = normalizeHashArray(executed);
+    const nextDeleted = normalizeHashArray(deleted);
+    const executedChanged =
+        JSON.stringify(tradeIntentState.pendingExecutedProposalHashes) !== JSON.stringify(nextExecuted);
+    const deletedChanged =
+        JSON.stringify(tradeIntentState.pendingDeletedProposalHashes) !== JSON.stringify(nextDeleted);
+    if (!executedChanged && !deletedChanged) {
+        return false;
+    }
+    tradeIntentState.pendingExecutedProposalHashes = nextExecuted;
+    tradeIntentState.pendingDeletedProposalHashes = nextDeleted;
+    markStateDirty();
+    return true;
+}
+
+function getExpectedReimbursementRecipientAddress(intent, fallbackAgentAddress = null) {
+    return normalizeAddressOrNull(
+        intent?.reimbursementRecipientAddress ??
+            intent?.tradingWalletAddress ??
+            fallbackAgentAddress ??
+            null
+    );
+}
+
+function normalizeTransactionOperation(value) {
+    if (value === undefined || value === null || value === '') {
+        return 0;
+    }
+    try {
+        const normalized = Number(value);
+        return Number.isInteger(normalized) && normalized >= 0 ? normalized : null;
+    } catch (error) {
+        return null;
+    }
+}
+
+function matchesReimbursementTransferTransaction({
+    transaction,
+    intent,
+    policy,
+    fallbackAgentAddress = null,
+}) {
+    if (!transaction?.to || !safeAddressEqual(transaction.to, policy.collateralToken)) {
+        return false;
+    }
+    if (normalizeTransactionOperation(transaction.operation) !== 0) {
+        return false;
+    }
+    if (parseOptionalNonNegativeIntegerString(transaction.value ?? 0) !== '0') {
+        return false;
+    }
+
+    const decoded = decodeErc20TransferCallData(transaction.data);
+    if (!decoded) {
+        return false;
+    }
+
+    const recipient = getExpectedReimbursementRecipientAddress(intent, fallbackAgentAddress);
+    const amountWei = parseOptionalNonNegativeIntegerString(intent?.reimbursementAmountWei ?? null);
+    if (!recipient || !amountWei) {
+        return false;
+    }
+
+    return decoded.to === recipient && decoded.amount === BigInt(amountWei);
+}
+
+function matchesReimbursementCommitmentIntent({
+    commitment,
+    intent,
+    fallbackAgentAddress = null,
+}) {
+    const expectedIntentKey = normalizeNonEmptyString(intent?.intentKey);
+    const commitmentIntentKey = normalizeNonEmptyString(commitment?.intentKey);
+    if (!expectedIntentKey || !commitmentIntentKey || commitmentIntentKey !== expectedIntentKey) {
+        return false;
+    }
+
+    const expectedSigner = normalizeAddressOrNull(intent?.signer);
+    const commitmentSigner = normalizeAddressOrNull(commitment?.signer);
+    if (!expectedSigner || !commitmentSigner || commitmentSigner !== expectedSigner) {
+        return false;
+    }
+
+    const expectedRecipient = getExpectedReimbursementRecipientAddress(
+        intent,
+        fallbackAgentAddress
+    );
+    const commitmentRecipient = normalizeAddressOrNull(commitment?.recipientAddress);
+    if (!expectedRecipient || !commitmentRecipient || commitmentRecipient !== expectedRecipient) {
+        return false;
+    }
+
+    const expectedAmountWei = parseOptionalNonNegativeIntegerString(intent?.reimbursementAmountWei);
+    const commitmentAmountWei = parseOptionalNonNegativeIntegerString(commitment?.amountWei);
+    if (!expectedAmountWei || !commitmentAmountWei || commitmentAmountWei !== expectedAmountWei) {
+        return false;
+    }
+
+    return true;
+}
+
+function getClobExecutionPreflightError(config) {
+    if (!config?.polymarketClobEnabled) {
+        return 'polymarketClobEnabled=true is required before placing Polymarket orders.';
+    }
+    if (!config?.proposeEnabled) {
+        return 'proposeEnabled=true is required before placing Polymarket orders, because filled intents must deposit outcome tokens and submit reimbursement proposals onchain.';
+    }
+    if (
+        !config?.polymarketClobApiKey ||
+        !config?.polymarketClobApiSecret ||
+        !config?.polymarketClobApiPassphrase
+    ) {
+        return 'Missing CLOB credentials. Set POLYMARKET_CLOB_API_KEY, POLYMARKET_CLOB_API_SECRET, and POLYMARKET_CLOB_API_PASSPHRASE.';
+    }
+    return null;
+}
+
+function sortIntentRecords(records) {
+    return [...records].sort((left, right) => {
+        const leftSequence = Number(left?.sequence ?? 0);
+        const rightSequence = Number(right?.sequence ?? 0);
+        if (leftSequence !== rightSequence) {
+            return leftSequence - rightSequence;
+        }
+        return String(left?.intentKey ?? '').localeCompare(String(right?.intentKey ?? ''));
+    });
+}
+
+function getTrackedIntents() {
+    return sortIntentRecords(
+        Object.values(tradeIntentState.intents).filter(
+            (intent) => intent?.sourceKind === 'signed_trade_intent'
+        )
+    );
+}
+
+function getOpenIntents() {
+    return getTrackedIntents().filter(
+        (intent) => !intent?.closedAtMs && !intent?.reimbursedAtMs && !intent?.creditReleasedAtMs
+    );
+}
+
+function getReimbursementHeadroomWei(intent) {
+    if (!intent?.signer) {
+        return 0n;
+    }
+    const depositedWei = getDepositedCreditWeiForAddress(tradeIntentState, intent.signer);
+    const reservedWei = getReservedCreditWeiForAddress(tradeIntentState, intent.signer);
+    const ownReservedWei = parseNonNegativeBigIntOrZero(intent.reservedCreditAmountWei);
+    const otherReservedWei = reservedWei > ownReservedWei ? reservedWei - ownReservedWei : 0n;
+    return depositedWei - otherReservedWei;
+}
+
+function getEffectiveReimbursementHeadroomWei(intent, actualCollateralBalanceWei = null) {
+    const modeledHeadroomWei = getReimbursementHeadroomWei(intent);
+    if (actualCollateralBalanceWei === null || actualCollateralBalanceWei === undefined) {
+        return modeledHeadroomWei;
+    }
+
+    const normalizedActualCollateralBalanceWei = BigInt(actualCollateralBalanceWei);
+    const ownReservedWei = parseNonNegativeBigIntOrZero(intent?.reservedCreditAmountWei);
+    const totalReservedWei = getTotalReservedCreditWei(tradeIntentState);
+    const otherReservedWei =
+        totalReservedWei > ownReservedWei ? totalReservedWei - ownReservedWei : 0n;
+    const actualHeadroomWei =
+        normalizedActualCollateralBalanceWei > otherReservedWei
+            ? normalizedActualCollateralBalanceWei - otherReservedWei
+            : 0n;
+    return actualHeadroomWei < modeledHeadroomWei ? actualHeadroomWei : modeledHeadroomWei;
+}
+
+function allocateSequence() {
+    const nextSequence = Number(tradeIntentState.nextSequence ?? 1);
+    tradeIntentState.nextSequence = nextSequence + 1;
+    markStateDirty();
+    return nextSequence;
+}
+
+async function hydrateTradeIntentState() {
+    if (tradeIntentStateHydrated) return;
+    tradeIntentStateHydrated = true;
+    try {
+        const parsed = await readPersistedTradeIntentState(getStatePath());
+        if (!parsed) {
+            return;
+        }
+        const persistedScope = normalizeRuntimeStateScope(parsed.scope);
+        if (persistedScope && runtimeStateScope && !runtimeStateScopesMatch(persistedScope, runtimeStateScope)) {
+            resetInMemoryState({ hydrated: true, preserveQueuedProposalEventUpdates: true });
+            throw new Error(
+                `Persisted polymarket-intent-trader state scope ${JSON.stringify(persistedScope)} does not match runtime scope ${JSON.stringify(runtimeStateScope)}.`
+            );
+        }
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            tradeIntentState.nextSequence =
+                Number.isInteger(parsed.nextSequence) && parsed.nextSequence > 0
+                    ? parsed.nextSequence
+                    : 1;
+            tradeIntentState.intents =
+                parsed.intents && typeof parsed.intents === 'object' && !Array.isArray(parsed.intents)
+                    ? parsed.intents
+                    : {};
+            tradeIntentState.deposits =
+                parsed.deposits &&
+                typeof parsed.deposits === 'object' &&
+                !Array.isArray(parsed.deposits)
+                    ? parsed.deposits
+                    : {};
+            tradeIntentState.reimbursementCommitments =
+                parsed.reimbursementCommitments &&
+                typeof parsed.reimbursementCommitments === 'object' &&
+                !Array.isArray(parsed.reimbursementCommitments)
+                    ? parsed.reimbursementCommitments
+                    : {};
+            tradeIntentState.pendingExecutedProposalHashes = normalizeHashArray(
+                parsed.pendingExecutedProposalHashes
+            );
+            tradeIntentState.pendingDeletedProposalHashes = normalizeHashArray(
+                parsed.pendingDeletedProposalHashes
+            );
+            tradeIntentState.backfilledDepositsThroughBlock =
+                typeof parsed.backfilledDepositsThroughBlock === 'string' &&
+                parsed.backfilledDepositsThroughBlock.trim()
+                    ? parsed.backfilledDepositsThroughBlock.trim()
+                    : null;
+            tradeIntentState.backfilledReimbursementCommitmentsThroughBlock =
+                typeof parsed.backfilledReimbursementCommitmentsThroughBlock === 'string' &&
+                parsed.backfilledReimbursementCommitmentsThroughBlock.trim()
+                    ? parsed.backfilledReimbursementCommitmentsThroughBlock.trim()
+                    : null;
+        }
+    } catch (error) {
+        resetInMemoryState({ hydrated: true, preserveQueuedProposalEventUpdates: true });
+        throw new Error(
+            `Failed to hydrate polymarket-intent-trader state from ${getStatePath()}: ${error?.message ?? error}`
+        );
+    }
+}
+
+async function persistTradeIntentState() {
+    await writePersistedTradeIntentState(getStatePath(), {
+        version: STATE_VERSION,
+        scope: runtimeStateScope,
+        nextSequence: tradeIntentState.nextSequence,
+        intents: tradeIntentState.intents,
+        deposits: tradeIntentState.deposits,
+        reimbursementCommitments: tradeIntentState.reimbursementCommitments,
+        pendingExecutedProposalHashes: tradeIntentState.pendingExecutedProposalHashes,
+        pendingDeletedProposalHashes: tradeIntentState.pendingDeletedProposalHashes,
+        backfilledDepositsThroughBlock: tradeIntentState.backfilledDepositsThroughBlock,
+        backfilledReimbursementCommitmentsThroughBlock:
+            tradeIntentState.backfilledReimbursementCommitmentsThroughBlock,
+    });
+}
+
+async function maybePersistTradeIntentState() {
+    await persistTradeIntentState();
+}
+
+async function resetTradeIntentState() {
+    resetInMemoryState({ hydrated: true });
+    await deletePersistedTradeIntentState(getStatePath());
+}
+
+function setTradeIntentStatePathForTest(nextPath) {
+    statePathOverride =
+        typeof nextPath === 'string' && nextPath.trim() ? nextPath.trim() : null;
+    runtimeStatePath = null;
+    runtimeStateNamespaceKey = null;
+    runtimeStateScope = null;
+    resetInMemoryState();
+}
+
+function getTradeIntentState() {
+    return cloneJson(tradeIntentState);
+}
+
+async function resolveTokenHolderAddress({ publicClient, config, account }) {
+    const runtimeSignerAddress = normalizeAddressOrNull(account?.address);
+    const fallbackAddress =
+        getClobAuthAddress({
+            config,
+            accountAddress: account?.address,
+        }) ?? runtimeSignerAddress;
+
+    if (!config?.polymarketRelayerEnabled) {
+        return {
+            tokenHolderAddress: runtimeSignerAddress,
+            tokenHolderResolutionError: runtimeSignerAddress
+                ? null
+                : 'Unable to resolve runtime signer address for non-relayer ERC1155 deposits.',
+        };
+    }
+
+    const configuredRelayerAddress = normalizeAddressOrNull(
+        config?.polymarketRelayerFromAddress
+    );
+    if (configuredRelayerAddress) {
+        return {
+            tokenHolderAddress: configuredRelayerAddress,
+            tokenHolderResolutionError: null,
+        };
+    }
+
+    try {
+        const resolved = await resolveRelayerProxyWallet({
+            publicClient,
+            account,
+            config,
+        });
+        const resolvedProxyWallet = normalizeAddressOrNull(resolved?.proxyWallet);
+        if (!resolvedProxyWallet) {
+            return {
+                tokenHolderAddress: null,
+                tokenHolderResolutionError:
+                    'Relayer proxy wallet resolution returned an invalid address.',
+            };
+        }
+        return {
+            tokenHolderAddress: resolvedProxyWallet,
+            tokenHolderResolutionError: null,
+        };
+    } catch (error) {
+        return {
+            tokenHolderAddress: null,
+            tokenHolderResolutionError: error?.message ?? String(error),
+        };
+    }
+}
+
+function resolvePolicy(config = {}) {
+    const candidate =
+        config?.agentConfig?.polymarketIntentTrader ?? config?.polymarketIntentTrader ?? {};
+    const signedCommands =
+        Array.isArray(candidate.signedCommands) && candidate.signedCommands.length > 0
+            ? candidate.signedCommands
+            : DEFAULT_SIGNED_COMMANDS;
+
+    const collateralToken =
+        normalizeAddressOrNull(candidate.collateralToken) ??
+        (Array.isArray(config?.watchAssets) && config.watchAssets.length > 0
+            ? normalizeAddressOrNull(config.watchAssets[0])
+            : normalizeAddressOrNull(DEFAULT_COLLATERAL_TOKEN));
+    const minimumTickSize =
+        normalizePriceToScaled(
+            candidate.minimumTickSize ?? candidate.tickSize ?? candidate.minimum_tick_size,
+            null
+        ) ?? null;
+
+    const policy = {
+        authorizedAgent: normalizeAddressOrNull(
+            candidate.authorizedAgent ?? candidate.agentAddress ?? null
+        ),
+        marketId: normalizeNonEmptyString(candidate.marketId),
+        minimumTickSize: minimumTickSize?.decimal ?? null,
+        minimumTickSizeScaled: minimumTickSize?.scaled ?? null,
+        yesTokenId: normalizeTokenId(candidate.yesTokenId),
+        noTokenId: normalizeTokenId(candidate.noTokenId),
+        collateralToken,
+        ogModule: normalizeAddressOrNull(config?.ogModule),
+        ctfContract:
+            normalizeAddressOrNull(candidate.ctfContract) ??
+            normalizeAddressOrNull(config?.polymarketConditionalTokens),
+        archiveRetryDelayMs:
+            parseOptionalPositiveInteger(candidate.archiveRetryDelayMs) ??
+            DEFAULT_ARCHIVE_RETRY_DELAY_MS,
+        pendingTxTimeoutMs:
+            parseOptionalPositiveInteger(candidate.pendingTxTimeoutMs) ??
+            DEFAULT_PENDING_TX_TIMEOUT_MS,
+        logChunkSize:
+            config?.logChunkSize !== undefined && config?.logChunkSize !== null
+                ? BigInt(config.logChunkSize)
+                : DEFAULT_LOG_CHUNK_SIZE,
+        signedCommands: new Set(
+            signedCommands
+                .map((entry) => normalizeNonEmptyString(entry)?.toLowerCase())
+                .filter(Boolean)
+        ),
+        errors: [],
+    };
+
+    if (!policy.marketId) {
+        policy.errors.push('polymarketIntentTrader.marketId is required.');
+    }
+    if (!policy.minimumTickSizeScaled) {
+        policy.errors.push(
+            'polymarketIntentTrader.minimumTickSize is required (for example 0.01 or 0.001).'
+        );
+    }
+    if (!policy.authorizedAgent) {
+        policy.errors.push('polymarketIntentTrader.authorizedAgent is required.');
+    }
+    if (!policy.yesTokenId) {
+        policy.errors.push('polymarketIntentTrader.yesTokenId is required.');
+    }
+    if (!policy.noTokenId) {
+        policy.errors.push('polymarketIntentTrader.noTokenId is required.');
+    }
+    if (!policy.collateralToken) {
+        policy.errors.push(
+            'polymarketIntentTrader.collateralToken is required or watchAssets[0] must be configured.'
+        );
+    }
+    if (!policy.ctfContract) {
+        policy.errors.push(
+            'polymarketIntentTrader.ctfContract is required or polymarketConditionalTokens must be configured.'
+        );
+    }
+    policy.ready = policy.errors.length === 0;
+    return policy;
+}
+
+function resolveExpiry(signal) {
+    const signedDeadlineMs = parseOptionalPositiveInteger(signal?.deadline);
+    const referenceMs =
+        parseOptionalPositiveInteger(signal?.sender?.signedAtMs) ??
+        parseOptionalPositiveInteger(signal?.receivedAtMs) ??
+        Date.now();
+    const textExpiryMs = resolveTextExpiryMs(signal?.text, { referenceMs });
+
+    if (
+        signedDeadlineMs &&
+        textExpiryMs &&
+        Math.abs(signedDeadlineMs - textExpiryMs) > 999
+    ) {
+        return {
+            expiryMs: null,
+            conflict: true,
+        };
+    }
+
+    return {
+        expiryMs: signedDeadlineMs ?? textExpiryMs ?? null,
+        conflict: false,
+    };
+}
+
+function normalizeUtcLabel(value) {
+    const normalized = normalizeNonEmptyString(value)?.toUpperCase() ?? null;
+    if (!normalized) {
+        return null;
+    }
+    if (normalized === 'UTC' || normalized === 'GMT' || normalized === 'Z') {
+        return 'UTC';
+    }
+    return null;
+}
+
+function parseAbsoluteTextExpiryMs(text) {
+    const normalizedText = normalizeWhitespace(text);
+    if (!normalizedText) {
+        return null;
+    }
+
+    const isoMatch = normalizedText.match(
+        /\b(?:before|by|until|til|expires?(?:\s+at|\s+on)?|expiring(?:\s+at|\s+on)?)\s+(\d{4}-\d{2}-\d{2})[ t](\d{1,2}):(\d{2})(?::(\d{2}))?\s*(utc|gmt|z)\b/i
+    );
+    if (isoMatch) {
+        const [, datePart, hourRaw, minuteRaw, secondRaw, zoneRaw] = isoMatch;
+        if (normalizeUtcLabel(zoneRaw)) {
+            const parsed = Date.parse(
+                `${datePart}T${hourRaw.padStart(2, '0')}:${minuteRaw}:${(secondRaw ?? '00').padStart(2, '0')}Z`
+            );
+            if (Number.isFinite(parsed) && parsed > 0) {
+                return parsed;
+            }
+        }
+    }
+
+    const namedDateMatch = normalizedText.match(
+        /\b(?:before|by|until|til|expires?(?:\s+at|\s+on)?|expiring(?:\s+at|\s+on)?)\s+([A-Za-z]{3,9}\s+\d{1,2},\s*\d{4}\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)\s*(?:utc|gmt))\b/i
+    );
+    if (namedDateMatch) {
+        const candidate = namedDateMatch[1].replace(/\butc\b/i, 'GMT');
+        const parsed = Date.parse(candidate);
+        if (Number.isFinite(parsed) && parsed > 0) {
+            return parsed;
+        }
+    }
+
+    return null;
+}
+
+function parseUtcTimeOnlyExpiryMs(text, { referenceMs }) {
+    const normalizedText = normalizeWhitespace(text);
+    if (!normalizedText) {
+        return null;
+    }
+
+    const timeOnlyMatch = normalizedText.match(
+        /\b(?:before|by|until|til|expires?(?:\s+at)?|expiring(?:\s+at)?)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(utc|gmt|z)\b/i
+    );
+    if (!timeOnlyMatch) {
+        return null;
+    }
+
+    const [, hourRaw, minuteRaw, meridiemRaw, zoneRaw] = timeOnlyMatch;
+    if (!normalizeUtcLabel(zoneRaw)) {
+        return null;
+    }
+
+    const hourValue = Number(hourRaw);
+    const minuteValue = Number(minuteRaw ?? '0');
+    if (
+        !Number.isInteger(hourValue) ||
+        !Number.isInteger(minuteValue) ||
+        minuteValue < 0 ||
+        minuteValue > 59
+    ) {
+        return null;
+    }
+
+    let normalizedHour = hourValue;
+    const meridiem = normalizeNonEmptyString(meridiemRaw)?.toLowerCase() ?? null;
+    if (meridiem) {
+        if (normalizedHour < 1 || normalizedHour > 12) {
+            return null;
+        }
+        if (meridiem === 'pm' && normalizedHour !== 12) {
+            normalizedHour += 12;
+        } else if (meridiem === 'am' && normalizedHour === 12) {
+            normalizedHour = 0;
+        }
+    } else if (normalizedHour < 0 || normalizedHour > 23) {
+        return null;
+    }
+
+    const referenceDate = new Date(referenceMs);
+    return Date.UTC(
+        referenceDate.getUTCFullYear(),
+        referenceDate.getUTCMonth(),
+        referenceDate.getUTCDate(),
+        normalizedHour,
+        minuteValue,
+        0,
+        0
+    );
+}
+
+function resolveTextExpiryMs(text, { referenceMs } = {}) {
+    const absoluteExpiryMs = parseAbsoluteTextExpiryMs(text);
+    if (absoluteExpiryMs) {
+        return absoluteExpiryMs;
+    }
+
+    const normalizedReferenceMs = parseOptionalPositiveInteger(referenceMs) ?? Date.now();
+    return parseUtcTimeOnlyExpiryMs(text, { referenceMs: normalizedReferenceMs });
+}
+
+function containsBuyVerb(text) {
+    return /\b(buy|purchase)\b/i.test(text);
+}
+
+function containsSellVerb(text) {
+    return /\b(sell|short)\b/i.test(text);
+}
+
+function containsNegatedBuyInstruction(text) {
+    return /\b(?:do\s+not|don't|dont|never|not)\s+(?:buy|purchase)\b/i.test(text);
+}
+
+function parseOutcomeFromText(text) {
+    if (containsNegatedBuyInstruction(text)) {
+        return null;
+    }
+
+    const actionMatch = text.match(/\b(?:buy|purchase)\s+(?:the\s+)?(yes|no)\b/i);
+    if (actionMatch?.[1]) {
+        return actionMatch[1].trim().toUpperCase();
+    }
+
+    const outcomes = new Set(
+        Array.from(text.matchAll(/\b(yes|no)\b/gi), (match) => match[1].trim().toUpperCase())
+    );
+    if (outcomes.size === 1) {
+        return Array.from(outcomes)[0];
+    }
+    return null;
+}
+
+function parseMaxSpendFromText(text) {
+    const patterns = [
+        /\bfor\s+up\s+to\s+\$?((?:[\d,]+(?:\.\d+)?|\.\d+))\s*(?:usdc|usd|dollars?)\b/gi,
+        /\bfor\s+up\s+to\s+\$((?:[\d,]+(?:\.\d+)?|\.\d+))\b/gi,
+        /\bup\s+to\s+\$?((?:[\d,]+(?:\.\d+)?|\.\d+))\s*(?:usdc|usd|dollars?)\b/gi,
+        /\bup\s+to\s+\$((?:[\d,]+(?:\.\d+)?|\.\d+))\b/gi,
+        /\b(?:spend|use|risk)\s+up\s+to\s+\$?((?:[\d,]+(?:\.\d+)?|\.\d+))\s*(?:usdc|usd|dollars?)\b/gi,
+        /\b(?:spend|use|risk)\s+up\s+to\s+\$((?:[\d,]+(?:\.\d+)?|\.\d+))\b/gi,
+        /\bmax(?:imum)?\s+(?:spend|cost|notional)?\s*\$?((?:[\d,]+(?:\.\d+)?|\.\d+))\s*(?:usdc|usd|dollars?)\b/gi,
+        /\bmax(?:imum)?\s+(?:spend|cost|notional)?\s*\$((?:[\d,]+(?:\.\d+)?|\.\d+))\b/gi,
+        /\bfor\s+\$?((?:[\d,]+(?:\.\d+)?|\.\d+))\s*(?:usdc|usd|dollars?)\b/gi,
+        /\bfor\s+\$((?:[\d,]+(?:\.\d+)?|\.\d+))\b/gi,
+    ];
+
+    for (const pattern of patterns) {
+        for (const match of text.matchAll(pattern)) {
+            const normalized = normalizeDecimalText(match[1]);
+            if (!normalized) continue;
+            try {
+                const wei = parseUnits(normalized, USDC_DECIMALS);
+                if (wei <= 0n) continue;
+                return {
+                    usdc: normalized,
+                    wei: wei.toString(),
+                };
+            } catch (error) {
+                // Ignore malformed candidates and continue scanning.
+            }
+        }
+    }
+
+    return null;
+}
+
+function normalizePriceToScaled(value, unit) {
+    const normalized = normalizeDecimalText(value);
+    if (!normalized) return null;
+
+    try {
+        const scaled =
+            unit === 'c' || unit === 'cent' || unit === 'cents' || unit === '%'
+                ? parseUnits(normalized, 4)
+                : parseUnits(normalized, 6);
+        if (scaled <= 0n || scaled > PRICE_SCALE) {
+            return null;
+        }
+        return {
+            decimal: formatScaledDecimal(scaled, 6),
+            scaled: scaled.toString(),
+        };
+    } catch (error) {
+        return null;
+    }
+}
+
+function isPriceOnTick({ priceScaled, tickSizeScaled }) {
+    try {
+        const normalizedPriceScaled = BigInt(String(priceScaled));
+        const normalizedTickSizeScaled = BigInt(String(tickSizeScaled));
+        if (normalizedPriceScaled <= 0n || normalizedTickSizeScaled <= 0n) {
+            return false;
+        }
+        return normalizedPriceScaled % normalizedTickSizeScaled === 0n;
+    } catch (error) {
+        return false;
+    }
+}
+
+function parseMaxPriceFromText(text) {
+    const patterns = [
+        /\b(?:price\s*(?:is|<=|=<|<|under|at\s+most|up\s+to)|max(?:imum)?\s+price(?:\s+is)?|at)\s*\$?((?:[\d,]+(?:\.\d+)?|\.\d+))\s*(c|cent|cents|%)\b(?:\s+or\s+(?:better|less|lower))?/gi,
+        /\b(?:price\s*(?:is|<=|=<|<|under|at\s+most|up\s+to)|max(?:imum)?\s+price(?:\s+is)?|at)\s*\$?((?:[\d,]+(?:\.\d+)?|\.\d+))\b(?:\s+or\s+(?:better|less|lower))?/gi,
+    ];
+
+    for (const pattern of patterns) {
+        for (const match of text.matchAll(pattern)) {
+            const normalized = normalizePriceToScaled(match[1], match[2]?.toLowerCase() ?? null);
+            if (normalized) {
+                return normalized;
+            }
+        }
+    }
+
+    return null;
+}
+
+function buildIntentKey({ signer, requestId }) {
+    return `${signer}:${requestId}`;
+}
+
+function encodeRequestIdForFilename(requestId) {
+    return Buffer.from(String(requestId), 'utf8').toString('hex');
+}
+
+function buildArtifactFilename(requestId) {
+    return `${FILENAME_PREFIX}${encodeRequestIdForFilename(requestId)}${FILENAME_SUFFIX}`;
+}
+
+function computeBuyOrderAmounts({ collateralAmountWei, price, tickSizeScaled = null }) {
+    const normalizedCollateralAmountWei = BigInt(collateralAmountWei);
+    if (normalizedCollateralAmountWei <= 0n) {
+        throw new Error('collateralAmountWei must be > 0 for buy-order sizing.');
+    }
+
+    const normalizedPrice = normalizeTradePrice(price);
+    if (!normalizedPrice) {
+        throw new Error('price must be a number between 0 and 1 for buy-order sizing.');
+    }
+
+    const priceScaled = BigInt(Math.round(normalizedPrice * Number(PRICE_SCALE)));
+    if (priceScaled <= 0n) {
+        throw new Error('price is too small for buy-order sizing.');
+    }
+    if (tickSizeScaled !== null && !isPriceOnTick({ priceScaled, tickSizeScaled })) {
+        throw new Error('price does not conform to the configured minimum tick size.');
+    }
+
+    // For BUY orders on Polymarket, makerAmount is the USDC spend and takerAmount is the
+    // minimum number of shares to receive at the signed worst price or better.
+    const takerAmount = computeCeilDiv(
+        normalizedCollateralAmountWei * PRICE_SCALE,
+        priceScaled
+    );
+    if (takerAmount <= 0n) {
+        throw new Error('takerAmount computed to zero; refusing order.');
+    }
+
+    return {
+        makerAmount: normalizedCollateralAmountWei.toString(),
+        takerAmount: takerAmount.toString(),
+        priceScaled: priceScaled.toString(),
+    };
+}
+
+function isSignedUserMessage(signal) {
+    return (
+        signal?.kind === 'userMessage' &&
+        signal?.sender?.authType === 'eip191' &&
+        typeof signal?.sender?.address === 'string' &&
+        typeof signal?.sender?.signature === 'string' &&
+        Number.isInteger(signal?.sender?.signedAtMs) &&
+        typeof signal?.requestId === 'string' &&
+        signal.requestId.trim().length > 0
+    );
+}
+
+function interpretSignedTradeIntentSignal(
+    signal,
+    {
+        policy = resolvePolicy({}),
+        commitmentSafe = null,
+        agentAddress = null,
+        runtimeChainId = null,
+        nowMs = Date.now(),
+    } = {}
+) {
+    if (!policy.ready) {
+        return { ok: false, reason: 'policy_not_ready' };
+    }
+    if (!isSignedUserMessage(signal)) {
+        return { ok: false, reason: 'not_signed_user_message' };
+    }
+
+    let signer;
+    try {
+        signer = normalizeAddress(signal.sender.address);
+    } catch (error) {
+        return { ok: false, reason: 'invalid_signer' };
+    }
+    const signedChainId = normalizeChainIdValue(signal.chainId);
+    if (!signedChainId) {
+        return { ok: false, reason: 'missing_chain_id' };
+    }
+    const normalizedRuntimeChainId = normalizeChainIdValue(runtimeChainId);
+    if (normalizedRuntimeChainId && signedChainId !== normalizedRuntimeChainId) {
+        return { ok: false, reason: 'wrong_chain_id' };
+    }
+    const requestId = signal.requestId.trim();
+    const normalizedCommand = normalizeNonEmptyString(signal.command)?.toLowerCase() ?? '';
+    if (
+        normalizedCommand &&
+        policy.signedCommands.size > 0 &&
+        !policy.signedCommands.has(normalizedCommand)
+    ) {
+        return { ok: false, reason: 'unsupported_command' };
+    }
+
+    const text = normalizeWhitespace(signal.text);
+    if (!text) {
+        return { ok: false, reason: 'missing_text' };
+    }
+    if (!containsBuyVerb(text)) {
+        return { ok: false, reason: 'missing_buy_instruction' };
+    }
+    if (containsSellVerb(text)) {
+        return { ok: false, reason: 'sell_not_supported' };
+    }
+
+    const outcome = parseOutcomeFromText(text);
+    if (!outcome) {
+        return { ok: false, reason: 'missing_or_ambiguous_outcome' };
+    }
+
+    const maxSpend = parseMaxSpendFromText(text);
+    if (!maxSpend) {
+        return { ok: false, reason: 'missing_max_spend' };
+    }
+
+    const maxPrice = parseMaxPriceFromText(text);
+    if (!maxPrice) {
+        return { ok: false, reason: 'missing_max_price' };
+    }
+    if (
+        policy.minimumTickSizeScaled &&
+        !isPriceOnTick({
+            priceScaled: maxPrice.scaled,
+            tickSizeScaled: policy.minimumTickSizeScaled,
+        })
+    ) {
+        return { ok: false, reason: 'invalid_price_tick' };
+    }
+
+    const resolvedExpiry = resolveExpiry(signal);
+    if (resolvedExpiry.conflict) {
+        return { ok: false, reason: 'ambiguous_expiry' };
+    }
+    const expiryMs = resolvedExpiry.expiryMs;
+    if (!expiryMs) {
+        return { ok: false, reason: 'missing_expiry' };
+    }
+    if (nowMs > expiryMs) {
+        return { ok: false, reason: 'expired' };
+    }
+
+    let orderAmounts;
+    try {
+        orderAmounts = computeBuyOrderAmounts({
+            collateralAmountWei: maxSpend.wei,
+            price: maxPrice.decimal,
+            tickSizeScaled: policy.minimumTickSizeScaled ?? null,
+        });
+    } catch (error) {
+        return {
+            ok: false,
+            reason: 'invalid_order_price',
+            detail: error?.message ?? String(error),
+        };
+    }
+    const tokenId = outcome === 'YES' ? policy.yesTokenId : policy.noTokenId;
+    const canonicalMessage = buildSignedMessagePayload({
+        address: signer,
+        chainId: signal.chainId,
+        timestampMs: signal.sender.signedAtMs,
+        text: signal.text,
+        command: signal.command,
+        args: signal.args,
+        metadata: signal.metadata,
+        requestId,
+        deadline: signal.deadline,
+    });
+
+    return {
+        ok: true,
+        intent: {
+            intentKey: buildIntentKey({ signer, requestId }),
+            sourceKind: 'signed_trade_intent',
+            requestId,
+            messageId: signal.messageId ?? null,
+            signer,
+            signature: signal.sender.signature,
+            signedAtMs: signal.sender.signedAtMs,
+            receivedAtMs: signal.receivedAtMs ?? null,
+            chainId: signal.chainId ?? null,
+            deadline: signal.deadline ?? null,
+            expiresAtMs: signal.expiresAtMs ?? null,
+            expiryMs,
+            text,
+            command: signal.command ?? null,
+            args: cloneJson(signal.args ?? null),
+            metadata: cloneJson(signal.metadata ?? null),
+            marketId: policy.marketId,
+            side: 'BUY',
+            outcome,
+            tokenId,
+            maxSpendUsdc: maxSpend.usdc,
+            maxSpendWei: maxSpend.wei,
+            reservedCreditAmountWei: maxSpend.wei,
+            reimbursementAmountWei: null,
+            filledShareAmount: null,
+            maxPrice: maxPrice.decimal,
+            maxPriceScaled: maxPrice.scaled,
+            orderMakerAmount: orderAmounts.makerAmount,
+            orderTakerAmount: orderAmounts.takerAmount,
+            orderPriceScaled: orderAmounts.priceScaled,
+            feeRateBps: null,
+            archiveFilename: buildArtifactFilename(requestId),
+            canonicalMessage,
+            commitmentSafe: commitmentSafe ? normalizeAddress(commitmentSafe) : null,
+            tradingWalletAddress: agentAddress ? normalizeAddress(agentAddress) : null,
+            createdAtMs: nowMs,
+            updatedAtMs: nowMs,
+        },
+    };
+}
+
+async function maybeBackfillDeposits({
+    publicClient,
+    commitmentSafe,
+    latestBlock,
+    policy,
+    config,
+}) {
+    const result = await backfillDeposits({
+        state: tradeIntentState,
+        publicClient,
+        commitmentSafe,
+        latestBlock,
+        policy,
+        config,
+        statusLogged: depositBackfillStatusLogged,
+    });
+    depositBackfillStatusLogged = result.statusLogged;
+    if (result.changed) {
+        markStateDirty();
+    }
+    return result.changed;
+}
+
+function invalidateLegacyReimbursementCommitmentBackfill(policy) {
+    if (!policy?.ogModule) {
+        return false;
+    }
+    const hasLegacyCommitmentRecord = Object.values(
+        tradeIntentState.reimbursementCommitments ?? {}
+    ).some(
+        (commitment) =>
+            commitment?.proposalHash &&
+            !normalizeAddressOrNull(commitment?.recipientAddress ?? null)
+    );
+    if (!hasLegacyCommitmentRecord) {
+        return false;
+    }
+
+    tradeIntentState.reimbursementCommitments = {};
+    tradeIntentState.backfilledReimbursementCommitmentsThroughBlock = null;
+    reimbursementBackfillStatusLogged = false;
+    console.warn(
+        '[agent] Clearing legacy reimbursement commitment backfill cache to rebuild recipient-aware proposal records.'
+    );
+    markStateDirty();
+    return true;
+}
+
+async function maybeBackfillReimbursementCommitments({
+    publicClient,
+    latestBlock,
+    policy,
+    config,
+}) {
+    const invalidatedLegacyState = invalidateLegacyReimbursementCommitmentBackfill(policy);
+    const result = await backfillReimbursementCommitments({
+        state: tradeIntentState,
+        publicClient,
+        latestBlock,
+        policy,
+        config,
+        statusLogged: reimbursementBackfillStatusLogged,
+    });
+    reimbursementBackfillStatusLogged = result.statusLogged;
+    if (result.changed || invalidatedLegacyState) {
+        markStateDirty();
+    }
+    return result.changed || invalidatedLegacyState;
+}
+
+function ingestSignals(signals, policy) {
+    let changed = false;
+
+    for (const signal of Array.isArray(signals) ? signals : []) {
+        try {
+            const deposit = createDepositRecord(signal, {
+                collateralToken: policy.collateralToken,
+            });
+            if (deposit && !tradeIntentState.deposits[deposit.depositKey]) {
+                tradeIntentState.deposits[deposit.depositKey] = deposit;
+                console.log(
+                    `[agent] Recorded Polymarket collateral credit for ${deposit.depositor}: amountWei=${deposit.amountWei} depositKey=${deposit.depositKey}.`
+                );
+                changed = true;
+            }
+        } catch (error) {
+            continue;
+        }
+    }
+
+    if (changed) {
+        markStateDirty();
+    }
+    return changed;
+}
+
+function acceptSignedTradeIntentSignals(
+    signals,
+    {
+        policy,
+        commitmentSafe,
+        agentAddress,
+        runtimeChainId = null,
+        actualCollateralBalanceWei = null,
+        nowMs = Date.now(),
+        config,
+    } = {}
+) {
+    let changed = false;
+
+    for (const signal of Array.isArray(signals) ? signals : []) {
+        const interpreted = interpretSignedTradeIntentSignal(signal, {
+            policy,
+            commitmentSafe,
+            agentAddress,
+            runtimeChainId,
+            nowMs,
+        });
+        if (!interpreted.ok) {
+            continue;
+        }
+
+        if (tradeIntentState.intents[interpreted.intent.intentKey]) {
+            continue;
+        }
+
+        const availableCreditWei = getAvailableCreditWeiForAddress(
+            tradeIntentState,
+            interpreted.intent.signer
+        );
+        if (availableCreditWei < BigInt(interpreted.intent.reservedCreditAmountWei)) {
+            console.warn(
+                `[agent] Ignoring signed Polymarket trade intent ${interpreted.intent.intentKey}: insufficient deposited collateral credit for signer ${interpreted.intent.signer} (availableWei=${availableCreditWei.toString()} requiredWei=${interpreted.intent.reservedCreditAmountWei}).`
+            );
+            continue;
+        }
+        if (actualCollateralBalanceWei !== null && actualCollateralBalanceWei !== undefined) {
+            const actualReservationHeadroomWei = getEffectiveOrderReservationHeadroomWei(
+                interpreted.intent,
+                actualCollateralBalanceWei
+            );
+            if (
+                actualReservationHeadroomWei <
+                BigInt(interpreted.intent.reservedCreditAmountWei)
+            ) {
+                console.warn(
+                    `[agent] Ignoring signed Polymarket trade intent ${interpreted.intent.intentKey}: insufficient actual Safe collateral remains unreserved (headroomWei=${actualReservationHeadroomWei.toString()} requiredWei=${interpreted.intent.reservedCreditAmountWei}).`
+                );
+                continue;
+            }
+        }
+        if (!config?.ipfsEnabled) {
+            throw new Error(
+                'polymarket-intent-trader requires ipfsEnabled=true in module config to archive signed trade intents before execution.'
+            );
+        }
+
+        tradeIntentState.intents[interpreted.intent.intentKey] = {
+            ...interpreted.intent,
+            sequence: allocateSequence(),
+            creditReservedAtMs: nowMs,
+            updatedAtMs: nowMs,
+        };
+        console.log(
+            `[agent] Accepted signed Polymarket trade intent ${interpreted.intent.intentKey}: outcome=${interpreted.intent.outcome} maxSpendWei=${interpreted.intent.maxSpendWei} maxPrice=${interpreted.intent.maxPrice}.`
+        );
+        changed = true;
+    }
+
+    if (changed) {
+        markStateDirty();
+    }
+    return changed;
+}
+
+function buildSignedTradeIntentArchiveArtifact({ record, commitmentSafe, agentAddress }) {
+    if (!record?.canonicalMessage) {
+        throw new Error(
+            'buildSignedTradeIntentArchiveArtifact requires a parsed signed intent record.'
+        );
+    }
+
+    return {
+        version: ARTIFACT_VERSION,
+        requestId: record.requestId,
+        messageId: record.messageId ?? null,
+        interpretedIntent: {
+            side: record.side,
+            outcome: record.outcome,
+            marketId: record.marketId,
+            tokenId: record.tokenId,
+            maxSpendUsdc: record.maxSpendUsdc,
+            maxSpendWei: record.maxSpendWei,
+            maxPrice: record.maxPrice,
+            maxPriceScaled: record.maxPriceScaled,
+            expiryMs: record.expiryMs,
+        },
+        signedRequest: {
+            authType: 'eip191',
+            signer: record.signer,
+            signature: record.signature,
+            signedAtMs: record.signedAtMs,
+            canonicalMessage: record.canonicalMessage,
+            envelope: {
+                chainId: record.chainId ?? null,
+                requestId: record.requestId,
+                deadline: record.deadline ?? null,
+                text: record.text ?? null,
+                command: record.command ?? null,
+                args: cloneJson(record.args ?? null),
+                metadata: cloneJson(record.metadata ?? null),
+            },
+        },
+        agentContext: {
+            commitmentSafe: commitmentSafe ?? record.commitmentSafe ?? null,
+            agentAddress: agentAddress ?? record.tradingWalletAddress ?? null,
+            receivedAtMs: record.receivedAtMs ?? null,
+            expiresAtMs: record.expiresAtMs ?? null,
+        },
+    };
+}
+
+function encodeExplanationFieldValue(value) {
+    return encodeURIComponent(String(value ?? ''));
+}
+
+function buildReimbursementExplanation(record) {
+    return [
+        'polymarket-intent-trader reimbursement',
+        `intent=${encodeExplanationFieldValue(record.intentKey)}`,
+        `requestId=${encodeExplanationFieldValue(record.requestId ?? 'n/a')}`,
+        `signer=${encodeExplanationFieldValue(record.signer ?? 'unknown')}`,
+        `recipient=${encodeExplanationFieldValue(record.reimbursementRecipientAddress ?? record.tradingWalletAddress ?? 'unknown')}`,
+        `outcome=${encodeExplanationFieldValue(record.outcome ?? 'unknown')}`,
+        `market=${encodeExplanationFieldValue(record.marketId ?? 'unknown')}`,
+        `tokenId=${encodeExplanationFieldValue(record.tokenId ?? 'unknown')}`,
+        `signedRequestCid=${encodeExplanationFieldValue(record.artifactUri ?? 'missing')}`,
+        `orderId=${encodeExplanationFieldValue(record.orderId ?? 'missing')}`,
+        `spentWei=${encodeExplanationFieldValue(record.reimbursementAmountWei ?? record.maxSpendWei ?? '0')}`,
+        `depositTx=${encodeExplanationFieldValue(record.depositTxHash ?? 'pending')}`,
+    ].join(' | ');
+}
+
+function getIntentLifecycleStatus(record, nowMs = Date.now()) {
+    if (!record) return 'unknown';
+    if (record.reimbursedAtMs) return 'reimbursed';
+    if (record.closedAtMs) return 'closed';
+    if (record.reimbursementProposalHash || record.reimbursementSubmissionTxHash) {
+        return 'reimbursement_submitted';
+    }
+    if (record.reimbursementDispatchAtMs) return 'reimbursement_dispatching';
+    if (record.tokenDeposited) return 'deposited';
+    if (record.depositDispatchAtMs) return 'deposit_dispatching';
+    if (record.depositTxHash) return 'deposit_submitted';
+    if (record.orderFilled) return 'order_filled';
+    if (record.orderSubmittedAtMs) return 'order_submitted';
+    if (record.orderDispatchAtMs) return 'order_dispatching';
+    if (record.orderId) return 'order_submitted';
+    if (record.artifactCid) return 'archived';
+    if (Number.isInteger(record.expiryMs) && nowMs > record.expiryMs) return 'expired';
+    return 'accepted';
+}
+
+function buildIntentSignal(record, nowMs = Date.now()) {
+    return {
+        kind: 'polymarketTradeIntent',
+        intentKey: record.intentKey,
+        requestId: record.requestId,
+        messageId: record.messageId ?? null,
+        signer: record.signer,
+        signedAtMs: record.signedAtMs,
+        text: record.text,
+        side: record.side,
+        outcome: record.outcome,
+        marketId: record.marketId,
+        tokenId: record.tokenId,
+        maxSpendUsdc: record.maxSpendUsdc,
+        maxSpendWei: record.maxSpendWei,
+        reservedCreditAmountWei: record.reservedCreditAmountWei,
+        maxPrice: record.maxPrice,
+        maxPriceScaled: record.maxPriceScaled,
+        orderDispatchAtMs: record.orderDispatchAtMs ?? null,
+        orderId: record.orderId ?? null,
+        orderStatus: record.orderStatus ?? null,
+        orderFilled: Boolean(record.orderFilled),
+        depositDispatchAtMs: record.depositDispatchAtMs ?? null,
+        depositTxHash: record.depositTxHash ?? null,
+        tokenDeposited: Boolean(record.tokenDeposited),
+        reimbursementAmountWei: record.reimbursementAmountWei ?? null,
+        filledShareAmount: record.filledShareAmount ?? null,
+        reimbursementDispatchAtMs: record.reimbursementDispatchAtMs ?? null,
+        reimbursementProposalHash: record.reimbursementProposalHash ?? null,
+        reimbursementSubmissionTxHash: record.reimbursementSubmissionTxHash ?? null,
+        archived: Boolean(record.artifactCid),
+        artifactCid: record.artifactCid ?? null,
+        artifactUri: record.artifactUri ?? null,
+        expired: Number.isInteger(record.expiryMs) && nowMs > record.expiryMs,
+        status: getIntentLifecycleStatus(record, nowMs),
+    };
+}
+
+function buildArchiveSignal(record, commitmentSafe, agentAddress) {
+    let archiveArtifact = null;
+    let archiveArtifactError = null;
+    try {
+        archiveArtifact = buildSignedTradeIntentArchiveArtifact({
+            record,
+            commitmentSafe,
+            agentAddress,
+        });
+    } catch (error) {
+        archiveArtifactError = error?.message ?? String(error);
+    }
+
+    return {
+        kind: 'polymarketSignedIntentArchive',
+        intentKey: record.intentKey,
+        requestId: record.requestId,
+        archiveFilename: record.archiveFilename,
+        archiveArtifact,
+        archiveArtifactError,
+        archived: Boolean(record.artifactCid),
+        artifactCid: record.artifactCid ?? null,
+        artifactUri: record.artifactUri ?? null,
+    };
+}
+
+function resolveOgProposalHashFromToolOutput(parsedOutput) {
+    const txHash = normalizeHash(parsedOutput?.transactionHash);
+    const explicitOgHash = normalizeHash(parsedOutput?.ogProposalHash);
+    if (explicitOgHash) return explicitOgHash;
+
+    const legacyHash = normalizeHash(parsedOutput?.proposalHash);
+    if (!legacyHash) return null;
+    if (txHash && legacyHash === txHash) return null;
+    return legacyHash;
+}
+
+function extractProposalHashFromReceipt({ receipt, ogModule }) {
+    const normalizedOgModule = normalizeAddressOrNull(ogModule);
+    if (!normalizedOgModule || !Array.isArray(receipt?.logs)) {
+        return null;
+    }
+
+    for (const log of receipt.logs) {
+        if (!safeAddressEqual(log?.address, normalizedOgModule)) {
+            continue;
+        }
+
+        const directHash = normalizeHash(log?.args?.proposalHash);
+        if (directHash) {
+            return directHash;
+        }
+
+        try {
+            const decoded = decodeEventLog({
+                abi: [transactionsProposedEvent],
+                data: log.data,
+                topics: log.topics,
+            });
+            const decodedHash = normalizeHash(decoded?.args?.proposalHash);
+            if (decodedHash) {
+                return decodedHash;
+            }
+        } catch (error) {
+            continue;
+        }
+    }
+
+    return null;
+}
+
+function matchesReimbursementProposalSignal({ signal, intent, agentAddress, policy }) {
+    if (signal?.kind !== 'proposal' || !Array.isArray(signal.transactions) || signal.transactions.length !== 1) {
+        return false;
+    }
+    if (!signal.proposer || !safeAddressEqual(signal.proposer, agentAddress)) {
+        return false;
+    }
+    const [transaction] = signal.transactions;
+    if (
+        !matchesReimbursementTransferTransaction({
+            transaction,
+            intent,
+            policy,
+            fallbackAgentAddress: agentAddress,
+        })
+    ) {
+        return false;
+    }
+    if (!intent.reimbursementExplanation) {
+        return true;
+    }
+    return (
+        typeof signal.explanation === 'string' &&
+        signal.explanation.trim() === intent.reimbursementExplanation
+    );
+}
+
+function recoverProposalHashesFromSignals({ signals, agentAddress, policy }) {
+    let changed = false;
+    const normalizedAgentAddress = normalizeAddress(agentAddress);
+    const nowMs = Date.now();
+
+    for (const intent of getOpenIntents()) {
+        if (intent.reimbursementProposalHash || !intent.reimbursementExplanation) {
+            continue;
+        }
+        if (!intent.reimbursementSubmissionTxHash && !intent.reimbursementSubmittedAtMs) {
+            continue;
+        }
+
+        const matchingProposalHashes = new Set();
+        for (const signal of Array.isArray(signals) ? signals : []) {
+            if (
+                !matchesReimbursementProposalSignal({
+                    signal,
+                    intent,
+                    agentAddress: normalizedAgentAddress,
+                    policy,
+                })
+            ) {
+                continue;
+            }
+            const proposalHash = normalizeHash(signal?.proposalHash);
+            if (proposalHash) {
+                matchingProposalHashes.add(proposalHash);
+            }
+        }
+        if (matchingProposalHashes.size === 0) {
+            continue;
+        }
+        if (matchingProposalHashes.size > 1) {
+            const detail =
+                'Multiple live reimbursement proposals matched this intent; refusing automatic proposal-hash recovery until manual reconciliation.';
+            if (
+                intent.lastReimbursementSubmissionError !== detail ||
+                !intent.reimbursementSubmissionAmbiguous
+            ) {
+                if (!Number.isInteger(intent.reimbursementSubmittedAtMs)) {
+                    intent.reimbursementSubmittedAtMs = nowMs;
+                }
+                markAmbiguousReimbursementSubmission(intent, detail, nowMs);
+                changed = true;
+            }
+            continue;
+        }
+        const [proposalHash] = Array.from(matchingProposalHashes);
+
+        intent.reimbursementProposalHash = proposalHash;
+        delete intent.reimbursementDispatchAtMs;
+        delete intent.reimbursementSubmittedAtMs;
+        if (pendingProposalSubmission?.intentKey === intent.intentKey) {
+            pendingProposalSubmission = null;
+        }
+        clearReimbursementSubmissionAmbiguity(intent);
+        delete intent.lastReimbursementSubmissionStatus;
+        delete intent.lastReimbursementSubmissionError;
+        intent.updatedAtMs = Date.now();
+        changed = true;
+    }
+
+    return changed;
+}
+
+function recoverProposalHashesFromBackfilledCommitments() {
+    let changed = false;
+    const nowMs = Date.now();
+
+    for (const intent of getOpenIntents()) {
+        if (!intent.reimbursementExplanation) {
+            continue;
+        }
+
+        const matchingCommitments = Object.values(tradeIntentState.reimbursementCommitments).filter(
+            (commitment) =>
+                commitment?.proposalHash &&
+                matchesReimbursementCommitmentIntent({
+                    commitment,
+                    intent,
+                    fallbackAgentAddress: intent.tradingWalletAddress,
+                })
+        );
+        if (matchingCommitments.length === 0) {
+            continue;
+        }
+
+        const currentProposalHash = normalizeHash(intent.reimbursementProposalHash);
+        const executedProposalHashes = Array.from(
+            new Set(
+                matchingCommitments
+                    .filter((commitment) => commitment?.status === 'executed')
+                    .map((commitment) => normalizeHash(commitment?.proposalHash))
+                    .filter(Boolean)
+            )
+        );
+        const liveProposalHashes = Array.from(
+            new Set(
+                matchingCommitments
+                    .filter(
+                        (commitment) =>
+                            commitment?.status !== 'deleted' && commitment?.status !== 'executed'
+                    )
+                    .map((commitment) => normalizeHash(commitment?.proposalHash))
+                    .filter(Boolean)
+            )
+        );
+        const deletedProposalHashes = new Set(
+            matchingCommitments
+                .filter((commitment) => commitment?.status === 'deleted')
+                .map((commitment) => normalizeHash(commitment?.proposalHash))
+                .filter(Boolean)
+        );
+
+        const resolvedExecutedProposalHash =
+            (currentProposalHash && executedProposalHashes.includes(currentProposalHash)
+                ? currentProposalHash
+                : null) ??
+            (executedProposalHashes.length > 0 ? executedProposalHashes[0] : null);
+        if (resolvedExecutedProposalHash) {
+            intent.reimbursementProposalHash = resolvedExecutedProposalHash;
+            intent.reimbursedAtMs = nowMs;
+            clearReimbursementSubmissionTracking(intent);
+            clearReimbursementSubmissionAmbiguity(intent);
+            delete intent.lastReimbursementSubmissionStatus;
+            delete intent.lastReimbursementSubmissionError;
+            if (pendingProposalSubmission?.intentKey === intent.intentKey) {
+                pendingProposalSubmission = null;
+            }
+            intent.updatedAtMs = nowMs;
+            changed = true;
+            continue;
+        }
+
+        const resolvedLiveProposalHash =
+            (currentProposalHash && liveProposalHashes.includes(currentProposalHash)
+                ? currentProposalHash
+                : null) ??
+            (liveProposalHashes.length === 1 ? liveProposalHashes[0] : null);
+        if (resolvedLiveProposalHash) {
+            intent.reimbursementProposalHash = resolvedLiveProposalHash;
+            delete intent.reimbursementDispatchAtMs;
+            delete intent.reimbursementSubmittedAtMs;
+            if (pendingProposalSubmission?.intentKey === intent.intentKey) {
+                pendingProposalSubmission = null;
+            }
+            clearReimbursementSubmissionAmbiguity(intent);
+            delete intent.lastReimbursementSubmissionStatus;
+            delete intent.lastReimbursementSubmissionError;
+            intent.updatedAtMs = nowMs;
+            changed = true;
+            continue;
+        }
+
+        if (liveProposalHashes.length > 1) {
+            const detail =
+                'Multiple backfilled reimbursement proposals matched this intent; refusing automatic proposal-hash recovery until manual reconciliation.';
+            if (
+                intent.lastReimbursementSubmissionError !== detail ||
+                !intent.reimbursementSubmissionAmbiguous
+            ) {
+                if (!Number.isInteger(intent.reimbursementSubmittedAtMs)) {
+                    intent.reimbursementSubmittedAtMs = nowMs;
+                }
+                markAmbiguousReimbursementSubmission(intent, detail, nowMs);
+                changed = true;
+            }
+            continue;
+        }
+
+        const deletedCurrentProposal =
+            currentProposalHash !== null && deletedProposalHashes.has(currentProposalHash);
+        const deletedOnlyBackfill =
+            liveProposalHashes.length === 0 &&
+            executedProposalHashes.length === 0 &&
+            deletedProposalHashes.size > 0;
+        if (!deletedCurrentProposal && !deletedOnlyBackfill) {
+            continue;
+        }
+
+        clearReimbursementSubmissionTracking(intent);
+        delete intent.reimbursementProposalHash;
+        delete intent.nextReimbursementAttemptAtMs;
+        if (pendingProposalSubmission?.intentKey === intent.intentKey) {
+            pendingProposalSubmission = null;
+        }
+        delete intent.lastReimbursementSubmissionStatus;
+        delete intent.lastReimbursementSubmissionError;
+        intent.updatedAtMs = nowMs;
+        changed = true;
+    }
+
+    return changed;
+}
+
+function markTerminalIntentFailure(
+    intent,
+    { stage, status, detail, releaseCredit = false, sideEffectsLikelyCommitted = false } = {}
+) {
+    const nowMs = Date.now();
+    delete intent.orderDispatchAtMs;
+    delete intent.depositDispatchAtMs;
+    delete intent.reimbursementDispatchAtMs;
+    intent.terminalFailureStage = stage ?? 'unknown';
+    intent.terminalFailureStatus = status ?? 'unknown';
+    intent.terminalFailureMessage = detail ?? null;
+    intent.terminalFailureSideEffectsLikelyCommitted = sideEffectsLikelyCommitted === true;
+    intent.terminalFailedAtMs = nowMs;
+    intent.closedAtMs = nowMs;
+    if (releaseCredit) {
+        intent.creditReleasedAtMs = nowMs;
+    }
+    intent.updatedAtMs = nowMs;
+}
+
+function expireUnsubmittedIntents(nowMs = Date.now()) {
+    let changed = false;
+    const orderFields = getLifecycleStageFields('order');
+    for (const intent of getOpenIntents()) {
+        if (
+            intent.orderId ||
+            intent.tokenDeposited ||
+            intent.orderSubmittedAtMs ||
+            intent[orderFields.dispatchAt]
+        ) {
+            continue;
+        }
+        if (!Number.isInteger(intent.expiryMs) || nowMs <= intent.expiryMs) {
+            continue;
+        }
+        markTerminalIntentFailure(intent, {
+            stage: 'expiry',
+            status: 'expired',
+            detail: 'Intent expired before execution.',
+            releaseCredit: true,
+        });
+        changed = true;
+    }
+    return changed;
+}
+
+async function refreshTrackedTxSubmissionStatus({
+    publicClient,
+    kind,
+    pendingTxTimeoutMs,
+    fields,
+    isComplete,
+    onMissingTxTimeout,
+    onConfirmedReceipt,
+    onRevertedReceipt,
+    onReceiptUnavailableAfterTimeout,
+}) {
+    let changed = false;
+    const nowMs = Date.now();
+
+    for (const intent of getOpenIntents()) {
+        if (isComplete(intent)) {
+            continue;
+        }
+
+        const txHash = intent[fields.txHash];
+        if (!txHash) {
+            if (!hasTimedOut(intent[fields.submittedAt], pendingTxTimeoutMs, nowMs)) {
+                continue;
+            }
+            if (intent[fields.ambiguous]) {
+                changed = noteStageTimeoutAmbiguity(intent, kind, nowMs) || changed;
+                continue;
+            }
+            changed = (await onMissingTxTimeout(intent, { nowMs })) || changed;
+            continue;
+        }
+
+        try {
+            const receipt = await publicClient.getTransactionReceipt({
+                hash: txHash,
+            });
+            const status = receipt?.status;
+            const reverted = status === 0n || status === 0 || status === 'reverted';
+            if (reverted) {
+                changed = (await onRevertedReceipt(intent, { nowMs, receipt })) || changed;
+                continue;
+            }
+            changed = (await onConfirmedReceipt(intent, { nowMs, receipt })) || changed;
+        } catch (error) {
+            if (!hasTimedOut(intent[fields.submittedAt], pendingTxTimeoutMs, nowMs)) {
+                continue;
+            }
+            changed =
+                (await onReceiptUnavailableAfterTimeout(intent, {
+                    nowMs,
+                    error,
+                })) || changed;
+        }
+    }
+
+    return changed;
+}
+
+async function refreshDepositSubmissionStatus({ publicClient, latestBlock, policy }) {
+    return refreshTrackedTxSubmissionStatus({
+        publicClient,
+        kind: 'deposit',
+        pendingTxTimeoutMs: policy.pendingTxTimeoutMs,
+        fields: getLifecycleStageFields('deposit'),
+        isComplete: (intent) => intent.tokenDeposited,
+        onMissingTxTimeout: (intent, { nowMs }) =>
+            reduceDepositSubmissionMissingTxTimeout(intent, { nowMs }),
+        onConfirmedReceipt: (intent, { nowMs, receipt }) =>
+            reduceDepositSubmissionConfirmedReceipt(intent, {
+                nowMs,
+                receipt,
+                latestBlock,
+            }),
+        onRevertedReceipt: (intent, { nowMs }) =>
+            reduceDepositSubmissionRevertedReceipt(intent, {
+                nowMs,
+                retryDelayMs: policy.archiveRetryDelayMs,
+            }),
+        onReceiptUnavailableAfterTimeout: (intent, { nowMs, error }) => {
+            const detail = error?.message ?? String(error);
+            return reduceDepositSubmissionReceiptTimeout(intent, { detail, nowMs });
+        },
+    });
+}
+
+async function refreshProposalSubmissionStatus({ publicClient, policy }) {
+    return refreshTrackedTxSubmissionStatus({
+        publicClient,
+        kind: 'reimbursement',
+        pendingTxTimeoutMs: policy.pendingTxTimeoutMs,
+        fields: getLifecycleStageFields('reimbursement'),
+        isComplete: (intent) => Boolean(intent.reimbursementProposalHash),
+        onMissingTxTimeout: (intent, { nowMs }) =>
+            reduceReimbursementSubmissionMissingTxTimeout(intent, { nowMs }),
+        onConfirmedReceipt: (intent, { nowMs, receipt }) => {
+            const result = reduceReimbursementSubmissionConfirmedReceipt(intent, {
+                nowMs,
+                receipt,
+                ogModule: policy.ogModule,
+                extractProposalHashFromReceipt,
+            });
+            if (result.recoveredProposalHash && pendingProposalSubmission?.intentKey === intent.intentKey) {
+                pendingProposalSubmission = null;
+            }
+            return result.changed;
+        },
+        onRevertedReceipt: (intent, { nowMs }) => {
+            const changed = reduceReimbursementSubmissionRevertedReceipt(intent, {
+                nowMs,
+                retryDelayMs: policy.archiveRetryDelayMs,
+            });
+            if (pendingProposalSubmission?.intentKey === intent.intentKey) {
+                pendingProposalSubmission = null;
+            }
+            return changed;
+        },
+        onReceiptUnavailableAfterTimeout: (intent, { nowMs, error }) => {
+            const detail = error?.message ?? String(error);
+            return reduceReimbursementSubmissionReceiptTimeout(intent, { detail, nowMs });
+        },
+    });
+}
+
+function applyProposalEventUpdate({ executedProposals = [], deletedProposals = [] }) {
+    const executedHashes = new Set([
+        ...normalizeHashArray(tradeIntentState.pendingExecutedProposalHashes),
+        ...normalizeHashArray(executedProposals),
+    ]);
+    const deletedHashes = new Set([
+        ...normalizeHashArray(tradeIntentState.pendingDeletedProposalHashes),
+        ...normalizeHashArray(deletedProposals),
+    ]);
+    let changed = setPendingProposalLifecycleHashes({
+        executed: Array.from(executedHashes),
+        deleted: Array.from(deletedHashes),
+    });
+    const nowMs = Date.now();
+
+    for (const intent of getTrackedIntents()) {
+        const proposalHash = normalizeHash(intent?.reimbursementProposalHash);
+        if (!proposalHash) {
+            continue;
+        }
+
+        if (executedHashes.has(proposalHash)) {
+            intent.reimbursedAtMs = nowMs;
+            clearReimbursementSubmissionTracking(intent);
+            intent.updatedAtMs = nowMs;
+            clearReimbursementSubmissionAmbiguity(intent);
+            delete intent.lastReimbursementSubmissionStatus;
+            delete intent.lastReimbursementSubmissionError;
+            if (pendingProposalSubmission?.intentKey === intent.intentKey) {
+                pendingProposalSubmission = null;
+            }
+            executedHashes.delete(proposalHash);
+            changed = true;
+            continue;
+        }
+
+        if (deletedHashes.has(proposalHash)) {
+            clearReimbursementSubmissionTracking(intent);
+            delete intent.reimbursementProposalHash;
+            intent.updatedAtMs = nowMs;
+            if (pendingProposalSubmission?.intentKey === intent.intentKey) {
+                pendingProposalSubmission = null;
+            }
+            deletedHashes.delete(proposalHash);
+            changed = true;
+        }
+    }
+
+    changed =
+        setPendingProposalLifecycleHashes({
+            executed: Array.from(executedHashes),
+            deleted: Array.from(deletedHashes),
+        }) || changed;
+
+    return changed;
+}
+
+function buildArchiveToolCall(intent, commitmentSafe, agentAddress) {
+    return {
+        callId: `archive-signed-trade-intent-${intent.sequence}`,
+        name: 'ipfs_publish',
+        arguments: JSON.stringify({
+            json: buildSignedTradeIntentArchiveArtifact({
+                record: intent,
+                commitmentSafe,
+                agentAddress,
+            }),
+            filename: intent.archiveFilename,
+            pin: true,
+        }),
+    };
+}
+
+function resolveClobOrderSignatureType(config) {
+    const configuredSignatureType = normalizeNonEmptyString(config?.polymarketClobSignatureType);
+    if (configuredSignatureType) {
+        return configuredSignatureType;
+    }
+    if (!config?.polymarketRelayerEnabled) {
+        return null;
+    }
+
+    const relayerTxType = normalizeNonEmptyString(config?.polymarketRelayerTxType)?.toUpperCase();
+    return relayerTxType === 'PROXY' ? 'POLY_PROXY' : 'POLY_GNOSIS_SAFE';
+}
+
+function buildOrderToolCall(intent, chainId, config) {
+    const feeRateBps = parseOptionalNonNegativeIntegerString(intent.feeRateBps);
+    if (!feeRateBps) {
+        throw new Error(
+            `Missing feeRateBps for signed Polymarket trade intent ${intent.intentKey}.`
+        );
+    }
+    const signatureType = resolveClobOrderSignatureType(config);
+
+    return {
+        callId: `place-polymarket-order-${intent.sequence}`,
+        name: 'polymarket_clob_build_sign_and_place_order',
+        arguments: JSON.stringify({
+            side: 'BUY',
+            tokenId: intent.tokenId,
+            orderType: 'FOK',
+            makerAmount: intent.orderMakerAmount,
+            takerAmount: intent.orderTakerAmount,
+            feeRateBps,
+            expiration: String(Math.floor(intent.expiryMs / 1000)),
+            chainId,
+            ...(signatureType ? { signatureType } : {}),
+        }),
+    };
+}
+
+function buildDepositToolCall(intent, policy, amount) {
+    return {
+        callId: `deposit-polymarket-outcome-${intent.sequence}`,
+        name: 'make_erc1155_deposit',
+        arguments: JSON.stringify({
+            token: policy.ctfContract,
+            tokenId: intent.tokenId,
+            amount,
+            data: '0x',
+        }),
+    };
+}
+
+function buildReimbursementToolCall(intent, policy, config) {
+    const transactions = buildOgTransactions(
+        [
+            {
+                kind: 'erc20_transfer',
+                token: policy.collateralToken,
+                to: intent.reimbursementRecipientAddress,
+                amountWei: intent.reimbursementAmountWei,
+            },
+        ],
+        { config }
+    );
+    const explanation = buildReimbursementExplanation(intent);
+    return {
+        callId: `reimburse-polymarket-intent-${intent.sequence}`,
+        name: 'post_bond_and_propose',
+        arguments: JSON.stringify({
+            transactions,
+            explanation,
+        }),
+        explanation,
+    };
+}
+
+function getSystemPrompt({ commitmentText }) {
+    return [
+        'You are a Polymarket signed-intent trading agent for an onchain commitment.',
+        'Focus on signals where kind is "userMessage".',
+        'Treat userMessage as an authenticated trade intent candidate only when sender.authType is "eip191".',
+        'Use the signed human-readable message text as the primary source of trading intent. Do not treat args as authoritative execution instructions.',
+        'Parse signed free-text messages into candidate BUY intents for the configured market only.',
+        'Archive accepted signed trade intents before later execution or reimbursement steps when IPFS is enabled.',
+        'Only reimburse the trading wallet that funded the trade, and only after fill confirmation, token deposit, and proposal submission checks pass.',
+        'Prefer ignore or clarify when the message is unsigned, malformed, expired, duplicated, ambiguous, or missing trade bounds.',
+        'Do not invent markets, prices, balances, or signer authority.',
+        'Return strict JSON with keys: action, rationale, intentStatus, recommendedNextStep.',
+        'Allowed action values: acknowledge_signed_intent, clarify, ignore.',
+        commitmentText ? `Commitment text:\n${commitmentText}` : '',
+    ]
+        .filter(Boolean)
+        .join(' ');
+}
+
+const getPollingOptions = getAlwaysEmitBalanceSnapshotPollingOptions;
+
+async function enrichSignals(
+    signals,
+    {
+        publicClient,
+        config,
+        account,
+        nowMs,
+    } = {}
+) {
+    await configureRuntimeStateContext({
+        publicClient,
+        commitmentSafe: config?.commitmentSafe,
+        config,
+    });
+    await hydrateTradeIntentState();
+    const policy = await resolveEffectivePolicy(config);
+    const runtimeChainId = await resolveRuntimeChainId({ publicClient, config });
+    const effectiveNowMs = parseOptionalPositiveInteger(nowMs) ?? Date.now();
+    const commitmentSafe = config?.commitmentSafe ?? null;
+    const agentAddress = account?.address ?? null;
+    const actualCollateralBalanceWei =
+        policy.ready && commitmentSafe
+            ? await readCollateralBalanceWei({
+                  publicClient,
+                  policy,
+                  commitmentSafe: normalizeAddress(commitmentSafe),
+              })
+            : null;
+    const out = Array.isArray(signals) ? [...signals] : [];
+    const emitted = new Set();
+
+    for (const intent of getTrackedIntents()) {
+        out.push(buildIntentSignal(intent, effectiveNowMs));
+        out.push(buildArchiveSignal(intent, commitmentSafe, agentAddress));
+        emitted.add(intent.intentKey);
+    }
+
+    for (const signal of Array.isArray(signals) ? signals : []) {
+        const interpreted = interpretSignedTradeIntentSignal(signal, {
+            policy,
+            commitmentSafe,
+            agentAddress,
+            runtimeChainId,
+            nowMs: effectiveNowMs,
+        });
+        if (!interpreted.ok || emitted.has(interpreted.intent.intentKey)) {
+            continue;
+        }
+        out.push(buildIntentSignal(interpreted.intent, effectiveNowMs));
+        out.push(buildArchiveSignal(interpreted.intent, commitmentSafe, agentAddress));
+    }
+
+    out.push({
+        kind: 'polymarketTradeIntentState',
+        policy,
+        credits: buildCreditSnapshot(tradeIntentState),
+        collateral: buildCollateralCreditSummary(tradeIntentState, {
+            actualCollateralBalanceWei,
+        }),
+    });
+
+    return out;
+}
+
+async function getDeterministicToolCalls({
+    signals,
+    commitmentSafe,
+    agentAddress,
+    publicClient,
+    config,
+    onchainPendingProposal = false,
+}) {
+    await configureRuntimeStateContext({ publicClient, commitmentSafe, config });
+    const policy = await resolveEffectivePolicy(config);
+    if (!policy.ready) {
+        return [];
+    }
+    await hydrateTradeIntentState();
+
+    const normalizedAgentAddress = normalizeAddress(agentAddress);
+    if (policy.authorizedAgent && normalizedAgentAddress !== policy.authorizedAgent) {
+        throw new Error(
+            `polymarket-intent-trader may only be served by authorized agent ${policy.authorizedAgent}.`
+        );
+    }
+    const runtimeChainId = await resolveRuntimeChainId({ publicClient, config });
+    assertRuntimeChainIdKnown(runtimeChainId, {
+        signals,
+        hasTrackedWork: getOpenIntents().length > 0,
+    });
+
+    const normalizedCommitmentSafe = normalizeAddress(commitmentSafe);
+    let latestBlock;
+    try {
+        latestBlock = await publicClient.getBlockNumber();
+    } catch (error) {
+        let emergencyChanged = ingestSignals(signals, policy);
+        emergencyChanged =
+            acceptSignedTradeIntentSignals(signals, {
+                policy,
+                commitmentSafe: normalizedCommitmentSafe,
+                agentAddress: normalizedAgentAddress,
+                runtimeChainId,
+                actualCollateralBalanceWei: null,
+                config,
+            }) || emergencyChanged;
+        if (emergencyChanged) {
+            await maybePersistTradeIntentState();
+        }
+        throw error;
+    }
+    const actualCollateralBalanceWei = await readCollateralBalanceWei({
+        publicClient,
+        policy,
+        commitmentSafe: normalizedCommitmentSafe,
+    });
+    clearStalePendingOrderSubmission();
+    clearStalePendingDepositSubmission();
+    clearStalePendingProposalSubmission();
+    let changed = reconcileDurableDispatchState();
+
+    while (queuedProposalEventUpdates.length > 0) {
+        changed = applyProposalEventUpdate(queuedProposalEventUpdates.shift()) || changed;
+    }
+
+    changed =
+        (await maybeBackfillDeposits({
+            publicClient,
+            commitmentSafe: normalizedCommitmentSafe,
+            latestBlock,
+            policy,
+            config,
+        })) || changed;
+    changed =
+        (await maybeBackfillReimbursementCommitments({
+            publicClient,
+            latestBlock,
+            policy,
+            config,
+        })) || changed;
+    changed = recoverProposalHashesFromBackfilledCommitments() || changed;
+    changed = ingestSignals(signals, policy) || changed;
+    changed =
+        acceptSignedTradeIntentSignals(signals, {
+            policy,
+            commitmentSafe: normalizedCommitmentSafe,
+            agentAddress: normalizedAgentAddress,
+            runtimeChainId,
+            actualCollateralBalanceWei,
+            config,
+        }) || changed;
+
+    if (changed) {
+        await maybePersistTradeIntentState();
+        changed = false;
+    }
+
+    const clobAuthAddress = getClobAuthAddress({
+        config,
+        accountAddress: normalizedAgentAddress,
+    });
+    const { tokenHolderAddress, tokenHolderResolutionError } = await resolveTokenHolderAddress({
+        publicClient,
+        config,
+        account: { address: normalizedAgentAddress },
+    });
+    let walletAlignmentError = null;
+    if (config?.polymarketRelayerEnabled) {
+        if (!clobAuthAddress) {
+            walletAlignmentError = 'Unable to resolve CLOB auth address for relayer mode.';
+        } else if (!tokenHolderAddress) {
+            walletAlignmentError =
+                tokenHolderResolutionError ?? 'Unable to resolve relayer token-holder address.';
+        } else if (clobAuthAddress !== tokenHolderAddress) {
+            walletAlignmentError =
+                `POLYMARKET_CLOB_ADDRESS (${clobAuthAddress}) must match relayer proxy wallet (${tokenHolderAddress}) when POLYMARKET_RELAYER_ENABLED=true.`;
+        }
+    } else if (clobAuthAddress && tokenHolderAddress && clobAuthAddress !== tokenHolderAddress) {
+        walletAlignmentError =
+            `POLYMARKET_CLOB_ADDRESS (${clobAuthAddress}) must match runtime signer address (${tokenHolderAddress}) when POLYMARKET_RELAYER_ENABLED=false, because make_erc1155_deposit transfers from the runtime signer wallet.`;
+    }
+    if (walletAlignmentError) {
+        throw new Error(walletAlignmentError);
+    }
+
+    changed = expireUnsubmittedIntents() || changed;
+    changed =
+        (await refreshOrderStatus({
+            openIntents: getOpenIntents(),
+            account: { address: normalizedAgentAddress },
+            config,
+            policy,
+            hasTimedOut,
+            markTerminalIntentFailure,
+            observeFilledTokenInventoryDelta: ({ intent }) =>
+                observeFilledTokenInventoryDelta({
+                    publicClient,
+                    policy,
+                    tokenHolderAddress,
+                    intent,
+                }),
+        })) || changed;
+    changed =
+        (await reconcileRecoveredDepositSubmissions({
+            signals,
+            publicClient,
+            commitmentSafe: normalizedCommitmentSafe,
+            latestBlock,
+            policy,
+        })) || changed;
+    changed =
+        (await refreshDepositSubmissionStatus({
+            publicClient,
+            latestBlock,
+            policy,
+        })) || changed;
+    changed =
+        (await refreshProposalSubmissionStatus({
+            publicClient,
+            policy,
+        })) || changed;
+    changed =
+        recoverProposalHashesFromSignals({
+            signals,
+            agentAddress: normalizedAgentAddress,
+            policy,
+        }) || changed;
+    changed = applyProposalEventUpdate({}) || changed;
+
+    if (changed) {
+        await maybePersistTradeIntentState();
+    }
+
+    const openIntents = getOpenIntents();
+
+    const actionCandidates = planNextActionCandidates({
+        openIntents,
+        pendingOrderSubmission,
+        pendingDepositSubmission,
+        onchainPendingProposal,
+        nowMs: Date.now(),
+    });
+    let chainId = normalizeChainIdValue(runtimeChainId) ?? undefined;
+
+    for (const action of actionCandidates) {
+        const intent = tradeIntentState.intents[action.intentKey];
+        if (!intent) {
+            continue;
+        }
+
+        if (action.kind === 'deposit') {
+            const filledShareAmount = parseOptionalNonNegativeIntegerString(intent.filledShareAmount);
+            if (!filledShareAmount || BigInt(filledShareAmount) <= 0n || !tokenHolderAddress) {
+                continue;
+            }
+            let tokenBalance;
+            try {
+                tokenBalance = await readOutcomeTokenBalance({
+                    publicClient,
+                    policy,
+                    tokenHolderAddress,
+                    tokenId: intent.tokenId,
+                });
+            } catch (error) {
+                intent.lastDepositStatus = 'unavailable';
+                intent.lastDepositError =
+                    `Failed to read outcome-token balance before deposit: ${error?.message ?? error}`;
+                intent.nextDepositAttemptAtMs = Date.now() + policy.archiveRetryDelayMs;
+                intent.updatedAtMs = Date.now();
+                await maybePersistTradeIntentState();
+                continue;
+            }
+            if (tokenBalance === null || tokenBalance < BigInt(filledShareAmount)) {
+                continue;
+            }
+
+            delete intent.lastDepositStatus;
+            delete intent.lastDepositError;
+            delete intent.nextDepositAttemptAtMs;
+            markStageDispatchStarted(intent, 'deposit');
+            intent.depositSourceAddress = tokenHolderAddress;
+            intent.depositExpectedAmount = filledShareAmount;
+            intent.depositDispatchBlockNumber = latestBlock.toString();
+            intent.updatedAtMs = Date.now();
+            await maybePersistTradeIntentState();
+            pendingDepositSubmission = {
+                intentKey: intent.intentKey,
+                startedAtMs: Date.now(),
+            };
+            return [buildDepositToolCall(intent, policy, filledShareAmount)];
+        }
+
+        if (action.kind === 'reimbursement') {
+            const reimbursementRecipientAddress = clobAuthAddress ?? normalizedAgentAddress;
+            if (!reimbursementRecipientAddress) {
+                throw new Error('Unable to resolve reimbursement recipient address.');
+            }
+            const reimbursementAmountWei = parseNonNegativeBigIntOrZero(
+                intent.reimbursementAmountWei
+            );
+            if (actualCollateralBalanceWei === null) {
+                const detail =
+                    'Unable to confirm actual Safe collateral headroom; refusing to submit a reimbursement proposal until the Safe collateral balance can be read.';
+                if (
+                    intent.lastReimbursementCreditError !== detail ||
+                    !Number.isInteger(intent.reimbursementCreditBlockedAtMs)
+                ) {
+                    intent.lastReimbursementCreditError = detail;
+                    intent.reimbursementCreditBlockedAtMs = Date.now();
+                    intent.updatedAtMs = Date.now();
+                    await maybePersistTradeIntentState();
+                }
+                continue;
+            }
+            const reimbursementHeadroomWei = getEffectiveReimbursementHeadroomWei(
+                intent,
+                actualCollateralBalanceWei
+            );
+            if (reimbursementAmountWei <= 0n || reimbursementHeadroomWei < reimbursementAmountWei) {
+                const detail =
+                    `Insufficient committed collateral credit remains for reimbursement (headroomWei=${reimbursementHeadroomWei.toString()} requiredWei=${reimbursementAmountWei.toString()}).`;
+                if (
+                    intent.lastReimbursementCreditError !== detail ||
+                    !Number.isInteger(intent.reimbursementCreditBlockedAtMs)
+                ) {
+                    intent.lastReimbursementCreditError = detail;
+                    intent.reimbursementCreditBlockedAtMs = Date.now();
+                    intent.updatedAtMs = Date.now();
+                    await maybePersistTradeIntentState();
+                }
+                continue;
+            }
+            intent.reimbursementRecipientAddress = reimbursementRecipientAddress;
+            intent.reimbursementExplanation = buildReimbursementExplanation(intent);
+            delete intent.lastReimbursementCreditError;
+            delete intent.reimbursementCreditBlockedAtMs;
+            delete intent.nextReimbursementAttemptAtMs;
+            markStageDispatchStarted(intent, 'reimbursement');
+            await maybePersistTradeIntentState();
+
+            pendingProposalSubmission = {
+                intentKey: intent.intentKey,
+                startedAtMs: Date.now(),
+                explanation: intent.reimbursementExplanation,
+            };
+            const reimbursementCall = buildReimbursementToolCall(intent, policy, config);
+            return [
+                {
+                    callId: reimbursementCall.callId,
+                    name: reimbursementCall.name,
+                    arguments: reimbursementCall.arguments,
+                },
+            ];
+        }
+
+        if (action.kind === 'archive') {
+            intent.lastArchiveAttemptAtMs = Date.now();
+            intent.nextArchiveAttemptAtMs = Date.now() + policy.archiveRetryDelayMs;
+            intent.updatedAtMs = Date.now();
+            await maybePersistTradeIntentState();
+            pendingArtifactPublish = {
+                intentKey: intent.intentKey,
+            };
+            console.log(`[agent] Preparing signed trade intent archive for ${intent.intentKey}.`);
+            return [buildArchiveToolCall(intent, normalizedCommitmentSafe, normalizedAgentAddress)];
+        }
+
+        if (action.kind !== 'order') {
+            continue;
+        }
+
+        const requiredReservationWei = parseNonNegativeBigIntOrZero(
+            intent.reservedCreditAmountWei
+        );
+        const actualReservationHeadroomWei = getEffectiveOrderReservationHeadroomWei(
+            intent,
+            actualCollateralBalanceWei
+        );
+        let actualCollateralHeadroomError = null;
+        if (requiredReservationWei > 0n) {
+            if (actualReservationHeadroomWei === null) {
+                actualCollateralHeadroomError =
+                    'Unable to confirm actual Safe collateral headroom; refusing to place a Polymarket order until the Safe collateral balance can be read.';
+            } else if (actualReservationHeadroomWei < requiredReservationWei) {
+                actualCollateralHeadroomError =
+                    `Insufficient actual Safe collateral remains unreserved for order placement (headroomWei=${actualReservationHeadroomWei.toString()} requiredWei=${requiredReservationWei.toString()}).`;
+            }
+        }
+        if (actualCollateralHeadroomError) {
+            if (
+                intent.lastOrderSubmissionStatus !== 'unavailable' ||
+                intent.lastOrderSubmissionError !== actualCollateralHeadroomError ||
+                !Number.isInteger(intent.nextOrderAttemptAtMs) ||
+                intent.nextOrderAttemptAtMs <= Date.now()
+            ) {
+                intent.lastOrderSubmissionStatus = 'unavailable';
+                intent.lastOrderSubmissionError = actualCollateralHeadroomError;
+                intent.nextOrderAttemptAtMs = Date.now() + policy.archiveRetryDelayMs;
+                intent.updatedAtMs = Date.now();
+                await maybePersistTradeIntentState();
+            }
+            continue;
+        }
+        delete intent.lastOrderSubmissionStatus;
+        delete intent.lastOrderSubmissionError;
+
+        const clobExecutionPreflightError = getClobExecutionPreflightError(config);
+        if (clobExecutionPreflightError) {
+            intent.lastOrderSubmissionStatus = 'unavailable';
+            intent.lastOrderSubmissionError = clobExecutionPreflightError;
+            intent.nextOrderAttemptAtMs = Date.now() + policy.archiveRetryDelayMs;
+            intent.updatedAtMs = Date.now();
+            await maybePersistTradeIntentState();
+            continue;
+        }
+
+        let feeRateBps;
+        try {
+            feeRateBps = await fetchClobFeeRateBps({
+                config,
+                tokenId: intent.tokenId,
+            });
+        } catch (error) {
+            intent.lastOrderSubmissionStatus = 'unavailable';
+            intent.lastOrderSubmissionError =
+                `Failed to fetch Polymarket fee rate before order placement: ${error?.message ?? error}`;
+            intent.nextOrderAttemptAtMs = Date.now() + policy.archiveRetryDelayMs;
+            intent.updatedAtMs = Date.now();
+            await maybePersistTradeIntentState();
+            continue;
+        }
+        let preOrderTokenBalance = null;
+        if (tokenHolderAddress) {
+            try {
+                preOrderTokenBalance = await readOutcomeTokenBalance({
+                    publicClient,
+                    policy,
+                    tokenHolderAddress,
+                    tokenId: intent.tokenId,
+                });
+            } catch (error) {
+                preOrderTokenBalance = null;
+            }
+        }
+        if (chainId === undefined) {
+            try {
+                chainId = normalizeChainIdValue(
+                    await resolveRuntimeChainId({ publicClient, config })
+                ) ?? undefined;
+            } catch (error) {
+                intent.lastOrderSubmissionStatus = 'unavailable';
+                intent.lastOrderSubmissionError =
+                    `Failed to resolve chainId before order placement: ${error?.message ?? error}`;
+                intent.nextOrderAttemptAtMs = Date.now() + policy.archiveRetryDelayMs;
+                intent.updatedAtMs = Date.now();
+                await maybePersistTradeIntentState();
+                continue;
+            }
+        }
+        intent.feeRateBps = feeRateBps;
+        intent.feeRateFetchedAtMs = Date.now();
+        intent.tradingWalletAddress = clobAuthAddress ?? normalizedAgentAddress;
+        intent.orderDispatchBlockNumber = latestBlock.toString();
+        intent.preOrderTokenHolderAddress = tokenHolderAddress ?? null;
+        intent.preOrderTokenBalance =
+            preOrderTokenBalance === null ? null : preOrderTokenBalance.toString();
+        intent.reimbursementRecipientAddress = clobAuthAddress ?? normalizedAgentAddress;
+        markStageDispatchStarted(intent, 'order');
+        await maybePersistTradeIntentState();
+        pendingOrderSubmission = {
+            intentKey: intent.intentKey,
+            startedAtMs: Date.now(),
+        };
+        console.log(`[agent] Preparing Polymarket BUY order for ${intent.intentKey}.`);
+        return [buildOrderToolCall(intent, chainId, config)];
+    }
+
+    return [];
+}
+
+function takePendingSubmission(kind) {
+    if (kind === 'order') {
+        const pending = pendingOrderSubmission;
+        pendingOrderSubmission = null;
+        return pending;
+    }
+    if (kind === 'deposit') {
+        const pending = pendingDepositSubmission;
+        pendingDepositSubmission = null;
+        return pending;
+    }
+    if (kind === 'reimbursement') {
+        const pending = pendingProposalSubmission;
+        pendingProposalSubmission = null;
+        return pending;
+    }
+    throw new Error(`Unsupported pending submission kind: ${kind}`);
+}
+
+function takePendingIntent(kind) {
+    const pending = takePendingSubmission(kind);
+    if (!pending?.intentKey) {
+        return { pending: null, intent: null };
+    }
+    return {
+        pending,
+        intent: tradeIntentState.intents[pending.intentKey] ?? null,
+    };
+}
+
+async function handleArchiveToolOutput({ parsedOutput, policy }) {
+    const pending = pendingArtifactPublish;
+    pendingArtifactPublish = null;
+    if (!pending?.intentKey) {
+        return;
+    }
+
+    const intent = tradeIntentState.intents[pending.intentKey];
+    if (!intent) {
+        return;
+    }
+
+    const result = reduceArchiveToolOutput(intent, parsedOutput, {
+        retryDelayMs: policy.archiveRetryDelayMs,
+        markTerminalIntentFailure,
+    });
+    if (result.published) {
+        console.log(
+            `[agent] Signed trade intent archive published for ${pending.intentKey}: uri=${intent.artifactUri ?? 'missing'}.`
+        );
+    }
+    await maybePersistTradeIntentState();
+}
+
+async function handleOrderToolOutput({ parsedOutput, policy }) {
+    const { intent } = takePendingIntent('order');
+    if (!intent) {
+        return;
+    }
+    reduceOrderToolOutput(intent, parsedOutput, {
+        retryDelayMs: policy.archiveRetryDelayMs,
+        extractOrderIdFromSubmission,
+        extractOrderStatusFromSubmission,
+        markTerminalIntentFailure,
+    });
+    await maybePersistTradeIntentState();
+}
+
+async function handleDepositToolOutput({ parsedOutput, policy }) {
+    const { intent } = takePendingIntent('deposit');
+    if (!intent) {
+        return;
+    }
+    reduceDepositToolOutput(intent, parsedOutput, {
+        retryDelayMs: policy.archiveRetryDelayMs,
+        normalizeHash,
+        markTerminalIntentFailure,
+    });
+    await maybePersistTradeIntentState();
+}
+
+async function handleReimbursementToolOutput({ parsedOutput, policy }) {
+    const { pending, intent } = takePendingIntent('reimbursement');
+    if (!intent) {
+        return;
+    }
+    reduceReimbursementToolOutput(intent, parsedOutput, {
+        retryDelayMs: policy.archiveRetryDelayMs,
+        pendingExplanation: pending?.explanation,
+        normalizeHash,
+        resolveOgProposalHashFromToolOutput,
+        markTerminalIntentFailure,
+    });
+    await maybePersistTradeIntentState();
+}
+
+async function onToolOutput({ name, parsedOutput, config, commitmentSafe }) {
+    await configureRuntimeStateContext({
+        commitmentSafe: commitmentSafe ?? config?.commitmentSafe,
+        config,
+    });
+    await hydrateTradeIntentState();
+    const policy = resolvePolicy(config);
+
+    if (name === 'ipfs_publish') {
+        await handleArchiveToolOutput({ parsedOutput, policy });
+        return;
+    }
+    if (name === 'polymarket_clob_build_sign_and_place_order') {
+        await handleOrderToolOutput({ parsedOutput, policy });
+        return;
+    }
+    if (name === 'make_erc1155_deposit') {
+        await handleDepositToolOutput({ parsedOutput, policy });
+        return;
+    }
+    if (name === 'post_bond_and_propose' || name === 'auto_post_bond_and_propose') {
+        await handleReimbursementToolOutput({ parsedOutput, policy });
+    }
+}
+
+function onProposalEvents({
+    executedProposals = [],
+    deletedProposals = [],
+}) {
+    queuedProposalEventUpdates.push({
+        executedProposals,
+        deletedProposals,
+    });
+}
+
+export {
+    buildSignedTradeIntentArchiveArtifact,
+    computeBuyOrderAmounts,
+    createDepositRecord,
+    enrichSignals,
+    getDeterministicToolCalls,
+    getPollingOptions,
+    getSystemPrompt,
+    getTradeIntentState,
+    interpretSignedTradeIntentSignal,
+    onProposalEvents,
+    onToolOutput,
+    resetTradeIntentState,
+    setTradeIntentStatePathForTest,
+};
