@@ -5599,6 +5599,81 @@ async function run() {
 
         await resetTradeIntentState();
         setTradeIntentStatePathForTest(stateFilePath);
+        runtime.latestBlock = 540n;
+        runtime.ctfBalances = {
+            [`${TEST_AGENT.toLowerCase()}:${NO_TOKEN_ID}`]: 1_000_000n,
+        };
+        await writeTradeIntentStateFixture(stateFilePath, {
+            nextSequence: 2,
+            intents: {
+                [`${TEST_SIGNER.toLowerCase()}:pm-intent-deposit-confirmed-missing-hash`]: {
+                    sourceKind: 'signed_trade_intent',
+                    sequence: 1,
+                    intentKey: `${TEST_SIGNER.toLowerCase()}:pm-intent-deposit-confirmed-missing-hash`,
+                    requestId: 'pm-intent-deposit-confirmed-missing-hash',
+                    signer: TEST_SIGNER.toLowerCase(),
+                    tokenId: NO_TOKEN_ID,
+                    outcome: 'NO',
+                    marketId: 'market-123',
+                    maxSpendWei: '25000000',
+                    reservedCreditAmountWei: '25000000',
+                    reimbursementAmountWei: '20000000',
+                    filledShareAmount: '1000000',
+                    artifactCid: 'bafy-deposit-confirmed-missing-hash',
+                    artifactUri: 'ipfs://bafy-deposit-confirmed-missing-hash',
+                    orderId: 'order-deposit-confirmed-missing-hash',
+                    orderFilled: true,
+                    orderFilledAtMs: 1_920_000_000_000,
+                    orderDispatchBlockNumber: '500',
+                    tradingWalletAddress: TEST_AGENT.toLowerCase(),
+                    preOrderTokenHolderAddress: TEST_AGENT.toLowerCase(),
+                    depositExpectedAmount: '1000000',
+                    createdAtMs: 1_920_000_000_000,
+                    updatedAtMs: 1_920_000_000_000,
+                },
+            },
+        });
+        const depositConfirmedMissingHashConfig = buildModuleConfig({
+            statePath: stateFilePath,
+        });
+        const depositConfirmedMissingHashCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: depositConfirmedMissingHashConfig,
+        });
+        assert.equal(depositConfirmedMissingHashCalls.length, 1);
+        assert.equal(depositConfirmedMissingHashCalls[0].name, 'make_erc1155_deposit');
+        await onToolOutput({
+            name: 'make_erc1155_deposit',
+            parsedOutput: {
+                status: 'confirmed',
+            },
+            config: depositConfirmedMissingHashConfig,
+        });
+        const noReimbursementAfterConfirmedMissingDepositHash = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_SAFE,
+            agentAddress: TEST_AGENT,
+            publicClient,
+            config: depositConfirmedMissingHashConfig,
+        });
+        assert.deepEqual(noReimbursementAfterConfirmedMissingDepositHash, []);
+        state = getTradeIntentState();
+        storedIntent =
+            state.intents[
+                `${TEST_SIGNER.toLowerCase()}:pm-intent-deposit-confirmed-missing-hash`
+            ];
+        assert.equal(storedIntent.tokenDeposited, undefined);
+        assert.equal(storedIntent.depositTxHash, undefined);
+        assert.equal(typeof storedIntent.depositSubmittedAtMs, 'number');
+        assert.equal(storedIntent.depositSubmissionAmbiguous, true);
+        assert.equal(storedIntent.lastDepositStatus, 'missing_tx_hash');
+        assert.match(storedIntent.lastDepositError, /confirmed without a transaction hash/i);
+
+        await resetTradeIntentState();
+        setTradeIntentStatePathForTest(stateFilePath);
         runtime.latestBlock = 541n;
         runtime.depositLogs = [];
         runtime.receipts = {};

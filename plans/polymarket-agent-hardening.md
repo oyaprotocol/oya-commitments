@@ -40,6 +40,7 @@ The user-visible outcome is a Polymarket agent that can be run for long periods 
 - [x] 2026-03-24 14:59Z: Found and fixed a silent-stall case where malformed-but-non-throwing CLOB order-status payloads could leave submitted orders active forever without surfacing a refresh failure; added regression coverage and re-ran validation.
 - [x] 2026-03-24 15:08Z: Tightened live proposal-hash recovery to require an authorized proposer on proposal signals instead of treating proposer as optional; added regression coverage and re-ran validation.
 - [x] 2026-03-24 15:22Z: Fixed order-call chainId fallback so CLOB order payloads reuse the already-resolved runtime/config chain ID when direct RPC chain-id lookup is unavailable; added regression coverage and re-ran validation.
+- [x] 2026-03-24 15:33Z: Hardened deposit tool-output reduction so hashless `confirmed` ERC1155 deposit results fail closed as ambiguous instead of marking `tokenDeposited=true`; added regression coverage and re-ran validation.
 
 ## Surprises & Discoveries
 
@@ -108,6 +109,9 @@ The user-visible outcome is a Polymarket agent that can be run for long periods 
   Date/Author: 2026-03-24 / Codex.
 - Decision: Order payload construction should reuse the module's already-resolved runtime/config chain ID instead of re-querying `publicClient.getChainId()` ad hoc.
   Rationale: intermittent chain-id RPC failures should not prevent CLOB order signing when the runtime chain was already resolved earlier in the same loop or provided by config.
+  Date/Author: 2026-03-24 / Codex.
+- Decision: A deposit stage may only advance to `tokenDeposited=true` when the tool output includes a durable transaction hash or later onchain reconciliation provides equivalent evidence.
+  Rationale: allowing a hashless `confirmed` tool result to unlock reimbursement weakens the audit trail and can let the module reimburse without a verifiable deposit transaction identifier.
   Date/Author: 2026-03-24 / Codex.
 
 ## Outcomes & Retrospective
