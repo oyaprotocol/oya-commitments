@@ -221,6 +221,42 @@ async function run() {
         path.join(repoRootPath, 'agent/.state/proposal-publications/overlay-state.json')
     );
 
+    await createAgentModule(repoRootPath, 'multichain-server', {
+        proposalPublishApi: {
+            enabled: true,
+            host: 'multichain-host.local',
+            port: 9790,
+            requireSignerAllowlist: false,
+        },
+        byChain: {
+            '11155111': {
+                commitmentSafe: '0x1111111111111111111111111111111111111111',
+            },
+            '137': {
+                commitmentSafe: '0x2222222222222222222222222222222222222222',
+            },
+        },
+    });
+
+    const multichainServerConfig = await resolveProposalPublishServerConfig({
+        argv: ['node', 'start-proposal-publish-node.mjs', '--module=multichain-server'],
+        env: {},
+        repoRootPath,
+    });
+    assert.equal(multichainServerConfig.runtimeConfig.chainId, undefined);
+    assert.equal(multichainServerConfig.runtimeConfig.proposalPublishApiHost, 'multichain-host.local');
+    assert.equal(multichainServerConfig.runtimeConfig.proposalPublishApiPort, 9790);
+    assert.equal(
+        multichainServerConfig.stateFile,
+        path.join(
+            repoRootPath,
+            'agent',
+            '.state',
+            'proposal-publications',
+            'multichain-server-chain-unknown.json'
+        )
+    );
+
     await createAgentModule(repoRootPath, 'ambiguous', {
         byChain: {
             '11155111': {

@@ -14,6 +14,7 @@ import {
     buildSignedProposalEnvelope,
     buildSignedProposalPayload,
 } from './signed-proposal.js';
+import { buildPublicationKey } from './proposal-publication-store.js';
 
 function parseEnvelopeFromCanonicalMessage(canonicalMessage) {
     if (typeof canonicalMessage !== 'string' || !canonicalMessage.trim()) {
@@ -125,6 +126,18 @@ function formatRequestContext({ body, signer, senderKeyId, code, statusCode }) {
     return parts.length > 0 ? ` (${parts.join(' ')})` : '';
 }
 
+function enqueuePublicationOperation(queueMap, queueKey, operation) {
+    const prior = queueMap.get(queueKey) ?? Promise.resolve();
+    const run = prior.then(operation, operation);
+    const tail = run.catch(() => {});
+    queueMap.set(queueKey, tail);
+    return run.finally(() => {
+        if (queueMap.get(queueKey) === tail) {
+            queueMap.delete(queueKey);
+        }
+    });
+}
+
 function createProposalPublicationApiServer({ config, store, logger = console } = {}) {
     if (!config) {
         throw new Error('createProposalPublicationApiServer requires config.');
@@ -155,6 +168,7 @@ function createProposalPublicationApiServer({ config, store, logger = console } 
     }
 
     let server;
+    const publishOperationTails = new Map();
 
     function emitLog(level, message) {
         const method =
@@ -475,12 +489,40 @@ function createProposalPublicationApiServer({ config, store, logger = console } 
             }
 
             let record = prepared.record;
-            const wasAlreadyPinned = Boolean(record?.cid) && Boolean(record?.pinned);
+            let wasAlreadyPinned = false;
             try {
-                record = await publishRecord(record, {
-                    signerAllowlistMode,
-                    nodeName: config.proposalPublishApiNodeName,
+                const publicationKey = buildPublicationKey({
+                    signer: signedAuth.sender.address,
+                    chainId: body.chainId,
+                    requestId: body.requestId,
                 });
+                ({ record, wasAlreadyPinned } = await enqueuePublicationOperation(
+                    publishOperationTails,
+                    publicationKey,
+                    async () => {
+                        const latestRecord = await store.getRecord({
+                            signer: signedAuth.sender.address,
+                            chainId: body.chainId,
+                            requestId: body.requestId,
+                        });
+                        if (!latestRecord) {
+                            throw new Error('Publication record disappeared before publish.');
+                        }
+
+                        const latestWasAlreadyPinned =
+                            Boolean(latestRecord.cid) && Boolean(latestRecord.pinned);
+                        const nextRecord = latestWasAlreadyPinned
+                            ? latestRecord
+                            : await publishRecord(latestRecord, {
+                                  signerAllowlistMode,
+                                  nodeName: config.proposalPublishApiNodeName,
+                              });
+                        return {
+                            record: nextRecord,
+                            wasAlreadyPinned: latestWasAlreadyPinned,
+                        };
+                    }
+                ));
             } catch (error) {
                 const latestRecord = await store.getRecord({
                     signer: signedAuth.sender.address,
