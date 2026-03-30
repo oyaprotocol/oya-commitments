@@ -1,9 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { getAddress } from 'viem';
 import { canonicalizeJson, isPlainObject } from './canonical-json.js';
 
 const STORE_VERSION = 'oya-proposal-publication-store-v1';
+const storeOperationTails = new Map();
 
 function cloneJson(value) {
     return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
@@ -120,7 +122,7 @@ async function readStoreState(stateFile) {
 async function writeStoreState(stateFile, state) {
     const dir = path.dirname(stateFile);
     await mkdir(dir, { recursive: true });
-    const tempPath = `${stateFile}.${process.pid}.${Date.now()}.tmp`;
+    const tempPath = `${stateFile}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
     await writeFile(
         tempPath,
         `${JSON.stringify(
@@ -136,16 +138,32 @@ async function writeStoreState(stateFile, state) {
     await rename(tempPath, stateFile);
 }
 
+function enqueueStoreOperation(queueKey, operation) {
+    const prior = storeOperationTails.get(queueKey) ?? Promise.resolve();
+    const run = prior.then(operation, operation);
+    const tail = run.catch(() => {});
+    storeOperationTails.set(queueKey, tail);
+    return run.finally(() => {
+        if (storeOperationTails.get(queueKey) === tail) {
+            storeOperationTails.delete(queueKey);
+        }
+    });
+}
+
 function createProposalPublicationStore({ stateFile }) {
     if (typeof stateFile !== 'string' || !stateFile.trim()) {
         throw new Error('createProposalPublicationStore requires a non-empty stateFile path.');
     }
+    const resolvedStateFile = path.resolve(stateFile.trim());
+    const queueKey = resolvedStateFile;
 
     async function getRecord({ signer, requestId }) {
-        const key = buildPublicationKey({ signer, requestId });
-        const state = await readStoreState(stateFile);
-        const record = state.records[key];
-        return record ? cloneJson(record) : null;
+        return enqueueStoreOperation(queueKey, async () => {
+            const key = buildPublicationKey({ signer, requestId });
+            const state = await readStoreState(resolvedStateFile);
+            const record = state.records[key];
+            return record ? cloneJson(record) : null;
+        });
     }
 
     async function prepareRecord({
@@ -157,71 +175,75 @@ function createProposalPublicationStore({ stateFile }) {
         receivedAtMs,
         publishedAtMs,
     }) {
-        const key = buildPublicationKey({ signer, requestId });
-        const state = await readStoreState(stateFile);
-        const existing = state.records[key];
-        if (existing) {
-            if (
-                existing.signature === signature &&
-                existing.canonicalMessage === canonicalMessage
-            ) {
+        return enqueueStoreOperation(queueKey, async () => {
+            const key = buildPublicationKey({ signer, requestId });
+            const state = await readStoreState(resolvedStateFile);
+            const existing = state.records[key];
+            if (existing) {
+                if (
+                    existing.signature === signature &&
+                    existing.canonicalMessage === canonicalMessage
+                ) {
+                    return {
+                        status: 'existing',
+                        record: cloneJson(existing),
+                    };
+                }
                 return {
-                    status: 'existing',
+                    status: 'conflict',
                     record: cloneJson(existing),
                 };
             }
-            return {
-                status: 'conflict',
-                record: cloneJson(existing),
-            };
-        }
 
-        const nowMs = Date.now();
-        const record = normalizeStoredRecord(
-            {
-                signer,
-                requestId,
-                signature,
-                canonicalMessage,
-                artifact,
-                receivedAtMs,
-                publishedAtMs,
-                cid: null,
-                uri: null,
-                pinned: false,
-                publishResult: null,
-                pinResult: null,
-                lastError: null,
-                createdAtMs: nowMs,
-                updatedAtMs: nowMs,
-            },
-            'record'
-        );
-        state.records[key] = record;
-        await writeStoreState(stateFile, state);
-        return {
-            status: 'created',
-            record: cloneJson(record),
-        };
+            const nowMs = Date.now();
+            const record = normalizeStoredRecord(
+                {
+                    signer,
+                    requestId,
+                    signature,
+                    canonicalMessage,
+                    artifact,
+                    receivedAtMs,
+                    publishedAtMs,
+                    cid: null,
+                    uri: null,
+                    pinned: false,
+                    publishResult: null,
+                    pinResult: null,
+                    lastError: null,
+                    createdAtMs: nowMs,
+                    updatedAtMs: nowMs,
+                },
+                'record'
+            );
+            state.records[key] = record;
+            await writeStoreState(resolvedStateFile, state);
+            return {
+                status: 'created',
+                record: cloneJson(record),
+            };
+        });
     }
 
     async function saveRecord(record) {
-        const normalized = normalizeStoredRecord(record, 'record');
-        const key = buildPublicationKey({
-            signer: normalized.signer,
-            requestId: normalized.requestId,
+        return enqueueStoreOperation(queueKey, async () => {
+            const normalized = normalizeStoredRecord(record, 'record');
+            const key = buildPublicationKey({
+                signer: normalized.signer,
+                requestId: normalized.requestId,
+            });
+            const state = await readStoreState(resolvedStateFile);
+            state.records[key] = {
+                ...normalized,
+                updatedAtMs: Date.now(),
+            };
+            await writeStoreState(resolvedStateFile, state);
+            return cloneJson(state.records[key]);
         });
-        const state = await readStoreState(stateFile);
-        state.records[key] = {
-            ...normalized,
-            updatedAtMs: Date.now(),
-        };
-        await writeStoreState(stateFile, state);
-        return cloneJson(state.records[key]);
     }
 
     return {
-        stateFile,
+        stateFile: resolvedStateFile,
         getRecord,
         prepareRecord,
         saveRecord,
