@@ -151,6 +151,8 @@ async function main() {
     const artifactByCid = new Map();
     const requestIdByCid = new Map();
     const failPinOnce = new Set(['pin-retry']);
+    const failAddOnce = new Set(['publish-retry-expired', 'publish-retry-resigned']);
+    const originalDateNow = Date.now;
     globalThis.fetch = async (url, options = {}) => {
         const urlString = String(url);
         if (!urlString.startsWith('http://ipfs.mock')) {
@@ -166,6 +168,10 @@ async function main() {
             const requestId = artifact?.signedProposal?.envelope?.requestId;
             const cid = `bafy${createHash('sha256').update(uploadedText).digest('hex').slice(0, 24)}`;
             addAttemptsByRequestId.set(requestId, (addAttemptsByRequestId.get(requestId) ?? 0) + 1);
+            if (failAddOnce.has(requestId)) {
+                failAddOnce.delete(requestId);
+                return textResponse(500, '{"error":"temporary add failure"}', 'Internal Server Error');
+            }
             artifactByCid.set(cid, artifact);
             requestIdByCid.set(cid, requestId);
             return textResponse(
@@ -314,7 +320,76 @@ async function main() {
         assert.equal(pinnedRecord.pinned, true);
         assert.equal(pinnedRecord.cid, pinRetryFirst.json.cid);
         assert.equal(pinnedRecord.lastError, null);
+
+        const retryBaseNowMs = originalDateNow();
+        Date.now = () => retryBaseNowMs;
+        const publishRetryRequest = await buildSignedBody({
+            account,
+            requestId: 'publish-retry-expired',
+            explanation: 'Retry exact same signed payload after add outage.',
+            timestampMs: retryBaseNowMs,
+        });
+        const publishRetryFirst = await postPublication(baseUrl, publishRetryRequest.body);
+        assert.equal(publishRetryFirst.status, 502);
+        assert.equal(publishRetryFirst.json.code, 'publish_failed');
+        assert.equal(publishRetryFirst.json.cid, null);
+        const pendingAfterAddFailure = await store.getRecord({
+            signer: account.address,
+            requestId: 'publish-retry-expired',
+        });
+        assert.equal(pendingAfterAddFailure.cid, null);
+        assert.equal(pendingAfterAddFailure.publishedAtMs, null);
+        assert.equal(pendingAfterAddFailure.artifact, null);
+
+        Date.now = () => retryBaseNowMs + 301_000;
+        const publishRetrySecond = await postPublication(baseUrl, publishRetryRequest.body);
+        assert.equal(publishRetrySecond.status, 202);
+        assert.equal(publishRetrySecond.json.status, 'published');
+        assert.ok(publishRetrySecond.json.cid);
+        assert.equal(addAttemptsByRequestId.get('publish-retry-expired'), 2);
+        const exactRetryRecord = await store.getRecord({
+            signer: account.address,
+            requestId: 'publish-retry-expired',
+        });
+        assert.ok(exactRetryRecord.publishedAtMs >= retryBaseNowMs + 301_000);
+        assert.ok(exactRetryRecord.artifact);
+        assert.equal(
+            exactRetryRecord.artifact.publication.publishedAtMs,
+            exactRetryRecord.publishedAtMs
+        );
+
+        Date.now = () => retryBaseNowMs + 400_000;
+        const resignedFirst = await buildSignedBody({
+            account,
+            requestId: 'publish-retry-resigned',
+            explanation: 'Retry with a refreshed signature after add outage.',
+            timestampMs: retryBaseNowMs + 400_000,
+        });
+        const resignedFailure = await postPublication(baseUrl, resignedFirst.body);
+        assert.equal(resignedFailure.status, 502);
+        assert.equal(resignedFailure.json.code, 'publish_failed');
+
+        Date.now = () => retryBaseNowMs + 801_000;
+        const resignedSecond = await buildSignedBody({
+            account,
+            requestId: 'publish-retry-resigned',
+            explanation: 'Retry with a refreshed signature after add outage.',
+            timestampMs: retryBaseNowMs + 801_000,
+        });
+        const resignedSuccess = await postPublication(baseUrl, resignedSecond.body);
+        assert.equal(resignedSuccess.status, 202);
+        assert.equal(resignedSuccess.json.status, 'published');
+        assert.ok(resignedSuccess.json.cid);
+        const resignedRecord = await store.getRecord({
+            signer: account.address,
+            requestId: 'publish-retry-resigned',
+        });
+        assert.equal(resignedRecord.signature, resignedSecond.signature);
+        assert.equal(resignedRecord.canonicalMessage, resignedSecond.payload);
+        assert.ok(resignedRecord.publishedAtMs >= retryBaseNowMs + 801_000);
+        assert.equal(addAttemptsByRequestId.get('publish-retry-resigned'), 2);
     } finally {
+        Date.now = originalDateNow;
         globalThis.fetch = originalFetch;
         await api.stop();
         await rm(tempDir, { recursive: true, force: true });

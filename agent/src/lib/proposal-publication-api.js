@@ -15,6 +15,42 @@ import {
     buildSignedProposalPayload,
 } from './signed-proposal.js';
 
+function parseEnvelopeFromCanonicalMessage(canonicalMessage) {
+    if (typeof canonicalMessage !== 'string' || !canonicalMessage.trim()) {
+        throw new Error('canonicalMessage must be a non-empty string.');
+    }
+
+    let parsed;
+    try {
+        parsed = JSON.parse(canonicalMessage);
+    } catch (error) {
+        throw new Error('canonicalMessage must be valid JSON.');
+    }
+    return buildSignedProposalEnvelope(parsed);
+}
+
+function buildEnvelopeIdentityIgnoringTimestamp(envelope) {
+    const normalized = buildSignedProposalEnvelope(envelope);
+    const { timestampMs: _ignoredTimestamp, ...rest } = normalized;
+    return JSON.stringify(rest);
+}
+
+function canRefreshPendingRecord({ existingRecord, envelope }) {
+    if (!existingRecord || existingRecord.cid !== null || existingRecord.pinned) {
+        return false;
+    }
+
+    try {
+        const existingEnvelope = parseEnvelopeFromCanonicalMessage(existingRecord.canonicalMessage);
+        return (
+            buildEnvelopeIdentityIgnoringTimestamp(existingEnvelope) ===
+            buildEnvelopeIdentityIgnoringTimestamp(envelope)
+        );
+    } catch (error) {
+        return false;
+    }
+}
+
 function validateProposalPublishBody(body) {
     if (!isPlainObject(body)) {
         return { ok: false, message: 'Request body must be a JSON object.' };
@@ -130,12 +166,25 @@ function createProposalPublicationApiServer({ config, store, logger = console } 
         method(message);
     }
 
-    async function publishRecord(record) {
+    async function publishRecord(record, { signerAllowlistMode, nodeName }) {
         let nextRecord = { ...record };
         if (!nextRecord.cid) {
+            const envelope = parseEnvelopeFromCanonicalMessage(nextRecord.canonicalMessage);
+            const publishedAtMs = Date.now();
+            const artifact = buildProposalPublicationArtifact({
+                signer: nextRecord.signer,
+                signature: nextRecord.signature,
+                signedAtMs: envelope.timestampMs,
+                canonicalMessage: nextRecord.canonicalMessage,
+                envelope,
+                receivedAtMs: nextRecord.receivedAtMs,
+                publishedAtMs,
+                signerAllowlistMode,
+                nodeName,
+            });
             const publishResponse = await publishIpfsContent({
                 config,
-                json: nextRecord.artifact,
+                json: artifact,
                 filename: buildProposalPublicationFilename({
                     requestId: nextRecord.requestId,
                     signer: nextRecord.signer,
@@ -144,6 +193,8 @@ function createProposalPublicationApiServer({ config, store, logger = console } 
             });
             nextRecord = await store.saveRecord({
                 ...nextRecord,
+                artifact,
+                publishedAtMs,
                 cid: publishResponse.cid,
                 uri: publishResponse.uri,
                 publishResult: publishResponse.publishResult,
@@ -260,6 +311,7 @@ function createProposalPublicationApiServer({ config, store, logger = console } 
                 signatureMaxAgeSeconds,
                 expectedChainId,
                 nowMs,
+                allowExpired: true,
                 buildPayload: ({ declaredAddress }) =>
                     buildSignedProposalPayload({
                         address: declaredAddress,
@@ -312,26 +364,93 @@ function createProposalPublicationApiServer({ config, store, logger = console } 
                 deadline: body.deadline,
             });
             const signerAllowlistMode = requireSignerAllowlist ? 'explicit' : 'open';
-
-            const prepared = await store.prepareRecord({
+            const existingRecord = await store.getRecord({
                 signer: signedAuth.sender.address,
                 requestId: body.requestId,
-                signature: signedAuth.sender.signature,
-                canonicalMessage: signedAuth.payload,
-                artifact: buildProposalPublicationArtifact({
-                    signer: signedAuth.sender.address,
-                    signature: signedAuth.sender.signature,
-                    signedAtMs: signedAuth.sender.signedAtMs,
-                    canonicalMessage: signedAuth.payload,
-                    envelope,
-                    receivedAtMs: nowMs,
-                    publishedAtMs: nowMs,
-                    signerAllowlistMode,
-                    nodeName: config.proposalPublishApiNodeName,
-                }),
-                receivedAtMs: nowMs,
-                publishedAtMs: nowMs,
             });
+            const exactExistingMatch =
+                existingRecord?.signature === signedAuth.sender.signature &&
+                existingRecord?.canonicalMessage === signedAuth.payload;
+            const refreshablePendingRecord =
+                !exactExistingMatch &&
+                canRefreshPendingRecord({
+                    existingRecord,
+                    envelope,
+                });
+
+            if (signedAuth.isExpired && !exactExistingMatch && !refreshablePendingRecord) {
+                emitLog(
+                    'warn',
+                    `[oya-node] Proposal publish API rejected request${formatRequestContext({
+                        body,
+                        signer: signedAuth.sender.address,
+                        senderKeyId: signedAuth.senderKeyId,
+                        code: existingRecord ? 'request_conflict' : 'signed_auth_failed',
+                        statusCode: existingRecord ? 409 : 401,
+                    })}: ${
+                        existingRecord
+                            ? 'requestId already exists for this signer with different signed contents.'
+                            : 'Signed request expired or has an invalid timestamp.'
+                    }`
+                );
+                if (existingRecord) {
+                    sendJson(res, 409, {
+                        error: 'requestId already exists for this signer with different signed contents.',
+                        code: 'request_conflict',
+                        cid: existingRecord.cid ?? null,
+                        uri: existingRecord.uri ?? null,
+                    });
+                } else {
+                    const extraHeaders =
+                        keyEntries.length > 0
+                            ? { 'WWW-Authenticate': 'Bearer realm="oya-proposal-publish-api"' }
+                            : {};
+                    sendJson(
+                        res,
+                        401,
+                        {
+                            error: 'Signed request expired or has an invalid timestamp.',
+                        },
+                        extraHeaders
+                    );
+                }
+                return;
+            }
+
+            let prepared;
+            if (exactExistingMatch) {
+                prepared = {
+                    status: 'existing',
+                    record: existingRecord,
+                };
+            } else if (refreshablePendingRecord) {
+                prepared = {
+                    status: 'existing',
+                    record: await store.saveRecord({
+                        ...existingRecord,
+                        signature: signedAuth.sender.signature,
+                        canonicalMessage: signedAuth.payload,
+                        publishedAtMs: null,
+                        artifact: null,
+                        cid: null,
+                        uri: null,
+                        pinned: false,
+                        publishResult: null,
+                        pinResult: null,
+                        lastError: null,
+                    }),
+                };
+            } else {
+                prepared = await store.prepareRecord({
+                    signer: signedAuth.sender.address,
+                    requestId: body.requestId,
+                    signature: signedAuth.sender.signature,
+                    canonicalMessage: signedAuth.payload,
+                    artifact: null,
+                    receivedAtMs: nowMs,
+                    publishedAtMs: null,
+                });
+            }
 
             if (prepared.status === 'conflict') {
                 emitLog(
@@ -356,7 +475,10 @@ function createProposalPublicationApiServer({ config, store, logger = console } 
             let record = prepared.record;
             const wasAlreadyPinned = Boolean(record?.cid) && Boolean(record?.pinned);
             try {
-                record = await publishRecord(record);
+                record = await publishRecord(record, {
+                    signerAllowlistMode,
+                    nodeName: config.proposalPublishApiNodeName,
+                });
             } catch (error) {
                 const latestRecord = await store.getRecord({
                     signer: signedAuth.sender.address,

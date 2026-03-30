@@ -26,6 +26,13 @@ function normalizeTimestamp(value, label) {
     return parsed;
 }
 
+function normalizeOptionalTimestamp(value, label) {
+    if (value === undefined || value === null) {
+        return null;
+    }
+    return normalizeTimestamp(value, label);
+}
+
 function normalizeOptionalString(value, label) {
     if (value === undefined || value === null) {
         return null;
@@ -67,8 +74,11 @@ function normalizeStoredRecord(record, label = 'record') {
                       throw new Error(`${label}.canonicalMessage must be a non-empty string.`);
                   })(),
         receivedAtMs: normalizeTimestamp(record.receivedAtMs, `${label}.receivedAtMs`),
-        publishedAtMs: normalizeTimestamp(record.publishedAtMs, `${label}.publishedAtMs`),
-        artifact: canonicalizeJson(cloneJson(record.artifact)),
+        publishedAtMs: normalizeOptionalTimestamp(record.publishedAtMs, `${label}.publishedAtMs`),
+        artifact:
+            record.artifact === undefined || record.artifact === null
+                ? null
+                : canonicalizeJson(cloneJson(record.artifact)),
         cid: normalizeOptionalString(record.cid, `${label}.cid`),
         uri: normalizeOptionalString(record.uri, `${label}.uri`),
         pinned: Boolean(record.pinned),
@@ -84,8 +94,17 @@ function normalizeStoredRecord(record, label = 'record') {
             `${label}.updatedAtMs`
         ),
     };
-    if (!isPlainObject(normalized.artifact)) {
+    if (normalized.artifact !== null && !isPlainObject(normalized.artifact)) {
         throw new Error(`${label}.artifact must be a JSON object.`);
+    }
+    if (normalized.cid !== null && normalized.artifact === null) {
+        throw new Error(`${label}.artifact must be set once cid exists.`);
+    }
+    if (normalized.cid !== null && normalized.publishedAtMs === null) {
+        throw new Error(`${label}.publishedAtMs must be set once cid exists.`);
+    }
+    if (normalized.pinned && normalized.cid === null) {
+        throw new Error(`${label}.cid must be set when pinned=true.`);
     }
     return normalized;
 }

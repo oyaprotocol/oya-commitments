@@ -42,6 +42,7 @@ async function authenticateSignedRequest({
     expectedChainId,
     nowMs,
     buildPayload,
+    allowExpired = false,
 }) {
     if (!body?.auth) {
         return {
@@ -103,7 +104,8 @@ async function authenticateSignedRequest({
     const maxAgeMs = signatureMaxAgeSeconds * 1000;
     const maxFutureSkewMs = 30_000;
     const ageMs = nowMs - auth.timestampMs;
-    if (ageMs < -maxFutureSkewMs || ageMs > maxAgeMs) {
+    const isExpired = ageMs < -maxFutureSkewMs || ageMs > maxAgeMs;
+    if (isExpired && !allowExpired) {
         return {
             ok: false,
             statusCode: 401,
@@ -140,6 +142,7 @@ async function authenticateSignedRequest({
 
     return {
         ok: true,
+        isExpired,
         payload,
         senderKeyId: `addr:${normalizedDeclared}`,
         sender: {
