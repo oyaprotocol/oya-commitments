@@ -67,6 +67,7 @@ For interactions, swap the env var (e.g., `PROPOSER_PK`, `EXECUTOR_PK`). For sig
 - **Timelock triggers**: Parses plain language timelocks in rules (absolute dates or “X minutes after deposit”) and emits `timelock` signals when due.
 - **Price triggers**: If a module exports `getPriceTriggers({ commitmentText, config })`, the runner evaluates those parsed/inferred Uniswap V3 thresholds and emits `priceTrigger` signals.
 - **Optional message API**: When enabled, accepts authenticated user messages over HTTP and injects them as `userMessage` signals for the next decision cycle.
+- **Optional proposal publication node**: In a separate process, verifies signed proposal-publication requests from allowed signers, publishes a canonical JSON artifact to IPFS, pins the CID, and returns stable publication metadata for co-owners and outside observers.
 - **Optional IPFS publishing**: When enabled, agents can publish text/JSON artifacts to a Kubo-compatible IPFS API and pin the resulting CID.
 
 All other behavior is intentionally left out. Implement your own agent in `agent-library/agents/<name>/agent.js` to add commitment-specific logic and tool use.
@@ -200,6 +201,134 @@ Compatibility note:
 If `--url` is omitted, the helper reads `messageApi.host` and `messageApi.port` from the selected agent module's merged config stack (`config.json`, optional `config.local.json`, and any `--overlay` / `--overlay-paths` files passed to the script). Use `--module=<agent-name>` and optional `--chain-id=<int>` to select the commitment config. When the module does not override those fields, the helper falls back to the built-in default `http://127.0.0.1:8787`.
 
 If bearer gating is configured, also pass `--bearer-token="<token>"` or set `MESSAGE_API_BEARER_TOKEN`.
+
+### Proposal Publication API (Optional)
+
+This is a separate process from the main agent loop. The node is publication-only in this stage:
+
+- it verifies an EIP-191 signed proposal-publication request
+- it optionally enforces a node-local signer allowlist and bearer token gate
+- it archives the signed proposal package to IPFS as canonical JSON
+- it pins the CID and returns publication metadata
+
+It does not judge proposal correctness, aggregate approvals, or propose onchain.
+
+Configure non-secret proposal publication settings in the module `config.json` or `byChain.<chainId>`:
+
+```json
+{
+  "chainId": 11155111,
+  "ipfsEnabled": true,
+  "proposalPublishApi": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 9890,
+    "requireSignerAllowlist": true,
+    "signerAllowlist": [
+      "0x1111111111111111111111111111111111111111"
+    ],
+    "signatureMaxAgeSeconds": 300,
+    "maxBodyBytes": 65536,
+    "stateFile": "agent/.state/proposal-publications/example.json",
+    "nodeName": "sepolia-publisher-1"
+  }
+}
+```
+
+Supported `proposalPublishApi` fields:
+
+- `enabled`: Set to `true` to allow the standalone proposal publication node to start.
+- `host`: Bind host (default `127.0.0.1`).
+- `port`: Bind port (default `9890`).
+- `requireSignerAllowlist`: Require `signerAllowlist` membership for signed requests (`true`/`false`, default `true`).
+- `signerAllowlist`: Optional array of EVM addresses allowed to sign publication requests. Required when `requireSignerAllowlist=true`.
+- `signatureMaxAgeSeconds`: Max signature age in seconds (default `300`).
+- `maxBodyBytes`: Request body limit in bytes (default `65536`).
+- `stateFile`: Optional JSON state file path for the durable publication ledger. If omitted, the startup helper defaults to `agent/.state/proposal-publications/<agent>-chain-<chainId>.json`.
+- `nodeName`: Optional operator-facing label recorded in published artifacts.
+
+Keep bearer tokens in env via `PROPOSAL_PUBLISH_API_KEYS_JSON`; `proposalPublishApi.keys` is intentionally not supported in repo-tracked module config. Use `byChain.<chainId>.proposalPublishApi` for chain-specific overrides.
+
+Start the standalone node:
+
+```bash
+node agent/scripts/start-proposal-publish-node.mjs --module=<agent-name>
+```
+
+Endpoints:
+
+- `GET /healthz`: health probe.
+- `POST /v1/proposals/publish`: verify, archive, and pin a signed proposal publication request.
+
+`POST /v1/proposals/publish` body:
+
+```json
+{
+  "chainId": 11155111,
+  "requestId": "proposal-2026-03-30-001",
+  "commitmentSafe": "0x2222222222222222222222222222222222222222",
+  "ogModule": "0x3333333333333333333333333333333333333333",
+  "transactions": [
+    {
+      "to": "0x4444444444444444444444444444444444444444",
+      "value": "0",
+      "data": "0x1234",
+      "operation": 0
+    }
+  ],
+  "explanation": "Archive this proposal bundle for co-owner review.",
+  "metadata": {
+    "module": "example-agent"
+  },
+  "auth": {
+    "type": "eip191",
+    "address": "0x1111111111111111111111111111111111111111",
+    "timestampMs": 1774897200000,
+    "signature": "0x..."
+  }
+}
+```
+
+Accepted requests must include signed auth:
+
+- `auth.type` must be `eip191`
+- `requestId` is required
+- `deadline` is optional and, when present, must be a Unix timestamp in milliseconds
+- signature is verified against a canonical payload that includes `address`, `chainId`, `timestampMs`, `requestId`, `commitmentSafe`, `ogModule`, `transactions`, `explanation`, `metadata`, and `deadline`
+- when `proposalPublishApi.requireSignerAllowlist=true`, the recovered signer must also appear in `proposalPublishApi.signerAllowlist`
+- when `PROPOSAL_PUBLISH_API_KEYS_JSON` is configured, a valid `Authorization: Bearer ...` header is also required
+
+Response semantics:
+
+- fresh accepted publication: `202` with `status: "published"`
+- identical retry for the same signer and `requestId`: `200` with `status: "duplicate"` and the original CID
+- same signer and `requestId` but different signed contents: `409`
+- if IPFS add succeeds but pinning fails, retries reuse the stored CID and only retry pinning
+
+Artifacts published by the node include both node-authored metadata and the signer-authenticated payload. The top-level structure is:
+
+- `publication`: `receivedAtMs`, `publishedAtMs`, `signerAllowlistMode`, optional `nodeName`
+- `signedProposal`: `signer`, `signature`, `signedAtMs`, `canonicalMessage`, and the normalized proposal `envelope`
+
+Signed send helper:
+
+```bash
+node agent/scripts/send-signed-proposal.mjs \
+  --module=<agent-name> \
+  --safe=0x2222222222222222222222222222222222222222 \
+  --og-module=0x3333333333333333333333333333333333333333 \
+  --transactions-json='[{"to":"0x4444444444444444444444444444444444444444","value":"0","data":"0x1234","operation":0}]' \
+  --explanation="Archive this proposal bundle for co-owner review." \
+  --private-key="0x<signer-private-key>"
+```
+
+If `--url` is omitted, the helper reads `proposalPublishApi.host` and `proposalPublishApi.port` from the selected agent module's merged config stack. `--url` requires `--chain-id=<id>` or `--module=<agent>` so the signed request remains chain-bound. For signer material, use `--private-key` / `PROPOSAL_PUBLISH_SIGNER_PRIVATE_KEY` or fall back to the shared `SIGNER_TYPE`-based signer config with `RPC_URL`. If bearer gating is enabled, also pass `--bearer-token="<token>"` or set `PROPOSAL_PUBLISH_BEARER_TOKEN`.
+
+Artifact verification helper:
+
+```bash
+node agent/scripts/verify-signed-proposal-artifact.mjs --file=./artifact.json
+```
 
 ### IPFS Publishing (Optional)
 
