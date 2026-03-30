@@ -40,6 +40,7 @@ Out of scope for this ExecPlan:
 - [x] 2026-03-30: Hardened `send-signed-proposal` target resolution so disabled or absent `proposalPublishApi` config no longer silently falls back to `127.0.0.1:9890`, and added a regression covering the disabled-module case plus explicit host/port override behavior.
 - [x] 2026-03-30: Serialized publication-store operations per state file, switched temp writes to collision-proof filenames, and added direct store regressions covering concurrent distinct-key writes plus same-key conflict handling.
 - [x] 2026-03-30: Hardened recovery semantics so unpublished pending records can be retried after the auth age window, including refreshed signatures for the same logical proposal before any IPFS add succeeds, and moved `publishedAtMs` stamping from request receipt to the actual add attempt that succeeds.
+- [x] 2026-03-30: Tightened artifact verification so the verifier now requires `signedProposal.signedAtMs` to match the signed envelope timestamp and returns the signed envelope timestamp as the verified `signedAtMs`.
 
 ## Surprises & Discoveries
 

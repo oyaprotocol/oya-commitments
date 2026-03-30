@@ -218,6 +218,9 @@ async function verifySignedProposalArtifact(artifact) {
     if (signedProposal.canonicalMessage !== canonicalMessage) {
         throw new Error('artifact signedProposal.canonicalMessage does not match the normalized envelope.');
     }
+    if (signedProposal.signedAtMs !== normalizedEnvelope.timestampMs) {
+        throw new Error('artifact signedProposal.signedAtMs does not match the signed envelope timestamp.');
+    }
     if (typeof signedProposal.signature !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(signedProposal.signature)) {
         throw new Error('artifact signedProposal.signature must be a 65-byte hex string.');
     }
@@ -241,7 +244,7 @@ async function verifySignedProposalArtifact(artifact) {
         commitmentSafe: normalizedEnvelope.commitmentSafe,
         ogModule: normalizedEnvelope.ogModule,
         transactionCount: normalizedEnvelope.transactions.length,
-        signedAtMs: signedProposal.signedAtMs,
+        signedAtMs: normalizedEnvelope.timestampMs,
         receivedAtMs: artifact.publication.receivedAtMs,
         publishedAtMs: artifact.publication.publishedAtMs,
         canonicalMessage,
