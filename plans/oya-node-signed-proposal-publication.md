@@ -37,6 +37,7 @@ Out of scope for this ExecPlan:
 - [x] 2026-03-30: Added the `signed-proposal-publish-smoke` validation module under `agent-library/agents/`.
 - [x] 2026-03-30: Updated `agent/README.md` to document the new proposal publication node, config, request format, retry semantics, and verification helper.
 - [x] 2026-03-30: Validated the new flow with targeted Node tests, message API regression tests, a smoke module run, and CLI dry-run checks.
+- [x] 2026-03-30: Hardened `send-signed-proposal` target resolution so disabled or absent `proposalPublishApi` config no longer silently falls back to `127.0.0.1:9890`, and added a regression covering the disabled-module case plus explicit host/port override behavior.
 
 ## Surprises & Discoveries
 
