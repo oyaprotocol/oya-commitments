@@ -242,6 +242,55 @@ async function run() {
         'http://sepolia-host.local:9891'
     );
 
+    await createAgentModule(repoRootPath, 'disabled-publication', {
+        chainId: 11155111,
+        proposalPublishApi: {
+            enabled: false,
+            requireSignerAllowlist: false,
+        },
+    });
+
+    await assert.rejects(
+        () =>
+            buildProposalPublishBaseUrl({
+                argv: ['node', 'send-signed-proposal.mjs', '--module=disabled-publication'],
+                env: {},
+                repoRootPath,
+            }),
+        /does not enable proposalPublishApi/
+    );
+
+    await assert.rejects(
+        () =>
+            buildProposalPublishBaseUrl({
+                argv: [
+                    'node',
+                    'send-signed-proposal.mjs',
+                    '--module=disabled-publication',
+                    '--scheme=https',
+                ],
+                env: {},
+                repoRootPath,
+            }),
+        /does not enable proposalPublishApi/
+    );
+
+    assert.equal(
+        await buildProposalPublishBaseUrl({
+            argv: [
+                'node',
+                'send-signed-proposal.mjs',
+                '--module=disabled-publication',
+                '--host=manual-host.local',
+                '--port=9895',
+                '--scheme=https',
+            ],
+            env: {},
+            repoRootPath,
+        }),
+        'https://manual-host.local:9895'
+    );
+
     console.log('[test] send signed proposal config OK');
 }
 

@@ -127,8 +127,9 @@ async function resolveProposalPublishApiTarget({
     const explicitPort =
         explicitPortRaw === null ? undefined : parseInteger(explicitPortRaw, 'port');
     const explicitScheme = getArgValue('--scheme=', argv);
+    const hasExplicitEndpointOverride = explicitHost !== null || explicitPort !== undefined;
     const hasExplicitBaseOverride =
-        explicitHost !== null || explicitPort !== undefined || explicitScheme !== null;
+        hasExplicitEndpointOverride || explicitScheme !== null;
     const configuredAgentRef = getArgValue('--module=', argv) ?? env.AGENT_MODULE ?? null;
 
     if (hasExplicitBaseOverride && explicitChainId === undefined && !configuredAgentRef) {
@@ -150,6 +151,11 @@ async function resolveProposalPublishApiTarget({
     if (hasExplicitBaseOverride && runtimeConfig.chainId === undefined) {
         throw new Error(
             `Unable to infer chainId for host/port override mode from module "${agentRef}". Pass --chain-id explicitly or fix the module config.`
+        );
+    }
+    if (!runtimeConfig.proposalPublishApiEnabled && !hasExplicitEndpointOverride) {
+        throw new Error(
+            `Agent "${agentRef}" does not enable proposalPublishApi. Enable proposalPublishApi.enabled in the active config stack or pass --url, --host, or --port explicitly.`
         );
     }
 
