@@ -30,6 +30,7 @@ Observable success looks like:
 - [x] 2026-03-30 04:12Z: Ran compile, targeted Foundry tests, harness phase-3 validation, and wrapper `--help` smoke checks.
 - [x] 2026-03-30 04:33Z: Fixed the signer-removal ordering bug in `script/SafeOwnerUtils.sol`, upgraded mocks to validate the signing owner, added a regression test in `test/ManageSafeOwners.t.sol`, and re-ran the deployment, owner-management, and harness validations.
 - [x] 2026-03-30 05:07Z: Added explicit deployment coverage for `SAFE_OWNERS=<ownerA>,<deployer>,<ownerB>` to confirm the signer is handled by membership rather than position in the requested owner list.
+- [x] 2026-03-30 05:19Z: Scrubbed inherited `SAFE_OWNERS` from harness-triggered Forge deployments when `harness.deployment.owners` is unset, and added a phase-3 regression that contaminates the parent env to verify deployer-only default ownership is preserved.
 
 ## Surprises & Discoveries
 
@@ -53,6 +54,9 @@ Observable success looks like:
 
 - Observation: The requested owner list order is not used as a canonical final ordering; reconciliation treats the signer and other requested owners by membership, then validates count and membership after mutation.
   Evidence: `reconcileOwners(...)` uses `_containsOwner(...)` checks rather than positional comparisons, and `test_DeploysSafeWhenDeployerIsSpecifiedMidList` passes with `SAFE_OWNERS=<ownerA>,<deployer>,<ownerB>`.
+
+- Observation: The harness deployment helper inherited ambient `SAFE_OWNERS` from the parent process unless `harness.deployment.owners` was explicitly set, which could silently override the intended deployer-only default.
+  Evidence: `deployHarnessCommitment(...)` built the Forge env from `...env` and only conditionally overrode `SAFE_OWNERS`; the fix now deletes inherited `SAFE_OWNERS` when `effectiveConfig.owners` is `undefined`, and the phase-3 harness test passes with a contaminated parent env.
 
 ## Decision Log
 
