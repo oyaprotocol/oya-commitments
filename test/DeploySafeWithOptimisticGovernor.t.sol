@@ -248,7 +248,9 @@ contract DeploySafeWithOptimisticGovernorTest is Test {
     }
 
     function test_DeploysSafeWhenDeployerIsSpecifiedMidList() public {
-        vm.setEnv("SAFE_OWNERS", string.concat(vm.toString(OWNER_A), ",", vm.toString(DEPLOYER), ",", vm.toString(OWNER_B)));
+        vm.setEnv(
+            "SAFE_OWNERS", string.concat(vm.toString(OWNER_A), ",", vm.toString(DEPLOYER), ",", vm.toString(OWNER_B))
+        );
 
         script.run();
 
