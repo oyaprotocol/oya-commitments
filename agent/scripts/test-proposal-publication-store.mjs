@@ -10,22 +10,24 @@ function buildSignature(hexChar) {
     return `0x${String(hexChar).repeat(130)}`;
 }
 
-function buildArtifact(requestId) {
+function buildArtifact(requestId, chainId) {
     return {
         version: 'test-artifact-v1',
+        chainId,
         requestId,
     };
 }
 
-function buildStoredRecord({ signer, requestId, signatureChar, publishedAtOffset = 0 }) {
+function buildStoredRecord({ signer, chainId, requestId, signatureChar, publishedAtOffset = 0 }) {
     return {
         signer,
+        chainId,
         requestId,
         signature: buildSignature(signatureChar),
         canonicalMessage: `canonical:${signer.toLowerCase()}:${requestId}:${signatureChar}`,
         receivedAtMs: BASE_TIME_MS,
         publishedAtMs: BASE_TIME_MS + publishedAtOffset,
-        artifact: buildArtifact(requestId),
+        artifact: buildArtifact(requestId, chainId),
         cid: null,
         uri: null,
         pinned: false,
@@ -50,11 +52,13 @@ async function run() {
         const saveStore = createProposalPublicationStore({ stateFile: saveStateFile });
         const saveRecordA = buildStoredRecord({
             signer: '0x1111111111111111111111111111111111111111',
+            chainId: 11155111,
             requestId: 'save-a',
             signatureChar: 'a',
         });
         const saveRecordB = buildStoredRecord({
             signer: '0x2222222222222222222222222222222222222222',
+            chainId: 11155111,
             requestId: 'save-b',
             signatureChar: 'b',
             publishedAtOffset: 1,
@@ -64,12 +68,14 @@ async function run() {
         assert.ok(
             await saveStore.getRecord({
                 signer: saveRecordA.signer,
+                chainId: saveRecordA.chainId,
                 requestId: saveRecordA.requestId,
             })
         );
         assert.ok(
             await saveStore.getRecord({
                 signer: saveRecordB.signer,
+                chainId: saveRecordB.chainId,
                 requestId: saveRecordB.requestId,
             })
         );
@@ -80,19 +86,21 @@ async function run() {
         const prepared = await Promise.all([
             prepareStore.prepareRecord({
                 signer: '0x3333333333333333333333333333333333333333',
+                chainId: 11155111,
                 requestId: 'prepare-a',
                 signature: buildSignature('c'),
                 canonicalMessage: 'canonical:prepare-a',
-                artifact: buildArtifact('prepare-a'),
+                artifact: buildArtifact('prepare-a', 11155111),
                 receivedAtMs: BASE_TIME_MS,
                 publishedAtMs: BASE_TIME_MS,
             }),
             prepareStore.prepareRecord({
                 signer: '0x4444444444444444444444444444444444444444',
+                chainId: 11155111,
                 requestId: 'prepare-b',
                 signature: buildSignature('d'),
                 canonicalMessage: 'canonical:prepare-b',
-                artifact: buildArtifact('prepare-b'),
+                artifact: buildArtifact('prepare-b', 11155111),
                 receivedAtMs: BASE_TIME_MS,
                 publishedAtMs: BASE_TIME_MS + 1,
             }),
@@ -107,19 +115,21 @@ async function run() {
         const conflictStore = createProposalPublicationStore({ stateFile: conflictStateFile });
         const firstPrepare = conflictStore.prepareRecord({
             signer: '0x5555555555555555555555555555555555555555',
+            chainId: 11155111,
             requestId: 'same-key',
             signature: buildSignature('e'),
             canonicalMessage: 'canonical:first',
-            artifact: buildArtifact('same-key-first'),
+            artifact: buildArtifact('same-key-first', 11155111),
             receivedAtMs: BASE_TIME_MS,
             publishedAtMs: BASE_TIME_MS,
         });
         const secondPrepare = conflictStore.prepareRecord({
             signer: '0x5555555555555555555555555555555555555555',
+            chainId: 11155111,
             requestId: 'same-key',
             signature: buildSignature('f'),
             canonicalMessage: 'canonical:second',
-            artifact: buildArtifact('same-key-second'),
+            artifact: buildArtifact('same-key-second', 11155111),
             receivedAtMs: BASE_TIME_MS,
             publishedAtMs: BASE_TIME_MS + 1,
         });
@@ -128,10 +138,53 @@ async function run() {
         assert.equal(conflicting.status, 'conflict');
         const finalRecord = await conflictStore.getRecord({
             signer: '0x5555555555555555555555555555555555555555',
+            chainId: 11155111,
             requestId: 'same-key',
         });
         assert.equal(finalRecord.signature, buildSignature('e'));
         assert.equal(await readRecordCount(conflictStateFile), 1);
+
+        const crossChainStateFile = path.join(tempDir, 'cross-chain-state.json');
+        const crossChainStore = createProposalPublicationStore({ stateFile: crossChainStateFile });
+        const [sepoliaRecord, polygonRecord] = await Promise.all([
+            crossChainStore.prepareRecord({
+                signer: '0x6666666666666666666666666666666666666666',
+                chainId: 11155111,
+                requestId: 'shared-request',
+                signature: buildSignature('1'),
+                canonicalMessage: 'canonical:shared-request:sepolia',
+                artifact: buildArtifact('shared-request', 11155111),
+                receivedAtMs: BASE_TIME_MS,
+                publishedAtMs: BASE_TIME_MS,
+            }),
+            crossChainStore.prepareRecord({
+                signer: '0x6666666666666666666666666666666666666666',
+                chainId: 137,
+                requestId: 'shared-request',
+                signature: buildSignature('2'),
+                canonicalMessage: 'canonical:shared-request:polygon',
+                artifact: buildArtifact('shared-request', 137),
+                receivedAtMs: BASE_TIME_MS,
+                publishedAtMs: BASE_TIME_MS + 1,
+            }),
+        ]);
+        assert.equal(sepoliaRecord.status, 'created');
+        assert.equal(polygonRecord.status, 'created');
+        assert.ok(
+            await crossChainStore.getRecord({
+                signer: '0x6666666666666666666666666666666666666666',
+                chainId: 11155111,
+                requestId: 'shared-request',
+            })
+        );
+        assert.ok(
+            await crossChainStore.getRecord({
+                signer: '0x6666666666666666666666666666666666666666',
+                chainId: 137,
+                requestId: 'shared-request',
+            })
+        );
+        assert.equal(await readRecordCount(crossChainStateFile), 2);
 
         console.log('[test] proposal publication store OK');
     } finally {

@@ -315,6 +315,7 @@ async function main() {
 
         const pinnedRecord = await store.getRecord({
             signer: account.address,
+            chainId: TEST_CHAIN_ID,
             requestId: 'pin-retry',
         });
         assert.equal(pinnedRecord.pinned, true);
@@ -335,6 +336,7 @@ async function main() {
         assert.equal(publishRetryFirst.json.cid, null);
         const pendingAfterAddFailure = await store.getRecord({
             signer: account.address,
+            chainId: TEST_CHAIN_ID,
             requestId: 'publish-retry-expired',
         });
         assert.equal(pendingAfterAddFailure.cid, null);
@@ -349,6 +351,7 @@ async function main() {
         assert.equal(addAttemptsByRequestId.get('publish-retry-expired'), 2);
         const exactRetryRecord = await store.getRecord({
             signer: account.address,
+            chainId: TEST_CHAIN_ID,
             requestId: 'publish-retry-expired',
         });
         assert.ok(exactRetryRecord.publishedAtMs >= retryBaseNowMs + 301_000);
@@ -382,6 +385,7 @@ async function main() {
         assert.ok(resignedSuccess.json.cid);
         const resignedRecord = await store.getRecord({
             signer: account.address,
+            chainId: TEST_CHAIN_ID,
             requestId: 'publish-retry-resigned',
         });
         assert.equal(resignedRecord.signature, resignedSecond.signature);

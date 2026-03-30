@@ -111,6 +111,9 @@ async function resolveProposalPublishApiTarget({
                 overlayPaths,
                 argv,
             });
+            if (runtimeConfig.chainId === undefined) {
+                throw new Error('resolved module config does not define chainId.');
+            }
             return {
                 baseUrl: normalizeBaseUrl(explicit),
                 chainId: runtimeConfig.chainId,

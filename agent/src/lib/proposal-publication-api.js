@@ -366,6 +366,7 @@ function createProposalPublicationApiServer({ config, store, logger = console } 
             const signerAllowlistMode = requireSignerAllowlist ? 'explicit' : 'open';
             const existingRecord = await store.getRecord({
                 signer: signedAuth.sender.address,
+                chainId: body.chainId,
                 requestId: body.requestId,
             });
             const exactExistingMatch =
@@ -443,6 +444,7 @@ function createProposalPublicationApiServer({ config, store, logger = console } 
             } else {
                 prepared = await store.prepareRecord({
                     signer: signedAuth.sender.address,
+                    chainId: body.chainId,
                     requestId: body.requestId,
                     signature: signedAuth.sender.signature,
                     canonicalMessage: signedAuth.payload,
@@ -482,6 +484,7 @@ function createProposalPublicationApiServer({ config, store, logger = console } 
             } catch (error) {
                 const latestRecord = await store.getRecord({
                     signer: signedAuth.sender.address,
+                    chainId: body.chainId,
                     requestId: body.requestId,
                 });
                 if (latestRecord) {
