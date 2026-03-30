@@ -148,6 +148,10 @@ async function run() {
 
     await writeHarnessJson(sessionPaths.files.overlay, {});
     await writeHarnessJson(sessionPaths.files.roles, roles);
+    const contaminatedHarnessEnv = {
+        ...process.env,
+        SAFE_OWNERS: roles.roles.agent.address,
+    };
 
     let anvilRecord;
     try {
@@ -164,7 +168,7 @@ async function run() {
             sessionPaths,
             rpcUrl: anvilRecord.rpcUrl,
             deployerPrivateKey: roles.roles.deployer.privateKey,
-            env: process.env,
+            env: contaminatedHarnessEnv,
         });
 
         assert.equal(deployResult.reused, false);
@@ -180,7 +184,7 @@ async function run() {
             sessionPaths,
             rpcUrl: anvilRecord.rpcUrl,
             deployerPrivateKey: roles.roles.deployer.privateKey,
-            env: process.env,
+            env: contaminatedHarnessEnv,
         });
         assert.equal(reusedResult.reused, true);
         assert.equal(reusedResult.deployment.commitmentSafe, deployResult.deployment.commitmentSafe);

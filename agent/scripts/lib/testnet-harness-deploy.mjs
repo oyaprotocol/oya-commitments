@@ -384,34 +384,40 @@ async function deployHarnessCommitment({
         );
     }
 
+    const forgeEnv = {
+        ...env,
+        DEPLOYER_PK: deployerPrivateKey,
+        OG_COLLATERAL: effectiveConfig.collateral,
+        OG_BOND_AMOUNT: effectiveConfig.bondAmount,
+        OG_RULES: runtimeContext.commitmentText,
+        ...(effectiveConfig.safeSingleton ? { SAFE_SINGLETON: effectiveConfig.safeSingleton } : {}),
+        ...(effectiveConfig.safeProxyFactory
+            ? { SAFE_PROXY_FACTORY: effectiveConfig.safeProxyFactory }
+            : {}),
+        ...(effectiveConfig.safeFallbackHandler
+            ? { SAFE_FALLBACK_HANDLER: effectiveConfig.safeFallbackHandler }
+            : {}),
+        ...(effectiveConfig.ogMasterCopy ? { OG_MASTER_COPY: effectiveConfig.ogMasterCopy } : {}),
+        ...(effectiveConfig.moduleProxyFactory
+            ? { MODULE_PROXY_FACTORY: effectiveConfig.moduleProxyFactory }
+            : {}),
+        ...(effectiveConfig.liveness ? { OG_LIVENESS: effectiveConfig.liveness } : {}),
+        ...(effectiveConfig.identifier ? { OG_IDENTIFIER_STR: effectiveConfig.identifier } : {}),
+        ...(effectiveConfig.safeSaltNonce ? { SAFE_SALT_NONCE: effectiveConfig.safeSaltNonce } : {}),
+        ...(effectiveConfig.ogSaltNonce ? { OG_SALT_NONCE: effectiveConfig.ogSaltNonce } : {}),
+    };
+    if (effectiveConfig.owners === undefined) {
+        delete forgeEnv.SAFE_OWNERS;
+    } else {
+        forgeEnv.SAFE_OWNERS = effectiveConfig.owners;
+    }
+
     await runForgeScript({
         repoRootPath,
         scriptBasename: DEPLOY_SCRIPT_BASENAME,
         contractName: 'DeploySafeWithOptimisticGovernor',
         rpcUrl,
-        env: {
-            ...env,
-            DEPLOYER_PK: deployerPrivateKey,
-            OG_COLLATERAL: effectiveConfig.collateral,
-            OG_BOND_AMOUNT: effectiveConfig.bondAmount,
-            OG_RULES: runtimeContext.commitmentText,
-            ...(effectiveConfig.safeSingleton ? { SAFE_SINGLETON: effectiveConfig.safeSingleton } : {}),
-            ...(effectiveConfig.safeProxyFactory
-                ? { SAFE_PROXY_FACTORY: effectiveConfig.safeProxyFactory }
-                : {}),
-            ...(effectiveConfig.safeFallbackHandler
-                ? { SAFE_FALLBACK_HANDLER: effectiveConfig.safeFallbackHandler }
-                : {}),
-            ...(effectiveConfig.ogMasterCopy ? { OG_MASTER_COPY: effectiveConfig.ogMasterCopy } : {}),
-            ...(effectiveConfig.moduleProxyFactory
-                ? { MODULE_PROXY_FACTORY: effectiveConfig.moduleProxyFactory }
-                : {}),
-            ...(effectiveConfig.liveness ? { OG_LIVENESS: effectiveConfig.liveness } : {}),
-            ...(effectiveConfig.identifier ? { OG_IDENTIFIER_STR: effectiveConfig.identifier } : {}),
-            ...(effectiveConfig.owners ? { SAFE_OWNERS: effectiveConfig.owners } : {}),
-            ...(effectiveConfig.safeSaltNonce ? { SAFE_SALT_NONCE: effectiveConfig.safeSaltNonce } : {}),
-            ...(effectiveConfig.ogSaltNonce ? { OG_SALT_NONCE: effectiveConfig.ogSaltNonce } : {}),
-        },
+        env: forgeEnv,
     });
 
     const broadcast = await readBroadcastJson(
