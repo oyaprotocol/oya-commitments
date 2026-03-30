@@ -10,7 +10,7 @@ import {
     sendHarnessDeposit,
     sendHarnessSignedMessage,
 } from './lib/testnet-harness-actions.mjs';
-import { deployHarnessCommitment } from './lib/testnet-harness-deploy.mjs';
+import { deployHarnessCommitment, parseDeploymentConfig } from './lib/testnet-harness-deploy.mjs';
 import {
     resolveAnvilExecutable,
     startHarnessAnvil,
@@ -29,6 +29,22 @@ import { resolveHarnessRuntimeContext } from './lib/testnet-harness-runtime.mjs'
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '../..');
+const harnessSafeAbi = [
+    {
+        type: 'function',
+        name: 'getOwners',
+        stateMutability: 'view',
+        inputs: [],
+        outputs: [{ name: '', type: 'address[]' }],
+    },
+    {
+        type: 'function',
+        name: 'getThreshold',
+        stateMutability: 'view',
+        inputs: [],
+        outputs: [{ name: '', type: 'uint256' }],
+    },
+];
 
 function commandAvailable(command) {
     const result = spawnSync(command, ['--version'], {
@@ -92,6 +108,66 @@ async function run() {
 
     const localProfile = resolveHarnessProfile('local-mock', { env: {} });
     const roles = deriveHarnessRoles();
+
+    assert.equal(
+        parseDeploymentConfig({
+            runtimeConfig: {
+                agentConfig: {
+                    harness: {
+                        deployment: {
+                            owners: [roles.roles.deployer.address, roles.roles.agent.address],
+                        },
+                    },
+                },
+            },
+        }).owners,
+        `${roles.roles.deployer.address},${roles.roles.agent.address}`
+    );
+    assert.equal(
+        parseDeploymentConfig({
+            runtimeConfig: {
+                agentConfig: {
+                    harness: {
+                        deployment: {
+                            owners: '0x',
+                        },
+                    },
+                },
+            },
+        }).owners,
+        '0x'
+    );
+    assert.throws(
+        () =>
+            parseDeploymentConfig({
+                runtimeConfig: {
+                    agentConfig: {
+                        harness: {
+                            deployment: {
+                                owners: [],
+                            },
+                        },
+                    },
+                },
+            }),
+        /must contain at least one owner/
+    );
+    assert.throws(
+        () =>
+            parseDeploymentConfig({
+                runtimeConfig: {
+                    agentConfig: {
+                        harness: {
+                            deployment: {
+                                owners: '   ',
+                            },
+                        },
+                    },
+                },
+            }),
+        /must not be empty/
+    );
+
     const fixture = await createTempModule();
     const agentRef = fixture.agentPath;
     const sessionPaths = await ensureHarnessSession({
@@ -102,6 +178,10 @@ async function run() {
 
     await writeHarnessJson(sessionPaths.files.overlay, {});
     await writeHarnessJson(sessionPaths.files.roles, roles);
+    const contaminatedHarnessEnv = {
+        ...process.env,
+        SAFE_OWNERS: roles.roles.agent.address,
+    };
 
     let anvilRecord;
     try {
@@ -118,7 +198,7 @@ async function run() {
             sessionPaths,
             rpcUrl: anvilRecord.rpcUrl,
             deployerPrivateKey: roles.roles.deployer.privateKey,
-            env: process.env,
+            env: contaminatedHarnessEnv,
         });
 
         assert.equal(deployResult.reused, false);
@@ -134,7 +214,7 @@ async function run() {
             sessionPaths,
             rpcUrl: anvilRecord.rpcUrl,
             deployerPrivateKey: roles.roles.deployer.privateKey,
-            env: process.env,
+            env: contaminatedHarnessEnv,
         });
         assert.equal(reusedResult.reused, true);
         assert.equal(reusedResult.deployment.commitmentSafe, deployResult.deployment.commitmentSafe);
@@ -170,6 +250,19 @@ async function run() {
             chainId: localProfile.chainId,
             rolesData: roles,
         });
+        const safeOwners = await harnessClients.publicClient.readContract({
+            address: runtimeContext.runtimeConfig.commitmentSafe,
+            abi: harnessSafeAbi,
+            functionName: 'getOwners',
+        });
+        const safeThreshold = await harnessClients.publicClient.readContract({
+            address: runtimeContext.runtimeConfig.commitmentSafe,
+            abi: harnessSafeAbi,
+            functionName: 'getThreshold',
+        });
+        assert.deepEqual(safeOwners, [roles.roles.deployer.address]);
+        assert.equal(safeThreshold, 1n);
+
         const depositorEntry = harnessClients.walletClients.depositor;
         const deployerEntry = harnessClients.walletClients.deployer;
         assert.ok(depositorEntry);

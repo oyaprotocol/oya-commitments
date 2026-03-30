@@ -18,30 +18,22 @@ The `agent/with-signer.mjs` helper resolves a signer and injects it as an env va
 # Private key from env
 SIGNER_TYPE=env PRIVATE_KEY=0x... \
   node agent/with-signer.mjs --env DEPLOYER_PK -- \
-  forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimisticGovernor \
-    --rpc-url $MAINNET_RPC_URL \
-    --broadcast
+  bash script/deploy-commitment.sh --owners 0x
 
 # Encrypted keystore
 SIGNER_TYPE=keystore KEYSTORE_PATH=./keys/deployer.json KEYSTORE_PASSWORD=... \
   node agent/with-signer.mjs --env DEPLOYER_PK -- \
-  forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimisticGovernor \
-    --rpc-url $MAINNET_RPC_URL \
-    --broadcast
+  bash script/deploy-commitment.sh --owners 0x1111111111111111111111111111111111111111,0x2222222222222222222222222222222222222222
 
 # OS keychain
 SIGNER_TYPE=keychain KEYCHAIN_SERVICE=og-deployer KEYCHAIN_ACCOUNT=deployer \
   node agent/with-signer.mjs --env DEPLOYER_PK -- \
-  forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimisticGovernor \
-    --rpc-url $MAINNET_RPC_URL \
-    --broadcast
+  bash script/deploy-commitment.sh
 
 # Vault KV (private key stored as a secret)
 SIGNER_TYPE=vault VAULT_ADDR=https://vault.example.com VAULT_TOKEN=... VAULT_SECRET_PATH=secret/data/og-deployer \
   node agent/with-signer.mjs --env DEPLOYER_PK -- \
-  forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimisticGovernor \
-    --rpc-url $MAINNET_RPC_URL \
-    --broadcast
+  bash script/set-safe-owners.sh --safe 0xYourSafe --owners 0x
 ```
 
 For interactions, swap the env var:

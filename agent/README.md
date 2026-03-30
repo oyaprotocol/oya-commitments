@@ -46,16 +46,12 @@ You can reuse the agent’s signer helpers to inject a private key env var for F
 # Private key from env
 SIGNER_TYPE=env PRIVATE_KEY=0x... \
   node agent/with-signer.mjs --env DEPLOYER_PK -- \
-  forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimisticGovernor \
-    --rpc-url $MAINNET_RPC_URL \
-    --broadcast
+  bash script/deploy-commitment.sh
 
 # Encrypted keystore
 SIGNER_TYPE=keystore KEYSTORE_PATH=./keys/deployer.json KEYSTORE_PASSWORD=... \
   node agent/with-signer.mjs --env DEPLOYER_PK -- \
-  forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimisticGovernor \
-    --rpc-url $MAINNET_RPC_URL \
-    --broadcast
+  bash script/set-safe-owners.sh --safe 0xYourSafe --owners 0x
 ```
 
 For interactions, swap the env var (e.g., `PROPOSER_PK`, `EXECUTOR_PK`). For signing without exporting a key, use an RPC signer proxy (`SIGNER_RPC_URL`, `SIGNER_ADDRESS`) that supports `eth_sendTransaction`.

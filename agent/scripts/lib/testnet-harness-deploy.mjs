@@ -36,6 +36,46 @@ function normalizeAddressOrUndefined(value, label) {
     }
 }
 
+function parseOwnersConfig(value, label) {
+    if (value === undefined || value === null) {
+        return undefined;
+    }
+    if (value === '0x') {
+        return '0x';
+    }
+
+    let rawOwners;
+    if (Array.isArray(value)) {
+        if (value.length === 0) {
+            throw new Error(`${label} must contain at least one owner. Omit it for deployer-only ownership or use "0x" to burn ownership.`);
+        }
+        rawOwners = value;
+    } else if (typeof value === 'string') {
+        if (!value.trim()) {
+            throw new Error(`${label} must not be empty. Omit it for deployer-only ownership or use "0x" to burn ownership.`);
+        }
+        rawOwners = value.split(',');
+    } else {
+        rawOwners = null;
+    }
+    if (!rawOwners) {
+        throw new Error(`${label} must be "0x", an address string, a comma-separated string, or an array.`);
+    }
+
+    const owners = rawOwners.map((item, index) =>
+        normalizeAddressOrUndefined(
+            typeof item === 'string' ? item.trim() : item,
+            `${label}[${index}]`
+        )
+    );
+
+    if (owners.some((owner) => owner === undefined)) {
+        throw new Error(`${label} entries must be non-empty addresses.`);
+    }
+
+    return owners.join(',');
+}
+
 function parseDeploymentConfig(runtimeContext) {
     const raw = runtimeContext.runtimeConfig.agentConfig?.harness?.deployment;
     if (raw === undefined || raw === null) {
@@ -67,6 +107,7 @@ function parseDeploymentConfig(runtimeContext) {
         bondAmount: normalizeUintEnv(raw.bondAmount, 'harness.deployment.bondAmount'),
         liveness: normalizeUintEnv(raw.liveness, 'harness.deployment.liveness'),
         identifier: typeof raw.identifier === 'string' && raw.identifier.trim() ? raw.identifier.trim() : undefined,
+        owners: parseOwnersConfig(raw.owners, 'harness.deployment.owners'),
         safeSaltNonce: normalizeUintEnv(raw.safeSaltNonce, 'harness.deployment.safeSaltNonce'),
         ogSaltNonce: normalizeUintEnv(raw.ogSaltNonce, 'harness.deployment.ogSaltNonce'),
     };
@@ -352,33 +393,40 @@ async function deployHarnessCommitment({
         );
     }
 
+    const forgeEnv = {
+        ...env,
+        DEPLOYER_PK: deployerPrivateKey,
+        OG_COLLATERAL: effectiveConfig.collateral,
+        OG_BOND_AMOUNT: effectiveConfig.bondAmount,
+        OG_RULES: runtimeContext.commitmentText,
+        ...(effectiveConfig.safeSingleton ? { SAFE_SINGLETON: effectiveConfig.safeSingleton } : {}),
+        ...(effectiveConfig.safeProxyFactory
+            ? { SAFE_PROXY_FACTORY: effectiveConfig.safeProxyFactory }
+            : {}),
+        ...(effectiveConfig.safeFallbackHandler
+            ? { SAFE_FALLBACK_HANDLER: effectiveConfig.safeFallbackHandler }
+            : {}),
+        ...(effectiveConfig.ogMasterCopy ? { OG_MASTER_COPY: effectiveConfig.ogMasterCopy } : {}),
+        ...(effectiveConfig.moduleProxyFactory
+            ? { MODULE_PROXY_FACTORY: effectiveConfig.moduleProxyFactory }
+            : {}),
+        ...(effectiveConfig.liveness ? { OG_LIVENESS: effectiveConfig.liveness } : {}),
+        ...(effectiveConfig.identifier ? { OG_IDENTIFIER_STR: effectiveConfig.identifier } : {}),
+        ...(effectiveConfig.safeSaltNonce ? { SAFE_SALT_NONCE: effectiveConfig.safeSaltNonce } : {}),
+        ...(effectiveConfig.ogSaltNonce ? { OG_SALT_NONCE: effectiveConfig.ogSaltNonce } : {}),
+    };
+    if (effectiveConfig.owners === undefined) {
+        delete forgeEnv.SAFE_OWNERS;
+    } else {
+        forgeEnv.SAFE_OWNERS = effectiveConfig.owners;
+    }
+
     await runForgeScript({
         repoRootPath,
         scriptBasename: DEPLOY_SCRIPT_BASENAME,
         contractName: 'DeploySafeWithOptimisticGovernor',
         rpcUrl,
-        env: {
-            ...env,
-            DEPLOYER_PK: deployerPrivateKey,
-            OG_COLLATERAL: effectiveConfig.collateral,
-            OG_BOND_AMOUNT: effectiveConfig.bondAmount,
-            OG_RULES: runtimeContext.commitmentText,
-            ...(effectiveConfig.safeSingleton ? { SAFE_SINGLETON: effectiveConfig.safeSingleton } : {}),
-            ...(effectiveConfig.safeProxyFactory
-                ? { SAFE_PROXY_FACTORY: effectiveConfig.safeProxyFactory }
-                : {}),
-            ...(effectiveConfig.safeFallbackHandler
-                ? { SAFE_FALLBACK_HANDLER: effectiveConfig.safeFallbackHandler }
-                : {}),
-            ...(effectiveConfig.ogMasterCopy ? { OG_MASTER_COPY: effectiveConfig.ogMasterCopy } : {}),
-            ...(effectiveConfig.moduleProxyFactory
-                ? { MODULE_PROXY_FACTORY: effectiveConfig.moduleProxyFactory }
-                : {}),
-            ...(effectiveConfig.liveness ? { OG_LIVENESS: effectiveConfig.liveness } : {}),
-            ...(effectiveConfig.identifier ? { OG_IDENTIFIER_STR: effectiveConfig.identifier } : {}),
-            ...(effectiveConfig.safeSaltNonce ? { SAFE_SALT_NONCE: effectiveConfig.safeSaltNonce } : {}),
-            ...(effectiveConfig.ogSaltNonce ? { OG_SALT_NONCE: effectiveConfig.ogSaltNonce } : {}),
-        },
+        env: forgeEnv,
     });
 
     const broadcast = await readBroadcastJson(

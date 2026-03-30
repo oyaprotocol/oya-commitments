@@ -38,15 +38,28 @@ contract SafeMock {
     }
 
     function removeOwner(address, address owner, uint256 _threshold) external {
-        // remove matching owner (simple linear scan for mock)
         for (uint256 i = 0; i < owners.length; i++) {
             if (owners[i] == owner) {
-                owners[i] = owners[owners.length - 1];
+                for (uint256 j = i; j + 1 < owners.length; j++) {
+                    owners[j] = owners[j + 1];
+                }
                 owners.pop();
                 break;
             }
         }
         threshold = _threshold;
+    }
+
+    function changeThreshold(uint256 _threshold) external {
+        threshold = _threshold;
+    }
+
+    function getOwners() external view returns (address[] memory) {
+        return owners;
+    }
+
+    function getThreshold() external view returns (uint256) {
+        return threshold;
     }
 
     function getTransactionHash(
@@ -60,7 +73,7 @@ contract SafeMock {
         address,
         address,
         uint256 _nonce
-    ) external view returns (bytes32) {
+    ) external pure returns (bytes32) {
         return keccak256(abi.encodePacked(_nonce));
     }
 
@@ -74,9 +87,14 @@ contract SafeMock {
         uint256,
         address,
         address payable,
-        bytes calldata
+        bytes calldata signatures
     ) external payable returns (bool success) {
-        if (operation != 0) {
+        if (operation != 0 || threshold != 1) {
+            return false;
+        }
+        bytes32 txHash = keccak256(abi.encodePacked(nonce));
+        address signer = _recoverSigner(txHash, signatures);
+        if (!_isOwner(signer)) {
             return false;
         }
         (success,) = to.call{value: value}(data);
@@ -87,6 +105,31 @@ contract SafeMock {
 
     function isModuleEnabled(address module) external view returns (bool) {
         return modules[module];
+    }
+
+    function _isOwner(address candidate) internal view returns (bool) {
+        for (uint256 i = 0; i < owners.length; i++) {
+            if (owners[i] == candidate) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function _recoverSigner(bytes32 txHash, bytes calldata signatures) internal pure returns (address signer) {
+        if (signatures.length != 65) {
+            return address(0);
+        }
+
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        assembly {
+            r := calldataload(signatures.offset)
+            s := calldataload(add(signatures.offset, 0x20))
+            v := byte(0, calldataload(add(signatures.offset, 0x40)))
+        }
+        signer = ecrecover(txHash, v, r, s);
     }
 }
 
@@ -118,44 +161,51 @@ contract OptimisticGovernorMock {
 
 contract DeploySafeWithOptimisticGovernorTest is Test {
     address internal constant BURN_OWNER = 0x000000000000000000000000000000000000dEaD;
+    address internal constant DEPLOYER = 0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf;
+    address internal constant OWNER_A = 0x1111111111111111111111111111111111111111;
+    address internal constant OWNER_B = 0x2222222222222222222222222222222222222222;
+    uint256 internal constant DEPLOYER_PK = 1;
 
     SafeProxyFactoryMock private safeProxyFactory;
     OptimisticGovernorMock private ogMasterCopy;
     ModuleProxyFactory private moduleProxyFactory;
     DeploySafeWithOptimisticGovernor private script;
+    DeploySafeWithOptimisticGovernor.Config private config;
+    string private rules;
 
     function setUp() public {
         safeProxyFactory = new SafeProxyFactoryMock();
         ogMasterCopy = new OptimisticGovernorMock();
         moduleProxyFactory = new ModuleProxyFactory();
         script = new DeploySafeWithOptimisticGovernor();
-
-        vm.setEnv("DEPLOYER_PK", "1");
-        vm.setEnv("SAFE_PROXY_FACTORY", vm.toString(address(safeProxyFactory)));
-        vm.setEnv("SAFE_SINGLETON", vm.toString(address(0xBEEF)));
-        vm.setEnv("SAFE_FALLBACK_HANDLER", vm.toString(address(0xFA11)));
-        vm.setEnv("OG_MASTER_COPY", vm.toString(address(ogMasterCopy)));
-        vm.setEnv("MODULE_PROXY_FACTORY", vm.toString(address(moduleProxyFactory)));
-
-        vm.setEnv("OG_COLLATERAL", vm.toString(address(0xCA11)));
-        vm.setEnv("OG_BOND_AMOUNT", vm.toString(uint256(250_000_000)));
-        vm.setEnv(
-            "OG_RULES",
-            "Any assets deposited in this Commitment may be transferred back to the depositor before January 15th, 2026 (12:00AM PST). After the deadline, assets may only be transferred to jdshutt.eth. If a third party is initiating the transfer after the deadline, they may take a 10% cut of the assets being transferred as a fee."
-        );
-        vm.setEnv("OG_LIVENESS", vm.toString(uint256(3600)));
-        vm.setEnv("OG_IDENTIFIER_STR", "COMMITMENT");
+        config = DeploySafeWithOptimisticGovernor.Config({
+            safeSingleton: address(0xBEEF),
+            safeProxyFactory: address(safeProxyFactory),
+            safeFallbackHandler: address(0xFA11),
+            moduleProxyFactory: address(moduleProxyFactory),
+            ogMasterCopy: address(ogMasterCopy),
+            collateral: address(0xCA11),
+            bondAmount: 250_000_000,
+            liveness: uint64(3600),
+            identifier: bytes32(bytes("COMMITMENT")),
+            safeSaltNonce: 1,
+            ogSaltNonce: 1
+        });
+        rules =
+            "Any assets deposited in this Commitment may be transferred back to the depositor before January 15th, 2026 (12:00AM PST). After the deadline, assets may only be transferred to jdshutt.eth. If a third party is initiating the transfer after the deadline, they may take a 10% cut of the assets being transferred as a fee.";
     }
 
-    function test_DeploysSafeAndOptimisticGovernor() public {
-        script.run();
+    function test_DeploysSafeAndOptimisticGovernorWithDeployerOwner() public {
+        script.runWithConfig(DEPLOYER_PK, _singleOwner(DEPLOYER), config, rules);
 
         address safeProxy = safeProxyFactory.lastProxy();
         assertTrue(safeProxy != address(0));
 
         SafeMock safe = SafeMock(safeProxy);
-        assertEq(safe.owners(0), BURN_OWNER);
-        assertEq(safe.threshold(), 1); // burn address set as sole owner
+        address[] memory owners = safe.getOwners();
+        assertEq(owners.length, 1);
+        assertEq(owners[0], DEPLOYER);
+        assertEq(safe.getThreshold(), 1);
         assertEq(safe.fallbackHandler(), address(0xFA11));
 
         address module = safe.lastEnabledModule();
@@ -171,5 +221,59 @@ contract DeploySafeWithOptimisticGovernorTest is Test {
         );
         assertEq(og.identifier(), bytes32(bytes("COMMITMENT")));
         assertEq(og.liveness(), uint64(3600));
+    }
+
+    function test_DeploysSafeWithBurnOwnerWhenRequested() public {
+        script.runWithConfig(DEPLOYER_PK, _singleOwner(BURN_OWNER), config, rules);
+
+        SafeMock safe = SafeMock(safeProxyFactory.lastProxy());
+        address[] memory owners = safe.getOwners();
+        assertEq(owners.length, 1);
+        assertEq(owners[0], BURN_OWNER);
+        assertEq(safe.getThreshold(), 1);
+    }
+
+    function test_DeploysSafeWithExplicitUnanimousOwners() public {
+        address[] memory requestedOwners = new address[](2);
+        requestedOwners[0] = OWNER_A;
+        requestedOwners[1] = OWNER_B;
+        script.runWithConfig(DEPLOYER_PK, requestedOwners, config, rules);
+
+        SafeMock safe = SafeMock(safeProxyFactory.lastProxy());
+        address[] memory owners = safe.getOwners();
+        assertEq(owners.length, 2);
+        assertEq(owners[0], OWNER_A);
+        assertEq(owners[1], OWNER_B);
+        assertEq(safe.getThreshold(), 2);
+    }
+
+    function test_DeploysSafeWhenDeployerIsSpecifiedMidList() public {
+        address[] memory requestedOwners = new address[](3);
+        requestedOwners[0] = OWNER_A;
+        requestedOwners[1] = DEPLOYER;
+        requestedOwners[2] = OWNER_B;
+        script.runWithConfig(DEPLOYER_PK, requestedOwners, config, rules);
+
+        SafeMock safe = SafeMock(safeProxyFactory.lastProxy());
+        address[] memory owners = safe.getOwners();
+        assertEq(owners.length, 3);
+        assertTrue(_containsOwner(owners, OWNER_A));
+        assertTrue(_containsOwner(owners, DEPLOYER));
+        assertTrue(_containsOwner(owners, OWNER_B));
+        assertEq(safe.getThreshold(), 3);
+    }
+
+    function _singleOwner(address owner) internal pure returns (address[] memory owners) {
+        owners = new address[](1);
+        owners[0] = owner;
+    }
+
+    function _containsOwner(address[] memory owners, address candidate) internal pure returns (bool) {
+        for (uint256 i = 0; i < owners.length; i++) {
+            if (owners[i] == candidate) {
+                return true;
+            }
+        }
+        return false;
     }
 }
