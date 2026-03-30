@@ -38,6 +38,7 @@ async function resolveProposalPublishApiConfigForAgent({
     env = process.env,
     overlayPaths,
     argv = process.argv,
+    allowAmbiguousChainId = false,
 }) {
     const {
         modulePath: resolvedModulePath,
@@ -50,10 +51,23 @@ async function resolveProposalPublishApiConfigForAgent({
         overlayPaths,
         argv,
     });
-    const runtimeChainId = resolveConfiguredChainId({
-        agentConfigFile: agentConfigStack,
-        explicitChainId: chainId,
-    });
+    let runtimeChainId;
+    try {
+        runtimeChainId = resolveConfiguredChainId({
+            agentConfigFile: agentConfigStack,
+            explicitChainId: chainId,
+        });
+    } catch (error) {
+        if (
+            allowAmbiguousChainId &&
+            (chainId === undefined || chainId === null) &&
+            String(error?.message ?? '').includes('defines multiple byChain entries')
+        ) {
+            runtimeChainId = undefined;
+        } else {
+            throw error;
+        }
+    }
     const baseConfig = buildConfig({
         env,
         requireRpcUrl: false,
@@ -67,6 +81,7 @@ async function resolveProposalPublishApiConfigForAgent({
         },
         agentConfigFile: agentConfigStack,
         chainId: runtimeChainId,
+        allowAmbiguousChainId,
     });
 
     return {
@@ -239,6 +254,7 @@ async function resolveProposalPublishServerConfig({
         env,
         overlayPaths,
         argv,
+        allowAmbiguousChainId: true,
     });
 
     return {

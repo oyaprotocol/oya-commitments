@@ -152,6 +152,15 @@ async function main() {
     const requestIdByCid = new Map();
     const failPinOnce = new Set(['pin-retry']);
     const failAddOnce = new Set(['publish-retry-expired', 'publish-retry-resigned']);
+    let releaseConcurrentAdd;
+    const concurrentAddBlocked = new Promise((resolve) => {
+        releaseConcurrentAdd = resolve;
+    });
+    let concurrentAddObservedResolve;
+    const concurrentAddObserved = new Promise((resolve) => {
+        concurrentAddObservedResolve = resolve;
+    });
+    const holdAddOnce = new Set(['concurrent-duplicate']);
     const originalDateNow = Date.now;
     globalThis.fetch = async (url, options = {}) => {
         const urlString = String(url);
@@ -168,6 +177,11 @@ async function main() {
             const requestId = artifact?.signedProposal?.envelope?.requestId;
             const cid = `bafy${createHash('sha256').update(uploadedText).digest('hex').slice(0, 24)}`;
             addAttemptsByRequestId.set(requestId, (addAttemptsByRequestId.get(requestId) ?? 0) + 1);
+            if (holdAddOnce.has(requestId)) {
+                holdAddOnce.delete(requestId);
+                concurrentAddObservedResolve();
+                await concurrentAddBlocked;
+            }
             if (failAddOnce.has(requestId)) {
                 failAddOnce.delete(requestId);
                 return textResponse(500, '{"error":"temporary add failure"}', 'Internal Server Error');
@@ -259,6 +273,27 @@ async function main() {
         assert.equal(duplicate.json.cid, accepted.json.cid);
         assert.equal(addAttemptsByRequestId.get('publish-ok'), 1);
         assert.equal(pinAttemptsByRequestId.get('publish-ok'), 1);
+
+        const concurrentRequest = await buildSignedBody({
+            account,
+            requestId: 'concurrent-duplicate',
+            explanation: 'Concurrent identical publish requests.',
+        });
+        const concurrentFirstPromise = postPublication(baseUrl, concurrentRequest.body);
+        await concurrentAddObserved;
+        const concurrentSecondPromise = postPublication(baseUrl, concurrentRequest.body);
+        releaseConcurrentAdd();
+        const [concurrentFirst, concurrentSecond] = await Promise.all([
+            concurrentFirstPromise,
+            concurrentSecondPromise,
+        ]);
+        assert.deepEqual(
+            [concurrentFirst.status, concurrentSecond.status].sort((left, right) => left - right),
+            [200, 202]
+        );
+        assert.equal(concurrentFirst.json.cid, concurrentSecond.json.cid);
+        assert.equal(addAttemptsByRequestId.get('concurrent-duplicate'), 1);
+        assert.equal(pinAttemptsByRequestId.get('concurrent-duplicate'), 1);
 
         const conflicting = await buildSignedBody({
             account,

@@ -781,12 +781,30 @@ function resolveConfiguredChainId({ agentConfigFile, explicitChainId } = {}) {
     );
 }
 
-function resolveAgentRuntimeConfig({ baseConfig, agentConfigFile, chainId }) {
-    const resolvedChainId =
-        resolveConfiguredChainId({
-            agentConfigFile,
-            explicitChainId: chainId,
-        }) ?? baseConfig.chainId;
+function resolveAgentRuntimeConfig({
+    baseConfig,
+    agentConfigFile,
+    chainId,
+    allowAmbiguousChainId = false,
+}) {
+    let resolvedChainId;
+    try {
+        resolvedChainId =
+            resolveConfiguredChainId({
+                agentConfigFile,
+                explicitChainId: chainId,
+            }) ?? baseConfig.chainId;
+    } catch (error) {
+        if (
+            allowAmbiguousChainId &&
+            (chainId === undefined || chainId === null) &&
+            String(error?.message ?? '').includes('defines multiple byChain entries')
+        ) {
+            resolvedChainId = baseConfig.chainId;
+        } else {
+            throw error;
+        }
+    }
     const rawAgentConfig = agentConfigFile?.raw;
     if (!rawAgentConfig) {
         return {

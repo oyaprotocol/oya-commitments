@@ -42,6 +42,7 @@ Out of scope for this ExecPlan:
 - [x] 2026-03-30: Hardened recovery semantics so unpublished pending records can be retried after the auth age window, including refreshed signatures for the same logical proposal before any IPFS add succeeds, and moved `publishedAtMs` stamping from request receipt to the actual add attempt that succeeds.
 - [x] 2026-03-30: Tightened artifact verification so the verifier now requires `signedProposal.signedAtMs` to match the signed envelope timestamp and returns the signed envelope timestamp as the verified `signedAtMs`.
 - [x] 2026-03-30: Expanded the store dedupe key from `signer + requestId` to `signer + chainId + requestId` with backward-compatible record normalization, and tightened explicit `--url` resolution so unresolved module chain IDs fail fast with actionable guidance.
+- [x] 2026-03-30: Added a per-publication keyed publish lock so concurrent duplicate requests cannot race into multiple IPFS adds, and enabled an intentional multi-chain server mode where node startup may leave `runtimeConfig.chainId` unset while send-side signing remains chain-bound.
 
 ## Surprises & Discoveries
 
