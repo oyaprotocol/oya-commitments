@@ -68,6 +68,7 @@ async function run() {
     assert.equal(verification.requestId, 'verify-artifact');
     assert.equal(verification.signer, account.address.toLowerCase());
     assert.equal(verification.transactionCount, 1);
+    assert.equal(verification.signedAtMs, envelope.timestampMs);
 
     const tamperedArtifact = {
         ...artifact,
@@ -82,6 +83,18 @@ async function run() {
     await assert.rejects(
         () => verifySignedProposalArtifact(tamperedArtifact),
         /canonicalMessage does not match/
+    );
+
+    const tamperedSignedAtArtifact = {
+        ...artifact,
+        signedProposal: {
+            ...artifact.signedProposal,
+            signedAtMs: artifact.signedProposal.signedAtMs + 999,
+        },
+    };
+    await assert.rejects(
+        () => verifySignedProposalArtifact(tamperedSignedAtArtifact),
+        /signedAtMs does not match/
     );
 
     await rm(tempDir, { recursive: true, force: true });
