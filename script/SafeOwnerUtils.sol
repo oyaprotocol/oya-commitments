@@ -98,6 +98,7 @@ abstract contract SafeOwnerUtils is Script {
         address signer = vm.addr(signerPk);
         address[] memory currentOwners = safe.getOwners();
         require(_containsOwner(currentOwners, signer), "signer must be a safe owner");
+        bool signerDesired = _containsOwner(desiredOwners, signer);
 
         for (uint256 i = 0; i < desiredOwners.length; i++) {
             address owner = desiredOwners[i];
@@ -117,6 +118,9 @@ abstract contract SafeOwnerUtils is Script {
                 if (_containsOwner(desiredOwners, owner)) {
                     continue;
                 }
+                if (owner == signer && !signerDesired) {
+                    continue;
+                }
                 address prevOwner = _findPreviousOwner(currentOwners, owner);
                 _execSafeTransaction(
                     signerPk,
@@ -132,7 +136,16 @@ abstract contract SafeOwnerUtils is Script {
             }
         }
 
-        if (desiredOwners.length > 1) {
+        currentOwners = safe.getOwners();
+        if (!signerDesired) {
+            require(_containsOwner(currentOwners, signer), "signer unexpectedly removed");
+            address prevOwner = _findPreviousOwner(currentOwners, signer);
+            _execSafeTransaction(
+                signerPk,
+                safeProxy,
+                abi.encodeWithSignature("removeOwner(address,address,uint256)", prevOwner, signer, desiredOwners.length)
+            );
+        } else if (desiredOwners.length > 1) {
             _execSafeTransaction(
                 signerPk, safeProxy, abi.encodeWithSignature("changeThreshold(uint256)", desiredOwners.length)
             );

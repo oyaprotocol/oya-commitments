@@ -28,6 +28,8 @@ Observable success looks like:
 - [x] 2026-03-30 04:12Z: Extended deployment and owner-management tests in `test/DeploySafeWithOptimisticGovernor.t.sol` and `test/ManageSafeOwners.t.sol`; updated harness config parsing and phase-3 coverage in `agent/scripts/lib/testnet-harness-deploy.mjs` and `agent/scripts/test-testnet-harness-phase3.mjs`.
 - [x] 2026-03-30 04:12Z: Updated `README.md`, `docs/deployment.md`, `docs/signers.md`, and `agent/README.md` to document the new owner flow and wrapper CLI.
 - [x] 2026-03-30 04:12Z: Ran compile, targeted Foundry tests, harness phase-3 validation, and wrapper `--help` smoke checks.
+- [x] 2026-03-30 04:33Z: Fixed the signer-removal ordering bug in `script/SafeOwnerUtils.sol`, upgraded mocks to validate the signing owner, added a regression test in `test/ManageSafeOwners.t.sol`, and re-ran the deployment, owner-management, and harness validations.
+- [x] 2026-03-30 05:07Z: Added explicit deployment coverage for `SAFE_OWNERS=<ownerA>,<deployer>,<ownerB>` to confirm the signer is handled by membership rather than position in the requested owner list.
 
 ## Surprises & Discoveries
 
@@ -45,6 +47,12 @@ Observable success looks like:
 
 - Observation: Forge suites that mutate env vars with `vm.setEnv` need isolated execution in this repo or the env-dependent tests can interfere with one another.
   Evidence: `forge test --offline --match-path test/DeploySafeWithOptimisticGovernor.t.sol` and `forge test --offline --match-path test/ManageSafeOwners.t.sol` were flaky until re-run with `--isolate --threads 1`.
+
+- Observation: Removing the signer before other non-desired owners leaves no valid signer for later Safe mutations, and separate broadcast transactions can strand the Safe in a partially reconciled state.
+  Evidence: The initial reconciliation loop in `script/SafeOwnerUtils.sol` removed the first non-desired owner it encountered; the fix now prunes other owners first and removes the signer last, with `test_RemoveOwnersRemovesSignerLast` covering the regression.
+
+- Observation: The requested owner list order is not used as a canonical final ordering; reconciliation treats the signer and other requested owners by membership, then validates count and membership after mutation.
+  Evidence: `reconcileOwners(...)` uses `_containsOwner(...)` checks rather than positional comparisons, and `test_DeploysSafeWhenDeployerIsSpecifiedMidList` passes with `SAFE_OWNERS=<ownerA>,<deployer>,<ownerB>`.
 
 ## Decision Log
 
@@ -67,6 +75,8 @@ Implemented the owner-bootstrap and reconciliation flow as planned. The deployme
 Added a reusable owner-management primitive in `script/ManageSafeOwners.s.sol`, plus wrapper commands for deployment, set, add, and remove flows. The docs now present the deployer-owned testing posture as the default and document the handoff to dead-owner or unanimous multi-owner control.
 
 The main operational lesson is that owner-management commands using only `DEPLOYER_PK` are intentionally limited to the threshold-1 transition phase. Once operators finalize to a non-deployer `N/N` Safe, future owner changes must go through the owners themselves or the Optimistic Governor process.
+
+Follow-up hardening fixed a bug where the signer could be removed before other non-desired owners. The reconciliation helper now removes all other prunable owners first, then removes the signer last while applying the final threshold in that same removal transaction when necessary.
 
 ## Context and Orientation
 
