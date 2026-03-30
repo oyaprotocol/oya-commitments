@@ -69,15 +69,45 @@ contract ManagedSafeMock {
         uint256,
         address,
         address payable,
-        bytes calldata
+        bytes calldata signatures
     ) external payable returns (bool success) {
-        if (operation != 0) {
+        if (operation != 0 || threshold != 1) {
+            return false;
+        }
+        bytes32 txHash = keccak256(abi.encodePacked(nonce));
+        address signer = _recoverSigner(txHash, signatures);
+        if (!_isOwner(signer)) {
             return false;
         }
         (success,) = to.call{value: value}(data);
         if (success) {
             nonce += 1;
         }
+    }
+
+    function _isOwner(address candidate) internal view returns (bool) {
+        for (uint256 i = 0; i < owners.length; i++) {
+            if (owners[i] == candidate) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function _recoverSigner(bytes32 txHash, bytes calldata signatures) internal pure returns (address signer) {
+        if (signatures.length != 65) {
+            return address(0);
+        }
+
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        assembly {
+            r := calldataload(signatures.offset)
+            s := calldataload(add(signatures.offset, 0x20))
+            v := byte(0, calldataload(add(signatures.offset, 0x40)))
+        }
+        signer = ecrecover(txHash, v, r, s);
     }
 }
 
@@ -142,6 +172,20 @@ contract ManageSafeOwnersTest is Test {
         script.run();
 
         _assertOwners(_singleOwner(BURN_OWNER), 1);
+    }
+
+    function test_RemoveOwnersRemovesSignerLast() public {
+        address[] memory owners = new address[](3);
+        owners[0] = DEPLOYER;
+        owners[1] = OWNER_A;
+        owners[2] = OWNER_B;
+        _setupOwners(owners, 1);
+        vm.setEnv("SAFE_OWNER_ACTION", "remove");
+        vm.setEnv("SAFE_REMOVE_OWNERS", string.concat(vm.toString(DEPLOYER), ",", vm.toString(OWNER_B)));
+
+        script.run();
+
+        _assertOwners(_singleOwner(OWNER_A), 1);
     }
 
     function _setupOwners(address[] memory owners, uint256 currentThreshold) internal {

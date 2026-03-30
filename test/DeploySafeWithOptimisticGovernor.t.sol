@@ -87,9 +87,14 @@ contract SafeMock {
         uint256,
         address,
         address payable,
-        bytes calldata
+        bytes calldata signatures
     ) external payable returns (bool success) {
-        if (operation != 0) {
+        if (operation != 0 || threshold != 1) {
+            return false;
+        }
+        bytes32 txHash = keccak256(abi.encodePacked(nonce));
+        address signer = _recoverSigner(txHash, signatures);
+        if (!_isOwner(signer)) {
             return false;
         }
         (success,) = to.call{value: value}(data);
@@ -100,6 +105,31 @@ contract SafeMock {
 
     function isModuleEnabled(address module) external view returns (bool) {
         return modules[module];
+    }
+
+    function _isOwner(address candidate) internal view returns (bool) {
+        for (uint256 i = 0; i < owners.length; i++) {
+            if (owners[i] == candidate) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function _recoverSigner(bytes32 txHash, bytes calldata signatures) internal pure returns (address signer) {
+        if (signatures.length != 65) {
+            return address(0);
+        }
+
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        assembly {
+            r := calldataload(signatures.offset)
+            s := calldataload(add(signatures.offset, 0x20))
+            v := byte(0, calldataload(add(signatures.offset, 0x40)))
+        }
+        signer = ecrecover(txHash, v, r, s);
     }
 }
 
@@ -215,5 +245,28 @@ contract DeploySafeWithOptimisticGovernorTest is Test {
         assertEq(owners[0], OWNER_A);
         assertEq(owners[1], OWNER_B);
         assertEq(safe.getThreshold(), 2);
+    }
+
+    function test_DeploysSafeWhenDeployerIsSpecifiedMidList() public {
+        vm.setEnv("SAFE_OWNERS", string.concat(vm.toString(OWNER_A), ",", vm.toString(DEPLOYER), ",", vm.toString(OWNER_B)));
+
+        script.run();
+
+        SafeMock safe = SafeMock(safeProxyFactory.lastProxy());
+        address[] memory owners = safe.getOwners();
+        assertEq(owners.length, 3);
+        assertTrue(_containsOwner(owners, OWNER_A));
+        assertTrue(_containsOwner(owners, DEPLOYER));
+        assertTrue(_containsOwner(owners, OWNER_B));
+        assertEq(safe.getThreshold(), 3);
+    }
+
+    function _containsOwner(address[] memory owners, address candidate) internal pure returns (bool) {
+        for (uint256 i = 0; i < owners.length; i++) {
+            if (owners[i] == candidate) {
+                return true;
+            }
+        }
+        return false;
     }
 }
