@@ -20,11 +20,11 @@ This is beta software provided “as is.” Use at your own risk. No guarantees 
 3. Run the deployment script:
 
 ```shell
-forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimisticGovernor \
-  --rpc-url <your_rpc_url> \
-  --broadcast \
-  --private-key <your_private_key>
+ENV_FILE=agent/.env \
+bash script/deploy-commitment.sh
 ```
+
+By default this leaves the deployer as the Safe's sole owner so you can do a testing phase before finalizing ownership. Pass `--owners 0x` to remove all human owners immediately, or `--owners <a>,<b>,<c>` to finalize an `N/N` Safe.
 
 ## Build An Agentic Commitment
 

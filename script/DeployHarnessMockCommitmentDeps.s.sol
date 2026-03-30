@@ -39,12 +39,26 @@ contract HarnessMockSafe {
     function removeOwner(address, address owner, uint256 _threshold) external {
         for (uint256 i = 0; i < owners.length; i++) {
             if (owners[i] == owner) {
-                owners[i] = owners[owners.length - 1];
+                for (uint256 j = i; j + 1 < owners.length; j++) {
+                    owners[j] = owners[j + 1];
+                }
                 owners.pop();
                 break;
             }
         }
         threshold = _threshold;
+    }
+
+    function changeThreshold(uint256 _threshold) external {
+        threshold = _threshold;
+    }
+
+    function getOwners() external view returns (address[] memory) {
+        return owners;
+    }
+
+    function getThreshold() external view returns (uint256) {
+        return threshold;
     }
 
     function getTransactionHash(
@@ -58,7 +72,7 @@ contract HarnessMockSafe {
         address,
         address,
         uint256 _nonce
-    ) external view returns (bytes32) {
+    ) external pure returns (bytes32) {
         return keccak256(abi.encodePacked(_nonce));
     }
 
@@ -72,9 +86,14 @@ contract HarnessMockSafe {
         uint256,
         address,
         address payable,
-        bytes calldata
+        bytes calldata signatures
     ) external payable returns (bool success) {
-        if (operation != 0) {
+        if (operation != 0 || threshold != 1) {
+            return false;
+        }
+        bytes32 txHash = keccak256(abi.encodePacked(nonce));
+        address signer = _recoverSigner(txHash, signatures);
+        if (!_isOwner(signer)) {
             return false;
         }
         (success,) = to.call{value: value}(data);
@@ -93,6 +112,31 @@ contract HarnessMockSafe {
             return false;
         }
         (success,) = to.call{value: value}(data);
+    }
+
+    function _isOwner(address candidate) internal view returns (bool) {
+        for (uint256 i = 0; i < owners.length; i++) {
+            if (owners[i] == candidate) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function _recoverSigner(bytes32 txHash, bytes calldata signatures) internal pure returns (address signer) {
+        if (signatures.length != 65) {
+            return address(0);
+        }
+
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        assembly {
+            r := calldataload(signatures.offset)
+            s := calldataload(add(signatures.offset, 0x20))
+            v := byte(0, calldataload(add(signatures.offset, 0x40)))
+        }
+        signer = ecrecover(txHash, v, r, s);
     }
 }
 
