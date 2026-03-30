@@ -1,0 +1,1 @@
+This smoke-test commitment exists only to validate signed proposal publication through a separate Oya node service. Signed proposal bundles and their explanations may be archived to IPFS for review by co-owners and observers.

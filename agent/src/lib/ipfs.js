@@ -1,3 +1,5 @@
+import { isPlainObject, stringifyCanonicalJson } from './canonical-json.js';
+
 const DEFAULT_IPFS_API_URL = 'http://127.0.0.1:5001';
 const DEFAULT_IPFS_REQUEST_TIMEOUT_MS = 15_000;
 const DEFAULT_IPFS_MAX_RETRIES = 1;
@@ -23,37 +25,23 @@ function normalizeIpfsApiUrl(url) {
     return (url ?? DEFAULT_IPFS_API_URL).replace(/\/+$/, '');
 }
 
-function canonicalize(value) {
-    if (Array.isArray(value)) {
-        return value.map((item) => canonicalize(item));
-    }
-    if (value && typeof value === 'object') {
-        const out = {};
-        for (const key of Object.keys(value).sort()) {
-            out[key] = canonicalize(value[key]);
-        }
-        return out;
-    }
-    return value;
-}
-
 function buildContentString({ content, json }) {
     const hasContent = typeof content === 'string';
-    const hasJson = Boolean(json) && typeof json === 'object' && !Array.isArray(json);
+    const hasJson = isPlainObject(json);
     if (hasContent === hasJson) {
         throw new Error('ipfs_publish requires exactly one of content or json.');
     }
     if (hasContent) {
         return String(content);
     }
-    return JSON.stringify(canonicalize(json));
+    return stringifyCanonicalJson(json);
 }
 
 function resolveMediaType({ mediaType, json }) {
     if (typeof mediaType === 'string' && mediaType.trim()) {
         return mediaType.trim();
     }
-    if (json && typeof json === 'object' && !Array.isArray(json)) {
+    if (isPlainObject(json)) {
         return 'application/json';
     }
     return 'text/plain; charset=utf-8';

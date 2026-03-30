@@ -1,0 +1,11 @@
+{
+  "chainId": 11155111,
+  "ipfsEnabled": true,
+  "proposalPublishApi": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 9890,
+    "requireSignerAllowlist": false,
+    "nodeName": "signed-proposal-publish-smoke"
+  }
+}
