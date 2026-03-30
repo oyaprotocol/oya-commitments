@@ -39,12 +39,26 @@ contract HarnessMockSafe {
     function removeOwner(address, address owner, uint256 _threshold) external {
         for (uint256 i = 0; i < owners.length; i++) {
             if (owners[i] == owner) {
-                owners[i] = owners[owners.length - 1];
+                for (uint256 j = i; j + 1 < owners.length; j++) {
+                    owners[j] = owners[j + 1];
+                }
                 owners.pop();
                 break;
             }
         }
         threshold = _threshold;
+    }
+
+    function changeThreshold(uint256 _threshold) external {
+        threshold = _threshold;
+    }
+
+    function getOwners() external view returns (address[] memory) {
+        return owners;
+    }
+
+    function getThreshold() external view returns (uint256) {
+        return threshold;
     }
 
     function getTransactionHash(
@@ -58,7 +72,7 @@ contract HarnessMockSafe {
         address,
         address,
         uint256 _nonce
-    ) external view returns (bytes32) {
+    ) external pure returns (bytes32) {
         return keccak256(abi.encodePacked(_nonce));
     }
 

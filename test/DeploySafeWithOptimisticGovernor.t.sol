@@ -38,15 +38,28 @@ contract SafeMock {
     }
 
     function removeOwner(address, address owner, uint256 _threshold) external {
-        // remove matching owner (simple linear scan for mock)
         for (uint256 i = 0; i < owners.length; i++) {
             if (owners[i] == owner) {
-                owners[i] = owners[owners.length - 1];
+                for (uint256 j = i; j + 1 < owners.length; j++) {
+                    owners[j] = owners[j + 1];
+                }
                 owners.pop();
                 break;
             }
         }
         threshold = _threshold;
+    }
+
+    function changeThreshold(uint256 _threshold) external {
+        threshold = _threshold;
+    }
+
+    function getOwners() external view returns (address[] memory) {
+        return owners;
+    }
+
+    function getThreshold() external view returns (uint256) {
+        return threshold;
     }
 
     function getTransactionHash(
@@ -60,7 +73,7 @@ contract SafeMock {
         address,
         address,
         uint256 _nonce
-    ) external view returns (bytes32) {
+    ) external pure returns (bytes32) {
         return keccak256(abi.encodePacked(_nonce));
     }
 
@@ -118,6 +131,9 @@ contract OptimisticGovernorMock {
 
 contract DeploySafeWithOptimisticGovernorTest is Test {
     address internal constant BURN_OWNER = 0x000000000000000000000000000000000000dEaD;
+    address internal constant DEPLOYER = 0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf;
+    address internal constant OWNER_A = 0x1111111111111111111111111111111111111111;
+    address internal constant OWNER_B = 0x2222222222222222222222222222222222222222;
 
     SafeProxyFactoryMock private safeProxyFactory;
     OptimisticGovernorMock private ogMasterCopy;
@@ -145,17 +161,20 @@ contract DeploySafeWithOptimisticGovernorTest is Test {
         );
         vm.setEnv("OG_LIVENESS", vm.toString(uint256(3600)));
         vm.setEnv("OG_IDENTIFIER_STR", "COMMITMENT");
+        vm.setEnv("SAFE_OWNERS", vm.toString(DEPLOYER));
     }
 
-    function test_DeploysSafeAndOptimisticGovernor() public {
+    function test_DeploysSafeAndOptimisticGovernorWithDeployerOwner() public {
         script.run();
 
         address safeProxy = safeProxyFactory.lastProxy();
         assertTrue(safeProxy != address(0));
 
         SafeMock safe = SafeMock(safeProxy);
-        assertEq(safe.owners(0), BURN_OWNER);
-        assertEq(safe.threshold(), 1); // burn address set as sole owner
+        address[] memory owners = safe.getOwners();
+        assertEq(owners.length, 1);
+        assertEq(owners[0], DEPLOYER);
+        assertEq(safe.getThreshold(), 1);
         assertEq(safe.fallbackHandler(), address(0xFA11));
 
         address module = safe.lastEnabledModule();
@@ -171,5 +190,30 @@ contract DeploySafeWithOptimisticGovernorTest is Test {
         );
         assertEq(og.identifier(), bytes32(bytes("COMMITMENT")));
         assertEq(og.liveness(), uint64(3600));
+    }
+
+    function test_DeploysSafeWithBurnOwnerWhenRequested() public {
+        vm.setEnv("SAFE_OWNERS", "0x");
+
+        script.run();
+
+        SafeMock safe = SafeMock(safeProxyFactory.lastProxy());
+        address[] memory owners = safe.getOwners();
+        assertEq(owners.length, 1);
+        assertEq(owners[0], BURN_OWNER);
+        assertEq(safe.getThreshold(), 1);
+    }
+
+    function test_DeploysSafeWithExplicitUnanimousOwners() public {
+        vm.setEnv("SAFE_OWNERS", string.concat(vm.toString(OWNER_A), ",", vm.toString(OWNER_B)));
+
+        script.run();
+
+        SafeMock safe = SafeMock(safeProxyFactory.lastProxy());
+        address[] memory owners = safe.getOwners();
+        assertEq(owners.length, 2);
+        assertEq(owners[0], OWNER_A);
+        assertEq(owners[1], OWNER_B);
+        assertEq(safe.getThreshold(), 2);
     }
 }

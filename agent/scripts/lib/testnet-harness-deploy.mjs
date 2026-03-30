@@ -36,6 +36,37 @@ function normalizeAddressOrUndefined(value, label) {
     }
 }
 
+function parseOwnersConfig(value, label) {
+    if (value === undefined || value === null || value === '') {
+        return undefined;
+    }
+    if (value === '0x') {
+        return '0x';
+    }
+
+    const rawOwners = Array.isArray(value)
+        ? value
+        : typeof value === 'string'
+          ? value.split(',')
+          : null;
+    if (!rawOwners) {
+        throw new Error(`${label} must be "0x", an address string, a comma-separated string, or an array.`);
+    }
+
+    const owners = rawOwners.map((item, index) =>
+        normalizeAddressOrUndefined(
+            typeof item === 'string' ? item.trim() : item,
+            `${label}[${index}]`
+        )
+    );
+
+    if (owners.some((owner) => owner === undefined)) {
+        throw new Error(`${label} entries must be non-empty addresses.`);
+    }
+
+    return owners.join(',');
+}
+
 function parseDeploymentConfig(runtimeContext) {
     const raw = runtimeContext.runtimeConfig.agentConfig?.harness?.deployment;
     if (raw === undefined || raw === null) {
@@ -67,6 +98,7 @@ function parseDeploymentConfig(runtimeContext) {
         bondAmount: normalizeUintEnv(raw.bondAmount, 'harness.deployment.bondAmount'),
         liveness: normalizeUintEnv(raw.liveness, 'harness.deployment.liveness'),
         identifier: typeof raw.identifier === 'string' && raw.identifier.trim() ? raw.identifier.trim() : undefined,
+        owners: parseOwnersConfig(raw.owners, 'harness.deployment.owners'),
         safeSaltNonce: normalizeUintEnv(raw.safeSaltNonce, 'harness.deployment.safeSaltNonce'),
         ogSaltNonce: normalizeUintEnv(raw.ogSaltNonce, 'harness.deployment.ogSaltNonce'),
     };
@@ -376,6 +408,7 @@ async function deployHarnessCommitment({
                 : {}),
             ...(effectiveConfig.liveness ? { OG_LIVENESS: effectiveConfig.liveness } : {}),
             ...(effectiveConfig.identifier ? { OG_IDENTIFIER_STR: effectiveConfig.identifier } : {}),
+            ...(effectiveConfig.owners ? { SAFE_OWNERS: effectiveConfig.owners } : {}),
             ...(effectiveConfig.safeSaltNonce ? { SAFE_SALT_NONCE: effectiveConfig.safeSaltNonce } : {}),
             ...(effectiveConfig.ogSaltNonce ? { OG_SALT_NONCE: effectiveConfig.ogSaltNonce } : {}),
         },
