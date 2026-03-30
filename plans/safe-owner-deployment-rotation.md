@@ -31,6 +31,8 @@ Observable success looks like:
 - [x] 2026-03-30 04:33Z: Fixed the signer-removal ordering bug in `script/SafeOwnerUtils.sol`, upgraded mocks to validate the signing owner, added a regression test in `test/ManageSafeOwners.t.sol`, and re-ran the deployment, owner-management, and harness validations.
 - [x] 2026-03-30 05:07Z: Added explicit deployment coverage for `SAFE_OWNERS=<ownerA>,<deployer>,<ownerB>` to confirm the signer is handled by membership rather than position in the requested owner list.
 - [x] 2026-03-30 05:19Z: Scrubbed inherited `SAFE_OWNERS` from harness-triggered Forge deployments when `harness.deployment.owners` is unset, and added a phase-3 regression that contaminates the parent env to verify deployer-only default ownership is preserved.
+- [x] 2026-03-30 05:42Z: Refactored the Forge deployment and owner-management scripts to expose parameterized entrypoints for tests, removed `vm.setEnv` dependencies from the new Safe-owner Forge suites, and verified the full Forge suite passes without `--isolate`.
+- [x] 2026-03-30 05:57Z: Hardened harness owner-config parsing to reject explicit empty owner lists, and reordered wrapper CLI Forge argument assembly so the script path cannot be displaced by forwarded args.
 
 ## Surprises & Discoveries
 
@@ -57,6 +59,15 @@ Observable success looks like:
 
 - Observation: The harness deployment helper inherited ambient `SAFE_OWNERS` from the parent process unless `harness.deployment.owners` was explicitly set, which could silently override the intended deployer-only default.
   Evidence: `deployHarnessCommitment(...)` built the Forge env from `...env` and only conditionally overrode `SAFE_OWNERS`; the fix now deletes inherited `SAFE_OWNERS` when `effectiveConfig.owners` is `undefined`, and the phase-3 harness test passes with a contaminated parent env.
+
+- Observation: Forge tests that mutate env with `vm.setEnv` can still race under the normal `forge test` runner even if targeted `--isolate --threads 1` invocations pass, because env state is process-global and shared across concurrently executed tests.
+  Evidence: the initial Safe-owner test suites passed in isolated runs but failed under plain `forge test -vvv` with cross-test contamination of `SAFE_OWNERS` and `SAFE_REMOVE_OWNERS`; refactoring those tests to use parameterized script entrypoints eliminated the failures.
+
+- Observation: An explicit empty `harness.deployment.owners` value is dangerous because it can collapse to the same deployer-owned default as "owners omitted", even though those meanings are operationally different.
+  Evidence: `parseOwnersConfig([])` previously returned `""`, which the Solidity deployment script treated as unset ownership; the parser now rejects empty arrays and blank strings, and phase-3 harness coverage asserts those misconfigurations throw.
+
+- Observation: The wrapper shell scripts must anchor the target script path before caller-forwarded args or a forwarded positional token can be parsed as `<PATH>` by `forge script`.
+  Evidence: the wrappers previously assembled `forge script <extra args> <path>`; they now assemble `forge script <path> ...`, preserving the script target while still forwarding caller args and wrapper-injected flags.
 
 ## Decision Log
 
@@ -235,6 +246,7 @@ Validation evidence captured during implementation:
 - `bash script/set-safe-owners.sh --help`
 - `bash script/add-safe-owners.sh --help`
 - `bash script/remove-safe-owners.sh --help`
+- `forge test --offline -vvv`
 
 ## Interfaces and Dependencies
 

@@ -37,18 +37,27 @@ function normalizeAddressOrUndefined(value, label) {
 }
 
 function parseOwnersConfig(value, label) {
-    if (value === undefined || value === null || value === '') {
+    if (value === undefined || value === null) {
         return undefined;
     }
     if (value === '0x') {
         return '0x';
     }
 
-    const rawOwners = Array.isArray(value)
-        ? value
-        : typeof value === 'string'
-          ? value.split(',')
-          : null;
+    let rawOwners;
+    if (Array.isArray(value)) {
+        if (value.length === 0) {
+            throw new Error(`${label} must contain at least one owner. Omit it for deployer-only ownership or use "0x" to burn ownership.`);
+        }
+        rawOwners = value;
+    } else if (typeof value === 'string') {
+        if (!value.trim()) {
+            throw new Error(`${label} must not be empty. Omit it for deployer-only ownership or use "0x" to burn ownership.`);
+        }
+        rawOwners = value.split(',');
+    } else {
+        rawOwners = null;
+    }
     if (!rawOwners) {
         throw new Error(`${label} must be "0x", an address string, a comma-separated string, or an array.`);
     }
