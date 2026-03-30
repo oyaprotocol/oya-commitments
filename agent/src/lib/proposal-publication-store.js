@@ -18,6 +18,14 @@ function normalizeRequestId(requestId, label = 'requestId') {
     return requestId.trim();
 }
 
+function normalizeChainId(value, label = 'chainId') {
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed < 1) {
+        throw new Error(`${label} must be a positive integer.`);
+    }
+    return parsed;
+}
+
 function normalizeTimestamp(value, label) {
     const parsed = Number(value);
     if (!Number.isInteger(parsed) || parsed < 0) {
@@ -43,8 +51,32 @@ function normalizeOptionalString(value, label) {
     return value.trim();
 }
 
-function buildPublicationKey({ signer, requestId }) {
-    return `${getAddress(signer).toLowerCase()}:${normalizeRequestId(requestId)}`;
+function deriveStoredRecordChainId(record, label = 'record') {
+    if (record.chainId !== undefined && record.chainId !== null) {
+        return normalizeChainId(record.chainId, `${label}.chainId`);
+    }
+
+    const artifactChainId = record.artifact?.signedProposal?.envelope?.chainId;
+    if (artifactChainId !== undefined && artifactChainId !== null) {
+        return normalizeChainId(artifactChainId, `${label}.artifact.signedProposal.envelope.chainId`);
+    }
+
+    if (typeof record.canonicalMessage === 'string' && record.canonicalMessage) {
+        try {
+            const parsed = JSON.parse(record.canonicalMessage);
+            if (parsed?.chainId !== undefined && parsed?.chainId !== null) {
+                return normalizeChainId(parsed.chainId, `${label}.canonicalMessage.chainId`);
+            }
+        } catch (error) {
+            // Fall through to the explicit error below.
+        }
+    }
+
+    throw new Error(`${label}.chainId must be present or derivable from canonicalMessage/artifact.`);
+}
+
+function buildPublicationKey({ signer, chainId, requestId }) {
+    return `${getAddress(signer).toLowerCase()}:${normalizeChainId(chainId)}:${normalizeRequestId(requestId)}`;
 }
 
 function createEmptyStoreState() {
@@ -60,6 +92,7 @@ function normalizeStoredRecord(record, label = 'record') {
     }
     const normalized = {
         signer: getAddress(record.signer).toLowerCase(),
+        chainId: deriveStoredRecordChainId(record, label),
         requestId: normalizeRequestId(record.requestId, `${label}.requestId`),
         signature:
             typeof record.signature === 'string' && /^0x[0-9a-fA-F]{130}$/.test(record.signature)
@@ -124,7 +157,13 @@ async function readStoreState(stateFile) {
         }
         const records = {};
         for (const [key, value] of Object.entries(parsed.records)) {
-            records[key] = normalizeStoredRecord(value, `records["${key}"]`);
+            const normalized = normalizeStoredRecord(value, `records["${key}"]`);
+            const normalizedKey = buildPublicationKey({
+                signer: normalized.signer,
+                chainId: normalized.chainId,
+                requestId: normalized.requestId,
+            });
+            records[normalizedKey] = normalized;
         }
         return {
             version: STORE_VERSION,
@@ -176,9 +215,9 @@ function createProposalPublicationStore({ stateFile }) {
     const resolvedStateFile = path.resolve(stateFile.trim());
     const queueKey = resolvedStateFile;
 
-    async function getRecord({ signer, requestId }) {
+    async function getRecord({ signer, chainId, requestId }) {
         return enqueueStoreOperation(queueKey, async () => {
-            const key = buildPublicationKey({ signer, requestId });
+            const key = buildPublicationKey({ signer, chainId, requestId });
             const state = await readStoreState(resolvedStateFile);
             const record = state.records[key];
             return record ? cloneJson(record) : null;
@@ -187,6 +226,7 @@ function createProposalPublicationStore({ stateFile }) {
 
     async function prepareRecord({
         signer,
+        chainId,
         requestId,
         signature,
         canonicalMessage,
@@ -195,7 +235,7 @@ function createProposalPublicationStore({ stateFile }) {
         publishedAtMs,
     }) {
         return enqueueStoreOperation(queueKey, async () => {
-            const key = buildPublicationKey({ signer, requestId });
+            const key = buildPublicationKey({ signer, chainId, requestId });
             const state = await readStoreState(resolvedStateFile);
             const existing = state.records[key];
             if (existing) {
@@ -218,6 +258,7 @@ function createProposalPublicationStore({ stateFile }) {
             const record = normalizeStoredRecord(
                 {
                     signer,
+                    chainId,
                     requestId,
                     signature,
                     canonicalMessage,
@@ -249,6 +290,7 @@ function createProposalPublicationStore({ stateFile }) {
             const normalized = normalizeStoredRecord(record, 'record');
             const key = buildPublicationKey({
                 signer: normalized.signer,
+                chainId: normalized.chainId,
                 requestId: normalized.requestId,
             });
             const state = await readStoreState(resolvedStateFile);

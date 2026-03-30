@@ -125,6 +125,30 @@ async function run() {
     assert.equal(directUrlWithChainTarget.baseUrl, 'http://cli-host:9555');
     assert.equal(directUrlWithChainTarget.chainId, 11155111);
 
+    await createAgentModule(repoRootPath, 'no-chain', {
+        proposalPublishApi: {
+            enabled: true,
+            host: 'no-chain-host.local',
+            port: 9797,
+            requireSignerAllowlist: false,
+        },
+    });
+
+    await assert.rejects(
+        () =>
+            buildProposalPublishBaseUrl({
+                argv: [
+                    'node',
+                    'send-signed-proposal.mjs',
+                    '--module=no-chain',
+                    '--url=http://cli-host:9555',
+                ],
+                env: {},
+                repoRootPath,
+            }),
+        /Unable to infer chainId for explicit --url from module "no-chain"/
+    );
+
     assert.equal(
         await buildProposalPublishBaseUrl({
             argv: [
