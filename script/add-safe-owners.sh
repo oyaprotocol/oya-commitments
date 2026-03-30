@@ -81,7 +81,6 @@ export SAFE_ADD_OWNERS="$OWNERS_VALUE"
 
 FORGE_ARGS=(
   script
-  "${FORGE_EXTRA_ARGS[@]}"
   script/ManageSafeOwners.s.sol:ManageSafeOwners
 )
 
@@ -99,6 +98,7 @@ if [[ "$HAS_RPC_URL" == false ]]; then
 fi
 
 FORGE_ARGS+=(--broadcast)
+FORGE_ARGS+=("${FORGE_EXTRA_ARGS[@]}")
 
 cd "$ROOT_DIR"
 forge "${FORGE_ARGS[@]}"

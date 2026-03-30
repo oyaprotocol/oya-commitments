@@ -12,11 +12,21 @@ contract ManageSafeOwners is SafeOwnerUtils {
 
         address[] memory desiredOwners = resolveDesiredOwners(action, safeProxy, deployer);
 
+        return runWithDesiredOwners(deployerPk, safeProxy, action, desiredOwners);
+    }
+
+    function runWithDesiredOwners(
+        uint256 deployerPk,
+        address safeProxy,
+        string memory action,
+        address[] memory desiredOwners
+    ) public returns (address) {
         vm.startBroadcast(deployerPk);
         reconcileOwners(deployerPk, safeProxy, desiredOwners);
         vm.stopBroadcast();
 
         logResult(safeProxy, action, desiredOwners);
+        return safeProxy;
     }
 
     function resolveDesiredOwners(string memory action, address safeProxy, address deployer)

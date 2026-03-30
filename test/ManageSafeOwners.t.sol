@@ -117,6 +117,7 @@ contract ManageSafeOwnersTest is Test {
     address internal constant OWNER_A = 0x1111111111111111111111111111111111111111;
     address internal constant OWNER_B = 0x2222222222222222222222222222222222222222;
     address internal constant OWNER_C = 0x3333333333333333333333333333333333333333;
+    uint256 internal constant DEPLOYER_PK = 1;
 
     ManageSafeOwners private script;
     ManagedSafeMock private safe;
@@ -124,21 +125,15 @@ contract ManageSafeOwnersTest is Test {
     function setUp() public {
         script = new ManageSafeOwners();
         safe = new ManagedSafeMock();
-
-        vm.setEnv("DEPLOYER_PK", "1");
-        vm.setEnv("COMMITMENT_SAFE", vm.toString(address(safe)));
-        vm.setEnv("SAFE_OWNER_ACTION", "set");
-        vm.setEnv("SAFE_OWNERS", vm.toString(DEPLOYER));
-        vm.setEnv("SAFE_ADD_OWNERS", vm.toString(OWNER_C));
-        vm.setEnv("SAFE_REMOVE_OWNERS", vm.toString(OWNER_C));
     }
 
     function test_AddOwnersBuildsUnanimousOwnerSet() public {
         _setupOwners(_singleOwner(DEPLOYER), 1);
-        vm.setEnv("SAFE_OWNER_ACTION", "add");
-        vm.setEnv("SAFE_ADD_OWNERS", string.concat(vm.toString(OWNER_A), ",", vm.toString(OWNER_B)));
-
-        script.run();
+        address[] memory desiredOwners = new address[](3);
+        desiredOwners[0] = DEPLOYER;
+        desiredOwners[1] = OWNER_A;
+        desiredOwners[2] = OWNER_B;
+        script.runWithDesiredOwners(DEPLOYER_PK, address(safe), "add", desiredOwners);
 
         address[] memory owners = new address[](3);
         owners[0] = DEPLOYER;
@@ -153,10 +148,7 @@ contract ManageSafeOwnersTest is Test {
         owners[1] = OWNER_A;
         owners[2] = OWNER_B;
         _setupOwners(owners, 1);
-        vm.setEnv("SAFE_OWNER_ACTION", "remove");
-        vm.setEnv("SAFE_REMOVE_OWNERS", string.concat(vm.toString(OWNER_A), ",", vm.toString(OWNER_B)));
-
-        script.run();
+        script.runWithDesiredOwners(DEPLOYER_PK, address(safe), "remove", _singleOwner(DEPLOYER));
 
         _assertOwners(_singleOwner(DEPLOYER), 1);
     }
@@ -166,10 +158,7 @@ contract ManageSafeOwnersTest is Test {
         owners[0] = DEPLOYER;
         owners[1] = OWNER_C;
         _setupOwners(owners, 1);
-        vm.setEnv("SAFE_OWNER_ACTION", "remove");
-        vm.setEnv("SAFE_REMOVE_OWNERS", string.concat(vm.toString(DEPLOYER), ",", vm.toString(OWNER_C)));
-
-        script.run();
+        script.runWithDesiredOwners(DEPLOYER_PK, address(safe), "remove", _singleOwner(BURN_OWNER));
 
         _assertOwners(_singleOwner(BURN_OWNER), 1);
     }
@@ -180,10 +169,7 @@ contract ManageSafeOwnersTest is Test {
         owners[1] = OWNER_A;
         owners[2] = OWNER_B;
         _setupOwners(owners, 1);
-        vm.setEnv("SAFE_OWNER_ACTION", "remove");
-        vm.setEnv("SAFE_REMOVE_OWNERS", string.concat(vm.toString(DEPLOYER), ",", vm.toString(OWNER_B)));
-
-        script.run();
+        script.runWithDesiredOwners(DEPLOYER_PK, address(safe), "remove", _singleOwner(OWNER_A));
 
         _assertOwners(_singleOwner(OWNER_A), 1);
     }

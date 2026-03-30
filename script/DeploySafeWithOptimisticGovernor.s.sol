@@ -56,6 +56,7 @@ contract DeploySafeWithOptimisticGovernor is SafeOwnerUtils {
         address safeSingleton;
         address safeProxyFactory;
         address safeFallbackHandler;
+        address moduleProxyFactory;
         address ogMasterCopy;
         address collateral;
         uint256 bondAmount;
@@ -75,12 +76,22 @@ contract DeploySafeWithOptimisticGovernor is SafeOwnerUtils {
         Config memory config = loadConfig();
         string memory rules = vm.envString("OG_RULES");
 
+        return runWithConfig(deployerPk, requestedOwners, config, rules);
+    }
+
+    function runWithConfig(
+        uint256 deployerPk,
+        address[] memory requestedOwners,
+        Config memory config,
+        string memory rules
+    ) public returns (address deployedModuleProxyFactory, address deployedSafe, address deployedOgModule) {
+        address deployer = vm.addr(deployerPk);
         address[] memory bootstrapOwners = new address[](1);
         bootstrapOwners[0] = deployer;
 
         vm.startBroadcast(deployerPk);
 
-        address moduleProxyFactory = resolveModuleProxyFactory();
+        address moduleProxyFactory = resolveModuleProxyFactory(config.moduleProxyFactory);
         address safeProxy = deploySafeProxy(config, bootstrapOwners, 1);
         address ogModule = deployOptimisticGovernor(config, moduleProxyFactory, safeProxy, rules);
 
@@ -102,6 +113,7 @@ contract DeploySafeWithOptimisticGovernor is SafeOwnerUtils {
         config.safeFallbackHandler =
             vm.envOr("SAFE_FALLBACK_HANDLER", address(0xf48f2B2d2a534e402487b3ee7C18c33Aec0Fe5e4));
 
+        config.moduleProxyFactory = vm.envOr("MODULE_PROXY_FACTORY", address(0));
         config.ogMasterCopy = vm.envOr("OG_MASTER_COPY", address(0x28CeBFE94a03DbCA9d17143e9d2Bd1155DC26D5d));
 
         config.collateral = vm.envAddress("OG_COLLATERAL");
@@ -122,12 +134,12 @@ contract DeploySafeWithOptimisticGovernor is SafeOwnerUtils {
         return "ASSERT_TRUTH2";
     }
 
-    function resolveModuleProxyFactory() internal returns (address moduleProxyFactory) {
-        moduleProxyFactory = vm.envOr("MODULE_PROXY_FACTORY", address(0));
+    function resolveModuleProxyFactory(address moduleProxyFactory) internal returns (address) {
         if (moduleProxyFactory == address(0)) {
             ModuleProxyFactory mpf = new ModuleProxyFactory();
             moduleProxyFactory = address(mpf);
         }
+        return moduleProxyFactory;
     }
 
     function deploySafeProxy(Config memory config, address[] memory owners, uint256 threshold)

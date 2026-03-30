@@ -137,6 +137,36 @@ async function run() {
         }).owners,
         '0x'
     );
+    assert.throws(
+        () =>
+            parseDeploymentConfig({
+                runtimeConfig: {
+                    agentConfig: {
+                        harness: {
+                            deployment: {
+                                owners: [],
+                            },
+                        },
+                    },
+                },
+            }),
+        /must contain at least one owner/
+    );
+    assert.throws(
+        () =>
+            parseDeploymentConfig({
+                runtimeConfig: {
+                    agentConfig: {
+                        harness: {
+                            deployment: {
+                                owners: '   ',
+                            },
+                        },
+                    },
+                },
+            }),
+        /must not be empty/
+    );
 
     const fixture = await createTempModule();
     const agentRef = fixture.agentPath;

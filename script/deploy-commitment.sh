@@ -70,7 +70,6 @@ export SAFE_OWNERS="$OWNERS_VALUE"
 
 FORGE_ARGS=(
   script
-  "${FORGE_EXTRA_ARGS[@]}"
   script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimisticGovernor
 )
 
@@ -88,6 +87,7 @@ if [[ "$HAS_RPC_URL" == false ]]; then
 fi
 
 FORGE_ARGS+=(--broadcast)
+FORGE_ARGS+=("${FORGE_EXTRA_ARGS[@]}")
 
 cd "$ROOT_DIR"
 forge "${FORGE_ARGS[@]}"

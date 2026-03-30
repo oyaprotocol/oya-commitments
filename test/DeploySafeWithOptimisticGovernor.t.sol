@@ -164,38 +164,39 @@ contract DeploySafeWithOptimisticGovernorTest is Test {
     address internal constant DEPLOYER = 0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf;
     address internal constant OWNER_A = 0x1111111111111111111111111111111111111111;
     address internal constant OWNER_B = 0x2222222222222222222222222222222222222222;
+    uint256 internal constant DEPLOYER_PK = 1;
 
     SafeProxyFactoryMock private safeProxyFactory;
     OptimisticGovernorMock private ogMasterCopy;
     ModuleProxyFactory private moduleProxyFactory;
     DeploySafeWithOptimisticGovernor private script;
+    DeploySafeWithOptimisticGovernor.Config private config;
+    string private rules;
 
     function setUp() public {
         safeProxyFactory = new SafeProxyFactoryMock();
         ogMasterCopy = new OptimisticGovernorMock();
         moduleProxyFactory = new ModuleProxyFactory();
         script = new DeploySafeWithOptimisticGovernor();
-
-        vm.setEnv("DEPLOYER_PK", "1");
-        vm.setEnv("SAFE_PROXY_FACTORY", vm.toString(address(safeProxyFactory)));
-        vm.setEnv("SAFE_SINGLETON", vm.toString(address(0xBEEF)));
-        vm.setEnv("SAFE_FALLBACK_HANDLER", vm.toString(address(0xFA11)));
-        vm.setEnv("OG_MASTER_COPY", vm.toString(address(ogMasterCopy)));
-        vm.setEnv("MODULE_PROXY_FACTORY", vm.toString(address(moduleProxyFactory)));
-
-        vm.setEnv("OG_COLLATERAL", vm.toString(address(0xCA11)));
-        vm.setEnv("OG_BOND_AMOUNT", vm.toString(uint256(250_000_000)));
-        vm.setEnv(
-            "OG_RULES",
-            "Any assets deposited in this Commitment may be transferred back to the depositor before January 15th, 2026 (12:00AM PST). After the deadline, assets may only be transferred to jdshutt.eth. If a third party is initiating the transfer after the deadline, they may take a 10% cut of the assets being transferred as a fee."
-        );
-        vm.setEnv("OG_LIVENESS", vm.toString(uint256(3600)));
-        vm.setEnv("OG_IDENTIFIER_STR", "COMMITMENT");
-        vm.setEnv("SAFE_OWNERS", vm.toString(DEPLOYER));
+        config = DeploySafeWithOptimisticGovernor.Config({
+            safeSingleton: address(0xBEEF),
+            safeProxyFactory: address(safeProxyFactory),
+            safeFallbackHandler: address(0xFA11),
+            moduleProxyFactory: address(moduleProxyFactory),
+            ogMasterCopy: address(ogMasterCopy),
+            collateral: address(0xCA11),
+            bondAmount: 250_000_000,
+            liveness: uint64(3600),
+            identifier: bytes32(bytes("COMMITMENT")),
+            safeSaltNonce: 1,
+            ogSaltNonce: 1
+        });
+        rules =
+            "Any assets deposited in this Commitment may be transferred back to the depositor before January 15th, 2026 (12:00AM PST). After the deadline, assets may only be transferred to jdshutt.eth. If a third party is initiating the transfer after the deadline, they may take a 10% cut of the assets being transferred as a fee.";
     }
 
     function test_DeploysSafeAndOptimisticGovernorWithDeployerOwner() public {
-        script.run();
+        script.runWithConfig(DEPLOYER_PK, _singleOwner(DEPLOYER), config, rules);
 
         address safeProxy = safeProxyFactory.lastProxy();
         assertTrue(safeProxy != address(0));
@@ -223,9 +224,7 @@ contract DeploySafeWithOptimisticGovernorTest is Test {
     }
 
     function test_DeploysSafeWithBurnOwnerWhenRequested() public {
-        vm.setEnv("SAFE_OWNERS", "0x");
-
-        script.run();
+        script.runWithConfig(DEPLOYER_PK, _singleOwner(BURN_OWNER), config, rules);
 
         SafeMock safe = SafeMock(safeProxyFactory.lastProxy());
         address[] memory owners = safe.getOwners();
@@ -235,9 +234,10 @@ contract DeploySafeWithOptimisticGovernorTest is Test {
     }
 
     function test_DeploysSafeWithExplicitUnanimousOwners() public {
-        vm.setEnv("SAFE_OWNERS", string.concat(vm.toString(OWNER_A), ",", vm.toString(OWNER_B)));
-
-        script.run();
+        address[] memory requestedOwners = new address[](2);
+        requestedOwners[0] = OWNER_A;
+        requestedOwners[1] = OWNER_B;
+        script.runWithConfig(DEPLOYER_PK, requestedOwners, config, rules);
 
         SafeMock safe = SafeMock(safeProxyFactory.lastProxy());
         address[] memory owners = safe.getOwners();
@@ -248,11 +248,11 @@ contract DeploySafeWithOptimisticGovernorTest is Test {
     }
 
     function test_DeploysSafeWhenDeployerIsSpecifiedMidList() public {
-        vm.setEnv(
-            "SAFE_OWNERS", string.concat(vm.toString(OWNER_A), ",", vm.toString(DEPLOYER), ",", vm.toString(OWNER_B))
-        );
-
-        script.run();
+        address[] memory requestedOwners = new address[](3);
+        requestedOwners[0] = OWNER_A;
+        requestedOwners[1] = DEPLOYER;
+        requestedOwners[2] = OWNER_B;
+        script.runWithConfig(DEPLOYER_PK, requestedOwners, config, rules);
 
         SafeMock safe = SafeMock(safeProxyFactory.lastProxy());
         address[] memory owners = safe.getOwners();
@@ -261,6 +261,11 @@ contract DeploySafeWithOptimisticGovernorTest is Test {
         assertTrue(_containsOwner(owners, DEPLOYER));
         assertTrue(_containsOwner(owners, OWNER_B));
         assertEq(safe.getThreshold(), 3);
+    }
+
+    function _singleOwner(address owner) internal pure returns (address[] memory owners) {
+        owners = new address[](1);
+        owners[0] = owner;
     }
 
     function _containsOwner(address[] memory owners, address candidate) internal pure returns (bool) {
