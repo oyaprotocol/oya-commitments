@@ -1,181 +1,13 @@
 import http from 'node:http';
-import { timingSafeEqual } from 'node:crypto';
-import { getAddress, recoverMessageAddress } from 'viem';
+import { getAddress } from 'viem';
 import { buildSignedMessagePayload } from './message-signing.js';
-
-function isPlainObject(value) {
-    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function safeTokenEquals(leftRaw, rightRaw) {
-    // Constant-time equality avoids leaking token prefix matches.
-    const left = Buffer.from(String(leftRaw));
-    const right = Buffer.from(String(rightRaw));
-    if (left.length !== right.length) {
-        return false;
-    }
-    return timingSafeEqual(left, right);
-}
-
-function authenticateRequest({ authorizationHeader, keyEntries }) {
-    if (typeof authorizationHeader !== 'string') return null;
-    const [scheme, ...tokenParts] = authorizationHeader.trim().split(/\s+/);
-    if (!scheme || scheme.toLowerCase() !== 'bearer') return null;
-    const token = tokenParts.join(' ').trim();
-    if (!token) return null;
-
-    let matchedKeyId = null;
-    for (const entry of keyEntries) {
-        if (safeTokenEquals(token, entry.token)) {
-            matchedKeyId = matchedKeyId ?? entry.keyId;
-        }
-    }
-    return matchedKeyId;
-}
-
-async function authenticateSignedRequest({
-    body,
-    signerAllowlist,
-    requireSignerAllowlist,
-    signatureMaxAgeSeconds,
-    expectedChainId,
-    nowMs,
-}) {
-    if (!body?.auth) {
-        return {
-            ok: false,
-            statusCode: 401,
-            message: 'Signed auth is required.',
-        };
-    }
-    if (!isPlainObject(body.auth)) {
-        return { ok: false, statusCode: 400, message: 'auth must be an object when provided.' };
-    }
-
-    const auth = body.auth;
-    if (auth.type !== 'eip191') {
-        return { ok: false, statusCode: 400, message: 'auth.type must be "eip191".' };
-    }
-    if (typeof auth.address !== 'string') {
-        return { ok: false, statusCode: 400, message: 'auth.address must be a string.' };
-    }
-    if (typeof auth.signature !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(auth.signature)) {
-        return { ok: false, statusCode: 400, message: 'auth.signature must be a 65-byte hex string.' };
-    }
-    if (!Number.isInteger(auth.timestampMs)) {
-        return { ok: false, statusCode: 400, message: 'auth.timestampMs must be an integer.' };
-    }
-    if (typeof body.requestId !== 'string' || !body.requestId.trim()) {
-        return {
-            ok: false,
-            statusCode: 400,
-            message: 'requestId is required when using signed auth.',
-        };
-    }
-    if (expectedChainId !== undefined && body.chainId !== expectedChainId) {
-        return {
-            ok: false,
-            statusCode: 400,
-            message: `chainId must equal ${expectedChainId}.`,
-        };
-    }
-
-    let declaredAddress;
-    try {
-        declaredAddress = getAddress(auth.address);
-    } catch (error) {
-        return { ok: false, statusCode: 400, message: 'auth.address must be a valid EVM address.' };
-    }
-    const normalizedDeclared = declaredAddress.toLowerCase();
-    if (requireSignerAllowlist && signerAllowlist.size === 0) {
-        return {
-            ok: false,
-            statusCode: 503,
-            message: 'Signer allowlist is required but not configured.',
-        };
-    }
-    if (requireSignerAllowlist && !signerAllowlist.has(normalizedDeclared)) {
-        return { ok: false, statusCode: 401, message: 'Signer is not allowlisted.' };
-    }
-
-    const maxAgeMs = signatureMaxAgeSeconds * 1000;
-    const maxFutureSkewMs = 30_000;
-    const ageMs = nowMs - auth.timestampMs;
-    if (ageMs < -maxFutureSkewMs || ageMs > maxAgeMs) {
-        return {
-            ok: false,
-            statusCode: 401,
-            message: 'Signed request expired or has an invalid timestamp.',
-        };
-    }
-
-    const payload = buildSignedMessagePayload({
-        address: declaredAddress,
-        chainId: body.chainId,
-        timestampMs: auth.timestampMs,
-        text: body.text,
-        command: body.command,
-        args: body.args,
-        metadata: body.metadata,
-        requestId: body.requestId,
-        deadline: body.deadline,
-    });
-
-    let recoveredAddress;
-    try {
-        recoveredAddress = getAddress(
-            await recoverMessageAddress({
-                message: payload,
-                signature: auth.signature,
-            })
-        );
-    } catch (error) {
-        return { ok: false, statusCode: 401, message: 'Invalid message signature.' };
-    }
-
-    if (recoveredAddress.toLowerCase() !== normalizedDeclared) {
-        return { ok: false, statusCode: 401, message: 'Signature does not match auth.address.' };
-    }
-
-    return {
-        ok: true,
-        senderKeyId: `addr:${normalizedDeclared}`,
-        sender: {
-            authType: 'eip191',
-            address: declaredAddress,
-            signedAtMs: auth.timestampMs,
-            signature: auth.signature,
-        },
-    };
-}
-
-async function readJsonBody(req, { maxBytes }) {
-    const chunks = [];
-    let total = 0;
-
-    for await (const chunk of req) {
-        total += chunk.length;
-        if (total > maxBytes) {
-            const error = new Error(`Request body exceeds ${maxBytes} bytes.`);
-            error.code = 'body_too_large';
-            throw error;
-        }
-        chunks.push(chunk);
-    }
-
-    const raw = Buffer.concat(chunks).toString('utf8');
-    if (!raw.trim()) {
-        return {};
-    }
-
-    try {
-        return JSON.parse(raw);
-    } catch (error) {
-        const parseError = new Error('Malformed JSON body.');
-        parseError.code = 'invalid_json';
-        throw parseError;
-    }
-}
+import { isPlainObject } from './canonical-json.js';
+import { readJsonBody, sendJson } from './http-api.js';
+import {
+    authenticateBearerRequest,
+    authenticateSignedRequest,
+    buildBearerKeyEntries,
+} from './signed-request-auth.js';
 
 function validateMessageBody(body) {
     if (!isPlainObject(body)) {
@@ -229,15 +61,6 @@ function validateMessageBody(body) {
     return { ok: true };
 }
 
-function sendJson(res, statusCode, payload, extraHeaders = {}) {
-    res.writeHead(statusCode, {
-        'Content-Type': 'application/json; charset=utf-8',
-        'Cache-Control': 'no-store',
-        ...extraHeaders,
-    });
-    res.end(JSON.stringify(payload));
-}
-
 function createMessageApiServer({ config, inbox, logger = console } = {}) {
     if (!config) {
         throw new Error('createMessageApiServer requires config.');
@@ -246,10 +69,7 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
         throw new Error('createMessageApiServer requires inbox.');
     }
 
-    const keyEntries = Object.entries(config.messageApiKeys ?? {}).map(([keyId, token]) => ({
-        keyId,
-        token,
-    }));
+    const keyEntries = buildBearerKeyEntries(config.messageApiKeys ?? {});
     const signerAllowlist = new Set(
         (config.messageApiSignerAllowlist ?? []).map((address) => getAddress(address).toLowerCase())
     );
@@ -363,7 +183,7 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
             const nowMs = Date.now();
             const bearerKeyId =
                 keyEntries.length > 0
-                    ? authenticateRequest({
+                    ? authenticateBearerRequest({
                           authorizationHeader: req.headers.authorization,
                           keyEntries,
                       })
@@ -393,6 +213,18 @@ function createMessageApiServer({ config, inbox, logger = console } = {}) {
                 signatureMaxAgeSeconds,
                 expectedChainId,
                 nowMs,
+                buildPayload: ({ declaredAddress }) =>
+                    buildSignedMessagePayload({
+                        address: declaredAddress,
+                        chainId: body.chainId,
+                        timestampMs: body.auth.timestampMs,
+                        text: body.text,
+                        command: body.command,
+                        args: body.args,
+                        metadata: body.metadata,
+                        requestId: body.requestId,
+                        deadline: body.deadline,
+                    }),
             });
             if (!signedAuth?.ok) {
                 emitLog(

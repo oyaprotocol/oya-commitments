@@ -1,22 +1,5 @@
 import { getAddress } from 'viem';
-
-function isPlainObject(value) {
-    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function canonicalize(value) {
-    if (Array.isArray(value)) {
-        return value.map((item) => canonicalize(item));
-    }
-    if (isPlainObject(value)) {
-        const out = {};
-        for (const key of Object.keys(value).sort()) {
-            out[key] = canonicalize(value[key]);
-        }
-        return out;
-    }
-    return value;
-}
+import { stringifyCanonicalJson } from './canonical-json.js';
 
 function buildSignedMessagePayload({
     address,
@@ -42,7 +25,7 @@ function buildSignedMessagePayload({
         }
     }
 
-    const canonical = canonicalize({
+    const canonical = {
         version: 'oya-agent-message-v1',
         address: normalizedAddress,
         ...(normalizedChainId !== undefined ? { chainId: normalizedChainId } : {}),
@@ -53,9 +36,9 @@ function buildSignedMessagePayload({
         args: args ?? null,
         metadata: metadata ?? null,
         deadline: deadline ?? null,
-    });
+    };
 
-    return JSON.stringify(canonical);
+    return stringifyCanonicalJson(canonical);
 }
 
 export { buildSignedMessagePayload };
