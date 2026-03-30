@@ -67,26 +67,34 @@ function parseHost(raw, fallback) {
 }
 
 function parseMessageApiKeys(raw) {
+    return parseApiKeyMap(raw, 'MESSAGE_API_KEYS_JSON');
+}
+
+function parseProposalPublishApiKeys(raw) {
+    return parseApiKeyMap(raw, 'PROPOSAL_PUBLISH_API_KEYS_JSON');
+}
+
+function parseApiKeyMap(raw, envName) {
     if (!raw) return {};
     let parsed;
     try {
         parsed = JSON.parse(raw);
     } catch (error) {
-        throw new Error('MESSAGE_API_KEYS_JSON must be valid JSON object');
+        throw new Error(`${envName} must be valid JSON object`);
     }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new Error('MESSAGE_API_KEYS_JSON must be a JSON object');
+        throw new Error(`${envName} must be a JSON object`);
     }
 
     const out = {};
     for (const [keyIdRaw, tokenRaw] of Object.entries(parsed)) {
         const keyId = String(keyIdRaw).trim();
         if (!keyId) {
-            throw new Error('MESSAGE_API_KEYS_JSON includes empty key id');
+            throw new Error(`${envName} includes empty key id`);
         }
         const token = typeof tokenRaw === 'string' ? tokenRaw.trim() : '';
         if (!token) {
-            throw new Error(`MESSAGE_API_KEYS_JSON token for key "${keyId}" must be non-empty`);
+            throw new Error(`${envName} token for key "${keyId}" must be non-empty`);
         }
         out[keyId] = token;
     }
@@ -205,11 +213,24 @@ const IPFS_DEFAULTS = Object.freeze({
     ipfsRetryDelayMs: 250,
 });
 
+const PROPOSAL_PUBLISH_API_DEFAULTS = Object.freeze({
+    proposalPublishApiHost: '127.0.0.1',
+    proposalPublishApiPort: 9890,
+    proposalPublishApiMaxBodyBytes: 65_536,
+    proposalPublishApiRequireSignerAllowlist: true,
+    proposalPublishApiSignerAllowlist: [],
+    proposalPublishApiSignatureMaxAgeSeconds: 300,
+    proposalPublishApiStateFile: undefined,
+    proposalPublishApiNodeName: undefined,
+    proposalPublishApiKeys: {},
+});
+
 const DEFAULT_POLYMARKET_CONDITIONAL_TOKENS =
     '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
 
 const MESSAGE_API_ENV_OVERRIDES = Symbol('messageApiEnvOverrides');
 const IPFS_ENV_OVERRIDES = Symbol('ipfsEnvOverrides');
+const PROPOSAL_PUBLISH_API_ENV_OVERRIDES = Symbol('proposalPublishApiEnvOverrides');
 const DEPRECATED_SHARED_CONFIG_ENV_VARS = Object.freeze([
     'CHAIN_ID',
     'COMMITMENT_SAFE',
@@ -309,6 +330,12 @@ function collectIpfsEnvOverrides(env = process.env) {
     };
 }
 
+function collectProposalPublishApiEnvOverrides(env = process.env) {
+    return {
+        keysJson: env.PROPOSAL_PUBLISH_API_KEYS_JSON,
+    };
+}
+
 function resolveMessageApiEnvConfig({ enabled, envOverrides = {} } = {}) {
     if (!enabled) {
         return {
@@ -336,6 +363,21 @@ function resolveIpfsEnvConfig({ enabled, envOverrides = {} } = {}) {
         ipfsEnabled: true,
         ...IPFS_DEFAULTS,
         ipfsHeaders: parseStringMap(envOverrides.headersJson, 'IPFS_HEADERS_JSON'),
+    };
+}
+
+function resolveProposalPublishApiEnvConfig({ enabled, envOverrides = {} } = {}) {
+    if (!enabled) {
+        return {
+            proposalPublishApiEnabled: false,
+            ...PROPOSAL_PUBLISH_API_DEFAULTS,
+        };
+    }
+
+    return {
+        proposalPublishApiEnabled: true,
+        ...PROPOSAL_PUBLISH_API_DEFAULTS,
+        proposalPublishApiKeys: parseProposalPublishApiKeys(envOverrides.keysJson),
     };
 }
 
@@ -444,18 +486,21 @@ function createDefaultRuntimeConfig({ env = process.env, rpcUrl } = {}) {
         uniswapV3FeeTiers: [500, 3000, 10000],
         messageApiEnabled: false,
         ...MESSAGE_API_DEFAULTS,
+        proposalPublishApiEnabled: false,
+        ...PROPOSAL_PUBLISH_API_DEFAULTS,
         ipfsEnabled: false,
         ...IPFS_DEFAULTS,
     };
 }
 
-function buildConfig() {
-    const rpcUrl = mustGetEnv('RPC_URL');
+function buildConfig({ env = process.env, requireRpcUrl = true, fallbackRpcUrl = undefined } = {}) {
+    const rpcUrl = requireRpcUrl ? mustGetEnv('RPC_URL') : env.RPC_URL ?? fallbackRpcUrl;
 
-    const messageApiEnvOverrides = collectMessageApiEnvOverrides();
-    const ipfsEnvOverrides = collectIpfsEnvOverrides();
+    const messageApiEnvOverrides = collectMessageApiEnvOverrides(env);
+    const ipfsEnvOverrides = collectIpfsEnvOverrides(env);
+    const proposalPublishApiEnvOverrides = collectProposalPublishApiEnvOverrides(env);
 
-    const config = createDefaultRuntimeConfig({ rpcUrl });
+    const config = createDefaultRuntimeConfig({ env, rpcUrl });
 
     Object.defineProperty(config, MESSAGE_API_ENV_OVERRIDES, {
         value: messageApiEnvOverrides,
@@ -463,6 +508,10 @@ function buildConfig() {
     });
     Object.defineProperty(config, IPFS_ENV_OVERRIDES, {
         value: ipfsEnvOverrides,
+        enumerable: false,
+    });
+    Object.defineProperty(config, PROPOSAL_PUBLISH_API_ENV_OVERRIDES, {
+        value: proposalPublishApiEnvOverrides,
         enumerable: false,
     });
 
@@ -478,6 +527,9 @@ export {
     IPFS_ENV_OVERRIDES,
     listDeprecatedConfigEnvVars,
     MESSAGE_API_ENV_OVERRIDES,
+    PROPOSAL_PUBLISH_API_ENV_OVERRIDES,
+    PROPOSAL_PUBLISH_API_DEFAULTS,
     resolveIpfsEnvConfig,
     resolveMessageApiEnvConfig,
+    resolveProposalPublishApiEnvConfig,
 };
