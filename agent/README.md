@@ -67,7 +67,7 @@ For interactions, swap the env var (e.g., `PROPOSER_PK`, `EXECUTOR_PK`). For sig
 - **Timelock triggers**: Parses plain language timelocks in rules (absolute dates or “X minutes after deposit”) and emits `timelock` signals when due.
 - **Price triggers**: If a module exports `getPriceTriggers({ commitmentText, config })`, the runner evaluates those parsed/inferred Uniswap V3 thresholds and emits `priceTrigger` signals.
 - **Optional message API**: When enabled, accepts authenticated user messages over HTTP and injects them as `userMessage` signals for the next decision cycle.
-- **Optional proposal publication node**: In a separate process, verifies signed proposal-publication requests from allowed signers, publishes a canonical JSON artifact to IPFS, pins the CID, and returns stable publication metadata for co-owners and outside observers.
+- **Optional proposal publication / submission node**: In a separate process, verifies signed proposal requests from allowed signers, publishes a canonical JSON artifact to IPFS, pins the CID, and can also submit the proposal onchain with the node's signer.
 - **Optional IPFS publishing**: When enabled, agents can publish text/JSON artifacts to a Kubo-compatible IPFS API and pin the resulting CID.
 
 All other behavior is intentionally left out. Implement your own agent in `agent-library/agents/<name>/agent.js` to add commitment-specific logic and tool use.
@@ -204,14 +204,18 @@ If bearer gating is configured, also pass `--bearer-token="<token>"` or set `MES
 
 ### Proposal Publication API (Optional)
 
-This is a separate process from the main agent loop. The node is publication-only in this stage:
+This is a separate process from the main agent loop. The node supports two modes:
 
-- it verifies an EIP-191 signed proposal-publication request
-- it optionally enforces a node-local signer allowlist and bearer token gate
-- it archives the signed proposal package to IPFS as canonical JSON
-- it pins the CID and returns publication metadata
+- `publish`: verify the signed request, archive it to IPFS, pin it, and return publication metadata.
+- `propose`: do all of the above, then submit `proposeTransactions(...)` onchain using the node's signer for the request's `chainId`.
 
-It does not judge proposal correctness, aggregate approvals, or propose onchain.
+In both modes:
+
+- the node verifies an EIP-191 signed proposal-publication request
+- it can enforce a node-local signer allowlist and bearer token gate
+- it trusts any allowlisted signer for any signed `commitmentSafe` / `ogModule` pair in this version
+
+It still does not judge proposal correctness, aggregate approvals, or collect fees in this stage.
 
 Configure non-secret proposal publication settings in the module `config.json` or `byChain.<chainId>`:
 
@@ -221,6 +225,7 @@ Configure non-secret proposal publication settings in the module `config.json` o
   "ipfsEnabled": true,
   "proposalPublishApi": {
     "enabled": true,
+    "mode": "publish",
     "host": "127.0.0.1",
     "port": 9890,
     "requireSignerAllowlist": true,
@@ -238,6 +243,7 @@ Configure non-secret proposal publication settings in the module `config.json` o
 Supported `proposalPublishApi` fields:
 
 - `enabled`: Set to `true` to allow the standalone proposal publication node to start.
+- `mode`: `publish` or `propose` (default `publish`).
 - `host`: Bind host (default `127.0.0.1`).
 - `port`: Bind port (default `9890`).
 - `requireSignerAllowlist`: Require `signerAllowlist` membership for signed requests (`true`/`false`, default `true`).
@@ -249,6 +255,13 @@ Supported `proposalPublishApi` fields:
 
 Keep bearer tokens in env via `PROPOSAL_PUBLISH_API_KEYS_JSON`; `proposalPublishApi.keys` is intentionally not supported in repo-tracked module config. Use `byChain.<chainId>.proposalPublishApi` for chain-specific overrides.
 
+`propose` mode is multi-chain-capable. The node resolves proposer runtime per signed `chainId`, so configure each served chain with a usable `byChain.<chainId>.rpcUrl` and `proposeEnabled=true`. Requests for unsupported chains are rejected before publication or submission side effects begin.
+
+The signed-request signer and the node's proposer signer are different roles:
+
+- the signed-request signer proves who approved the payload
+- the node's signer pays gas, posts bond, and actually submits the onchain proposal
+
 Start the standalone node:
 
 ```bash
@@ -259,6 +272,7 @@ Endpoints:
 
 - `GET /healthz`: health probe.
 - `POST /v1/proposals/publish`: verify, archive, and pin a signed proposal publication request.
+- In `propose` mode, the same endpoint also submits the proposal onchain after successful publication.
 
 `POST /v1/proposals/publish` body:
 
@@ -304,6 +318,8 @@ Response semantics:
 - identical retry for the same signer and `requestId`: `200` with `status: "duplicate"` and the original CID
 - same signer and `requestId` but different signed contents: `409`
 - if IPFS add succeeds but pinning fails, retries reuse the stored CID and only retry pinning
+- in `propose` mode, responses also include a nested `submission` object with submission status, transaction hash, and resolved OG proposal hash when available
+- in `propose` mode, retries never resubmit when the node already has a stored proposal transaction hash for that `(signer, chainId, requestId)`
 
 Artifacts published by the node include both node-authored metadata and the signer-authenticated payload. The top-level structure is:
 
@@ -323,6 +339,33 @@ node agent/scripts/send-signed-proposal.mjs \
 ```
 
 If `--url` is omitted, the helper reads `proposalPublishApi.host` and `proposalPublishApi.port` from the selected agent module's merged config stack. `--url` requires `--chain-id=<id>` or `--module=<agent>` so the signed request remains chain-bound. For signer material, use `--private-key` / `PROPOSAL_PUBLISH_SIGNER_PRIVATE_KEY` or fall back to the shared `SIGNER_TYPE`-based signer config with `RPC_URL`. If bearer gating is enabled, also pass `--bearer-token="<token>"` or set `PROPOSAL_PUBLISH_BEARER_TOKEN`.
+
+Example `propose`-mode config serving Sepolia and Polygon from one node:
+
+```json
+{
+  "proposalPublishApi": {
+    "enabled": true,
+    "mode": "propose",
+    "host": "127.0.0.1",
+    "port": 9890,
+    "requireSignerAllowlist": true,
+    "signerAllowlist": [
+      "0x1111111111111111111111111111111111111111"
+    ]
+  },
+  "byChain": {
+    "11155111": {
+      "rpcUrl": "https://sepolia.example",
+      "proposeEnabled": true
+    },
+    "137": {
+      "rpcUrl": "https://polygon.example",
+      "proposeEnabled": true
+    }
+  }
+}
+```
 
 Artifact verification helper:
 

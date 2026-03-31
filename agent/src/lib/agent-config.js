@@ -63,6 +63,14 @@ function parseHostValue(value, label) {
     return trimmed;
 }
 
+function parseProposalPublishModeValue(value, label) {
+    const normalized = parseStringValue(value, label).toLowerCase();
+    if (normalized !== 'publish' && normalized !== 'propose') {
+        throw new Error(`${label} must be one of: publish, propose`);
+    }
+    return normalized;
+}
+
 function parseIntegerValue(value, label, { min = undefined, max = undefined } = {}) {
     const parsed = Number(value);
     if (!Number.isInteger(parsed)) {
@@ -208,6 +216,7 @@ const CORE_RUNTIME_FIELD_DEFINITIONS = Object.freeze([
 ]);
 
 const SHARED_RUNTIME_FIELD_DEFINITIONS = Object.freeze([
+    { key: 'rpcUrl', parser: parseHostValue },
     { key: 'pollIntervalMs', parser: (value, label) => parseIntegerValue(value, label, { min: 1 }) },
     { key: 'logChunkSize', parser: (value, label) => parseBigIntValue(value, label, { min: 1n }) },
     { key: 'startBlock', parser: (value, label) => parseBigIntValue(value, label, { min: 0n }) },
@@ -340,6 +349,11 @@ const PROPOSAL_PUBLISH_API_FIELD_DEFINITIONS = Object.freeze([
         key: 'port',
         runtimeKey: 'proposalPublishApiPort',
         parser: (value, label) => parseIntegerValue(value, label, { min: 1 }),
+    },
+    {
+        key: 'mode',
+        runtimeKey: 'proposalPublishApiMode',
+        parser: parseProposalPublishModeValue,
     },
     {
         key: 'requireSignerAllowlist',

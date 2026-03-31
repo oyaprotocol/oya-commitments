@@ -35,12 +35,12 @@ Out of scope for this ExecPlan:
 - [x] 2026-03-31: Audited `PLANS.md`, the existing publication-only ExecPlan, and the shared OG proposal submission helper in `agent/src/lib/tx.js`.
 - [x] 2026-03-31: Wrote this standalone follow-on ExecPlan in `plans/oya-node-publish-and-propose.md` before implementation.
 - [x] 2026-03-31: Revised the plan so `propose` mode is multi-chain-capable per signed `chainId`, with per-request chain resolution and clear rejection for unsupported chains.
-- [ ] Add node mode support so startup and runtime config can distinguish `publish` from `propose`.
-- [ ] Extend the publication ledger to persist proposal-submission lifecycle state in addition to IPFS publication state.
-- [ ] Reuse or refactor the shared OG proposal submission code so the node can persist a submission transaction hash before any long receipt / log resolution step.
-- [ ] Extend the HTTP API so `POST /v1/proposals/publish` optionally performs the onchain proposal stage after successful publication.
-- [ ] Add regression coverage for publish-only compatibility, propose-mode success, duplicate retries, partial failures, multi-chain request routing, and unsupported-chain rejection in propose mode.
-- [ ] Update `agent/README.md` and the script help text to document the new mode and the node's signer requirements.
+- [x] 2026-03-31: Added `proposalPublishApi.mode`, promoted `rpcUrl` into shared runtime config so it can be overridden per chain, and taught the startup helper to report mode plus supported chains in `--dry-run`.
+- [x] 2026-03-31: Extended the durable publication ledger with a nested `submission` state machine and backward-compatible normalization for older publication-only records.
+- [x] 2026-03-31: Refactored the shared OG submission primitive to expose an early `onProposalTxSubmitted` persistence hook and exported receipt-based OG proposal-hash resolution for node-side reconciliation.
+- [x] 2026-03-31: Extended `POST /v1/proposals/publish` so `publish` mode remains unchanged and `propose` mode now routes by signed `chainId`, archives to IPFS, and then submits onchain with idempotent retry handling.
+- [x] 2026-03-31: Added regression coverage for publish-only compatibility, propose-mode success, duplicate retries, submission retry after pre-tx failure, pending-hash reconciliation, and unsupported-chain rejection.
+- [x] 2026-03-31: Updated `agent/README.md` and `start-proposal-publish-node.mjs` help text to document the new mode and per-chain proposer requirements.
 
 ## Surprises & Discoveries
 
@@ -52,6 +52,9 @@ Out of scope for this ExecPlan:
 
 - Observation: The publication ledger currently solves IPFS idempotency, but onchain idempotency adds a second failure boundary where the node may have sent a transaction before the HTTP response is lost or before the OG proposal hash is resolved.
   Evidence: `agent/src/lib/proposal-publication-store.js` today persists `cid`, `uri`, `pinned`, and related publication metadata, while `agent/src/lib/tx.js` only returns the submission hash after the onchain call has already occurred.
+
+- Observation: Multi-chain propose mode needed one additional shared runtime capability that publication-only mode did not: chain-specific `rpcUrl` selection from config rather than a single process-wide `RPC_URL`.
+  Evidence: `agent/src/lib/config.js` previously sourced `rpcUrl` only from env, while `agent/src/lib/agent-config.js` did not expose `rpcUrl` as a shared override field. The implementation promoted `rpcUrl` into the shared config layer and updated `agent/src/lib/runtime-bootstrap.js` to honor config-selected RPC endpoints.
 
 ## Decision Log
 
@@ -81,14 +84,25 @@ Out of scope for this ExecPlan:
 
 ## Outcomes & Retrospective
 
-This plan has been drafted but not implemented yet. The intended finished outcome is:
+This plan is now implemented. The finished outcome is:
 
 - operators can start the same Oya node in `publish` or `propose` mode
 - `publish` mode remains backward-compatible with the current production behavior
 - `propose` mode archives the signed request to IPFS and then submits it onchain using the node's signer for the request's chain
 - retries are idempotent across both the IPFS boundary and the onchain submission boundary
+- propose-mode startup can remain chain-ambiguous as long as each incoming request resolves to a supported chain-specific runtime before any side effects begin
 
-Implementation lessons and final validation evidence will be recorded here as the work proceeds.
+Validation completed during implementation:
+
+- `node agent/scripts/test-agent-config-file.mjs`
+- `node agent/scripts/test-send-signed-proposal-config.mjs`
+- `node agent/scripts/test-proposal-publication-store.mjs`
+- `node agent/scripts/test-proposal-publication-api.mjs`
+- `node agent/scripts/test-transfer-tool-and-proposal-explanation.mjs`
+- `node agent/scripts/test-zero-first-erc20-allowance.mjs`
+- `node agent/scripts/test-tool-output-retryability.mjs`
+- `node agent-library/agents/signed-proposal-publish-smoke/test-signed-proposal-publish-smoke-agent.mjs`
+- `node agent/scripts/start-proposal-publish-node.mjs --module=signed-proposal-publish-smoke --dry-run`
 
 ## Context and Orientation
 

@@ -65,20 +65,19 @@ async function run() {
         });
 
         await Promise.all([saveStore.saveRecord(saveRecordA), saveStore.saveRecord(saveRecordB)]);
-        assert.ok(
-            await saveStore.getRecord({
-                signer: saveRecordA.signer,
-                chainId: saveRecordA.chainId,
-                requestId: saveRecordA.requestId,
-            })
-        );
-        assert.ok(
-            await saveStore.getRecord({
-                signer: saveRecordB.signer,
-                chainId: saveRecordB.chainId,
-                requestId: saveRecordB.requestId,
-            })
-        );
+        const savedA = await saveStore.getRecord({
+            signer: saveRecordA.signer,
+            chainId: saveRecordA.chainId,
+            requestId: saveRecordA.requestId,
+        });
+        const savedB = await saveStore.getRecord({
+            signer: saveRecordB.signer,
+            chainId: saveRecordB.chainId,
+            requestId: saveRecordB.requestId,
+        });
+        assert.equal(savedA.submission.status, 'not_started');
+        assert.equal(savedA.submission.transactionHash, null);
+        assert.equal(savedB.submission.status, 'not_started');
         assert.equal(await readRecordCount(saveStateFile), 2);
 
         const prepareStateFile = path.join(tempDir, 'prepare-state.json');
@@ -110,6 +109,7 @@ async function run() {
             ['created', 'created']
         );
         assert.equal(await readRecordCount(prepareStateFile), 2);
+        assert.equal(prepared[0].record.submission.status, 'not_started');
 
         const conflictStateFile = path.join(tempDir, 'conflict-state.json');
         const conflictStore = createProposalPublicationStore({ stateFile: conflictStateFile });
@@ -185,6 +185,32 @@ async function run() {
             })
         );
         assert.equal(await readRecordCount(crossChainStateFile), 2);
+
+        const submissionStateFile = path.join(tempDir, 'submission-state.json');
+        const submissionStore = createProposalPublicationStore({ stateFile: submissionStateFile });
+        const submissionRecord = await submissionStore.saveRecord({
+            ...buildStoredRecord({
+                signer: '0x7777777777777777777777777777777777777777',
+                chainId: 11155111,
+                requestId: 'submission-record',
+                signatureChar: '7',
+            }),
+            submission: {
+                status: 'resolved',
+                submittedAtMs: BASE_TIME_MS + 2,
+                transactionHash: `0x${'a'.repeat(64)}`,
+                ogProposalHash: `0x${'b'.repeat(64)}`,
+                result: {
+                    bondAmount: 123n,
+                    skipped: false,
+                },
+                error: null,
+                sideEffectsLikelyCommitted: true,
+            },
+        });
+        assert.equal(submissionRecord.submission.status, 'resolved');
+        assert.equal(submissionRecord.submission.result.bondAmount, '123');
+        assert.equal(submissionRecord.submission.transactionHash, `0x${'a'.repeat(64)}`);
 
         console.log('[test] proposal publication store OK');
     } finally {
