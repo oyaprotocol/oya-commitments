@@ -73,6 +73,22 @@ const REGISTRY_BY_NETWORK = {
     },
 };
 
+const NETWORK_BY_CHAIN_ID = {
+    1: 'ethereum',
+    56: 'bsc',
+    97: 'bsc-testnet',
+    100: 'gnosis',
+    137: 'polygon',
+    143: 'monad',
+    80002: 'polygon-amoy',
+    8453: 'base',
+    84532: 'base-sepolia',
+    10143: 'monad-testnet',
+    11155111: 'ethereum-sepolia',
+    534351: 'scroll-testnet',
+    534352: 'scroll',
+};
+
 const identityRegistryAbi = [
     {
         type: 'function',
@@ -92,6 +108,10 @@ const identityRegistryAbi = [
         anonymous: false,
     },
 ];
+
+function inferRegistryNetworkFromChainId(chainId) {
+    return NETWORK_BY_CHAIN_ID[Number(chainId)];
+}
 
 async function main({
     argv = process.argv,
@@ -169,11 +189,7 @@ async function main({
     const network =
         getArgValue('--network=', argv) ??
         env.AGENT_NETWORK ??
-        (chainId === 1
-            ? 'ethereum'
-            : chainId === 11155111
-              ? 'ethereum-sepolia'
-              : undefined);
+        inferRegistryNetworkFromChainId(chainId);
     const registry =
         registryOverride ?? (network ? REGISTRY_BY_NETWORK[network]?.identityRegistry : undefined);
     if (!registry) {
@@ -274,3 +290,4 @@ if (isDirectScriptExecution(import.meta.url)) {
 }
 
 export { main };
+export { inferRegistryNetworkFromChainId };

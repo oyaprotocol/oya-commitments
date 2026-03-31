@@ -852,6 +852,8 @@ AGENT_NETWORK=ethereum-sepolia \
 node agent/scripts/register-erc8004.mjs
 ```
 
+`register-erc8004.mjs` infers `AGENT_NETWORK` automatically for the built-in registry mappings on Ethereum, Sepolia, Base, Base Sepolia, Polygon, Polygon Amoy, Gnosis, Scroll, Scroll testnet, Monad, Monad testnet, BSC, and BSC testnet. Set `AGENT_NETWORK` or `AGENT_REGISTRY` explicitly when you want to override that mapping.
+
 The script infers `AGENT_URI` as:
 `https://raw.githubusercontent.com/<org>/<repo>/<branch>/agent-library/agents/<agent>/agent.json`
 Defaults: `AGENT_ORG=oyaprotocol`, `AGENT_REPO=oya-commitments`
