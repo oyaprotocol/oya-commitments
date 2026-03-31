@@ -387,7 +387,11 @@ async function resolveProposalPublishServerConfig({
                 overlayPaths,
                 argv,
             });
-            if (chainRuntimeConfig.proposalPublishApiEnabled && chainRuntimeConfig.proposeEnabled) {
+            if (
+                chainRuntimeConfig.proposalPublishApiEnabled &&
+                chainRuntimeConfig.proposeEnabled &&
+                chainRuntimeConfig.rpcUrl
+            ) {
                 proposeCapableChains.push(chainId);
             }
         }

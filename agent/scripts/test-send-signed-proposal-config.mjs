@@ -348,6 +348,34 @@ async function run() {
         /does not resolve any propose-capable chain runtime/
     );
 
+    await createAgentModule(repoRootPath, 'broken-propose-no-rpc', {
+        proposalPublishApi: {
+            enabled: true,
+            mode: 'propose',
+            host: 'broken-propose-no-rpc.local',
+            port: 9793,
+            requireSignerAllowlist: false,
+        },
+        byChain: {
+            '11155111': {
+                proposeEnabled: true,
+            },
+            '137': {
+                proposeEnabled: true,
+            },
+        },
+    });
+
+    await assert.rejects(
+        () =>
+            resolveProposalPublishServerConfig({
+                argv: ['node', 'start-proposal-publish-node.mjs', '--module=broken-propose-no-rpc'],
+                env: {},
+                repoRootPath,
+            }),
+        /does not resolve any propose-capable chain runtime/
+    );
+
     await assert.rejects(
         () =>
             buildProposalPublishBaseUrl({
