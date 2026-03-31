@@ -1,14 +1,19 @@
-import { createPublicClient, decodeEventLog, getAddress, http } from 'viem';
+import { decodeEventLog, getAddress } from 'viem';
 import {
     optimisticGovernorAbi,
     proposalDeletedEvent,
     proposalExecutedEvent,
     transactionsProposedEvent,
 } from '../src/lib/og.js';
-import { createSignerClient } from '../src/lib/signer.js';
+import { createValidatedReadWriteRuntime } from '../src/lib/chain-runtime.js';
 import { getLogsChunked } from '../src/lib/chain-history.js';
 import { normalizeHashOrNull } from '../src/lib/utils.js';
-import { getArgValue, hasFlag, loadScriptEnv } from './lib/cli-runtime.mjs';
+import {
+    getArgValue,
+    hasFlag,
+    isDirectScriptExecution,
+    loadScriptEnv,
+} from './lib/cli-runtime.mjs';
 
 loadScriptEnv();
 
@@ -59,41 +64,49 @@ Options:
 `);
 }
 
-async function main() {
-    if (hasFlag('--help') || hasFlag('-h')) {
+async function main({
+    argv = process.argv,
+    env = process.env,
+    createValidatedReadWriteRuntimeFn = createValidatedReadWriteRuntime,
+} = {}) {
+    if (hasFlag('--help', argv) || hasFlag('-h', argv)) {
         printUsage();
         return;
     }
 
-    const ogRaw = getArgValue('--og=');
+    const ogRaw = getArgValue('--og=', argv);
     if (!ogRaw) {
         throw new Error('Missing --og=<address>.');
     }
     const ogModule = getAddress(ogRaw);
 
-    const proposalTxHashRaw = getArgValue('--proposal-tx-hash=') ?? getArgValue('--tx-hash=');
+    const proposalTxHashRaw =
+        getArgValue('--proposal-tx-hash=', argv) ?? getArgValue('--tx-hash=', argv);
     const proposalTxHash = normalizeHashOrNull(proposalTxHashRaw);
     if (!proposalTxHash) {
         throw new Error('Missing or invalid --proposal-tx-hash=<0x...>.');
     }
 
-    const rpcUrl = getArgValue('--rpc-url=') ?? process.env.RPC_URL;
+    const rpcUrl = getArgValue('--rpc-url=', argv) ?? env.RPC_URL;
     if (!rpcUrl) {
         throw new Error('Missing --rpc-url=<url> (or RPC_URL env).');
     }
 
-    const chunkSizeRaw = getArgValue('--log-chunk-size=');
+    const chunkSizeRaw = getArgValue('--log-chunk-size=', argv);
     const chunkSize = chunkSizeRaw
         ? parsePositiveBigInt(chunkSizeRaw, 'log chunk size')
         : DEFAULT_LOG_CHUNK_SIZE;
 
-    const waitTimeoutRaw = getArgValue('--wait-timeout-ms=');
+    const waitTimeoutRaw = getArgValue('--wait-timeout-ms=', argv);
     const waitTimeoutMs = waitTimeoutRaw
         ? parsePositiveNumber(waitTimeoutRaw, '--wait-timeout-ms')
         : DEFAULT_WAIT_TIMEOUT_MS;
 
-    const publicClient = createPublicClient({ transport: http(rpcUrl) });
-    const { account, walletClient } = await createSignerClient({ rpcUrl });
+    const { publicClient, account, walletClient } = await createValidatedReadWriteRuntimeFn({
+        rpcUrl,
+        publicClientLabel: 'Execution rpcUrl',
+        signerClientLabel: 'Execution signer',
+    });
 
     const proposalReceipt = await publicClient.getTransactionReceipt({
         hash: proposalTxHash,
@@ -216,7 +229,11 @@ async function main() {
     }
 }
 
-main().catch((error) => {
-    console.error(`[script] Failed: ${error?.message ?? error}`);
-    process.exit(1);
-});
+if (isDirectScriptExecution(import.meta.url)) {
+    main().catch((error) => {
+        console.error(`[script] Failed: ${error?.message ?? error}`);
+        process.exit(1);
+    });
+}
+
+export { main };

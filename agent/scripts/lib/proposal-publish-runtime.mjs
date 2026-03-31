@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { createPublicClient, http } from 'viem';
 import { buildConfig } from '../../src/lib/config.js';
+import { createValidatedReadWriteRuntime } from '../../src/lib/chain-runtime.js';
 import { resolveAgentRuntimeConfig, resolveConfiguredChainId } from '../../src/lib/agent-config.js';
 import { createSignerClient } from '../../src/lib/signer.js';
 import {
@@ -233,29 +234,15 @@ async function createProposalPublishSubmissionRuntimeResolver({
                         );
                     }
 
-                    const publicClient = createPublicClientFn({
-                        transport: http(runtimeConfig.rpcUrl),
-                    });
-                    const { account, walletClient } = await createSignerClientFn({
-                        rpcUrl: runtimeConfig.rpcUrl,
-                    });
-                    const actualChainId = await publicClient.getChainId();
-                    if (actualChainId !== normalizedChainId) {
-                        throw buildUnsupportedChainError(
-                            `Resolved rpcUrl for chainId ${normalizedChainId} is connected to chainId ${actualChainId}.`
-                        );
-                    }
-                    const signerChainId = normalizeChainIdValue(
-                        typeof walletClient?.getChainId === 'function'
-                            ? await walletClient.getChainId()
-                            : await walletClient.request({ method: 'eth_chainId' }),
-                        'wallet signer chainId'
-                    );
-                    if (signerChainId !== normalizedChainId) {
-                        throw buildUnsupportedChainError(
-                            `Resolved signer runtime for chainId ${normalizedChainId} is connected to chainId ${signerChainId}.`
-                        );
-                    }
+                    const { publicClient, account, walletClient } =
+                        await createValidatedReadWriteRuntime({
+                            rpcUrl: runtimeConfig.rpcUrl,
+                            expectedChainId: normalizedChainId,
+                            buildError: buildUnsupportedChainError,
+                            createPublicClientFn,
+                            createSignerClientFn,
+                            httpTransportFn: http,
+                        });
 
                     return {
                         runtimeConfig,
