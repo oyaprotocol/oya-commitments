@@ -41,6 +41,7 @@ Out of scope for this ExecPlan:
 - [x] 2026-03-31: Extended `POST /v1/proposals/publish` so `publish` mode remains unchanged and `propose` mode now routes by signed `chainId`, archives to IPFS, and then submits onchain with idempotent retry handling.
 - [x] 2026-03-31: Added regression coverage for publish-only compatibility, propose-mode success, duplicate retries, submission retry after pre-tx failure, pending-hash reconciliation, and unsupported-chain rejection.
 - [x] 2026-03-31: Updated `agent/README.md` and `start-proposal-publish-node.mjs` help text to document the new mode and per-chain proposer requirements.
+- [x] 2026-03-31: Fixed follow-up regressions so ambiguous multi-chain agent configs still boot before runtime chain probing, and propose-mode startup only counts chains with a usable `rpcUrl` as propose-capable.
 
 ## Surprises & Discoveries
 

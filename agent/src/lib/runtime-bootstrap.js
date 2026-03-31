@@ -106,6 +106,7 @@ export async function initializeAgentRuntime() {
     const provisionalConfig = resolveAgentRuntimeConfig({
         baseConfig: config,
         agentConfigFile,
+        allowAmbiguousChainId: true,
     });
     const publicClient = createPublicClient({ transport: http(provisionalConfig.rpcUrl) });
     const { account, walletClient } = await createSignerClient({ rpcUrl: provisionalConfig.rpcUrl });

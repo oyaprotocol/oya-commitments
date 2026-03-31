@@ -644,6 +644,14 @@ async function run() {
     });
     assert.equal(explicitAmbiguousResolved.chainId, 137);
     assert.equal(explicitAmbiguousResolved.messageApiPort, 9000);
+    const provisionalAmbiguousResolved = resolveAgentRuntimeConfig({
+        baseConfig,
+        agentConfigFile: ambiguousChainFile,
+        allowAmbiguousChainId: true,
+    });
+    assert.equal(provisionalAmbiguousResolved.chainId, undefined);
+    assert.equal(provisionalAmbiguousResolved.rpcUrl, RPC_URL);
+    assert.equal(provisionalAmbiguousResolved.messageApiPort, baseConfig.messageApiPort);
 
     await writeFile(
         configPath,
