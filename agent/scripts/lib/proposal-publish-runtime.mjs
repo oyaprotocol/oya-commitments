@@ -167,9 +167,30 @@ async function createProposalPublishSubmissionRuntimeResolver({
     createSignerClientFn = createSignerClient,
 } = {}) {
     const cache = new Map();
+    const serverRuntimeConfig = await resolveProposalPublishApiConfigForAgent({
+        agentRef,
+        chainId: undefined,
+        repoRootPath,
+        env,
+        overlayPaths,
+        argv,
+        allowAmbiguousChainId: true,
+    });
+    const servedChainIds = listServedChainIds(
+        serverRuntimeConfig,
+        serverRuntimeConfig.agentConfigStack
+    );
 
     return async function resolveProposalSubmissionRuntime({ chainId }) {
         const normalizedChainId = normalizeChainIdValue(chainId);
+        if (
+            servedChainIds.length > 0 &&
+            !servedChainIds.includes(normalizedChainId)
+        ) {
+            throw buildUnsupportedChainError(
+                `Agent "${agentRef}" does not support proposal submission for chainId ${normalizedChainId}. Supported chainIds: ${servedChainIds.join(', ')}.`
+            );
+        }
         if (!cache.has(normalizedChainId)) {
             cache.set(
                 normalizedChainId,

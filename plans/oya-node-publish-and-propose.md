@@ -45,6 +45,7 @@ Out of scope for this ExecPlan:
 - [x] 2026-03-31: Fixed duplicate reliability so exact propose-mode retries can still return stored records during runtime outages when no new submission side effects are required, and narrowed startup `supportedChainIds` / preflight validation to the chains the node actually serves.
 - [x] 2026-03-31: Hardened propose-mode runtime resolution so both the read RPC and the signer-side RPC must match the request chain, with regression coverage for remote signer mismatch.
 - [x] 2026-03-31: Tightened propose-mode chain validation so startup only counts per-chain `mode: "propose"` runtimes as propose-capable, and request-time fixed-chain selection conflicts now surface as `unsupported_chain` instead of a generic runtime failure.
+- [x] 2026-03-31: Enforced the configured served-chain allowlist before request-time proposer runtime resolution, so unsupported chains are rejected before any read or signer client is constructed.
 
 ## Surprises & Discoveries
 

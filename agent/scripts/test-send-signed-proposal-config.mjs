@@ -343,6 +343,30 @@ async function run() {
         /Resolved signer runtime for chainId 11155111 is connected to chainId 137/
     );
 
+    let unsupportedChainConstructedClient = false;
+    const unsupportedChainRuntimeResolver = await createProposalPublishSubmissionRuntimeResolver({
+        agentRef: 'multichain-propose',
+        env: {},
+        repoRootPath,
+        createPublicClientFn: () => {
+            unsupportedChainConstructedClient = true;
+            throw new Error('should not construct public client for unsupported chain');
+        },
+        createSignerClientFn: async () => {
+            unsupportedChainConstructedClient = true;
+            throw new Error('should not construct signer client for unsupported chain');
+        },
+    });
+
+    await assert.rejects(
+        () => unsupportedChainRuntimeResolver({ chainId: 10 }),
+        (error) =>
+            error?.code === 'unsupported_chain' &&
+            error?.statusCode === 400 &&
+            /does not support proposal submission for chainId 10/.test(error.message)
+    );
+    assert.equal(unsupportedChainConstructedClient, false);
+
     const fixedChainRuntimeResolver = await createProposalPublishSubmissionRuntimeResolver({
         agentRef: 'single-chain',
         env: {},
