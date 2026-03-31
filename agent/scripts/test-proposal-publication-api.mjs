@@ -135,10 +135,10 @@ async function main() {
     const stateFile = path.join(tempDir, 'proposal-publications.json');
     const store = createProposalPublicationStore({ stateFile });
     const logger = {
-        logs: [],
+        infos: [],
         warnings: [],
-        log(message) {
-            this.logs.push(String(message));
+        info(message) {
+            this.infos.push(String(message));
         },
         warn(message) {
             this.warnings.push(String(message));
@@ -224,6 +224,8 @@ async function main() {
     const address = server.address();
     assert.ok(address && typeof address === 'object' && typeof address.port === 'number');
     const baseUrl = `http://127.0.0.1:${address.port}`;
+    assert.equal(logger.infos.length, 1);
+    assert.match(logger.infos[0], /Proposal publish API listening on/);
 
     try {
         const health = await fetch(`${baseUrl}/healthz`);

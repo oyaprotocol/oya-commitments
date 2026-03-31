@@ -213,6 +213,28 @@ async function verifySignedProposalArtifact(artifact) {
     }
 
     const signedProposal = artifact.signedProposal;
+    const publication = {
+        receivedAtMs: parsePositiveInteger(
+            artifact.publication.receivedAtMs,
+            'artifact.publication.receivedAtMs'
+        ),
+        publishedAtMs: parsePositiveInteger(
+            artifact.publication.publishedAtMs,
+            'artifact.publication.publishedAtMs'
+        ),
+        signerAllowlistMode: normalizeNonEmptyString(
+            artifact.publication.signerAllowlistMode,
+            'artifact.publication.signerAllowlistMode'
+        ),
+        ...(artifact.publication.nodeName !== undefined
+            ? {
+                  nodeName: normalizeNonEmptyString(
+                      artifact.publication.nodeName,
+                      'artifact.publication.nodeName'
+                  ),
+              }
+            : {}),
+    };
     const normalizedEnvelope = buildSignedProposalEnvelope(signedProposal.envelope ?? {});
     const canonicalMessage = buildSignedProposalPayload(normalizedEnvelope);
     if (signedProposal.canonicalMessage !== canonicalMessage) {
@@ -245,9 +267,10 @@ async function verifySignedProposalArtifact(artifact) {
         ogModule: normalizedEnvelope.ogModule,
         transactionCount: normalizedEnvelope.transactions.length,
         signedAtMs: normalizedEnvelope.timestampMs,
-        receivedAtMs: artifact.publication.receivedAtMs,
-        publishedAtMs: artifact.publication.publishedAtMs,
+        receivedAtMs: publication.receivedAtMs,
+        publishedAtMs: publication.publishedAtMs,
         canonicalMessage,
+        publication,
         envelope: normalizedEnvelope,
     };
 }

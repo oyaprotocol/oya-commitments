@@ -596,7 +596,8 @@ function createProposalPublicationApiServer({ config, store, logger = console } 
             address && typeof address === 'object' && typeof address.port === 'number'
                 ? address.port
                 : config.proposalPublishApiPort;
-        logger.log(
+        emitLog(
+            'info',
             `[oya-node] Proposal publish API listening on http://${config.proposalPublishApiHost}:${boundPort}`
         );
         return server;

@@ -43,6 +43,7 @@ Out of scope for this ExecPlan:
 - [x] 2026-03-30: Tightened artifact verification so the verifier now requires `signedProposal.signedAtMs` to match the signed envelope timestamp and returns the signed envelope timestamp as the verified `signedAtMs`.
 - [x] 2026-03-30: Expanded the store dedupe key from `signer + requestId` to `signer + chainId + requestId` with backward-compatible record normalization, and tightened explicit `--url` resolution so unresolved module chain IDs fail fast with actionable guidance.
 - [x] 2026-03-30: Added a per-publication keyed publish lock so concurrent duplicate requests cannot race into multiple IPFS adds, and enabled an intentional multi-chain server mode where node startup may leave `runtimeConfig.chainId` unset while send-side signing remains chain-bound.
+- [x] 2026-03-30: Routed API startup bind logs through the shared logger fallback path and tightened artifact verification so publication metadata is schema-validated before success is returned.
 
 ## Surprises & Discoveries
 
@@ -82,7 +83,7 @@ Out of scope for this ExecPlan:
   Rationale: Observers need the raw signed payload and signature to verify signer intent, and they also need node-side timestamps showing when the publication service received and archived the request.
   Date/Author: 2026-03-30 / Codex.
 
-- Decision: Add a file-backed publication ledger keyed by `(signer, requestId)` so retries return the original publication record instead of creating duplicate timestamped artifacts.
+- Decision: Add a file-backed publication ledger keyed by `(signer, chainId, requestId)` so retries return the original publication record instead of creating duplicate timestamped artifacts.
   Rationale: IPFS content addressing alone is not enough once the artifact contains node-side timestamps. Durable local idempotency is needed for stable retries and for crash recovery after add-before-pin partial failures.
   Date/Author: 2026-03-30 / Codex.
 
@@ -95,7 +96,7 @@ Out of scope for this ExecPlan:
 The publication-only Oya node is implemented as a fully separate process from the main agent runtime. The final shape matches the reviewed direction:
 
 - `agent/src/lib/proposal-publication-api.js` serves `GET /healthz` and `POST /v1/proposals/publish`
-- `agent/src/lib/proposal-publication-store.js` keeps a durable JSON ledger keyed by `(signer, requestId)`
+- `agent/src/lib/proposal-publication-store.js` keeps a durable JSON ledger keyed by `(signer, chainId, requestId)`
 - `agent/src/lib/signed-proposal.js` defines the canonical proposal envelope, signed payload, artifact format, and verifier
 - `agent/scripts/start-proposal-publish-node.mjs` starts the standalone node from module config
 - `agent/scripts/send-signed-proposal.mjs` signs and submits publication requests
