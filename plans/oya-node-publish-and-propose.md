@@ -42,6 +42,7 @@ Out of scope for this ExecPlan:
 - [x] 2026-03-31: Added regression coverage for publish-only compatibility, propose-mode success, duplicate retries, submission retry after pre-tx failure, pending-hash reconciliation, and unsupported-chain rejection.
 - [x] 2026-03-31: Updated `agent/README.md` and `start-proposal-publish-node.mjs` help text to document the new mode and per-chain proposer requirements.
 - [x] 2026-03-31: Fixed follow-up regressions so ambiguous multi-chain agent configs still boot before runtime chain probing, and propose-mode startup only counts chains with a usable `rpcUrl` as propose-capable.
+- [x] 2026-03-31: Fixed duplicate reliability so exact propose-mode retries can still return stored records during runtime outages when no new submission side effects are required, and narrowed startup `supportedChainIds` / preflight validation to the chains the node actually serves.
 
 ## Surprises & Discoveries
 

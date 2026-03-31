@@ -317,6 +317,35 @@ async function run() {
         [137, 11155111]
     );
 
+    await createAgentModule(repoRootPath, 'selected-chain-propose', {
+        chainId: 11155111,
+        proposalPublishApi: {
+            enabled: true,
+            mode: 'propose',
+            host: 'selected-chain-propose.local',
+            port: 9794,
+            requireSignerAllowlist: false,
+        },
+        byChain: {
+            '11155111': {
+                rpcUrl: 'https://rpc.sepolia.example',
+                proposeEnabled: true,
+            },
+            '137': {
+                rpcUrl: 'https://rpc.polygon.example',
+                proposeEnabled: true,
+            },
+        },
+    });
+
+    const selectedChainProposeServerConfig = await resolveProposalPublishServerConfig({
+        argv: ['node', 'start-proposal-publish-node.mjs', '--module=selected-chain-propose'],
+        env: {},
+        repoRootPath,
+    });
+    assert.equal(selectedChainProposeServerConfig.runtimeConfig.chainId, 11155111);
+    assert.deepEqual(selectedChainProposeServerConfig.supportedChainIds, [11155111]);
+
     await createAgentModule(repoRootPath, 'broken-propose', {
         proposalPublishApi: {
             enabled: true,
