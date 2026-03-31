@@ -46,6 +46,7 @@ Out of scope for this ExecPlan:
 - [x] 2026-03-31: Hardened propose-mode runtime resolution so both the read RPC and the signer-side RPC must match the request chain, with regression coverage for remote signer mismatch.
 - [x] 2026-03-31: Tightened propose-mode chain validation so startup only counts per-chain `mode: "propose"` runtimes as propose-capable, and request-time fixed-chain selection conflicts now surface as `unsupported_chain` instead of a generic runtime failure.
 - [x] 2026-03-31: Enforced the configured served-chain allowlist before request-time proposer runtime resolution, so unsupported chains are rejected before any read or signer client is constructed.
+- [x] 2026-03-31: Recreated runtime read/signer clients after final chain-specific config resolution in `initializeAgentRuntime()`, and hardened the proposal-submission catch path so storage failures after an observed tx hash stay on the safe `submission_uncertain` path.
 
 ## Surprises & Discoveries
 

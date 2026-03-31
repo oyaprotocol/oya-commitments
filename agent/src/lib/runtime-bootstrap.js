@@ -90,17 +90,26 @@ function resolvePollingOptions({ agentModule, commitmentText }) {
     }
 }
 
-export async function initializeAgentRuntime() {
-    loadRuntimeEnv();
+export async function initializeAgentRuntime({
+    loadRuntimeEnvFn = loadRuntimeEnv,
+    buildConfigFn = buildConfig,
+    assertNoDeprecatedConfigEnvVarsFn = assertNoDeprecatedConfigEnvVars,
+    loadAgentModuleFn = loadAgentModule,
+    createPublicClientFn = createPublicClient,
+    createSignerClientFn = createSignerClient,
+    httpTransportFn = http,
+    validateMessageApiDecisionEngineFn = validateMessageApiDecisionEngine,
+} = {}) {
+    loadRuntimeEnvFn();
 
-    const config = buildConfig();
+    const config = buildConfigFn();
     const agentRef = config.agentModule ?? 'default';
-    assertNoDeprecatedConfigEnvVars({
+    assertNoDeprecatedConfigEnvVarsFn({
         env: process.env,
         agentModuleName: normalizeAgentModuleName(agentRef),
     });
 
-    const { agentModule, commitmentText, agentConfigFile } = await loadAgentModule({
+    const { agentModule, commitmentText, agentConfigFile } = await loadAgentModuleFn({
         agentModuleRef: agentRef,
     });
     const provisionalConfig = resolveAgentRuntimeConfig({
@@ -108,10 +117,10 @@ export async function initializeAgentRuntime() {
         agentConfigFile,
         allowAmbiguousChainId: true,
     });
-    const publicClient = createPublicClient({ transport: http(provisionalConfig.rpcUrl) });
-    const { account, walletClient } = await createSignerClient({ rpcUrl: provisionalConfig.rpcUrl });
-    const agentAddress = account.address;
-    const runtimeChainId = await publicClient.getChainId();
+    const provisionalPublicClient = createPublicClientFn({
+        transport: httpTransportFn(provisionalConfig.rpcUrl),
+    });
+    const runtimeChainId = await provisionalPublicClient.getChainId();
     resolveConfiguredChainId({
         agentConfigFile,
         explicitChainId: runtimeChainId,
@@ -125,6 +134,11 @@ export async function initializeAgentRuntime() {
             chainId: runtimeChainId,
         })
     );
+    const publicClient = createPublicClientFn({
+        transport: httpTransportFn(config.rpcUrl),
+    });
+    const { account, walletClient } = await createSignerClientFn({ rpcUrl: config.rpcUrl });
+    const agentAddress = account.address;
 
     if (!config.commitmentSafe) {
         throw new Error(
@@ -141,7 +155,7 @@ export async function initializeAgentRuntime() {
         config.watchAssets.map((asset) => String(asset).toLowerCase())
     );
     const messageInbox = createRuntimeMessageInbox(config);
-    validateMessageApiDecisionEngine({ config, agentModule });
+    validateMessageApiDecisionEngineFn({ config, agentModule });
 
     return {
         config,
