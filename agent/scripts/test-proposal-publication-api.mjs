@@ -439,6 +439,10 @@ async function main() {
             [`0x${'3'.repeat(64)}`, `0x${'4'.repeat(64)}`],
         ]);
         const resolveProposalHashCalls = [];
+        const proposalRuntimeAvailableByChain = new Map([
+            [11155111, true],
+            [137, true],
+        ]);
         const proposeApi = createProposalPublicationApiServer({
             config: buildServerConfig(account.address, {
                 chainId: undefined,
@@ -450,6 +454,12 @@ async function main() {
                 warn() {},
             },
             resolveProposalRuntime: async ({ chainId }) => {
+                if (proposalRuntimeAvailableByChain.get(chainId) === false) {
+                    const error = new Error(`Proposal runtime unavailable for chainId ${chainId}.`);
+                    error.code = 'proposal_runtime_unavailable';
+                    error.statusCode = 502;
+                    throw error;
+                }
                 if (chainId !== 11155111 && chainId !== 137) {
                     const error = new Error(`Unsupported chainId ${chainId}.`);
                     error.code = 'unsupported_chain';
@@ -493,6 +503,14 @@ async function main() {
                     return {
                         transactionHash: `0x${'3'.repeat(64)}`,
                         proposalHash: `0x${'3'.repeat(64)}`,
+                        ogProposalHash: null,
+                        sideEffectsLikelyCommitted: true,
+                    };
+                }
+                if (explanation === 'Duplicate while runtime unavailable.') {
+                    return {
+                        transactionHash: `0x${'9'.repeat(64)}`,
+                        proposalHash: `0x${'9'.repeat(64)}`,
                         ogProposalHash: null,
                         sideEffectsLikelyCommitted: true,
                     };
@@ -622,6 +640,32 @@ async function main() {
                 1
             );
             assert.deepEqual(resolveProposalHashCalls, [`0x${'3'.repeat(64)}`]);
+
+            const runtimeOutageDuplicateRequest = await buildSignedBody({
+                account,
+                chainId: 11155111,
+                requestId: 'submit-pending-runtime-outage',
+                explanation: 'Duplicate while runtime unavailable.',
+            });
+            const runtimeOutageFirst = await postPublication(
+                proposeBaseUrl,
+                runtimeOutageDuplicateRequest.body
+            );
+            assert.equal(runtimeOutageFirst.status, 202);
+            assert.equal(runtimeOutageFirst.json.submission.status, 'submitted');
+            proposalRuntimeAvailableByChain.set(11155111, false);
+            const runtimeOutageDuplicate = await postPublication(
+                proposeBaseUrl,
+                runtimeOutageDuplicateRequest.body
+            );
+            assert.equal(runtimeOutageDuplicate.status, 200);
+            assert.equal(runtimeOutageDuplicate.json.status, 'duplicate');
+            assert.equal(runtimeOutageDuplicate.json.submission.status, 'submitted');
+            assert.equal(
+                submitAttemptsByExplanation.get('Duplicate while runtime unavailable.'),
+                1
+            );
+            proposalRuntimeAvailableByChain.set(11155111, true);
 
             const polygonRequest = await buildSignedBody({
                 account,

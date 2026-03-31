@@ -178,6 +178,19 @@ function buildSubmissionResponse(submission) {
     };
 }
 
+function canBypassProposalRuntimeForDuplicate(record, exactExistingMatch) {
+    if (!exactExistingMatch || !record) {
+        return false;
+    }
+
+    const submission = record.submission ?? { status: 'not_started' };
+    return (
+        submission.status === 'resolved' ||
+        submission.status === 'uncertain' ||
+        (submission.status === 'submitted' && Boolean(submission.transactionHash))
+    );
+}
+
 function createProposalPublicationApiServer({
     config,
     store,
@@ -334,10 +347,25 @@ function createProposalPublicationApiServer({
             };
         }
         if (existingSubmission.status === 'submitted' && existingSubmission.transactionHash) {
-            return {
-                record: await reconcileSubmittedRecord(record, { runtime, envelope }),
-                submissionAttempted: false,
-            };
+            if (!runtime) {
+                return {
+                    record,
+                    submissionAttempted: false,
+                };
+            }
+
+            try {
+                const reconciledRecord = await reconcileSubmittedRecord(record, { runtime, envelope });
+                return {
+                    record: reconciledRecord,
+                    submissionAttempted: false,
+                };
+            } catch (error) {
+                return {
+                    record,
+                    submissionAttempted: false,
+                };
+            }
         }
         if (
             existingSubmission.status === 'uncertain' ||
@@ -357,6 +385,9 @@ function createProposalPublicationApiServer({
                     },
                 }
             );
+        }
+        if (!runtime) {
+            throw new Error('Proposal runtime unavailable for submission attempt.');
         }
 
         const submittedAtMs = Date.now();
@@ -667,8 +698,27 @@ function createProposalPublicationApiServer({
                 deadline: body.deadline,
             });
             const signerAllowlistMode = requireSignerAllowlist ? 'explicit' : 'open';
+            const existingRecord = await store.getRecord({
+                signer: signedAuth.sender.address,
+                chainId: body.chainId,
+                requestId: body.requestId,
+            });
+            const exactExistingMatch =
+                existingRecord?.signature === signedAuth.sender.signature &&
+                existingRecord?.canonicalMessage === signedAuth.payload;
+            const refreshablePendingRecord =
+                !exactExistingMatch &&
+                canRefreshPendingRecord({
+                    existingRecord,
+                    envelope,
+                });
+            const canBypassProposalRuntime = canBypassProposalRuntimeForDuplicate(
+                existingRecord,
+                exactExistingMatch
+            );
+
             let proposalRuntime;
-            if (apiMode === 'propose') {
+            if (apiMode === 'propose' && !canBypassProposalRuntime) {
                 try {
                     proposalRuntime = await resolveProposalRuntime({
                         chainId: body.chainId,
@@ -693,20 +743,6 @@ function createProposalPublicationApiServer({
                     return;
                 }
             }
-            const existingRecord = await store.getRecord({
-                signer: signedAuth.sender.address,
-                chainId: body.chainId,
-                requestId: body.requestId,
-            });
-            const exactExistingMatch =
-                existingRecord?.signature === signedAuth.sender.signature &&
-                existingRecord?.canonicalMessage === signedAuth.payload;
-            const refreshablePendingRecord =
-                !exactExistingMatch &&
-                canRefreshPendingRecord({
-                    existingRecord,
-                    envelope,
-                });
 
             if (signedAuth.isExpired && !exactExistingMatch && !refreshablePendingRecord) {
                 emitLog(
@@ -901,8 +937,22 @@ function createProposalPublicationApiServer({
                                     'Publication record disappeared before proposal submission.'
                                 );
                             }
+                            let runtime = proposalRuntime;
+                            if (
+                                !runtime &&
+                                latestRecord.submission?.status === 'submitted' &&
+                                latestRecord.submission?.transactionHash
+                            ) {
+                                try {
+                                    runtime = await resolveProposalRuntime({
+                                        chainId: body.chainId,
+                                    });
+                                } catch (error) {
+                                    runtime = undefined;
+                                }
+                            }
                             return submitPublishedRecord(latestRecord, {
-                                runtime: proposalRuntime,
+                                runtime,
                                 envelope,
                             });
                         }

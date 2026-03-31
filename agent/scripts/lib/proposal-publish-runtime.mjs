@@ -128,6 +128,13 @@ function listConfiguredChainIds(agentConfigStack) {
     return Array.from(new Set(configuredChainIds));
 }
 
+function listServedChainIds(runtimeConfig, agentConfigStack) {
+    if (runtimeConfig.chainId !== undefined && runtimeConfig.chainId !== null) {
+        return [normalizeChainIdValue(runtimeConfig.chainId, 'resolved chainId')];
+    }
+    return listConfiguredChainIds(agentConfigStack);
+}
+
 function buildUnsupportedChainError(message) {
     const error = new Error(message);
     error.code = 'unsupported_chain';
@@ -375,7 +382,7 @@ async function resolveProposalPublishServerConfig({
         argv,
         allowAmbiguousChainId: true,
     });
-    const supportedChainIds = listConfiguredChainIds(runtimeConfig.agentConfigStack);
+    const supportedChainIds = listServedChainIds(runtimeConfig, runtimeConfig.agentConfigStack);
     if (runtimeConfig.proposalPublishApiMode === 'propose') {
         const proposeCapableChains = [];
         for (const chainId of supportedChainIds) {
