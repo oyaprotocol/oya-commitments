@@ -767,7 +767,12 @@ async function run() {
             observedBootstrapSignerRpcUrls.push(rpcUrl);
             return {
                 account: { address: FILE_SIGNER },
-                walletClient: { rpcUrl },
+                walletClient: {
+                    rpcUrl,
+                    async getChainId() {
+                        return 11155111;
+                    },
+                },
             };
         },
         validateMessageApiDecisionEngineFn() {},
@@ -779,6 +784,58 @@ async function run() {
     ]);
     assert.deepEqual(observedBootstrapSignerRpcUrls, ['https://rpc.sepolia.final']);
     assert.equal(bootstrapRuntime.agentAddress, FILE_SIGNER);
+
+    let bootstrapClientCallCount = 0;
+    await assert.rejects(
+        () =>
+            initializeAgentRuntime({
+                loadRuntimeEnvFn() {},
+                buildConfigFn: () => ({
+                    ...baseConfig,
+                    agentModule: 'bootstrap-test-mismatch',
+                    chainId: undefined,
+                    messageApiEnabled: false,
+                }),
+                assertNoDeprecatedConfigEnvVarsFn() {},
+                loadAgentModuleFn: async () => ({
+                    agentModule: {},
+                    commitmentText: 'bootstrap test commitment',
+                    agentConfigFile: {
+                        raw: {
+                            byChain: {
+                                '11155111': {
+                                    rpcUrl: 'https://rpc.sepolia.mismatch',
+                                    commitmentSafe: FILE_SAFE,
+                                    ogModule: FILE_OG,
+                                },
+                            },
+                        },
+                        sourceLabel: 'bootstrap mismatch agent config',
+                    },
+                }),
+                httpTransportFn: (rpcUrl) => ({ rpcUrl }),
+                createPublicClientFn: ({ transport }) => {
+                    bootstrapClientCallCount += 1;
+                    return {
+                        async getChainId() {
+                            return bootstrapClientCallCount === 1 ? 11155111 : 137;
+                        },
+                        transport,
+                    };
+                },
+                createSignerClientFn: async ({ rpcUrl }) => ({
+                    account: { address: FILE_SIGNER },
+                    walletClient: {
+                        rpcUrl,
+                        async getChainId() {
+                            return 11155111;
+                        },
+                    },
+                }),
+                validateMessageApiDecisionEngineFn() {},
+            }),
+        /Resolved runtime rpcUrl for chainId 11155111 is connected to chainId 137/
+    );
 
     console.log('[test] agent config file OK');
 }

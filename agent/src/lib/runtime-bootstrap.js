@@ -14,6 +14,7 @@ import {
 } from './decision-support.js';
 import { createMessageInbox } from './message-inbox.js';
 import { createSignerClient } from './signer.js';
+import { createValidatedReadWriteRuntime } from './chain-runtime.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -134,10 +135,15 @@ export async function initializeAgentRuntime({
             chainId: runtimeChainId,
         })
     );
-    const publicClient = createPublicClientFn({
-        transport: httpTransportFn(config.rpcUrl),
+    const { publicClient, account, walletClient } = await createValidatedReadWriteRuntime({
+        rpcUrl: config.rpcUrl,
+        expectedChainId: runtimeChainId,
+        publicClientLabel: 'Resolved runtime rpcUrl',
+        signerClientLabel: 'Resolved runtime signer',
+        createPublicClientFn,
+        createSignerClientFn,
+        httpTransportFn,
     });
-    const { account, walletClient } = await createSignerClientFn({ rpcUrl: config.rpcUrl });
     const agentAddress = account.address;
 
     if (!config.commitmentSafe) {
