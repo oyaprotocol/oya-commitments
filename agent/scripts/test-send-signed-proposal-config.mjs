@@ -4,6 +4,7 @@ import path from 'node:path';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import {
     buildProposalPublishBaseUrl,
+    createProposalPublishSubmissionRuntimeResolver,
     resolveProposalPublishApiTarget,
     resolveProposalPublishServerConfig,
 } from './lib/proposal-publish-runtime.mjs';
@@ -315,6 +316,31 @@ async function run() {
     assert.deepEqual(
         multichainProposeServerConfig.supportedChainIds.sort((left, right) => left - right),
         [137, 11155111]
+    );
+
+    const mismatchedSignerRuntimeResolver = await createProposalPublishSubmissionRuntimeResolver({
+        agentRef: 'multichain-propose',
+        env: {},
+        repoRootPath,
+        createPublicClientFn: () => ({
+            async getChainId() {
+                return 11155111;
+            },
+        }),
+        createSignerClientFn: async () => ({
+            account: { address: '0x1111111111111111111111111111111111111111' },
+            walletClient: {
+                async request({ method }) {
+                    assert.equal(method, 'eth_chainId');
+                    return '0x89';
+                },
+            },
+        }),
+    });
+
+    await assert.rejects(
+        () => mismatchedSignerRuntimeResolver({ chainId: 11155111 }),
+        /Resolved signer runtime for chainId 11155111 is connected to chainId 137/
     );
 
     await createAgentModule(repoRootPath, 'selected-chain-propose', {
