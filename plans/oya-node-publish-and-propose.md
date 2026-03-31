@@ -7,7 +7,7 @@ This ExecPlan is a living document and must be maintained according to `PLANS.md
 Extend the existing Oya node from "archive signed proposal requests to IPFS" into "archive, and optionally also submit the proposal onchain." After this change, the same signed payload produced by `agent/scripts/send-signed-proposal.mjs` will continue to be accepted by the node, but operators will be able to start the node in one of two modes:
 
 - `publish`: current behavior. Verify the signed payload, publish the artifact to IPFS, pin it, and return the CID.
-- `propose`: publish and pin the artifact first, then submit `proposeTransactions(...)` against the signed payload's `ogModule` using the node's own configured signer.
+- `propose`: resolve the signed payload's `chainId` to a supported chain-specific proposer runtime, publish and pin the artifact, then submit `proposeTransactions(...)` against the signed payload's `ogModule` using the node's configured signer for that chain.
 
 This follow-on plan intentionally does not add rule validation yet. In this version, the node assumes that any request signed by an address on the node's internal allowlist is eligible for execution, regardless of which commitment it targets. The signed payload already contains `chainId`, `commitmentSafe`, `ogModule`, `transactions`, and `explanation`; those signed fields are the only source of truth for what gets archived and, in `propose` mode, what gets submitted onchain.
 
@@ -19,6 +19,7 @@ After this change, the observable behavior should be:
 4. Exact duplicate retries do not create duplicate IPFS artifacts or duplicate onchain proposals.
 5. If IPFS publication succeeds but onchain proposal submission fails before a transaction hash is obtained, the node reuses the archived CID and retries only the proposal stage.
 6. If the node already has a proposal submission transaction hash for a signed request, retries never resubmit blindly; they only return or reconcile the stored submission record.
+7. In `propose` mode, requests for unsupported chain IDs are rejected clearly instead of forcing the node into a single fixed-chain startup mode.
 
 Out of scope for this ExecPlan:
 
@@ -33,11 +34,12 @@ Out of scope for this ExecPlan:
 
 - [x] 2026-03-31: Audited `PLANS.md`, the existing publication-only ExecPlan, and the shared OG proposal submission helper in `agent/src/lib/tx.js`.
 - [x] 2026-03-31: Wrote this standalone follow-on ExecPlan in `plans/oya-node-publish-and-propose.md` before implementation.
+- [x] 2026-03-31: Revised the plan so `propose` mode is multi-chain-capable per signed `chainId`, with per-request chain resolution and clear rejection for unsupported chains.
 - [ ] Add node mode support so startup and runtime config can distinguish `publish` from `propose`.
 - [ ] Extend the publication ledger to persist proposal-submission lifecycle state in addition to IPFS publication state.
 - [ ] Reuse or refactor the shared OG proposal submission code so the node can persist a submission transaction hash before any long receipt / log resolution step.
 - [ ] Extend the HTTP API so `POST /v1/proposals/publish` optionally performs the onchain proposal stage after successful publication.
-- [ ] Add regression coverage for publish-only compatibility, propose-mode success, duplicate retries, partial failures, and chain-bound startup enforcement in propose mode.
+- [ ] Add regression coverage for publish-only compatibility, propose-mode success, duplicate retries, partial failures, multi-chain request routing, and unsupported-chain rejection in propose mode.
 - [ ] Update `agent/README.md` and the script help text to document the new mode and the node's signer requirements.
 
 ## Surprises & Discoveries
@@ -45,8 +47,8 @@ Out of scope for this ExecPlan:
 - Observation: The repository already has a generic OG proposal submission helper, `postBondAndPropose(...)`, under `agent/src/lib/tx.js`; the node does not need a second copy of the bond / allowance / simulate / submit logic.
   Evidence: `agent/src/lib/tx.js` exports `postBondAndPropose`, and it already handles ERC-20 bond checks, duplicate-proposal simulation failures, submission, and OG proposal-hash resolution.
 
-- Observation: The current publication server can intentionally start without a resolved `chainId` in multi-chain publish-only mode, but onchain proposal submission is fundamentally chain-bound because it needs a concrete RPC target and signer context.
-  Evidence: `agent/scripts/lib/proposal-publish-runtime.mjs` allows ambiguous chain resolution for server startup today, while `postBondAndPropose(...)` requires a concrete `publicClient`, `walletClient`, `account`, and chain-specific config.
+- Observation: The current publication server can intentionally start without a resolved `chainId`, and that same ambiguity can be preserved for `propose` mode if request handling resolves a concrete proposer runtime from each signed payload's `chainId`.
+  Evidence: `agent/scripts/lib/proposal-publish-runtime.mjs` already supports ambiguous startup resolution for publication-only mode, while `postBondAndPropose(...)` only needs a concrete `publicClient`, `walletClient`, `account`, and chain-specific config at the moment submission actually occurs.
 
 - Observation: The publication ledger currently solves IPFS idempotency, but onchain idempotency adds a second failure boundary where the node may have sent a transaction before the HTTP response is lost or before the OG proposal hash is resolved.
   Evidence: `agent/src/lib/proposal-publication-store.js` today persists `cid`, `uri`, `pinned`, and related publication metadata, while `agent/src/lib/tx.js` only returns the submission hash after the onchain call has already occurred.
@@ -69,8 +71,8 @@ Out of scope for this ExecPlan:
   Rationale: The user explicitly wants the first version to skip rule validation and treat the node's internal allowlist as sufficient authorization.
   Date/Author: 2026-03-31 / Codex.
 
-- Decision: `propose` mode will require a resolved chain-specific runtime config at startup, while `publish` mode can continue to run in multi-chain archival mode.
-  Rationale: Publishing to IPFS does not need a chain-bound RPC or signer. Onchain proposal submission does. Keeping this boundary explicit avoids ambiguous runtime behavior.
+- Decision: `propose` mode will be multi-chain-capable, but each request must resolve its signed `chainId` to a supported chain-specific proposer runtime before publication and submission proceed.
+  Rationale: The user wants the node to propose against whichever chain is named in the signed payload. That is safe as long as the node only accepts chains for which it has explicit RPC, signer, and proposal config, and rejects unsupported chains clearly.
   Date/Author: 2026-03-31 / Codex.
 
 - Decision: The node's own configured signer, not the signed-request signer, will be the proposer that pays gas and posts bond.
@@ -83,7 +85,7 @@ This plan has been drafted but not implemented yet. The intended finished outcom
 
 - operators can start the same Oya node in `publish` or `propose` mode
 - `publish` mode remains backward-compatible with the current production behavior
-- `propose` mode archives the signed request to IPFS and then submits it onchain using the node's signer
+- `propose` mode archives the signed request to IPFS and then submits it onchain using the node's signer for the request's chain
 - retries are idempotent across both the IPFS boundary and the onchain submission boundary
 
 Implementation lessons and final validation evidence will be recorded here as the work proceeds.
@@ -109,6 +111,7 @@ Important runtime assumptions already present in the repo:
 - The signed envelope already covers the target `chainId`, `commitmentSafe`, `ogModule`, `transactions`, and `explanation`.
 - The node's signer stack comes from the existing shared signer config in `agent/src/lib/signer.js` and the repo-wide config system in `agent/src/lib/config.js` and `agent/src/lib/agent-config.js`.
 - `postBondAndPropose(...)` respects existing runtime controls such as `proposeEnabled`, `allowProposeOnSimulationFail`, `proposeGasLimit`, `proposalHashResolveTimeoutMs`, and `proposalHashResolvePollIntervalMs`.
+- Multi-chain agent configs already exist via `byChain`, so the missing piece for multi-chain propose mode is request-time chain selection, not a new config model.
 
 The key architectural constraint for this plan is that publication idempotency and proposal-submission idempotency are not the same thing. IPFS publication is content-addressed and can be safely retried after storing the CID. Onchain submission can spend gas and change state. The node must therefore persist enough proposal-submission state to decide whether a retry should:
 
@@ -119,7 +122,7 @@ The key architectural constraint for this plan is that publication idempotency a
 
 ## Plan of Work
 
-First, generalize the node runtime from "publication service" to "publication service with an optional submission stage." This means extending config resolution in `agent/src/lib/config.js`, `agent/src/lib/agent-config.js`, and `agent/scripts/lib/proposal-publish-runtime.mjs` so the server can resolve a `proposalPublishApi.mode` field with values `publish` or `propose`. `publish` mode keeps the current semantics. `propose` mode requires chain-bound runtime resolution and existing proposal-related config such as `proposeEnabled=true`, RPC access, and signer configuration.
+First, generalize the node runtime from "publication service" to "publication service with an optional submission stage." This means extending config resolution in `agent/src/lib/config.js`, `agent/src/lib/agent-config.js`, and `agent/scripts/lib/proposal-publish-runtime.mjs` so the server can resolve a `proposalPublishApi.mode` field with values `publish` or `propose`. `publish` mode keeps the current semantics. `propose` mode must support request-time chain selection: the server starts from a possibly ambiguous multi-chain config, and each request resolves its signed `chainId` to a concrete per-chain proposer runtime with `proposeEnabled=true`, RPC access, and signer configuration.
 
 Second, extend the durable ledger in `agent/src/lib/proposal-publication-store.js` to track proposal-submission state alongside publication state. Each record should still be keyed by `(signer, chainId, requestId)`, but it also needs a nested `submission` object with enough information to recover safely. The minimal persisted fields should be:
 
@@ -133,25 +136,27 @@ Second, extend the durable ledger in `agent/src/lib/proposal-publication-store.j
 
 The store must preserve backward compatibility with publication-only records already on disk. Old records should load as `submission.status = "not_started"` when rewritten.
 
-Third, make the shared proposal-submission path safe for node-side idempotence. The current `postBondAndPropose(...)` helper in `agent/src/lib/tx.js` is close to what the node needs, but the node needs earlier persistence points. The cleanest path is to refactor the submission helper so the node can:
+Third, make the shared proposal-submission path safe for node-side idempotence and per-request chain routing. The current `postBondAndPropose(...)` helper in `agent/src/lib/tx.js` is close to what the node needs, but the node needs earlier persistence points plus a clean way to resolve a per-chain runtime from the signed `chainId`. The cleanest path is to refactor the submission helper so the node can:
 
 - get a callback or structured result as soon as a submission transaction hash exists
 - persist that transaction hash before trying to resolve `ogProposalHash`
 - distinguish "submission definitely not sent" from "side effects may already be committed"
+- resolve `publicClient`, `walletClient`, `account`, and proposal config from the request's `chainId` rather than a fixed startup chain
 
 This shared refactor belongs in `agent/src/lib/tx.js` because it improves the core OG submission primitive rather than adding node-specific logic to a shared file arbitrarily. The node-specific wrapper can then live in a new shared file such as `agent/src/lib/proposal-submission.js` or alongside the server if the abstraction stays small.
 
 Fourth, extend `agent/src/lib/proposal-publication-api.js` so `POST /v1/proposals/publish` performs a two-stage pipeline:
 
 1. authenticate the signed request exactly as today
-2. prepare or load the durable record
-3. publish and pin the artifact exactly as today
-4. if mode is `publish`, return the publication response and stop
-5. if mode is `propose`, enqueue a second keyed operation for proposal submission
-6. submit `proposeTransactions(...)` against the signed `ogModule` with the signed `transactions` and `explanation`
-7. persist the submission transaction hash immediately when available
-8. attempt to resolve the OG proposal hash from logs or receipt
-9. return both publication and submission metadata
+2. if mode is `propose`, resolve a proposer runtime from the signed `chainId` or reject the request as unsupported before side effects begin
+3. prepare or load the durable record
+4. publish and pin the artifact exactly as today
+5. if mode is `publish`, return the publication response and stop
+6. if mode is `propose`, enqueue a second keyed operation for proposal submission
+7. submit `proposeTransactions(...)` against the signed `ogModule` with the signed `transactions` and `explanation`
+8. persist the submission transaction hash immediately when available
+9. attempt to resolve the OG proposal hash from logs or receipt
+10. return both publication and submission metadata
 
 The signed payload fields are the only inputs used for the target commitment: the node proposes against the signed `ogModule`, and the returned record carries the signed `commitmentSafe` for observers and later policy enforcement. No additional unsigned "target commitment" parameter should be added to the request.
 
@@ -175,10 +180,10 @@ Fifth, define the response and retry semantics clearly. The existing top-level p
 
 If the archive exists and the proposal has already been submitted, retries should return the stored `transactionHash` and `ogProposalHash` without a second onchain submission. If archive succeeded but submission failed before a transaction hash existed, the API should return a 502-style failure that still includes the existing CID and indicates the request can be retried safely. If a failure occurs after `sideEffectsLikelyCommitted=true` but before a transaction hash is known, the API should mark the record `uncertain` and refuse automatic retry until an operator investigates; that is safer than risking a duplicate proposal.
 
-Sixth, update startup, CLI, and docs. `agent/scripts/start-proposal-publish-node.mjs` should keep its current entrypoint for compatibility but expose the resolved mode in `--dry-run` output. If needed, a thin alias such as `start-proposal-node.mjs` can be added later, but this plan does not require a rename. `agent/README.md` and script help text must explain:
+Sixth, update startup, CLI, and docs. `agent/scripts/start-proposal-publish-node.mjs` should keep its current entrypoint for compatibility but expose the resolved mode and supported chain behavior in `--dry-run` output. If needed, a thin alias such as `start-proposal-node.mjs` can be added later, but this plan does not require a rename. `agent/README.md` and script help text must explain:
 
 - how to enable `proposalPublishApi.mode: "publish"` versus `"propose"`
-- that `propose` mode requires a real proposer signer and chain-specific runtime config
+- that `propose` mode requires a real proposer signer and resolvable per-chain runtime config for every chain the node should serve
 - that the signed-request signer and the node's proposer signer are different roles
 - that v1 does not enforce commitment-specific policy
 
@@ -197,9 +202,10 @@ Sixth, update startup, CLI, and docs. `agent/scripts/start-proposal-publish-node
    Work:
 
    - add `proposalPublishApi.mode` with default `publish`
-   - reject `propose` mode when startup does not resolve a concrete `chainId`
+   - add request-time chain resolution helpers for `propose` mode
    - include the resolved mode in `--dry-run` output
    - keep `publish` mode backward-compatible with today's multi-chain archival behavior
+   - fail startup only when `propose` mode has no usable proposer runtime for any chain, not merely because startup is chain-ambiguous
 
 2. Extend the durable ledger for submission state.
 
@@ -242,6 +248,7 @@ Sixth, update startup, CLI, and docs. `agent/scripts/start-proposal-publish-node
    Work:
 
    - keep the request schema unchanged
+   - resolve and validate the signed `chainId` before publication when in `propose` mode
    - in `publish` mode, keep current semantics unchanged
    - in `propose` mode, run publication first, then submission
    - add a second keyed in-process queue keyed by `(signer, chainId, requestId)` for the submission stage, or reuse the same keyed queue if sequencing stays simple
@@ -268,11 +275,12 @@ Sixth, update startup, CLI, and docs. `agent/scripts/start-proposal-publish-node
 The change is accepted when all of the following are true:
 
 - `publish` mode behaves exactly as it does today for successful requests, duplicate retries, and publication-only recovery cases.
-- `propose` mode accepts the same signed payload, publishes the artifact, then submits the proposal onchain using the node's signer.
+- `propose` mode accepts the same signed payload, publishes the artifact, then submits the proposal onchain using the node's signer for the payload's chain.
 - exact duplicate retries in `propose` mode return the same `cid` and `transactionHash` without a second IPFS add or a second onchain submission.
 - if the publication stage succeeded and the submission stage failed before a transaction hash existed, the node returns the existing `cid` and safely retries submission only.
 - if a transaction hash exists but `ogProposalHash` is still null, retries only attempt reconciliation and never resubmit.
-- `propose` mode cannot start without a concrete chain-bound runtime config.
+- `propose` mode can start from multi-chain config and correctly routes at least two distinct signed `chainId` values to distinct proposer runtimes.
+- `propose` mode rejects unsupported chain IDs before publication or submission side effects begin.
 
 Minimum validation commands to run from `/Users/johnshutt/Code/oya-commitments`:
 
@@ -302,6 +310,11 @@ Publication stage:
 
 - identical retries reuse the existing CID and pin state
 - failed pin after successful add retries only the pin step, as today
+
+Per-request chain routing:
+
+- in `propose` mode, unsupported or unresolvable `chainId` values must fail before the node archives or submits anything
+- once a record exists for a supported `(signer, chainId, requestId)`, retries continue to use that same chain-scoped record
 
 Submission stage:
 
@@ -340,7 +353,14 @@ Expected config shape for archive-and-submit mode:
           "0xAgentSigner..."
         ]
       },
-      "proposeEnabled": true
+      "byChain": {
+        "1": {
+          "proposeEnabled": true
+        },
+        "11155111": {
+          "proposeEnabled": true
+        }
+      }
     }
 
 Expected successful response fields in `propose` mode:
@@ -351,8 +371,9 @@ Expected successful response fields in `propose` mode:
 Expected operator-visible logs:
 
 - startup log includes the resolved mode
+- startup or dry-run output indicates whether the node is serving a single configured chain or resolving proposer context per request
 - request logs include the publication request id and signer, as today
-- in `propose` mode, success logs also include the proposal submission transaction hash
+- in `propose` mode, success logs also include the request `chainId` and proposal submission transaction hash
 
 ## Interfaces and Dependencies
 
@@ -369,7 +390,7 @@ Primary files and interfaces:
 - `agent/src/lib/signer.js`
   - node-side proposer signer resolution
 - `agent/scripts/lib/proposal-publish-runtime.mjs`
-  - startup and CLI resolution for node host/port/chain/mode
+  - startup and CLI resolution for node host/port/chain/mode, plus per-request proposer runtime resolution
 - `agent/scripts/start-proposal-publish-node.mjs`
   - standalone node process
 - `agent/scripts/send-signed-proposal.mjs`
@@ -395,7 +416,7 @@ Existing config and env dependencies:
 - `proposalHashResolveTimeoutMs`
 - `proposalHashResolvePollIntervalMs`
 - `bondSpender`
-- chain-specific RPC configuration
+- chain-specific RPC configuration for every chain served in `propose` mode
 
 External services and protocols involved:
 
