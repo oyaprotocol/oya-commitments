@@ -142,6 +142,21 @@ function buildUnsupportedChainError(message) {
     return error;
 }
 
+function normalizeProposalRuntimeResolutionError(error, { agentRef, chainId }) {
+    if (error?.code && error?.statusCode) {
+        return error;
+    }
+
+    const message = String(error?.message ?? error);
+    if (message.includes('conflicting chainId')) {
+        return buildUnsupportedChainError(
+            `Agent "${agentRef}" does not support proposal submission for chainId ${chainId}. ${message}`
+        );
+    }
+
+    return error;
+}
+
 async function createProposalPublishSubmissionRuntimeResolver({
     agentRef,
     env = process.env,
@@ -159,14 +174,22 @@ async function createProposalPublishSubmissionRuntimeResolver({
             cache.set(
                 normalizedChainId,
                 (async () => {
-                    const runtimeConfig = await resolveProposalPublishApiConfigForAgent({
-                        agentRef,
-                        chainId: normalizedChainId,
-                        repoRootPath,
-                        env,
-                        overlayPaths,
-                        argv,
-                    });
+                    let runtimeConfig;
+                    try {
+                        runtimeConfig = await resolveProposalPublishApiConfigForAgent({
+                            agentRef,
+                            chainId: normalizedChainId,
+                            repoRootPath,
+                            env,
+                            overlayPaths,
+                            argv,
+                        });
+                    } catch (error) {
+                        throw normalizeProposalRuntimeResolutionError(error, {
+                            agentRef,
+                            chainId: normalizedChainId,
+                        });
+                    }
 
                     if (!runtimeConfig.proposalPublishApiEnabled) {
                         throw buildUnsupportedChainError(
@@ -409,6 +432,7 @@ async function resolveProposalPublishServerConfig({
             });
             if (
                 chainRuntimeConfig.proposalPublishApiEnabled &&
+                chainRuntimeConfig.proposalPublishApiMode === 'propose' &&
                 chainRuntimeConfig.proposeEnabled &&
                 chainRuntimeConfig.rpcUrl
             ) {
