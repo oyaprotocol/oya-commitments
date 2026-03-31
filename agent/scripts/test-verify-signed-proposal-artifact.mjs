@@ -69,6 +69,10 @@ async function run() {
     assert.equal(verification.signer, account.address.toLowerCase());
     assert.equal(verification.transactionCount, 1);
     assert.equal(verification.signedAtMs, envelope.timestampMs);
+    assert.equal(verification.receivedAtMs, envelope.timestampMs + 10);
+    assert.equal(verification.publishedAtMs, envelope.timestampMs + 20);
+    assert.equal(verification.publication.signerAllowlistMode, 'explicit');
+    assert.equal(verification.publication.nodeName, 'verify-test-node');
 
     const tamperedArtifact = {
         ...artifact,
@@ -95,6 +99,30 @@ async function run() {
     await assert.rejects(
         () => verifySignedProposalArtifact(tamperedSignedAtArtifact),
         /signedAtMs does not match/
+    );
+
+    const invalidReceivedAtArtifact = {
+        ...artifact,
+        publication: {
+            ...artifact.publication,
+            receivedAtMs: 'not-an-integer',
+        },
+    };
+    await assert.rejects(
+        () => verifySignedProposalArtifact(invalidReceivedAtArtifact),
+        /artifact\.publication\.receivedAtMs must be a positive integer/
+    );
+
+    const invalidPublishedAtArtifact = {
+        ...artifact,
+        publication: {
+            ...artifact.publication,
+            publishedAtMs: -1,
+        },
+    };
+    await assert.rejects(
+        () => verifySignedProposalArtifact(invalidPublishedAtArtifact),
+        /artifact\.publication\.publishedAtMs must be a positive integer/
     );
 
     await rm(tempDir, { recursive: true, force: true });
