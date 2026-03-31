@@ -1,6 +1,8 @@
 import path from 'node:path';
+import { createPublicClient, http } from 'viem';
 import { buildConfig } from '../../src/lib/config.js';
 import { resolveAgentRuntimeConfig, resolveConfiguredChainId } from '../../src/lib/agent-config.js';
+import { createSignerClient } from '../../src/lib/signer.js';
 import {
     getArgValue,
     loadAgentConfigForScript,
@@ -14,6 +16,14 @@ function parseInteger(value, label) {
     const parsed = Number(value);
     if (!Number.isInteger(parsed)) {
         throw new Error(`${label} must be an integer.`);
+    }
+    return parsed;
+}
+
+function normalizeChainIdValue(value, label = 'chainId') {
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed < 1) {
+        throw new Error(`${label} must be a positive integer.`);
     }
     return parsed;
 }
@@ -71,7 +81,7 @@ async function resolveProposalPublishApiConfigForAgent({
     const baseConfig = buildConfig({
         env,
         requireRpcUrl: false,
-        fallbackRpcUrl: 'http://127.0.0.1:8545',
+        fallbackRpcUrl: undefined,
     });
 
     const runtimeConfig = resolveAgentRuntimeConfig({
@@ -88,8 +98,117 @@ async function resolveProposalPublishApiConfigForAgent({
         ...runtimeConfig,
         agentName,
         hasProposalPublishApiConfig: Boolean(runtimeConfig.agentConfig?.proposalPublishApi),
+        agentConfigStack,
         modulePath: resolvedModulePath,
         configPath: agentConfigPath,
+    };
+}
+
+function listConfiguredChainIds(agentConfigStack) {
+    const rawAgentConfig = agentConfigStack?.raw;
+    if (!rawAgentConfig) {
+        return [];
+    }
+
+    const configuredChainIds = [];
+    if (rawAgentConfig.chainId !== undefined && rawAgentConfig.chainId !== null) {
+        configuredChainIds.push(
+            normalizeChainIdValue(rawAgentConfig.chainId, 'agent config chainId')
+        );
+    }
+
+    if (rawAgentConfig.byChain && typeof rawAgentConfig.byChain === 'object' && !Array.isArray(rawAgentConfig.byChain)) {
+        for (const key of Object.keys(rawAgentConfig.byChain)) {
+            configuredChainIds.push(
+                normalizeChainIdValue(key, 'agent config byChain key')
+            );
+        }
+    }
+
+    return Array.from(new Set(configuredChainIds));
+}
+
+function buildUnsupportedChainError(message) {
+    const error = new Error(message);
+    error.code = 'unsupported_chain';
+    error.statusCode = 400;
+    return error;
+}
+
+async function createProposalPublishSubmissionRuntimeResolver({
+    agentRef,
+    env = process.env,
+    repoRootPath = repoRoot,
+    overlayPaths = resolveExplicitOverlayPaths({ argv: process.argv }),
+    argv = process.argv,
+} = {}) {
+    const cache = new Map();
+
+    return async function resolveProposalSubmissionRuntime({ chainId }) {
+        const normalizedChainId = normalizeChainIdValue(chainId);
+        if (!cache.has(normalizedChainId)) {
+            cache.set(
+                normalizedChainId,
+                (async () => {
+                    const runtimeConfig = await resolveProposalPublishApiConfigForAgent({
+                        agentRef,
+                        chainId: normalizedChainId,
+                        repoRootPath,
+                        env,
+                        overlayPaths,
+                        argv,
+                    });
+
+                    if (!runtimeConfig.proposalPublishApiEnabled) {
+                        throw buildUnsupportedChainError(
+                            `Agent "${agentRef}" does not enable proposalPublishApi for chainId ${normalizedChainId}.`
+                        );
+                    }
+                    if (runtimeConfig.proposalPublishApiMode !== 'propose') {
+                        throw buildUnsupportedChainError(
+                            `Agent "${agentRef}" is not configured for propose mode on chainId ${normalizedChainId}.`
+                        );
+                    }
+                    if (!runtimeConfig.proposeEnabled) {
+                        throw buildUnsupportedChainError(
+                            `Agent "${agentRef}" does not enable proposing on chainId ${normalizedChainId}.`
+                        );
+                    }
+                    if (!runtimeConfig.rpcUrl) {
+                        throw buildUnsupportedChainError(
+                            `Agent "${agentRef}" does not define rpcUrl for chainId ${normalizedChainId}.`
+                        );
+                    }
+
+                    const publicClient = createPublicClient({
+                        transport: http(runtimeConfig.rpcUrl),
+                    });
+                    const { account, walletClient } = await createSignerClient({
+                        rpcUrl: runtimeConfig.rpcUrl,
+                    });
+                    const actualChainId = await publicClient.getChainId();
+                    if (actualChainId !== normalizedChainId) {
+                        throw buildUnsupportedChainError(
+                            `Resolved rpcUrl for chainId ${normalizedChainId} is connected to chainId ${actualChainId}.`
+                        );
+                    }
+
+                    return {
+                        runtimeConfig,
+                        publicClient,
+                        walletClient,
+                        account,
+                    };
+                })()
+            );
+        }
+
+        try {
+            return await cache.get(normalizedChainId);
+        } catch (error) {
+            cache.delete(normalizedChainId);
+            throw error;
+        }
     };
 }
 
@@ -256,6 +375,28 @@ async function resolveProposalPublishServerConfig({
         argv,
         allowAmbiguousChainId: true,
     });
+    const supportedChainIds = listConfiguredChainIds(runtimeConfig.agentConfigStack);
+    if (runtimeConfig.proposalPublishApiMode === 'propose') {
+        const proposeCapableChains = [];
+        for (const chainId of supportedChainIds) {
+            const chainRuntimeConfig = await resolveProposalPublishApiConfigForAgent({
+                agentRef,
+                chainId,
+                repoRootPath,
+                env,
+                overlayPaths,
+                argv,
+            });
+            if (chainRuntimeConfig.proposalPublishApiEnabled && chainRuntimeConfig.proposeEnabled) {
+                proposeCapableChains.push(chainId);
+            }
+        }
+        if (proposeCapableChains.length === 0) {
+            throw new Error(
+                `Agent "${agentRef}" enables proposalPublishApi.mode="propose" but does not resolve any propose-capable chain runtime. Configure at least one chain with proposal publishing enabled, proposeEnabled=true, and rpcUrl.`
+            );
+        }
+    }
 
     return {
         agentRef,
@@ -265,11 +406,13 @@ async function resolveProposalPublishServerConfig({
             repoRootPath,
         }),
         runtimeConfig,
+        supportedChainIds,
     };
 }
 
 export {
     buildProposalPublishBaseUrl,
+    createProposalPublishSubmissionRuntimeResolver,
     resolveProposalPublishApiConfigForAgent,
     resolveProposalPublishApiTarget,
     resolveProposalPublishServerConfig,

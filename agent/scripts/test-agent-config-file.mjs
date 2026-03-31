@@ -66,6 +66,7 @@ async function run() {
     });
 
     const baseConfig = {
+        rpcUrl: RPC_URL,
         commitmentSafe: BASE_SAFE,
         ogModule: BASE_OG,
         watchAssets: [BASE_ERC20],
@@ -142,6 +143,17 @@ async function run() {
         messageApiIdempotencyTtlSeconds: 86400,
         messageApiRateLimitPerMinute: 30,
         messageApiRateLimitBurst: 10,
+        proposalPublishApiEnabled: false,
+        proposalPublishApiHost: '127.0.0.1',
+        proposalPublishApiPort: 9890,
+        proposalPublishApiMode: 'publish',
+        proposalPublishApiKeys: { env: 'proposal-token' },
+        proposalPublishApiRequireSignerAllowlist: true,
+        proposalPublishApiSignerAllowlist: [],
+        proposalPublishApiSignatureMaxAgeSeconds: 300,
+        proposalPublishApiMaxBodyBytes: 65536,
+        proposalPublishApiStateFile: undefined,
+        proposalPublishApiNodeName: undefined,
         chainId: undefined,
     };
 
@@ -165,6 +177,7 @@ async function run() {
             {
                 policyName: 'fast-withdraw',
                 chainId: 11155111,
+                rpcUrl: 'https://rpc.shared.example',
                 commitmentSafe: FILE_SAFE,
                 watchAssets: [FILE_ERC20],
                 pollIntervalMs: 15_000,
@@ -229,8 +242,18 @@ async function run() {
                     signerAllowlist: [FILE_SIGNER],
                     rateLimitPerMinute: 12,
                 },
+                proposalPublishApi: {
+                    enabled: true,
+                    host: 'proposal.shared.example',
+                    port: 9890,
+                    mode: 'publish',
+                    requireSignerAllowlist: true,
+                    signerAllowlist: [FILE_SIGNER],
+                    nodeName: 'shared-node',
+                },
                 byChain: {
                     '11155111': {
+                        rpcUrl: 'https://rpc.sepolia.example',
                         ogModule: FILE_OG,
                         watchAssets: [FILE_CHAIN_ERC20],
                         startBlock: '999999',
@@ -245,6 +268,11 @@ async function run() {
                             requireSignerAllowlist: false,
                             signerAllowlist: [CHAIN_SIGNER],
                             batchSize: 7,
+                        },
+                        proposalPublishApi: {
+                            mode: 'propose',
+                            port: 9891,
+                            signerAllowlist: [CHAIN_SIGNER],
                         },
                         watchErc1155Assets: [
                             {
@@ -286,6 +314,7 @@ async function run() {
     assert.equal(resolved.ogModule, FILE_OG);
     assert.equal(resolved.agentConfig.commitmentSafe, FILE_SAFE);
     assert.equal(resolved.agentConfig.ogModule, FILE_OG);
+    assert.equal(resolved.rpcUrl, 'https://rpc.sepolia.example');
     assert.equal(resolved.pollIntervalMs, 15_000);
     assert.equal(resolved.logChunkSize, 9000n);
     assert.equal(resolved.startBlock, 999999n);
@@ -350,6 +379,17 @@ async function run() {
     assert.equal(resolved.messageApiBatchSize, 7);
     assert.equal(resolved.messageApiRateLimitPerMinute, 12);
     assert.deepEqual(resolved.agentConfig.messageApi.signerAllowlist, [getAddress(CHAIN_SIGNER)]);
+    assert.equal(resolved.proposalPublishApiEnabled, true);
+    assert.equal(resolved.proposalPublishApiHost, 'proposal.shared.example');
+    assert.equal(resolved.proposalPublishApiPort, 9891);
+    assert.equal(resolved.proposalPublishApiMode, 'propose');
+    assert.deepEqual(resolved.proposalPublishApiKeys, { env: 'proposal-token' });
+    assert.equal(resolved.proposalPublishApiRequireSignerAllowlist, true);
+    assert.deepEqual(resolved.proposalPublishApiSignerAllowlist, [getAddress(CHAIN_SIGNER)]);
+    assert.equal(resolved.proposalPublishApiNodeName, 'shared-node');
+    assert.deepEqual(resolved.agentConfig.proposalPublishApi.signerAllowlist, [
+        getAddress(CHAIN_SIGNER),
+    ]);
 
     const configLocalPath = path.join(tmpDir, 'config.local.json');
     const overlayOnePath = path.join(tmpDir, 'overlay-one.json');

@@ -100,12 +100,16 @@ export async function initializeAgentRuntime() {
         agentModuleName: normalizeAgentModuleName(agentRef),
     });
 
-    const publicClient = createPublicClient({ transport: http(config.rpcUrl) });
-    const { account, walletClient } = await createSignerClient({ rpcUrl: config.rpcUrl });
-    const agentAddress = account.address;
     const { agentModule, commitmentText, agentConfigFile } = await loadAgentModule({
         agentModuleRef: agentRef,
     });
+    const provisionalConfig = resolveAgentRuntimeConfig({
+        baseConfig: config,
+        agentConfigFile,
+    });
+    const publicClient = createPublicClient({ transport: http(provisionalConfig.rpcUrl) });
+    const { account, walletClient } = await createSignerClient({ rpcUrl: provisionalConfig.rpcUrl });
+    const agentAddress = account.address;
     const runtimeChainId = await publicClient.getChainId();
     resolveConfiguredChainId({
         agentConfigFile,

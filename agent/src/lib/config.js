@@ -216,6 +216,7 @@ const IPFS_DEFAULTS = Object.freeze({
 const PROPOSAL_PUBLISH_API_DEFAULTS = Object.freeze({
     proposalPublishApiHost: '127.0.0.1',
     proposalPublishApiPort: 9890,
+    proposalPublishApiMode: 'publish',
     proposalPublishApiMaxBodyBytes: 65_536,
     proposalPublishApiRequireSignerAllowlist: true,
     proposalPublishApiSignerAllowlist: [],
