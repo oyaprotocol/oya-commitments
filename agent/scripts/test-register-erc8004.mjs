@@ -1,7 +1,25 @@
 import assert from 'node:assert/strict';
-import { main as registerErc8004Main } from './register-erc8004.mjs';
+import {
+    inferRegistryNetworkFromChainId,
+    main as registerErc8004Main,
+} from './register-erc8004.mjs';
 
 async function run() {
+    assert.equal(inferRegistryNetworkFromChainId(1), 'ethereum');
+    assert.equal(inferRegistryNetworkFromChainId(56), 'bsc');
+    assert.equal(inferRegistryNetworkFromChainId(97), 'bsc-testnet');
+    assert.equal(inferRegistryNetworkFromChainId(100), 'gnosis');
+    assert.equal(inferRegistryNetworkFromChainId(137), 'polygon');
+    assert.equal(inferRegistryNetworkFromChainId(143), 'monad');
+    assert.equal(inferRegistryNetworkFromChainId(80002), 'polygon-amoy');
+    assert.equal(inferRegistryNetworkFromChainId(8453), 'base');
+    assert.equal(inferRegistryNetworkFromChainId(84532), 'base-sepolia');
+    assert.equal(inferRegistryNetworkFromChainId(10143), 'monad-testnet');
+    assert.equal(inferRegistryNetworkFromChainId(11155111), 'ethereum-sepolia');
+    assert.equal(inferRegistryNetworkFromChainId(534351), 'scroll-testnet');
+    assert.equal(inferRegistryNetworkFromChainId(534352), 'scroll');
+    assert.equal(inferRegistryNetworkFromChainId(31337), undefined);
+
     let writeContractCalled = false;
     let readFileCalled = false;
     let writeFileCalled = false;
