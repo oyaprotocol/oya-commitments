@@ -340,6 +340,13 @@ function createProposalPublicationApiServer({
 
     async function submitPublishedRecord(record, { runtime, envelope }) {
         const existingSubmission = record.submission ?? { status: 'not_started' };
+        const observedSubmission = {
+            submittedAtMs: existingSubmission.submittedAtMs ?? null,
+            transactionHash: existingSubmission.transactionHash ?? null,
+            ogProposalHash: existingSubmission.ogProposalHash ?? null,
+            result: existingSubmission.result ?? null,
+            sideEffectsLikelyCommitted: Boolean(existingSubmission.sideEffectsLikelyCommitted),
+        };
         if (existingSubmission.status === 'resolved') {
             return {
                 record,
@@ -403,6 +410,9 @@ function createProposalPublicationApiServer({
                 transactions: envelope.transactions,
                 explanation: envelope.explanation,
                 onProposalTxSubmitted: async (transactionHash) => {
+                    observedSubmission.submittedAtMs = submittedAtMs;
+                    observedSubmission.transactionHash = transactionHash;
+                    observedSubmission.sideEffectsLikelyCommitted = true;
                     latestRecord = await saveSubmission(latestRecord, {
                         status: 'submitted',
                         submittedAtMs,
@@ -419,6 +429,11 @@ function createProposalPublicationApiServer({
             });
 
             if (result?.transactionHash) {
+                observedSubmission.submittedAtMs = observedSubmission.submittedAtMs ?? submittedAtMs;
+                observedSubmission.transactionHash = result.transactionHash;
+                observedSubmission.ogProposalHash = result.ogProposalHash ?? null;
+                observedSubmission.result = result;
+                observedSubmission.sideEffectsLikelyCommitted = true;
                 latestRecord = await saveSubmission(latestRecord, {
                     status: result.ogProposalHash ? 'resolved' : 'submitted',
                     submittedAtMs:
@@ -436,6 +451,10 @@ function createProposalPublicationApiServer({
             }
 
             if (result?.skipped) {
+                observedSubmission.result = result;
+                observedSubmission.sideEffectsLikelyCommitted = Boolean(
+                    result.sideEffectsLikelyCommitted
+                );
                 latestRecord = await saveSubmission(latestRecord, {
                     status: 'resolved',
                     result,
@@ -449,6 +468,9 @@ function createProposalPublicationApiServer({
             }
 
             const sideEffectsLikelyCommitted = Boolean(result?.sideEffectsLikelyCommitted);
+            observedSubmission.result = result ?? null;
+            observedSubmission.sideEffectsLikelyCommitted =
+                observedSubmission.sideEffectsLikelyCommitted || sideEffectsLikelyCommitted;
             const nextStatus = sideEffectsLikelyCommitted ? 'uncertain' : 'failed';
             latestRecord = await saveSubmission(latestRecord, {
                 status: nextStatus,
@@ -513,36 +535,62 @@ function createProposalPublicationApiServer({
                 };
             }
 
-            const sideEffectsLikelyCommitted = hasCommittedToolSideEffects(error);
-            latestRecord = await saveSubmission(latestRecord, {
-                status: sideEffectsLikelyCommitted ? 'uncertain' : 'failed',
-                result: null,
+            const sideEffectsLikelyCommitted =
+                Boolean(observedSubmission.transactionHash) ||
+                observedSubmission.sideEffectsLikelyCommitted ||
+                hasCommittedToolSideEffects(error);
+            const nextStatus = sideEffectsLikelyCommitted ? 'uncertain' : 'failed';
+            const fallbackSubmission = {
+                status: nextStatus,
+                ...(observedSubmission.submittedAtMs !== null
+                    ? { submittedAtMs: observedSubmission.submittedAtMs }
+                    : {}),
+                ...(observedSubmission.transactionHash
+                    ? { transactionHash: observedSubmission.transactionHash }
+                    : {}),
+                ...(observedSubmission.ogProposalHash
+                    ? { ogProposalHash: observedSubmission.ogProposalHash }
+                    : {}),
+                result:
+                    observedSubmission.result ??
+                    (sideEffectsLikelyCommitted ? latestRecord.submission?.result ?? null : null),
                 error: buildSubmissionErrorPayload({
                     code:
-                        sideEffectsLikelyCommitted
+                        nextStatus === 'uncertain'
                             ? 'submission_uncertain'
                             : 'submission_failed',
                     message: error?.message ?? String(error),
                 }),
                 sideEffectsLikelyCommitted,
-            });
+            };
+            try {
+                latestRecord = await saveSubmission(latestRecord, fallbackSubmission);
+            } catch (_persistError) {
+                latestRecord = {
+                    ...latestRecord,
+                    submission: {
+                        ...(latestRecord.submission ?? {}),
+                        ...fallbackSubmission,
+                    },
+                };
+            }
             throw new ApiResponseError(
-                sideEffectsLikelyCommitted
+                nextStatus === 'uncertain'
                     ? 'Proposal submission may already have side effects onchain. Automatic retry has been blocked.'
                     : error?.message ?? 'Proposal submission failed.',
                 {
-                    statusCode: sideEffectsLikelyCommitted ? 409 : 502,
+                    statusCode: nextStatus === 'uncertain' ? 409 : 502,
                     code:
-                        sideEffectsLikelyCommitted
+                        nextStatus === 'uncertain'
                             ? 'submission_uncertain'
                             : 'submission_failed',
                     body: {
                         error:
-                            sideEffectsLikelyCommitted
+                            nextStatus === 'uncertain'
                                 ? 'Proposal submission may already have side effects onchain. Automatic retry has been blocked.'
                                 : error?.message ?? 'Proposal submission failed.',
                         code:
-                            sideEffectsLikelyCommitted
+                            nextStatus === 'uncertain'
                                 ? 'submission_uncertain'
                                 : 'submission_failed',
                         submission: buildSubmissionResponse(latestRecord.submission),

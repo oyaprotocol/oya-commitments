@@ -697,6 +697,121 @@ async function main() {
         } finally {
             await proposeApi.stop();
         }
+
+        const uncertainPersistStateFile = path.join(
+            tempDir,
+            'proposal-publications-propose-uncertain.json'
+        );
+        const uncertainPersistStoreBase = createProposalPublicationStore({
+            stateFile: uncertainPersistStateFile,
+        });
+        const observedTxHash = `0x${'a'.repeat(64)}`;
+        let observedTxPersistFailures = 0;
+        let uncertainSubmitAttempts = 0;
+        const uncertainPersistStore = {
+            async getRecord(args) {
+                return uncertainPersistStoreBase.getRecord(args);
+            },
+            async prepareRecord(args) {
+                return uncertainPersistStoreBase.prepareRecord(args);
+            },
+            async saveRecord(record) {
+                if (
+                    record.submission?.transactionHash === observedTxHash &&
+                    observedTxPersistFailures === 0
+                ) {
+                    observedTxPersistFailures += 1;
+                    throw new Error('simulated submission store write failure');
+                }
+                return uncertainPersistStoreBase.saveRecord(record);
+            },
+        };
+        const uncertainPersistApi = createProposalPublicationApiServer({
+            config: buildServerConfig(account.address, {
+                chainId: undefined,
+                proposalPublishApiMode: 'propose',
+            }),
+            store: uncertainPersistStore,
+            logger: {
+                info() {},
+                warn() {},
+            },
+            resolveProposalRuntime: async ({ chainId }) => ({
+                runtimeConfig: {
+                    chainId,
+                    proposeEnabled: true,
+                    bondSpender: 'og',
+                    proposalHashResolveTimeoutMs: 1,
+                    proposalHashResolvePollIntervalMs: 1,
+                },
+                publicClient: {
+                    async getChainId() {
+                        return chainId;
+                    },
+                },
+                walletClient: {},
+                account: { address: account.address },
+            }),
+            submitProposal: async ({ explanation }) => {
+                uncertainSubmitAttempts += 1;
+                assert.equal(explanation, 'Observed tx before store failure.');
+                return {
+                    transactionHash: observedTxHash,
+                    proposalHash: observedTxHash,
+                    ogProposalHash: null,
+                    sideEffectsLikelyCommitted: true,
+                };
+            },
+            resolveProposalHash: async () => null,
+        });
+        const uncertainPersistServer = await uncertainPersistApi.start();
+        const uncertainPersistAddress = uncertainPersistServer.address();
+        assert.ok(
+            uncertainPersistAddress &&
+                typeof uncertainPersistAddress === 'object' &&
+                typeof uncertainPersistAddress.port === 'number'
+        );
+        const uncertainPersistBaseUrl = `http://127.0.0.1:${uncertainPersistAddress.port}`;
+
+        try {
+            const uncertainPersistRequest = await buildSignedBody({
+                account,
+                chainId: 11155111,
+                requestId: 'submit-observed-tx-store-failure',
+                explanation: 'Observed tx before store failure.',
+            });
+            const uncertainPersistFirst = await postPublication(
+                uncertainPersistBaseUrl,
+                uncertainPersistRequest.body
+            );
+            assert.equal(uncertainPersistFirst.status, 409);
+            assert.equal(uncertainPersistFirst.json.code, 'submission_uncertain');
+            assert.equal(uncertainPersistFirst.json.submission.status, 'uncertain');
+            assert.equal(
+                uncertainPersistFirst.json.submission.transactionHash,
+                observedTxHash
+            );
+            assert.equal(uncertainSubmitAttempts, 1);
+
+            const uncertainPersistRecord = await uncertainPersistStoreBase.getRecord({
+                signer: account.address,
+                chainId: 11155111,
+                requestId: 'submit-observed-tx-store-failure',
+            });
+            assert.equal(uncertainPersistRecord.submission.status, 'uncertain');
+            assert.equal(uncertainPersistRecord.submission.transactionHash, observedTxHash);
+
+            const uncertainPersistSecond = await postPublication(
+                uncertainPersistBaseUrl,
+                uncertainPersistRequest.body
+            );
+            assert.equal(uncertainPersistSecond.status, 409);
+            assert.equal(uncertainPersistSecond.json.code, 'submission_uncertain');
+            assert.equal(uncertainPersistSecond.json.submission.status, 'uncertain');
+            assert.equal(uncertainSubmitAttempts, 1);
+        } finally {
+            await uncertainPersistApi.stop();
+        }
     } finally {
         Date.now = originalDateNow;
         globalThis.fetch = originalFetch;

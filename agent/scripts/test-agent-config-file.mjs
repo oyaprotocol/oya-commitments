@@ -10,6 +10,7 @@ import {
     resolveConfiguredChainId,
     resolveAgentRuntimeConfig,
 } from '../src/lib/agent-config.js';
+import { initializeAgentRuntime } from '../src/lib/runtime-bootstrap.js';
 
 const RPC_URL = 'http://127.0.0.1:8545';
 const BASE_ERC20 = '0x1111111111111111111111111111111111111111';
@@ -720,6 +721,64 @@ async function run() {
             }),
         /selects chainId 11155111, but received conflicting chainId 137/
     );
+
+    const observedBootstrapPublicClientRpcUrls = [];
+    const observedBootstrapSignerRpcUrls = [];
+    const bootstrapRuntime = await initializeAgentRuntime({
+        loadRuntimeEnvFn() {},
+        buildConfigFn: () => ({
+            ...baseConfig,
+            agentModule: 'bootstrap-test',
+            chainId: undefined,
+            messageApiEnabled: false,
+        }),
+        assertNoDeprecatedConfigEnvVarsFn() {},
+        loadAgentModuleFn: async () => ({
+            agentModule: {},
+            commitmentText: 'bootstrap test commitment',
+            agentConfigFile: {
+                raw: {
+                    byChain: {
+                        '11155111': {
+                            rpcUrl: 'https://rpc.sepolia.final',
+                            commitmentSafe: FILE_SAFE,
+                            ogModule: FILE_OG,
+                        },
+                        '137': {
+                            rpcUrl: 'https://rpc.polygon.final',
+                            commitmentSafe: BASE_SAFE,
+                            ogModule: BASE_OG,
+                        },
+                    },
+                },
+                sourceLabel: 'bootstrap test agent config',
+            },
+        }),
+        httpTransportFn: (rpcUrl) => ({ rpcUrl }),
+        createPublicClientFn: ({ transport }) => {
+            observedBootstrapPublicClientRpcUrls.push(transport.rpcUrl);
+            return {
+                async getChainId() {
+                    return 11155111;
+                },
+            };
+        },
+        createSignerClientFn: async ({ rpcUrl }) => {
+            observedBootstrapSignerRpcUrls.push(rpcUrl);
+            return {
+                account: { address: FILE_SIGNER },
+                walletClient: { rpcUrl },
+            };
+        },
+        validateMessageApiDecisionEngineFn() {},
+    });
+    assert.equal(bootstrapRuntime.config.rpcUrl, 'https://rpc.sepolia.final');
+    assert.deepEqual(observedBootstrapPublicClientRpcUrls, [
+        RPC_URL,
+        'https://rpc.sepolia.final',
+    ]);
+    assert.deepEqual(observedBootstrapSignerRpcUrls, ['https://rpc.sepolia.final']);
+    assert.equal(bootstrapRuntime.agentAddress, FILE_SIGNER);
 
     console.log('[test] agent config file OK');
 }
