@@ -488,6 +488,37 @@ async function run() {
     assert.equal(selectedChainProposeServerConfig.runtimeConfig.chainId, 11155111);
     assert.deepEqual(selectedChainProposeServerConfig.supportedChainIds, [11155111]);
 
+    let selectedChainConstructedClient = false;
+    const selectedChainRuntimeResolver = await createProposalPublishSubmissionRuntimeResolver({
+        agentRef: 'selected-chain-propose',
+        env: {},
+        repoRootPath,
+        argv: [
+            'node',
+            'start-proposal-publish-node.mjs',
+            '--module=selected-chain-propose',
+            '--chain-id=11155111',
+        ],
+        createPublicClientFn: () => {
+            selectedChainConstructedClient = true;
+            throw new Error('should not construct public client for chain outside startup selection');
+        },
+        createSignerClientFn: async () => {
+            selectedChainConstructedClient = true;
+            throw new Error('should not construct signer client for chain outside startup selection');
+        },
+    });
+
+    await assert.rejects(
+        () => selectedChainRuntimeResolver({ chainId: 137 }),
+        (error) =>
+            error?.code === 'unsupported_chain' &&
+            error?.statusCode === 400 &&
+            /does not support proposal submission for chainId 137/.test(error.message) &&
+            /Supported chainIds: 11155111/.test(error.message)
+    );
+    assert.equal(selectedChainConstructedClient, false);
+
     await createAgentModule(repoRootPath, 'multichain-propose-mode-mismatch', {
         proposalPublishApi: {
             enabled: true,
