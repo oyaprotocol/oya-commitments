@@ -6,9 +6,16 @@ import { canonicalizeJson, isPlainObject } from './canonical-json.js';
 
 const STORE_VERSION = 'oya-proposal-publication-store-v1';
 const storeOperationTails = new Map();
+const SUBMISSION_STATUSES = new Set(['not_started', 'submitted', 'resolved', 'failed', 'uncertain']);
 
 function cloneJson(value) {
-    return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+    return value === undefined
+        ? undefined
+        : JSON.parse(
+              JSON.stringify(value, (_key, item) =>
+                  typeof item === 'bigint' ? item.toString() : item
+              )
+          );
 }
 
 function normalizeRequestId(requestId, label = 'requestId') {
@@ -49,6 +56,70 @@ function normalizeOptionalString(value, label) {
         throw new Error(`${label} must be a non-empty string when provided.`);
     }
     return value.trim();
+}
+
+function normalizeOptionalHash(value, label) {
+    if (value === undefined || value === null) {
+        return null;
+    }
+    if (typeof value !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(value)) {
+        throw new Error(`${label} must be a 32-byte hex string when provided.`);
+    }
+    return value.toLowerCase();
+}
+
+function createEmptySubmissionState() {
+    return {
+        status: 'not_started',
+        submittedAtMs: null,
+        transactionHash: null,
+        ogProposalHash: null,
+        result: null,
+        error: null,
+        sideEffectsLikelyCommitted: false,
+    };
+}
+
+function normalizeSubmissionState(value, label) {
+    if (value === undefined || value === null) {
+        return createEmptySubmissionState();
+    }
+    if (!isPlainObject(value)) {
+        throw new Error(`${label} must be an object.`);
+    }
+
+    const statusRaw = value.status ?? 'not_started';
+    const status =
+        typeof statusRaw === 'string' && SUBMISSION_STATUSES.has(statusRaw.trim().toLowerCase())
+            ? statusRaw.trim().toLowerCase()
+            : (() => {
+                  throw new Error(
+                      `${label}.status must be one of: ${Array.from(SUBMISSION_STATUSES).join(', ')}.`
+                  );
+              })();
+
+    const normalized = {
+        status,
+        submittedAtMs: normalizeOptionalTimestamp(value.submittedAtMs, `${label}.submittedAtMs`),
+        transactionHash: normalizeOptionalHash(value.transactionHash, `${label}.transactionHash`),
+        ogProposalHash: normalizeOptionalHash(value.ogProposalHash, `${label}.ogProposalHash`),
+        result: value.result === undefined ? null : cloneJson(value.result),
+        error: value.error === undefined ? null : cloneJson(value.error),
+        sideEffectsLikelyCommitted: Boolean(value.sideEffectsLikelyCommitted),
+    };
+
+    if (normalized.ogProposalHash !== null && normalized.transactionHash === null) {
+        throw new Error(`${label}.transactionHash must be set when ogProposalHash exists.`);
+    }
+    if (
+        (normalized.status === 'submitted' || normalized.status === 'resolved') &&
+        normalized.submittedAtMs === null &&
+        normalized.transactionHash !== null
+    ) {
+        throw new Error(`${label}.submittedAtMs must be set once transactionHash exists.`);
+    }
+
+    return normalized;
 }
 
 function deriveStoredRecordChainId(record, label = 'record') {
@@ -118,6 +189,7 @@ function normalizeStoredRecord(record, label = 'record') {
         publishResult: record.publishResult === undefined ? null : cloneJson(record.publishResult),
         pinResult: record.pinResult === undefined ? null : cloneJson(record.pinResult),
         lastError: record.lastError === undefined ? null : cloneJson(record.lastError),
+        submission: normalizeSubmissionState(record.submission, `${label}.submission`),
         createdAtMs: normalizeTimestamp(
             record.createdAtMs ?? record.receivedAtMs,
             `${label}.createdAtMs`
@@ -271,6 +343,7 @@ function createProposalPublicationStore({ stateFile }) {
                     publishResult: null,
                     pinResult: null,
                     lastError: null,
+                    submission: createEmptySubmissionState(),
                     createdAtMs: nowMs,
                     updatedAtMs: nowMs,
                 },

@@ -14,6 +14,7 @@ import {
 } from './decision-support.js';
 import { createMessageInbox } from './message-inbox.js';
 import { createSignerClient } from './signer.js';
+import { createValidatedReadWriteRuntime } from './chain-runtime.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -90,23 +91,37 @@ function resolvePollingOptions({ agentModule, commitmentText }) {
     }
 }
 
-export async function initializeAgentRuntime() {
-    loadRuntimeEnv();
+export async function initializeAgentRuntime({
+    loadRuntimeEnvFn = loadRuntimeEnv,
+    buildConfigFn = buildConfig,
+    assertNoDeprecatedConfigEnvVarsFn = assertNoDeprecatedConfigEnvVars,
+    loadAgentModuleFn = loadAgentModule,
+    createPublicClientFn = createPublicClient,
+    createSignerClientFn = createSignerClient,
+    httpTransportFn = http,
+    validateMessageApiDecisionEngineFn = validateMessageApiDecisionEngine,
+} = {}) {
+    loadRuntimeEnvFn();
 
-    const config = buildConfig();
+    const config = buildConfigFn();
     const agentRef = config.agentModule ?? 'default';
-    assertNoDeprecatedConfigEnvVars({
+    assertNoDeprecatedConfigEnvVarsFn({
         env: process.env,
         agentModuleName: normalizeAgentModuleName(agentRef),
     });
 
-    const publicClient = createPublicClient({ transport: http(config.rpcUrl) });
-    const { account, walletClient } = await createSignerClient({ rpcUrl: config.rpcUrl });
-    const agentAddress = account.address;
-    const { agentModule, commitmentText, agentConfigFile } = await loadAgentModule({
+    const { agentModule, commitmentText, agentConfigFile } = await loadAgentModuleFn({
         agentModuleRef: agentRef,
     });
-    const runtimeChainId = await publicClient.getChainId();
+    const provisionalConfig = resolveAgentRuntimeConfig({
+        baseConfig: config,
+        agentConfigFile,
+        allowAmbiguousChainId: true,
+    });
+    const provisionalPublicClient = createPublicClientFn({
+        transport: httpTransportFn(provisionalConfig.rpcUrl),
+    });
+    const runtimeChainId = await provisionalPublicClient.getChainId();
     resolveConfiguredChainId({
         agentConfigFile,
         explicitChainId: runtimeChainId,
@@ -120,6 +135,16 @@ export async function initializeAgentRuntime() {
             chainId: runtimeChainId,
         })
     );
+    const { publicClient, account, walletClient } = await createValidatedReadWriteRuntime({
+        rpcUrl: config.rpcUrl,
+        expectedChainId: runtimeChainId,
+        publicClientLabel: 'Resolved runtime rpcUrl',
+        signerClientLabel: 'Resolved runtime signer',
+        createPublicClientFn,
+        createSignerClientFn,
+        httpTransportFn,
+    });
+    const agentAddress = account.address;
 
     if (!config.commitmentSafe) {
         throw new Error(
@@ -136,7 +161,7 @@ export async function initializeAgentRuntime() {
         config.watchAssets.map((asset) => String(asset).toLowerCase())
     );
     const messageInbox = createRuntimeMessageInbox(config);
-    validateMessageApiDecisionEngine({ config, agentModule });
+    validateMessageApiDecisionEngineFn({ config, agentModule });
 
     return {
         config,
