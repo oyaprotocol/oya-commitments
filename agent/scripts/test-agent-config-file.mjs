@@ -10,6 +10,7 @@ import {
     resolveConfiguredChainId,
     resolveAgentRuntimeConfig,
 } from '../src/lib/agent-config.js';
+import { initializeAgentRuntime } from '../src/lib/runtime-bootstrap.js';
 
 const RPC_URL = 'http://127.0.0.1:8545';
 const BASE_ERC20 = '0x1111111111111111111111111111111111111111';
@@ -66,6 +67,7 @@ async function run() {
     });
 
     const baseConfig = {
+        rpcUrl: RPC_URL,
         commitmentSafe: BASE_SAFE,
         ogModule: BASE_OG,
         watchAssets: [BASE_ERC20],
@@ -142,6 +144,17 @@ async function run() {
         messageApiIdempotencyTtlSeconds: 86400,
         messageApiRateLimitPerMinute: 30,
         messageApiRateLimitBurst: 10,
+        proposalPublishApiEnabled: false,
+        proposalPublishApiHost: '127.0.0.1',
+        proposalPublishApiPort: 9890,
+        proposalPublishApiMode: 'publish',
+        proposalPublishApiKeys: { env: 'proposal-token' },
+        proposalPublishApiRequireSignerAllowlist: true,
+        proposalPublishApiSignerAllowlist: [],
+        proposalPublishApiSignatureMaxAgeSeconds: 300,
+        proposalPublishApiMaxBodyBytes: 65536,
+        proposalPublishApiStateFile: undefined,
+        proposalPublishApiNodeName: undefined,
         chainId: undefined,
     };
 
@@ -165,6 +178,7 @@ async function run() {
             {
                 policyName: 'fast-withdraw',
                 chainId: 11155111,
+                rpcUrl: 'https://rpc.shared.example',
                 commitmentSafe: FILE_SAFE,
                 watchAssets: [FILE_ERC20],
                 pollIntervalMs: 15_000,
@@ -229,8 +243,18 @@ async function run() {
                     signerAllowlist: [FILE_SIGNER],
                     rateLimitPerMinute: 12,
                 },
+                proposalPublishApi: {
+                    enabled: true,
+                    host: 'proposal.shared.example',
+                    port: 9890,
+                    mode: 'publish',
+                    requireSignerAllowlist: true,
+                    signerAllowlist: [FILE_SIGNER],
+                    nodeName: 'shared-node',
+                },
                 byChain: {
                     '11155111': {
+                        rpcUrl: 'https://rpc.sepolia.example',
                         ogModule: FILE_OG,
                         watchAssets: [FILE_CHAIN_ERC20],
                         startBlock: '999999',
@@ -245,6 +269,11 @@ async function run() {
                             requireSignerAllowlist: false,
                             signerAllowlist: [CHAIN_SIGNER],
                             batchSize: 7,
+                        },
+                        proposalPublishApi: {
+                            mode: 'propose',
+                            port: 9891,
+                            signerAllowlist: [CHAIN_SIGNER],
                         },
                         watchErc1155Assets: [
                             {
@@ -286,6 +315,7 @@ async function run() {
     assert.equal(resolved.ogModule, FILE_OG);
     assert.equal(resolved.agentConfig.commitmentSafe, FILE_SAFE);
     assert.equal(resolved.agentConfig.ogModule, FILE_OG);
+    assert.equal(resolved.rpcUrl, 'https://rpc.sepolia.example');
     assert.equal(resolved.pollIntervalMs, 15_000);
     assert.equal(resolved.logChunkSize, 9000n);
     assert.equal(resolved.startBlock, 999999n);
@@ -350,6 +380,17 @@ async function run() {
     assert.equal(resolved.messageApiBatchSize, 7);
     assert.equal(resolved.messageApiRateLimitPerMinute, 12);
     assert.deepEqual(resolved.agentConfig.messageApi.signerAllowlist, [getAddress(CHAIN_SIGNER)]);
+    assert.equal(resolved.proposalPublishApiEnabled, true);
+    assert.equal(resolved.proposalPublishApiHost, 'proposal.shared.example');
+    assert.equal(resolved.proposalPublishApiPort, 9891);
+    assert.equal(resolved.proposalPublishApiMode, 'propose');
+    assert.deepEqual(resolved.proposalPublishApiKeys, { env: 'proposal-token' });
+    assert.equal(resolved.proposalPublishApiRequireSignerAllowlist, true);
+    assert.deepEqual(resolved.proposalPublishApiSignerAllowlist, [getAddress(CHAIN_SIGNER)]);
+    assert.equal(resolved.proposalPublishApiNodeName, 'shared-node');
+    assert.deepEqual(resolved.agentConfig.proposalPublishApi.signerAllowlist, [
+        getAddress(CHAIN_SIGNER),
+    ]);
 
     const configLocalPath = path.join(tmpDir, 'config.local.json');
     const overlayOnePath = path.join(tmpDir, 'overlay-one.json');
@@ -604,6 +645,14 @@ async function run() {
     });
     assert.equal(explicitAmbiguousResolved.chainId, 137);
     assert.equal(explicitAmbiguousResolved.messageApiPort, 9000);
+    const provisionalAmbiguousResolved = resolveAgentRuntimeConfig({
+        baseConfig,
+        agentConfigFile: ambiguousChainFile,
+        allowAmbiguousChainId: true,
+    });
+    assert.equal(provisionalAmbiguousResolved.chainId, undefined);
+    assert.equal(provisionalAmbiguousResolved.rpcUrl, RPC_URL);
+    assert.equal(provisionalAmbiguousResolved.messageApiPort, baseConfig.messageApiPort);
 
     await writeFile(
         configPath,
@@ -671,6 +720,121 @@ async function run() {
                 explicitChainId: 137,
             }),
         /selects chainId 11155111, but received conflicting chainId 137/
+    );
+
+    const observedBootstrapPublicClientRpcUrls = [];
+    const observedBootstrapSignerRpcUrls = [];
+    const bootstrapRuntime = await initializeAgentRuntime({
+        loadRuntimeEnvFn() {},
+        buildConfigFn: () => ({
+            ...baseConfig,
+            agentModule: 'bootstrap-test',
+            chainId: undefined,
+            messageApiEnabled: false,
+        }),
+        assertNoDeprecatedConfigEnvVarsFn() {},
+        loadAgentModuleFn: async () => ({
+            agentModule: {},
+            commitmentText: 'bootstrap test commitment',
+            agentConfigFile: {
+                raw: {
+                    byChain: {
+                        '11155111': {
+                            rpcUrl: 'https://rpc.sepolia.final',
+                            commitmentSafe: FILE_SAFE,
+                            ogModule: FILE_OG,
+                        },
+                        '137': {
+                            rpcUrl: 'https://rpc.polygon.final',
+                            commitmentSafe: BASE_SAFE,
+                            ogModule: BASE_OG,
+                        },
+                    },
+                },
+                sourceLabel: 'bootstrap test agent config',
+            },
+        }),
+        httpTransportFn: (rpcUrl) => ({ rpcUrl }),
+        createPublicClientFn: ({ transport }) => {
+            observedBootstrapPublicClientRpcUrls.push(transport.rpcUrl);
+            return {
+                async getChainId() {
+                    return 11155111;
+                },
+            };
+        },
+        createSignerClientFn: async ({ rpcUrl }) => {
+            observedBootstrapSignerRpcUrls.push(rpcUrl);
+            return {
+                account: { address: FILE_SIGNER },
+                walletClient: {
+                    rpcUrl,
+                    async getChainId() {
+                        return 11155111;
+                    },
+                },
+            };
+        },
+        validateMessageApiDecisionEngineFn() {},
+    });
+    assert.equal(bootstrapRuntime.config.rpcUrl, 'https://rpc.sepolia.final');
+    assert.deepEqual(observedBootstrapPublicClientRpcUrls, [
+        RPC_URL,
+        'https://rpc.sepolia.final',
+    ]);
+    assert.deepEqual(observedBootstrapSignerRpcUrls, ['https://rpc.sepolia.final']);
+    assert.equal(bootstrapRuntime.agentAddress, FILE_SIGNER);
+
+    let bootstrapClientCallCount = 0;
+    await assert.rejects(
+        () =>
+            initializeAgentRuntime({
+                loadRuntimeEnvFn() {},
+                buildConfigFn: () => ({
+                    ...baseConfig,
+                    agentModule: 'bootstrap-test-mismatch',
+                    chainId: undefined,
+                    messageApiEnabled: false,
+                }),
+                assertNoDeprecatedConfigEnvVarsFn() {},
+                loadAgentModuleFn: async () => ({
+                    agentModule: {},
+                    commitmentText: 'bootstrap test commitment',
+                    agentConfigFile: {
+                        raw: {
+                            byChain: {
+                                '11155111': {
+                                    rpcUrl: 'https://rpc.sepolia.mismatch',
+                                    commitmentSafe: FILE_SAFE,
+                                    ogModule: FILE_OG,
+                                },
+                            },
+                        },
+                        sourceLabel: 'bootstrap mismatch agent config',
+                    },
+                }),
+                httpTransportFn: (rpcUrl) => ({ rpcUrl }),
+                createPublicClientFn: ({ transport }) => {
+                    bootstrapClientCallCount += 1;
+                    return {
+                        async getChainId() {
+                            return bootstrapClientCallCount === 1 ? 11155111 : 137;
+                        },
+                        transport,
+                    };
+                },
+                createSignerClientFn: async ({ rpcUrl }) => ({
+                    account: { address: FILE_SIGNER },
+                    walletClient: {
+                        rpcUrl,
+                        async getChainId() {
+                            return 11155111;
+                        },
+                    },
+                }),
+                validateMessageApiDecisionEngineFn() {},
+            }),
+        /Resolved runtime rpcUrl for chainId 11155111 is connected to chainId 137/
     );
 
     console.log('[test] agent config file OK');

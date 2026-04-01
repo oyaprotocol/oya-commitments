@@ -23,7 +23,7 @@ const TEST_TRANSACTIONS = [
     },
 ];
 
-function buildServerConfig(signerAddress) {
+function buildServerConfig(signerAddress, overrides = {}) {
     return {
         chainId: TEST_CHAIN_ID,
         ipfsEnabled: true,
@@ -36,6 +36,7 @@ function buildServerConfig(signerAddress) {
         ipfsRetryDelayMs: 0,
         proposalPublishApiHost: '127.0.0.1',
         proposalPublishApiPort: 0,
+        proposalPublishApiMode: 'publish',
         proposalPublishApiKeys: {
             ops: 'k_test_ops_secret',
         },
@@ -44,6 +45,7 @@ function buildServerConfig(signerAddress) {
         proposalPublishApiSignatureMaxAgeSeconds: 300,
         proposalPublishApiMaxBodyBytes: 65_536,
         proposalPublishApiNodeName: 'test-node',
+        ...overrides,
     };
 }
 
@@ -225,7 +227,7 @@ async function main() {
     assert.ok(address && typeof address === 'object' && typeof address.port === 'number');
     const baseUrl = `http://127.0.0.1:${address.port}`;
     assert.equal(logger.infos.length, 1);
-    assert.match(logger.infos[0], /Proposal publish API listening on/);
+    assert.match(logger.infos[0], /Proposal publish API \(publish\) listening on/);
 
     try {
         const health = await fetch(`${baseUrl}/healthz`);
@@ -429,6 +431,497 @@ async function main() {
         assert.equal(resignedRecord.canonicalMessage, resignedSecond.payload);
         assert.ok(resignedRecord.publishedAtMs >= retryBaseNowMs + 801_000);
         assert.equal(addAttemptsByRequestId.get('publish-retry-resigned'), 2);
+
+        const proposeStateFile = path.join(tempDir, 'proposal-publications-propose.json');
+        const proposeStore = createProposalPublicationStore({ stateFile: proposeStateFile });
+        const submitAttemptsByExplanation = new Map();
+        const resolvedProposalHashes = new Map([
+            [`0x${'3'.repeat(64)}`, `0x${'4'.repeat(64)}`],
+        ]);
+        const resolveProposalHashCalls = [];
+        const proposalRuntimeAvailableByChain = new Map([
+            [11155111, true],
+            [137, true],
+        ]);
+        const proposeApi = createProposalPublicationApiServer({
+            config: buildServerConfig(account.address, {
+                chainId: undefined,
+                proposalPublishApiMode: 'propose',
+            }),
+            store: proposeStore,
+            logger: {
+                info() {},
+                warn() {},
+            },
+            resolveProposalRuntime: async ({ chainId }) => {
+                if (proposalRuntimeAvailableByChain.get(chainId) === false) {
+                    const error = new Error(`Proposal runtime unavailable for chainId ${chainId}.`);
+                    error.code = 'proposal_runtime_unavailable';
+                    error.statusCode = 502;
+                    throw error;
+                }
+                if (chainId !== 11155111 && chainId !== 137) {
+                    const error = new Error(`Unsupported chainId ${chainId}.`);
+                    error.code = 'unsupported_chain';
+                    error.statusCode = 400;
+                    throw error;
+                }
+                return {
+                    runtimeConfig: {
+                        chainId,
+                        proposeEnabled: true,
+                        bondSpender: 'og',
+                        proposalHashResolveTimeoutMs: 1,
+                        proposalHashResolvePollIntervalMs: 1,
+                    },
+                    publicClient: {
+                        async getChainId() {
+                            return chainId;
+                        },
+                    },
+                    walletClient: {},
+                    account: { address: account.address },
+                };
+            },
+            submitProposal: async ({ config, explanation }) => {
+                submitAttemptsByExplanation.set(
+                    explanation,
+                    (submitAttemptsByExplanation.get(explanation) ?? 0) + 1
+                );
+                if (explanation === 'Retry after submission failure.') {
+                    if (submitAttemptsByExplanation.get(explanation) === 1) {
+                        throw new Error('submit unavailable');
+                    }
+                    return {
+                        transactionHash: `0x${'5'.repeat(64)}`,
+                        proposalHash: `0x${'6'.repeat(64)}`,
+                        ogProposalHash: `0x${'6'.repeat(64)}`,
+                        sideEffectsLikelyCommitted: true,
+                    };
+                }
+                if (explanation === 'Resolve proposal hash on duplicate retry.') {
+                    return {
+                        transactionHash: `0x${'3'.repeat(64)}`,
+                        proposalHash: `0x${'3'.repeat(64)}`,
+                        ogProposalHash: null,
+                        sideEffectsLikelyCommitted: true,
+                    };
+                }
+                if (explanation === 'Duplicate while runtime unavailable.') {
+                    return {
+                        transactionHash: `0x${'9'.repeat(64)}`,
+                        proposalHash: `0x${'9'.repeat(64)}`,
+                        ogProposalHash: null,
+                        sideEffectsLikelyCommitted: true,
+                    };
+                }
+                if (explanation === 'Propose success on polygon.') {
+                    assert.equal(config.chainId, 137);
+                    return {
+                        transactionHash: `0x${'7'.repeat(64)}`,
+                        proposalHash: `0x${'8'.repeat(64)}`,
+                        ogProposalHash: `0x${'8'.repeat(64)}`,
+                        sideEffectsLikelyCommitted: true,
+                    };
+                }
+                assert.equal(config.chainId, 11155111);
+                return {
+                    transactionHash: `0x${'1'.repeat(64)}`,
+                    proposalHash: `0x${'2'.repeat(64)}`,
+                    ogProposalHash: `0x${'2'.repeat(64)}`,
+                    sideEffectsLikelyCommitted: true,
+                };
+            },
+            resolveProposalHash: async ({ proposalTxHash }) => {
+                resolveProposalHashCalls.push(proposalTxHash);
+                return resolvedProposalHashes.get(proposalTxHash) ?? null;
+            },
+        });
+        const proposeServer = await proposeApi.start();
+        const proposeAddress = proposeServer.address();
+        assert.ok(
+            proposeAddress &&
+                typeof proposeAddress === 'object' &&
+                typeof proposeAddress.port === 'number'
+        );
+        const proposeBaseUrl = `http://127.0.0.1:${proposeAddress.port}`;
+
+        try {
+            const proposeAcceptedRequest = await buildSignedBody({
+                account,
+                chainId: 11155111,
+                requestId: 'propose-ok',
+                explanation: 'Propose success on sepolia.',
+            });
+            const proposeAccepted = await postPublication(
+                proposeBaseUrl,
+                proposeAcceptedRequest.body
+            );
+            assert.equal(proposeAccepted.status, 202);
+            assert.equal(proposeAccepted.json.status, 'published');
+            assert.equal(proposeAccepted.json.mode, 'propose');
+            assert.equal(proposeAccepted.json.submission.status, 'resolved');
+            assert.equal(
+                proposeAccepted.json.submission.transactionHash,
+                `0x${'1'.repeat(64)}`
+            );
+            assert.equal(submitAttemptsByExplanation.get('Propose success on sepolia.'), 1);
+
+            const proposeDuplicate = await postPublication(
+                proposeBaseUrl,
+                proposeAcceptedRequest.body
+            );
+            assert.equal(proposeDuplicate.status, 200);
+            assert.equal(proposeDuplicate.json.status, 'duplicate');
+            assert.equal(proposeDuplicate.json.submission.status, 'resolved');
+            assert.equal(submitAttemptsByExplanation.get('Propose success on sepolia.'), 1);
+
+            const retryFailureRequest = await buildSignedBody({
+                account,
+                chainId: 11155111,
+                requestId: 'submit-retry',
+                explanation: 'Retry after submission failure.',
+            });
+            const retryFailureFirst = await postPublication(
+                proposeBaseUrl,
+                retryFailureRequest.body
+            );
+            assert.equal(retryFailureFirst.status, 502);
+            assert.equal(retryFailureFirst.json.code, 'submission_failed');
+            assert.ok(retryFailureFirst.json.cid);
+            assert.equal(retryFailureFirst.json.submission.status, 'failed');
+            assert.equal(addAttemptsByRequestId.get('submit-retry'), 1);
+
+            const retryFailureSecond = await postPublication(
+                proposeBaseUrl,
+                retryFailureRequest.body
+            );
+            assert.equal(retryFailureSecond.status, 202);
+            assert.equal(retryFailureSecond.json.status, 'published');
+            assert.equal(retryFailureSecond.json.cid, retryFailureFirst.json.cid);
+            assert.equal(retryFailureSecond.json.submission.status, 'resolved');
+            assert.equal(
+                retryFailureSecond.json.submission.transactionHash,
+                `0x${'5'.repeat(64)}`
+            );
+            assert.equal(addAttemptsByRequestId.get('submit-retry'), 1);
+            assert.equal(submitAttemptsByExplanation.get('Retry after submission failure.'), 2);
+
+            const pendingSubmissionRequest = await buildSignedBody({
+                account,
+                chainId: 11155111,
+                requestId: 'submit-pending',
+                explanation: 'Resolve proposal hash on duplicate retry.',
+            });
+            const pendingSubmissionFirst = await postPublication(
+                proposeBaseUrl,
+                pendingSubmissionRequest.body
+            );
+            assert.equal(pendingSubmissionFirst.status, 202);
+            assert.equal(pendingSubmissionFirst.json.submission.status, 'submitted');
+            assert.equal(
+                pendingSubmissionFirst.json.submission.transactionHash,
+                `0x${'3'.repeat(64)}`
+            );
+
+            const pendingSubmissionSecond = await postPublication(
+                proposeBaseUrl,
+                pendingSubmissionRequest.body
+            );
+            assert.equal(pendingSubmissionSecond.status, 200);
+            assert.equal(pendingSubmissionSecond.json.status, 'duplicate');
+            assert.equal(pendingSubmissionSecond.json.submission.status, 'resolved');
+            assert.equal(
+                pendingSubmissionSecond.json.submission.ogProposalHash,
+                `0x${'4'.repeat(64)}`
+            );
+            assert.equal(
+                submitAttemptsByExplanation.get('Resolve proposal hash on duplicate retry.'),
+                1
+            );
+            assert.deepEqual(resolveProposalHashCalls, [`0x${'3'.repeat(64)}`]);
+
+            const runtimeOutageDuplicateRequest = await buildSignedBody({
+                account,
+                chainId: 11155111,
+                requestId: 'submit-pending-runtime-outage',
+                explanation: 'Duplicate while runtime unavailable.',
+            });
+            const runtimeOutageFirst = await postPublication(
+                proposeBaseUrl,
+                runtimeOutageDuplicateRequest.body
+            );
+            assert.equal(runtimeOutageFirst.status, 202);
+            assert.equal(runtimeOutageFirst.json.submission.status, 'submitted');
+            proposalRuntimeAvailableByChain.set(11155111, false);
+            const runtimeOutageDuplicate = await postPublication(
+                proposeBaseUrl,
+                runtimeOutageDuplicateRequest.body
+            );
+            assert.equal(runtimeOutageDuplicate.status, 200);
+            assert.equal(runtimeOutageDuplicate.json.status, 'duplicate');
+            assert.equal(runtimeOutageDuplicate.json.submission.status, 'submitted');
+            assert.equal(
+                submitAttemptsByExplanation.get('Duplicate while runtime unavailable.'),
+                1
+            );
+
+            const expiredWhileRuntimeDownRequest = await buildSignedBody({
+                account,
+                chainId: 11155111,
+                requestId: 'expired-while-runtime-down',
+                explanation: 'Expired request should not resolve runtime.',
+                timestampMs: Date.now() - 600_000,
+            });
+            const expiredWhileRuntimeDown = await postPublication(
+                proposeBaseUrl,
+                expiredWhileRuntimeDownRequest.body
+            );
+            assert.equal(expiredWhileRuntimeDown.status, 401);
+            assert.match(
+                expiredWhileRuntimeDown.json.error,
+                /Signed request expired or has an invalid timestamp/
+            );
+
+            const conflictingWhileRuntimeDownRequest = await buildSignedBody({
+                account,
+                chainId: 11155111,
+                requestId: 'propose-ok',
+                explanation: 'Conflict should beat runtime outage.',
+            });
+            const conflictingWhileRuntimeDown = await postPublication(
+                proposeBaseUrl,
+                conflictingWhileRuntimeDownRequest.body
+            );
+            assert.equal(conflictingWhileRuntimeDown.status, 409);
+            assert.equal(conflictingWhileRuntimeDown.json.code, 'request_conflict');
+            proposalRuntimeAvailableByChain.set(11155111, true);
+
+            const polygonRequest = await buildSignedBody({
+                account,
+                chainId: 137,
+                requestId: 'polygon-propose',
+                explanation: 'Propose success on polygon.',
+            });
+            const polygonAccepted = await postPublication(proposeBaseUrl, polygonRequest.body);
+            assert.equal(polygonAccepted.status, 202);
+            assert.equal(polygonAccepted.json.submission.status, 'resolved');
+            assert.equal(
+                polygonAccepted.json.submission.transactionHash,
+                `0x${'7'.repeat(64)}`
+            );
+
+            const unsupportedChainRequest = await buildSignedBody({
+                account,
+                chainId: 10,
+                requestId: 'unsupported-chain',
+                explanation: 'Unsupported chain request.',
+            });
+            const unsupportedChainResponse = await postPublication(
+                proposeBaseUrl,
+                unsupportedChainRequest.body
+            );
+            assert.equal(unsupportedChainResponse.status, 400);
+            assert.equal(unsupportedChainResponse.json.code, 'unsupported_chain');
+            assert.equal(addAttemptsByRequestId.get('unsupported-chain') ?? 0, 0);
+        } finally {
+            await proposeApi.stop();
+        }
+
+        const uncertainPersistStateFile = path.join(
+            tempDir,
+            'proposal-publications-propose-uncertain.json'
+        );
+        const uncertainPersistStoreBase = createProposalPublicationStore({
+            stateFile: uncertainPersistStateFile,
+        });
+        const observedTxHash = `0x${'a'.repeat(64)}`;
+        let observedTxPersistFailures = 0;
+        let uncertainSubmitAttempts = 0;
+        const uncertainPersistStore = {
+            async getRecord(args) {
+                return uncertainPersistStoreBase.getRecord(args);
+            },
+            async prepareRecord(args) {
+                return uncertainPersistStoreBase.prepareRecord(args);
+            },
+            async saveRecord(record) {
+                if (
+                    record.submission?.transactionHash === observedTxHash &&
+                    observedTxPersistFailures === 0
+                ) {
+                    observedTxPersistFailures += 1;
+                    throw new Error('simulated submission store write failure');
+                }
+                return uncertainPersistStoreBase.saveRecord(record);
+            },
+        };
+        const uncertainPersistApi = createProposalPublicationApiServer({
+            config: buildServerConfig(account.address, {
+                chainId: undefined,
+                proposalPublishApiMode: 'propose',
+            }),
+            store: uncertainPersistStore,
+            logger: {
+                info() {},
+                warn() {},
+            },
+            resolveProposalRuntime: async ({ chainId }) => ({
+                runtimeConfig: {
+                    chainId,
+                    proposeEnabled: true,
+                    bondSpender: 'og',
+                    proposalHashResolveTimeoutMs: 1,
+                    proposalHashResolvePollIntervalMs: 1,
+                },
+                publicClient: {
+                    async getChainId() {
+                        return chainId;
+                    },
+                },
+                walletClient: {},
+                account: { address: account.address },
+            }),
+            submitProposal: async ({ explanation }) => {
+                uncertainSubmitAttempts += 1;
+                assert.equal(explanation, 'Observed tx before store failure.');
+                return {
+                    transactionHash: observedTxHash,
+                    proposalHash: observedTxHash,
+                    ogProposalHash: null,
+                    sideEffectsLikelyCommitted: true,
+                };
+            },
+            resolveProposalHash: async () => null,
+        });
+        const uncertainPersistServer = await uncertainPersistApi.start();
+        const uncertainPersistAddress = uncertainPersistServer.address();
+        assert.ok(
+            uncertainPersistAddress &&
+                typeof uncertainPersistAddress === 'object' &&
+                typeof uncertainPersistAddress.port === 'number'
+        );
+        const uncertainPersistBaseUrl = `http://127.0.0.1:${uncertainPersistAddress.port}`;
+
+        try {
+            const uncertainPersistRequest = await buildSignedBody({
+                account,
+                chainId: 11155111,
+                requestId: 'submit-observed-tx-store-failure',
+                explanation: 'Observed tx before store failure.',
+            });
+            const uncertainPersistFirst = await postPublication(
+                uncertainPersistBaseUrl,
+                uncertainPersistRequest.body
+            );
+            assert.equal(uncertainPersistFirst.status, 409);
+            assert.equal(uncertainPersistFirst.json.code, 'submission_uncertain');
+            assert.equal(uncertainPersistFirst.json.submission.status, 'uncertain');
+            assert.equal(
+                uncertainPersistFirst.json.submission.transactionHash,
+                observedTxHash
+            );
+            assert.equal(uncertainSubmitAttempts, 1);
+
+            const uncertainPersistRecord = await uncertainPersistStoreBase.getRecord({
+                signer: account.address,
+                chainId: 11155111,
+                requestId: 'submit-observed-tx-store-failure',
+            });
+            assert.equal(uncertainPersistRecord.submission.status, 'uncertain');
+            assert.equal(uncertainPersistRecord.submission.transactionHash, observedTxHash);
+
+            const uncertainPersistSecond = await postPublication(
+                uncertainPersistBaseUrl,
+                uncertainPersistRequest.body
+            );
+            assert.equal(uncertainPersistSecond.status, 409);
+            assert.equal(uncertainPersistSecond.json.code, 'submission_uncertain');
+            assert.equal(uncertainPersistSecond.json.submission.status, 'uncertain');
+            assert.equal(uncertainSubmitAttempts, 1);
+        } finally {
+            await uncertainPersistApi.stop();
+        }
+
+        const reconcileFailureStateFile = path.join(
+            tempDir,
+            'proposal-publications-propose-reconcile-failure.json'
+        );
+        const reconcileFailureStore = createProposalPublicationStore({
+            stateFile: reconcileFailureStateFile,
+        });
+        let reconcileFailureSubmitAttempts = 0;
+        const reconcileFailureTxHash = `0x${'b'.repeat(64)}`;
+        const reconcileFailureApi = createProposalPublicationApiServer({
+            config: buildServerConfig(account.address, {
+                chainId: undefined,
+                proposalPublishApiMode: 'propose',
+            }),
+            store: reconcileFailureStore,
+            logger: {
+                info() {},
+                warn() {},
+            },
+            resolveProposalRuntime: async ({ chainId }) => ({
+                runtimeConfig: {
+                    chainId,
+                    proposeEnabled: true,
+                    bondSpender: 'og',
+                    proposalHashResolveTimeoutMs: 1,
+                    proposalHashResolvePollIntervalMs: 1,
+                },
+                publicClient: {
+                    async getChainId() {
+                        return chainId;
+                    },
+                },
+                walletClient: {},
+                account: { address: account.address },
+            }),
+            submitProposal: async ({ explanation, onProposalTxSubmitted }) => {
+                reconcileFailureSubmitAttempts += 1;
+                assert.equal(
+                    explanation,
+                    'Known transaction hash should survive reconcile failure.'
+                );
+                await onProposalTxSubmitted(reconcileFailureTxHash);
+                throw new Error('submit completed but post-submit handling failed');
+            },
+            resolveProposalHash: async () => {
+                throw new Error('temporary receipt lookup failure');
+            },
+        });
+        const reconcileFailureServer = await reconcileFailureApi.start();
+        const reconcileFailureAddress = reconcileFailureServer.address();
+        assert.ok(
+            reconcileFailureAddress &&
+                typeof reconcileFailureAddress === 'object' &&
+                typeof reconcileFailureAddress.port === 'number'
+        );
+        const reconcileFailureBaseUrl = `http://127.0.0.1:${reconcileFailureAddress.port}`;
+
+        try {
+            const reconcileFailureRequest = await buildSignedBody({
+                account,
+                chainId: 11155111,
+                requestId: 'known-tx-reconcile-failure',
+                explanation: 'Known transaction hash should survive reconcile failure.',
+            });
+            const reconcileFailureResponse = await postPublication(
+                reconcileFailureBaseUrl,
+                reconcileFailureRequest.body
+            );
+            assert.equal(reconcileFailureResponse.status, 202);
+            assert.equal(reconcileFailureResponse.json.status, 'published');
+            assert.equal(reconcileFailureResponse.json.submission.status, 'submitted');
+            assert.equal(
+                reconcileFailureResponse.json.submission.transactionHash,
+                reconcileFailureTxHash
+            );
+            assert.equal(reconcileFailureSubmitAttempts, 1);
+        } finally {
+            await reconcileFailureApi.stop();
+        }
     } finally {
         Date.now = originalDateNow;
         globalThis.fetch = originalFetch;

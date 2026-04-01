@@ -208,6 +208,7 @@ async function postBondAndPropose({
     ogModule,
     transactions,
     explanation,
+    onProposalTxSubmitted = undefined,
 }) {
     if (!config.proposeEnabled) {
         throw new Error('Proposals disabled via PROPOSE_ENABLED.');
@@ -359,6 +360,7 @@ async function postBondAndPropose({
             }
             if (proposalTxHash) {
                 sideEffectsLikelyCommitted = true;
+                await onProposalTxSubmitted?.(proposalTxHash);
             }
         } catch (error) {
             submissionError = error;
@@ -967,4 +969,5 @@ export {
     normalizeOgTransactions,
     postBondAndDispute,
     postBondAndPropose,
+    resolveProposalHashFromReceipt,
 };

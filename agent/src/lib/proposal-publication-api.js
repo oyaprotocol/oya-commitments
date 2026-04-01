@@ -15,6 +15,18 @@ import {
     buildSignedProposalPayload,
 } from './signed-proposal.js';
 import { buildPublicationKey } from './proposal-publication-store.js';
+import { hasCommittedToolSideEffects } from './tool-execution-error.js';
+import { postBondAndPropose, resolveProposalHashFromReceipt } from './tx.js';
+
+class ApiResponseError extends Error {
+    constructor(message, { statusCode, code, body } = {}) {
+        super(message);
+        this.name = 'ApiResponseError';
+        this.statusCode = statusCode ?? 500;
+        this.code = code ?? 'internal_error';
+        this.body = body ?? { error: message, code: this.code };
+    }
+}
 
 function parseEnvelopeFromCanonicalMessage(canonicalMessage) {
     if (typeof canonicalMessage !== 'string' || !canonicalMessage.trim()) {
@@ -138,7 +150,55 @@ function enqueuePublicationOperation(queueMap, queueKey, operation) {
     });
 }
 
-function createProposalPublicationApiServer({ config, store, logger = console } = {}) {
+function buildSubmissionErrorPayload({
+    code,
+    message,
+    atMs = Date.now(),
+}) {
+    return {
+        code,
+        message,
+        atMs,
+    };
+}
+
+function buildSubmissionResponse(submission) {
+    return {
+        status: submission?.status ?? 'not_started',
+        submittedAtMs: submission?.submittedAtMs ?? null,
+        transactionHash: submission?.transactionHash ?? null,
+        ogProposalHash: submission?.ogProposalHash ?? null,
+        sideEffectsLikelyCommitted: Boolean(submission?.sideEffectsLikelyCommitted),
+        ...(submission?.result?.skipped
+            ? {
+                  skipped: true,
+                  skipReason: submission.result.skipReason ?? null,
+              }
+            : {}),
+    };
+}
+
+function canBypassProposalRuntimeForDuplicate(record, exactExistingMatch) {
+    if (!exactExistingMatch || !record) {
+        return false;
+    }
+
+    const submission = record.submission ?? { status: 'not_started' };
+    return (
+        submission.status === 'resolved' ||
+        submission.status === 'uncertain' ||
+        (submission.status === 'submitted' && Boolean(submission.transactionHash))
+    );
+}
+
+function createProposalPublicationApiServer({
+    config,
+    store,
+    logger = console,
+    resolveProposalRuntime = undefined,
+    submitProposal = postBondAndPropose,
+    resolveProposalHash = resolveProposalHashFromReceipt,
+} = {}) {
     if (!config) {
         throw new Error('createProposalPublicationApiServer requires config.');
     }
@@ -157,6 +217,7 @@ function createProposalPublicationApiServer({ config, store, logger = console } 
     );
     const requireSignerAllowlist = config.proposalPublishApiRequireSignerAllowlist !== false;
     const signatureMaxAgeSeconds = Number(config.proposalPublishApiSignatureMaxAgeSeconds ?? 300);
+    const apiMode = config.proposalPublishApiMode ?? 'publish';
     const expectedChainId =
         config.chainId === undefined || config.chainId === null
             ? undefined
@@ -166,9 +227,15 @@ function createProposalPublicationApiServer({ config, store, logger = console } 
             'Proposal publication API requires proposalPublishApi.signerAllowlist when proposalPublishApi.requireSignerAllowlist=true. PROPOSAL_PUBLISH_API_KEYS_JSON is optional additional bearer gating.'
         );
     }
+    if (apiMode === 'propose' && typeof resolveProposalRuntime !== 'function') {
+        throw new Error(
+            'Proposal publication API in propose mode requires resolveProposalRuntime(chainId).'
+        );
+    }
 
     let server;
     const publishOperationTails = new Map();
+    const submissionOperationTails = new Map();
 
     function emitLog(level, message) {
         const method =
@@ -230,6 +297,315 @@ function createProposalPublicationApiServer({ config, store, logger = console } 
         }
 
         return nextRecord;
+    }
+
+    async function saveSubmission(record, patch) {
+        return store.saveRecord({
+            ...record,
+            submission: {
+                ...(record.submission ?? {}),
+                ...patch,
+            },
+        });
+    }
+
+    async function reconcileSubmittedRecord(record, { runtime, envelope }) {
+        const transactionHash = record.submission?.transactionHash;
+        if (!transactionHash || record.submission?.ogProposalHash) {
+            return record;
+        }
+
+        const ogProposalHash = await resolveProposalHash({
+            publicClient: runtime.publicClient,
+            proposalTxHash: transactionHash,
+            ogModule: envelope.ogModule,
+            timeoutMs: runtime.runtimeConfig.proposalHashResolveTimeoutMs,
+            pollIntervalMs: runtime.runtimeConfig.proposalHashResolvePollIntervalMs,
+        });
+        if (!ogProposalHash) {
+            return record;
+        }
+
+        return saveSubmission(record, {
+            status: 'resolved',
+            ogProposalHash,
+            result: {
+                ...(record.submission?.result ?? {}),
+                ogProposalHash,
+            },
+            error: null,
+            sideEffectsLikelyCommitted: true,
+        });
+    }
+
+    async function submitPublishedRecord(record, { runtime, envelope }) {
+        const existingSubmission = record.submission ?? { status: 'not_started' };
+        const observedSubmission = {
+            submittedAtMs: existingSubmission.submittedAtMs ?? null,
+            transactionHash: existingSubmission.transactionHash ?? null,
+            ogProposalHash: existingSubmission.ogProposalHash ?? null,
+            result: existingSubmission.result ?? null,
+            sideEffectsLikelyCommitted: Boolean(existingSubmission.sideEffectsLikelyCommitted),
+        };
+        if (existingSubmission.status === 'resolved') {
+            return {
+                record,
+                submissionAttempted: false,
+            };
+        }
+        if (existingSubmission.status === 'submitted' && existingSubmission.transactionHash) {
+            if (!runtime) {
+                return {
+                    record,
+                    submissionAttempted: false,
+                };
+            }
+
+            try {
+                const reconciledRecord = await reconcileSubmittedRecord(record, { runtime, envelope });
+                return {
+                    record: reconciledRecord,
+                    submissionAttempted: false,
+                };
+            } catch (error) {
+                return {
+                    record,
+                    submissionAttempted: false,
+                };
+            }
+        }
+        if (
+            existingSubmission.status === 'uncertain' ||
+            (existingSubmission.sideEffectsLikelyCommitted &&
+                !existingSubmission.transactionHash)
+        ) {
+            throw new ApiResponseError(
+                'Proposal submission is in an uncertain state for this request. Inspect node logs and chain state before retrying.',
+                {
+                    statusCode: 409,
+                    code: 'submission_uncertain',
+                    body: {
+                        error:
+                            'Proposal submission is in an uncertain state for this request. Inspect node logs and chain state before retrying.',
+                        code: 'submission_uncertain',
+                        submission: buildSubmissionResponse(existingSubmission),
+                    },
+                }
+            );
+        }
+        if (!runtime) {
+            throw new Error('Proposal runtime unavailable for submission attempt.');
+        }
+
+        const submittedAtMs = Date.now();
+        let latestRecord = record;
+
+        try {
+            const result = await submitProposal({
+                publicClient: runtime.publicClient,
+                walletClient: runtime.walletClient,
+                account: runtime.account,
+                config: runtime.runtimeConfig,
+                ogModule: envelope.ogModule,
+                transactions: envelope.transactions,
+                explanation: envelope.explanation,
+                onProposalTxSubmitted: async (transactionHash) => {
+                    observedSubmission.submittedAtMs = submittedAtMs;
+                    observedSubmission.transactionHash = transactionHash;
+                    observedSubmission.sideEffectsLikelyCommitted = true;
+                    latestRecord = await saveSubmission(latestRecord, {
+                        status: 'submitted',
+                        submittedAtMs,
+                        transactionHash,
+                        ogProposalHash: null,
+                        result: {
+                            ...(latestRecord.submission?.result ?? {}),
+                            transactionHash,
+                        },
+                        error: null,
+                        sideEffectsLikelyCommitted: true,
+                    });
+                },
+            });
+
+            if (result?.transactionHash) {
+                observedSubmission.submittedAtMs = observedSubmission.submittedAtMs ?? submittedAtMs;
+                observedSubmission.transactionHash = result.transactionHash;
+                observedSubmission.ogProposalHash = result.ogProposalHash ?? null;
+                observedSubmission.result = result;
+                observedSubmission.sideEffectsLikelyCommitted = true;
+                latestRecord = await saveSubmission(latestRecord, {
+                    status: result.ogProposalHash ? 'resolved' : 'submitted',
+                    submittedAtMs:
+                        latestRecord.submission?.submittedAtMs ?? submittedAtMs,
+                    transactionHash: result.transactionHash,
+                    ogProposalHash: result.ogProposalHash ?? null,
+                    result,
+                    error: null,
+                    sideEffectsLikelyCommitted: true,
+                });
+                return {
+                    record: latestRecord,
+                    submissionAttempted: true,
+                };
+            }
+
+            if (result?.skipped) {
+                observedSubmission.result = result;
+                observedSubmission.sideEffectsLikelyCommitted = Boolean(
+                    result.sideEffectsLikelyCommitted
+                );
+                latestRecord = await saveSubmission(latestRecord, {
+                    status: 'resolved',
+                    result,
+                    error: null,
+                    sideEffectsLikelyCommitted: Boolean(result.sideEffectsLikelyCommitted),
+                });
+                return {
+                    record: latestRecord,
+                    submissionAttempted: false,
+                };
+            }
+
+            const sideEffectsLikelyCommitted = Boolean(result?.sideEffectsLikelyCommitted);
+            observedSubmission.result = result ?? null;
+            observedSubmission.sideEffectsLikelyCommitted =
+                observedSubmission.sideEffectsLikelyCommitted || sideEffectsLikelyCommitted;
+            const nextStatus = sideEffectsLikelyCommitted ? 'uncertain' : 'failed';
+            latestRecord = await saveSubmission(latestRecord, {
+                status: nextStatus,
+                result: result ?? null,
+                error: buildSubmissionErrorPayload({
+                    code:
+                        nextStatus === 'uncertain'
+                            ? 'submission_uncertain'
+                            : 'submission_failed',
+                    message:
+                        result?.submissionError?.message ??
+                        'Proposal submission failed before a transaction hash was obtained.',
+                }),
+                sideEffectsLikelyCommitted,
+            });
+            throw new ApiResponseError(
+                nextStatus === 'uncertain'
+                    ? 'Proposal submission may already have side effects onchain. Automatic retry has been blocked.'
+                    : result?.submissionError?.message ??
+                          'Proposal submission failed before a transaction hash was obtained.',
+                {
+                    statusCode: nextStatus === 'uncertain' ? 409 : 502,
+                    code:
+                        nextStatus === 'uncertain'
+                            ? 'submission_uncertain'
+                            : 'submission_failed',
+                    body: {
+                        error:
+                            nextStatus === 'uncertain'
+                                ? 'Proposal submission may already have side effects onchain. Automatic retry has been blocked.'
+                                : result?.submissionError?.message ??
+                                  'Proposal submission failed before a transaction hash was obtained.',
+                        code:
+                            nextStatus === 'uncertain'
+                                ? 'submission_uncertain'
+                                : 'submission_failed',
+                        submission: buildSubmissionResponse(latestRecord.submission),
+                    },
+                }
+            );
+        } catch (error) {
+            const refreshedRecord = await store.getRecord({
+                signer: latestRecord.signer,
+                chainId: latestRecord.chainId,
+                requestId: latestRecord.requestId,
+            });
+            if (refreshedRecord) {
+                latestRecord = refreshedRecord;
+            }
+            if (error instanceof ApiResponseError) {
+                throw error;
+            }
+
+            if (latestRecord.submission?.transactionHash) {
+                let reconciledRecord = latestRecord;
+                try {
+                    reconciledRecord = await reconcileSubmittedRecord(latestRecord, {
+                        runtime,
+                        envelope,
+                    });
+                } catch (reconcileError) {
+                    emitLog(
+                        'warn',
+                        `[oya-node] Proposal submission reconciliation failed (requestId=${latestRecord.requestId} signer=${latestRecord.signer} txHash=${latestRecord.submission.transactionHash}): ${reconcileError?.message ?? reconcileError}`
+                    );
+                }
+                return {
+                    record: reconciledRecord,
+                    submissionAttempted: true,
+                };
+            }
+
+            const sideEffectsLikelyCommitted =
+                Boolean(observedSubmission.transactionHash) ||
+                observedSubmission.sideEffectsLikelyCommitted ||
+                hasCommittedToolSideEffects(error);
+            const nextStatus = sideEffectsLikelyCommitted ? 'uncertain' : 'failed';
+            const fallbackSubmission = {
+                status: nextStatus,
+                ...(observedSubmission.submittedAtMs !== null
+                    ? { submittedAtMs: observedSubmission.submittedAtMs }
+                    : {}),
+                ...(observedSubmission.transactionHash
+                    ? { transactionHash: observedSubmission.transactionHash }
+                    : {}),
+                ...(observedSubmission.ogProposalHash
+                    ? { ogProposalHash: observedSubmission.ogProposalHash }
+                    : {}),
+                result:
+                    observedSubmission.result ??
+                    (sideEffectsLikelyCommitted ? latestRecord.submission?.result ?? null : null),
+                error: buildSubmissionErrorPayload({
+                    code:
+                        nextStatus === 'uncertain'
+                            ? 'submission_uncertain'
+                            : 'submission_failed',
+                    message: error?.message ?? String(error),
+                }),
+                sideEffectsLikelyCommitted,
+            };
+            try {
+                latestRecord = await saveSubmission(latestRecord, fallbackSubmission);
+            } catch (_persistError) {
+                latestRecord = {
+                    ...latestRecord,
+                    submission: {
+                        ...(latestRecord.submission ?? {}),
+                        ...fallbackSubmission,
+                    },
+                };
+            }
+            throw new ApiResponseError(
+                nextStatus === 'uncertain'
+                    ? 'Proposal submission may already have side effects onchain. Automatic retry has been blocked.'
+                    : error?.message ?? 'Proposal submission failed.',
+                {
+                    statusCode: nextStatus === 'uncertain' ? 409 : 502,
+                    code:
+                        nextStatus === 'uncertain'
+                            ? 'submission_uncertain'
+                            : 'submission_failed',
+                    body: {
+                        error:
+                            nextStatus === 'uncertain'
+                                ? 'Proposal submission may already have side effects onchain. Automatic retry has been blocked.'
+                                : error?.message ?? 'Proposal submission failed.',
+                        code:
+                            nextStatus === 'uncertain'
+                                ? 'submission_uncertain'
+                                : 'submission_failed',
+                        submission: buildSubmissionResponse(latestRecord.submission),
+                    },
+                }
+            );
+        }
     }
 
     async function start() {
@@ -392,6 +768,10 @@ function createProposalPublicationApiServer({ config, store, logger = console } 
                     existingRecord,
                     envelope,
                 });
+            const canBypassProposalRuntime = canBypassProposalRuntimeForDuplicate(
+                existingRecord,
+                exactExistingMatch
+            );
 
             if (signedAuth.isExpired && !exactExistingMatch && !refreshablePendingRecord) {
                 emitLog(
@@ -488,8 +868,36 @@ function createProposalPublicationApiServer({ config, store, logger = console } 
                 return;
             }
 
+            let proposalRuntime;
+            if (apiMode === 'propose' && !canBypassProposalRuntime) {
+                try {
+                    proposalRuntime = await resolveProposalRuntime({
+                        chainId: body.chainId,
+                    });
+                } catch (error) {
+                    const statusCode = error?.statusCode ?? 502;
+                    const code = error?.code ?? 'proposal_runtime_unavailable';
+                    emitLog(
+                        'warn',
+                        `[oya-node] Proposal publish API rejected request${formatRequestContext({
+                            body,
+                            signer: signedAuth.sender.address,
+                            senderKeyId: signedAuth.senderKeyId,
+                            code,
+                            statusCode,
+                        })}: ${error?.message ?? error}`
+                    );
+                    sendJson(res, statusCode, {
+                        error: error?.message ?? 'Proposal runtime unavailable.',
+                        code,
+                    });
+                    return;
+                }
+            }
+
             let record = prepared.record;
             let wasAlreadyPinned = false;
+            let submissionAttempted = false;
             try {
                 const publicationKey = buildPublicationKey({
                     signer: signedAuth.sender.address,
@@ -564,9 +972,90 @@ function createProposalPublicationApiServer({ config, store, logger = console } 
                 return;
             }
 
-            const status = wasAlreadyPinned ? 'duplicate' : 'published';
-            sendJson(res, wasAlreadyPinned ? 200 : 202, {
+            if (apiMode === 'propose') {
+                try {
+                    const publicationKey = buildPublicationKey({
+                        signer: signedAuth.sender.address,
+                        chainId: body.chainId,
+                        requestId: body.requestId,
+                    });
+                    ({ record, submissionAttempted } = await enqueuePublicationOperation(
+                        submissionOperationTails,
+                        publicationKey,
+                        async () => {
+                            const latestRecord = await store.getRecord({
+                                signer: signedAuth.sender.address,
+                                chainId: body.chainId,
+                                requestId: body.requestId,
+                            });
+                            if (!latestRecord) {
+                                throw new Error(
+                                    'Publication record disappeared before proposal submission.'
+                                );
+                            }
+                            let runtime = proposalRuntime;
+                            if (
+                                !runtime &&
+                                latestRecord.submission?.status === 'submitted' &&
+                                latestRecord.submission?.transactionHash
+                            ) {
+                                try {
+                                    runtime = await resolveProposalRuntime({
+                                        chainId: body.chainId,
+                                    });
+                                } catch (error) {
+                                    runtime = undefined;
+                                }
+                            }
+                            return submitPublishedRecord(latestRecord, {
+                                runtime,
+                                envelope,
+                            });
+                        }
+                    ));
+                } catch (error) {
+                    const latestRecord = await store.getRecord({
+                        signer: signedAuth.sender.address,
+                        chainId: body.chainId,
+                        requestId: body.requestId,
+                    });
+                    if (latestRecord) {
+                        record = latestRecord;
+                    }
+                    const statusCode = error?.statusCode ?? 502;
+                    const code = error?.code ?? 'submission_failed';
+                    emitLog(
+                        'warn',
+                        `[oya-node] Proposal submit API failed${formatRequestContext({
+                            body,
+                            signer: signedAuth.sender.address,
+                            senderKeyId: signedAuth.senderKeyId,
+                            code,
+                            statusCode,
+                        })}: ${error?.message ?? error}`
+                    );
+                    sendJson(res, statusCode, {
+                        status: wasAlreadyPinned ? 'duplicate' : 'published',
+                        mode: apiMode,
+                        requestId: record?.requestId ?? body.requestId,
+                        signer: record?.signer ?? signedAuth.sender.address.toLowerCase(),
+                        cid: record?.cid ?? null,
+                        uri: record?.uri ?? null,
+                        pinned: Boolean(record?.pinned),
+                        receivedAtMs: record?.receivedAtMs ?? null,
+                        publishedAtMs: record?.publishedAtMs ?? null,
+                        error: error?.body?.error ?? error?.message ?? 'Proposal submission failed.',
+                        code,
+                        submission: buildSubmissionResponse(record?.submission),
+                    });
+                    return;
+                }
+            }
+
+            const status = wasAlreadyPinned && !submissionAttempted ? 'duplicate' : 'published';
+            sendJson(res, wasAlreadyPinned && !submissionAttempted ? 200 : 202, {
                 status,
+                mode: apiMode,
                 requestId: record.requestId,
                 signer: record.signer,
                 cid: record.cid,
@@ -574,6 +1063,9 @@ function createProposalPublicationApiServer({ config, store, logger = console } 
                 pinned: record.pinned,
                 receivedAtMs: record.receivedAtMs,
                 publishedAtMs: record.publishedAtMs,
+                ...(apiMode === 'propose'
+                    ? { submission: buildSubmissionResponse(record.submission) }
+                    : {}),
             });
         });
 
@@ -598,7 +1090,7 @@ function createProposalPublicationApiServer({ config, store, logger = console } 
                 : config.proposalPublishApiPort;
         emitLog(
             'info',
-            `[oya-node] Proposal publish API listening on http://${config.proposalPublishApiHost}:${boundPort}`
+            `[oya-node] Proposal publish API (${apiMode}) listening on http://${config.proposalPublishApiHost}:${boundPort}`
         );
         return server;
     }

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import {
     buildProposalPublishBaseUrl,
+    createProposalPublishSubmissionRuntimeResolver,
     resolveProposalPublishApiTarget,
     resolveProposalPublishServerConfig,
 } from './lib/proposal-publish-runtime.mjs';
@@ -35,6 +36,7 @@ async function run() {
         'single-chain',
         {
             chainId: 11155111,
+            rpcUrl: 'https://rpc.sepolia.example',
             proposalPublishApi: {
                 enabled: true,
                 host: 'config-host.local',
@@ -195,6 +197,7 @@ async function run() {
         repoRootPath,
     });
     assert.equal(serverConfig.runtimeConfig.proposalPublishApiEnabled, true);
+    assert.equal(serverConfig.runtimeConfig.proposalPublishApiMode, 'publish');
     assert.equal(
         serverConfig.stateFile,
         path.join(
@@ -246,6 +249,7 @@ async function run() {
     assert.equal(multichainServerConfig.runtimeConfig.chainId, undefined);
     assert.equal(multichainServerConfig.runtimeConfig.proposalPublishApiHost, 'multichain-host.local');
     assert.equal(multichainServerConfig.runtimeConfig.proposalPublishApiPort, 9790);
+    assert.equal(multichainServerConfig.runtimeConfig.proposalPublishApiMode, 'publish');
     assert.equal(
         multichainServerConfig.stateFile,
         path.join(
@@ -277,6 +281,342 @@ async function run() {
             },
         },
     });
+    assert.deepEqual(multichainServerConfig.supportedChainIds.sort((left, right) => left - right), [
+        137,
+        11155111,
+    ]);
+
+    await createAgentModule(repoRootPath, 'multichain-propose', {
+        proposalPublishApi: {
+            enabled: true,
+            mode: 'propose',
+            host: 'multichain-propose.local',
+            port: 9791,
+            requireSignerAllowlist: false,
+        },
+        byChain: {
+            '11155111': {
+                rpcUrl: 'https://rpc.sepolia.example',
+                proposeEnabled: true,
+            },
+            '137': {
+                rpcUrl: 'https://rpc.polygon.example',
+                proposeEnabled: true,
+            },
+        },
+    });
+
+    const multichainProposeServerConfig = await resolveProposalPublishServerConfig({
+        argv: ['node', 'start-proposal-publish-node.mjs', '--module=multichain-propose'],
+        env: {},
+        repoRootPath,
+    });
+    assert.equal(multichainProposeServerConfig.runtimeConfig.chainId, undefined);
+    assert.equal(multichainProposeServerConfig.runtimeConfig.proposalPublishApiMode, 'propose');
+    assert.deepEqual(
+        multichainProposeServerConfig.supportedChainIds.sort((left, right) => left - right),
+        [137, 11155111]
+    );
+
+    await createAgentModule(repoRootPath, 'overlay-propose', {
+        proposalPublishApi: {
+            enabled: true,
+            mode: 'propose',
+            host: 'overlay-propose.local',
+            port: 9796,
+            requireSignerAllowlist: false,
+        },
+        byChain: {
+            '11155111': {},
+        },
+    });
+    const submissionOverlayPath = path.join(repoRootPath, 'submission-overlay.json');
+    await writeFile(
+        submissionOverlayPath,
+        JSON.stringify(
+            {
+                byChain: {
+                    '11155111': {
+                        rpcUrl: 'https://rpc.overlay.sepolia.example',
+                        proposeEnabled: true,
+                    },
+                },
+            },
+            null,
+            2
+        ),
+        'utf8'
+    );
+
+    const overlayDrivenRuntimeResolver = await createProposalPublishSubmissionRuntimeResolver({
+        agentRef: 'overlay-propose',
+        env: {},
+        repoRootPath,
+        argv: [
+            'node',
+            'start-proposal-publish-node.mjs',
+            '--module=overlay-propose',
+            `--overlay=${submissionOverlayPath}`,
+        ],
+        createPublicClientFn: () => ({
+            async getChainId() {
+                return 11155111;
+            },
+        }),
+        createSignerClientFn: async () => ({
+            account: { address: '0x1111111111111111111111111111111111111111' },
+            walletClient: {
+                async request({ method }) {
+                    assert.equal(method, 'eth_chainId');
+                    return '0xaa36a7';
+                },
+            },
+        }),
+    });
+    const overlayDrivenRuntime = await overlayDrivenRuntimeResolver({
+        chainId: 11155111,
+    });
+    assert.equal(
+        overlayDrivenRuntime.runtimeConfig.rpcUrl,
+        'https://rpc.overlay.sepolia.example'
+    );
+    assert.equal(overlayDrivenRuntime.runtimeConfig.proposeEnabled, true);
+
+    const mismatchedSignerRuntimeResolver = await createProposalPublishSubmissionRuntimeResolver({
+        agentRef: 'multichain-propose',
+        env: {},
+        repoRootPath,
+        createPublicClientFn: () => ({
+            async getChainId() {
+                return 11155111;
+            },
+        }),
+        createSignerClientFn: async () => ({
+            account: { address: '0x1111111111111111111111111111111111111111' },
+            walletClient: {
+                async request({ method }) {
+                    assert.equal(method, 'eth_chainId');
+                    return '0x89';
+                },
+            },
+        }),
+    });
+
+    await assert.rejects(
+        () => mismatchedSignerRuntimeResolver({ chainId: 11155111 }),
+        /Resolved signer runtime for chainId 11155111 is connected to chainId 137/
+    );
+
+    let unsupportedChainConstructedClient = false;
+    const unsupportedChainRuntimeResolver = await createProposalPublishSubmissionRuntimeResolver({
+        agentRef: 'multichain-propose',
+        env: {},
+        repoRootPath,
+        createPublicClientFn: () => {
+            unsupportedChainConstructedClient = true;
+            throw new Error('should not construct public client for unsupported chain');
+        },
+        createSignerClientFn: async () => {
+            unsupportedChainConstructedClient = true;
+            throw new Error('should not construct signer client for unsupported chain');
+        },
+    });
+
+    await assert.rejects(
+        () => unsupportedChainRuntimeResolver({ chainId: 10 }),
+        (error) =>
+            error?.code === 'unsupported_chain' &&
+            error?.statusCode === 400 &&
+            /does not support proposal submission for chainId 10/.test(error.message)
+    );
+    assert.equal(unsupportedChainConstructedClient, false);
+
+    const fixedChainRuntimeResolver = await createProposalPublishSubmissionRuntimeResolver({
+        agentRef: 'single-chain',
+        env: {},
+        repoRootPath,
+        createPublicClientFn: () => ({
+            async getChainId() {
+                return 11155111;
+            },
+        }),
+        createSignerClientFn: async () => ({
+            account: { address: '0x1111111111111111111111111111111111111111' },
+            walletClient: {
+                async request({ method }) {
+                    assert.equal(method, 'eth_chainId');
+                    return '0xaa36a7';
+                },
+            },
+        }),
+    });
+
+    await assert.rejects(
+        () => fixedChainRuntimeResolver({ chainId: 137 }),
+        (error) =>
+            error?.code === 'unsupported_chain' &&
+            error?.statusCode === 400 &&
+            /does not support proposal submission for chainId 137/.test(error.message)
+    );
+
+    await createAgentModule(repoRootPath, 'selected-chain-propose', {
+        chainId: 11155111,
+        proposalPublishApi: {
+            enabled: true,
+            mode: 'propose',
+            host: 'selected-chain-propose.local',
+            port: 9794,
+            requireSignerAllowlist: false,
+        },
+        byChain: {
+            '11155111': {
+                rpcUrl: 'https://rpc.sepolia.example',
+                proposeEnabled: true,
+            },
+            '137': {
+                rpcUrl: 'https://rpc.polygon.example',
+                proposeEnabled: true,
+            },
+        },
+    });
+
+    const selectedChainProposeServerConfig = await resolveProposalPublishServerConfig({
+        argv: ['node', 'start-proposal-publish-node.mjs', '--module=selected-chain-propose'],
+        env: {},
+        repoRootPath,
+    });
+    assert.equal(selectedChainProposeServerConfig.runtimeConfig.chainId, 11155111);
+    assert.deepEqual(selectedChainProposeServerConfig.supportedChainIds, [11155111]);
+
+    let selectedChainConstructedClient = false;
+    const selectedChainRuntimeResolver = await createProposalPublishSubmissionRuntimeResolver({
+        agentRef: 'selected-chain-propose',
+        env: {},
+        repoRootPath,
+        argv: [
+            'node',
+            'start-proposal-publish-node.mjs',
+            '--module=selected-chain-propose',
+            '--chain-id=11155111',
+        ],
+        createPublicClientFn: () => {
+            selectedChainConstructedClient = true;
+            throw new Error('should not construct public client for chain outside startup selection');
+        },
+        createSignerClientFn: async () => {
+            selectedChainConstructedClient = true;
+            throw new Error('should not construct signer client for chain outside startup selection');
+        },
+    });
+
+    await assert.rejects(
+        () => selectedChainRuntimeResolver({ chainId: 137 }),
+        (error) =>
+            error?.code === 'unsupported_chain' &&
+            error?.statusCode === 400 &&
+            /does not support proposal submission for chainId 137/.test(error.message) &&
+            /Supported chainIds: 11155111/.test(error.message)
+    );
+    assert.equal(selectedChainConstructedClient, false);
+
+    await createAgentModule(repoRootPath, 'multichain-propose-mode-mismatch', {
+        proposalPublishApi: {
+            enabled: true,
+            mode: 'propose',
+            host: 'multichain-propose-mode-mismatch.local',
+            port: 9795,
+            requireSignerAllowlist: false,
+        },
+        byChain: {
+            '11155111': {
+                rpcUrl: 'https://rpc.sepolia.example',
+                proposeEnabled: true,
+                proposalPublishApi: {
+                    mode: 'publish',
+                },
+            },
+            '137': {
+                rpcUrl: 'https://rpc.polygon.example',
+                proposeEnabled: true,
+                proposalPublishApi: {
+                    mode: 'publish',
+                },
+            },
+        },
+    });
+
+    await assert.rejects(
+        () =>
+            resolveProposalPublishServerConfig({
+                argv: [
+                    'node',
+                    'start-proposal-publish-node.mjs',
+                    '--module=multichain-propose-mode-mismatch',
+                ],
+                env: {},
+                repoRootPath,
+            }),
+        /does not resolve any propose-capable chain runtime/
+    );
+
+    await createAgentModule(repoRootPath, 'broken-propose', {
+        proposalPublishApi: {
+            enabled: true,
+            mode: 'propose',
+            host: 'broken-propose.local',
+            port: 9792,
+            requireSignerAllowlist: false,
+        },
+        byChain: {
+            '11155111': {
+                proposeEnabled: false,
+            },
+            '137': {
+                proposalPublishApi: {
+                    enabled: false,
+                },
+                proposeEnabled: true,
+            },
+        },
+    });
+
+    await assert.rejects(
+        () =>
+            resolveProposalPublishServerConfig({
+                argv: ['node', 'start-proposal-publish-node.mjs', '--module=broken-propose'],
+                env: {},
+                repoRootPath,
+            }),
+        /does not resolve any propose-capable chain runtime/
+    );
+
+    await createAgentModule(repoRootPath, 'broken-propose-no-rpc', {
+        proposalPublishApi: {
+            enabled: true,
+            mode: 'propose',
+            host: 'broken-propose-no-rpc.local',
+            port: 9793,
+            requireSignerAllowlist: false,
+        },
+        byChain: {
+            '11155111': {
+                proposeEnabled: true,
+            },
+            '137': {
+                proposeEnabled: true,
+            },
+        },
+    });
+
+    await assert.rejects(
+        () =>
+            resolveProposalPublishServerConfig({
+                argv: ['node', 'start-proposal-publish-node.mjs', '--module=broken-propose-no-rpc'],
+                env: {},
+                repoRootPath,
+            }),
+        /does not resolve any propose-capable chain runtime/
+    );
 
     await assert.rejects(
         () =>

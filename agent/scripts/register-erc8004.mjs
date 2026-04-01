@@ -1,9 +1,9 @@
 import { readFile, writeFile } from 'node:fs/promises';
-import { createPublicClient, decodeEventLog, http } from 'viem';
-import { getAddress } from 'viem';
-import { createSignerClient } from '../src/lib/signer.js';
+import { decodeEventLog, getAddress } from 'viem';
+import { createValidatedReadWriteRuntime } from '../src/lib/chain-runtime.js';
 import {
     getArgValue,
+    isDirectScriptExecution,
     loadScriptEnv,
     normalizeAgentName,
     repoRoot,
@@ -73,6 +73,22 @@ const REGISTRY_BY_NETWORK = {
     },
 };
 
+const NETWORK_BY_CHAIN_ID = {
+    1: 'ethereum',
+    56: 'bsc',
+    97: 'bsc-testnet',
+    100: 'gnosis',
+    137: 'polygon',
+    143: 'monad',
+    80002: 'polygon-amoy',
+    8453: 'base',
+    84532: 'base-sepolia',
+    10143: 'monad-testnet',
+    11155111: 'ethereum-sepolia',
+    534351: 'scroll-testnet',
+    534352: 'scroll',
+};
+
 const identityRegistryAbi = [
     {
         type: 'function',
@@ -93,44 +109,60 @@ const identityRegistryAbi = [
     },
 ];
 
-async function main() {
+function inferRegistryNetworkFromChainId(chainId) {
+    return NETWORK_BY_CHAIN_ID[Number(chainId)];
+}
+
+async function main({
+    argv = process.argv,
+    env = process.env,
+    repoRootPath = repoRoot,
+    readFileFn = readFile,
+    writeFileFn = writeFile,
+    createValidatedReadWriteRuntimeFn = createValidatedReadWriteRuntime,
+    resolveConfiguredChainIdForScriptFn = resolveConfiguredChainIdForScript,
+} = {}) {
     const agentRef =
-        getArgValue('--agent=') ??
-        resolveAgentRef({ flag: '--agent=' });
+        getArgValue('--agent=', argv) ??
+        resolveAgentRef({ argv, env, flag: '--agent=' });
     const agentName = normalizeAgentName(agentRef);
     const agentJsonPath = `${resolveAgentDirectory(agentRef, {
-        repoRootPath: repoRoot,
+        repoRootPath,
     })}/agent.json`;
 
-    const agentUriArg = getArgValue('--agent-uri=');
-    const agentOrg = process.env.AGENT_ORG ?? 'oyaprotocol';
-    const agentRepo = process.env.AGENT_REPO ?? 'oya-commitments';
-    const agentBranch = process.env.AGENT_BRANCH;
-    if (!agentBranch && !process.env.AGENT_URI_BASE && !process.env.AGENT_URI) {
+    const agentUriArg = getArgValue('--agent-uri=', argv);
+    const agentOrg = env.AGENT_ORG ?? 'oyaprotocol';
+    const agentRepo = env.AGENT_REPO ?? 'oya-commitments';
+    const agentBranch = env.AGENT_BRANCH;
+    if (!agentBranch && !env.AGENT_URI_BASE && !env.AGENT_URI) {
         throw new Error('Missing AGENT_BRANCH (or provide AGENT_URI / AGENT_URI_BASE).');
     }
     const agentUriBase =
-        process.env.AGENT_URI_BASE ??
+        env.AGENT_URI_BASE ??
         (agentBranch
             ? `https://raw.githubusercontent.com/${agentOrg}/${agentRepo}/${agentBranch}/agent-library/agents`
             : null);
     const agentUri =
         agentUriArg ??
-        process.env.AGENT_URI ??
+        env.AGENT_URI ??
         (agentUriBase ? `${agentUriBase}/${agentName}/agent.json` : null);
     if (!agentUri) {
         throw new Error('Missing --agent-uri or AGENT_URI (or AGENT_URI_BASE).');
     }
 
-    const rpcUrl = process.env.RPC_URL;
+    const rpcUrl = env.RPC_URL;
     if (!rpcUrl) {
         throw new Error('Missing RPC_URL.');
     }
 
-    const publicClient = createPublicClient({ transport: http(rpcUrl) });
-    const { account, walletClient } = await createSignerClient({ rpcUrl });
+    const { publicClient, account, walletClient, chainId: runtimeChainId } =
+        await createValidatedReadWriteRuntimeFn({
+            rpcUrl,
+            publicClientLabel: 'Registration rpcUrl',
+            signerClientLabel: 'Registration signer',
+        });
 
-    const explicitChainIdRaw = getArgValue('--chain-id=');
+    const explicitChainIdRaw = getArgValue('--chain-id=', argv);
     const explicitChainId =
         explicitChainIdRaw === null ? undefined : Number(explicitChainIdRaw);
     if (
@@ -139,24 +171,25 @@ async function main() {
     ) {
         throw new Error('--chain-id must be an integer.');
     }
-    const rpcChainId = await publicClient.getChainId();
     const chainId =
-        (await resolveConfiguredChainIdForScript(agentRef, {
-            repoRootPath: repoRoot,
-            env: process.env,
-            explicitChainId: explicitChainId ?? rpcChainId,
+        (await resolveConfiguredChainIdForScriptFn(agentRef, {
+            repoRootPath,
+            env,
+            argv,
+            explicitChainId: explicitChainId ?? runtimeChainId,
         })) ??
         explicitChainId ??
-        rpcChainId;
-    const registryOverride = getArgValue('--agent-registry=') ?? process.env.AGENT_REGISTRY;
+        runtimeChainId;
+    if (chainId !== runtimeChainId) {
+        throw new Error(
+            `Resolved chainId ${chainId} does not match RPC_URL chainId ${runtimeChainId}.`
+        );
+    }
+    const registryOverride = getArgValue('--agent-registry=', argv) ?? env.AGENT_REGISTRY;
     const network =
-        getArgValue('--network=') ??
-        process.env.AGENT_NETWORK ??
-        (chainId === 1
-            ? 'ethereum'
-            : chainId === 11155111
-              ? 'ethereum-sepolia'
-              : undefined);
+        getArgValue('--network=', argv) ??
+        env.AGENT_NETWORK ??
+        inferRegistryNetworkFromChainId(chainId);
     const registry =
         registryOverride ?? (network ? REGISTRY_BY_NETWORK[network]?.identityRegistry : undefined);
     if (!registry) {
@@ -194,11 +227,11 @@ async function main() {
         throw new Error('Failed to parse Registered event for agentId.');
     }
 
-    const wallet = getArgValue('--agent-wallet=') ?? process.env.AGENT_WALLET ?? account.address;
+    const wallet = getArgValue('--agent-wallet=', argv) ?? env.AGENT_WALLET ?? account.address;
     const registryEndpoint = formatCaip10(chainId, registry).toLowerCase();
     const walletEndpoint = formatCaip10(chainId, wallet);
 
-    const raw = await readFile(agentJsonPath, 'utf8');
+    const raw = await readFileFn(agentJsonPath, 'utf8');
     const json = JSON.parse(raw);
     json.endpoints = Array.isArray(json.endpoints) ? json.endpoints : [];
     const existingEndpoint = json.endpoints.find((item) => item?.name === 'agentWallet');
@@ -238,7 +271,7 @@ async function main() {
     }
     json.registrations = normalizedRegistrations;
 
-    await writeFile(agentJsonPath, `${JSON.stringify(json, null, 2)}\n`, 'utf8');
+    await writeFileFn(agentJsonPath, `${JSON.stringify(json, null, 2)}\n`, 'utf8');
 
     console.log('[agent] Registered:', {
         agentId: agentIdValue,
@@ -249,7 +282,12 @@ async function main() {
     console.log('[agent] Updated metadata:', agentJsonPath);
 }
 
-main().catch((error) => {
-    console.error('[agent] registration failed:', error.message ?? error);
-    process.exit(1);
-});
+if (isDirectScriptExecution(import.meta.url)) {
+    main().catch((error) => {
+        console.error('[agent] registration failed:', error.message ?? error);
+        process.exit(1);
+    });
+}
+
+export { main };
+export { inferRegistryNetworkFromChainId };
