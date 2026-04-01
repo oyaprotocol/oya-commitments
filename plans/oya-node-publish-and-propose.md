@@ -49,6 +49,7 @@ Out of scope for this ExecPlan:
 - [x] 2026-03-31: Recreated runtime read/signer clients after final chain-specific config resolution in `initializeAgentRuntime()`, and hardened the proposal-submission catch path so storage failures after an observed tx hash stay on the safe `submission_uncertain` path.
 - [x] 2026-03-31: Centralized read/signer chain validation in a shared helper and applied it to both agent bootstrap and propose-mode runtime resolution, reducing the risk of future chain-check drift across codepaths.
 - [x] 2026-03-31: Extended the shared validated runtime helper to own read/signer client construction and migrated additional write-capable scripts (`execute-og-proposal.mjs` and `register-erc8004.mjs`) onto it, with a regression for config-vs-RPC mismatch in ERC-8004 registration.
+- [x] 2026-03-31: Deferred propose-mode runtime resolution until after deterministic expired/conflict checks, made post-submit reconciliation failures fall back to the known submitted record when a transaction hash is already persisted, and fixed injected-`argv` overlay resolution in the proposal runtime helper.
 
 ## Surprises & Discoveries
 

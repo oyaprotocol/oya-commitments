@@ -525,10 +525,18 @@ function createProposalPublicationApiServer({
             }
 
             if (latestRecord.submission?.transactionHash) {
-                const reconciledRecord = await reconcileSubmittedRecord(latestRecord, {
-                    runtime,
-                    envelope,
-                });
+                let reconciledRecord = latestRecord;
+                try {
+                    reconciledRecord = await reconcileSubmittedRecord(latestRecord, {
+                        runtime,
+                        envelope,
+                    });
+                } catch (reconcileError) {
+                    emitLog(
+                        'warn',
+                        `[oya-node] Proposal submission reconciliation failed (requestId=${latestRecord.requestId} signer=${latestRecord.signer} txHash=${latestRecord.submission.transactionHash}): ${reconcileError?.message ?? reconcileError}`
+                    );
+                }
                 return {
                     record: reconciledRecord,
                     submissionAttempted: true,
@@ -765,33 +773,6 @@ function createProposalPublicationApiServer({
                 exactExistingMatch
             );
 
-            let proposalRuntime;
-            if (apiMode === 'propose' && !canBypassProposalRuntime) {
-                try {
-                    proposalRuntime = await resolveProposalRuntime({
-                        chainId: body.chainId,
-                    });
-                } catch (error) {
-                    const statusCode = error?.statusCode ?? 502;
-                    const code = error?.code ?? 'proposal_runtime_unavailable';
-                    emitLog(
-                        'warn',
-                        `[oya-node] Proposal publish API rejected request${formatRequestContext({
-                            body,
-                            signer: signedAuth.sender.address,
-                            senderKeyId: signedAuth.senderKeyId,
-                            code,
-                            statusCode,
-                        })}: ${error?.message ?? error}`
-                    );
-                    sendJson(res, statusCode, {
-                        error: error?.message ?? 'Proposal runtime unavailable.',
-                        code,
-                    });
-                    return;
-                }
-            }
-
             if (signedAuth.isExpired && !exactExistingMatch && !refreshablePendingRecord) {
                 emitLog(
                     'warn',
@@ -885,6 +866,33 @@ function createProposalPublicationApiServer({
                     uri: prepared.record?.uri ?? null,
                 });
                 return;
+            }
+
+            let proposalRuntime;
+            if (apiMode === 'propose' && !canBypassProposalRuntime) {
+                try {
+                    proposalRuntime = await resolveProposalRuntime({
+                        chainId: body.chainId,
+                    });
+                } catch (error) {
+                    const statusCode = error?.statusCode ?? 502;
+                    const code = error?.code ?? 'proposal_runtime_unavailable';
+                    emitLog(
+                        'warn',
+                        `[oya-node] Proposal publish API rejected request${formatRequestContext({
+                            body,
+                            signer: signedAuth.sender.address,
+                            senderKeyId: signedAuth.senderKeyId,
+                            code,
+                            statusCode,
+                        })}: ${error?.message ?? error}`
+                    );
+                    sendJson(res, statusCode, {
+                        error: error?.message ?? 'Proposal runtime unavailable.',
+                        code,
+                    });
+                    return;
+                }
             }
 
             let record = prepared.record;

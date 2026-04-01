@@ -665,6 +665,36 @@ async function main() {
                 submitAttemptsByExplanation.get('Duplicate while runtime unavailable.'),
                 1
             );
+
+            const expiredWhileRuntimeDownRequest = await buildSignedBody({
+                account,
+                chainId: 11155111,
+                requestId: 'expired-while-runtime-down',
+                explanation: 'Expired request should not resolve runtime.',
+                timestampMs: Date.now() - 600_000,
+            });
+            const expiredWhileRuntimeDown = await postPublication(
+                proposeBaseUrl,
+                expiredWhileRuntimeDownRequest.body
+            );
+            assert.equal(expiredWhileRuntimeDown.status, 401);
+            assert.match(
+                expiredWhileRuntimeDown.json.error,
+                /Signed request expired or has an invalid timestamp/
+            );
+
+            const conflictingWhileRuntimeDownRequest = await buildSignedBody({
+                account,
+                chainId: 11155111,
+                requestId: 'propose-ok',
+                explanation: 'Conflict should beat runtime outage.',
+            });
+            const conflictingWhileRuntimeDown = await postPublication(
+                proposeBaseUrl,
+                conflictingWhileRuntimeDownRequest.body
+            );
+            assert.equal(conflictingWhileRuntimeDown.status, 409);
+            assert.equal(conflictingWhileRuntimeDown.json.code, 'request_conflict');
             proposalRuntimeAvailableByChain.set(11155111, true);
 
             const polygonRequest = await buildSignedBody({
@@ -811,6 +841,86 @@ async function main() {
             assert.equal(uncertainSubmitAttempts, 1);
         } finally {
             await uncertainPersistApi.stop();
+        }
+
+        const reconcileFailureStateFile = path.join(
+            tempDir,
+            'proposal-publications-propose-reconcile-failure.json'
+        );
+        const reconcileFailureStore = createProposalPublicationStore({
+            stateFile: reconcileFailureStateFile,
+        });
+        let reconcileFailureSubmitAttempts = 0;
+        const reconcileFailureTxHash = `0x${'b'.repeat(64)}`;
+        const reconcileFailureApi = createProposalPublicationApiServer({
+            config: buildServerConfig(account.address, {
+                chainId: undefined,
+                proposalPublishApiMode: 'propose',
+            }),
+            store: reconcileFailureStore,
+            logger: {
+                info() {},
+                warn() {},
+            },
+            resolveProposalRuntime: async ({ chainId }) => ({
+                runtimeConfig: {
+                    chainId,
+                    proposeEnabled: true,
+                    bondSpender: 'og',
+                    proposalHashResolveTimeoutMs: 1,
+                    proposalHashResolvePollIntervalMs: 1,
+                },
+                publicClient: {
+                    async getChainId() {
+                        return chainId;
+                    },
+                },
+                walletClient: {},
+                account: { address: account.address },
+            }),
+            submitProposal: async ({ explanation, onProposalTxSubmitted }) => {
+                reconcileFailureSubmitAttempts += 1;
+                assert.equal(
+                    explanation,
+                    'Known transaction hash should survive reconcile failure.'
+                );
+                await onProposalTxSubmitted(reconcileFailureTxHash);
+                throw new Error('submit completed but post-submit handling failed');
+            },
+            resolveProposalHash: async () => {
+                throw new Error('temporary receipt lookup failure');
+            },
+        });
+        const reconcileFailureServer = await reconcileFailureApi.start();
+        const reconcileFailureAddress = reconcileFailureServer.address();
+        assert.ok(
+            reconcileFailureAddress &&
+                typeof reconcileFailureAddress === 'object' &&
+                typeof reconcileFailureAddress.port === 'number'
+        );
+        const reconcileFailureBaseUrl = `http://127.0.0.1:${reconcileFailureAddress.port}`;
+
+        try {
+            const reconcileFailureRequest = await buildSignedBody({
+                account,
+                chainId: 11155111,
+                requestId: 'known-tx-reconcile-failure',
+                explanation: 'Known transaction hash should survive reconcile failure.',
+            });
+            const reconcileFailureResponse = await postPublication(
+                reconcileFailureBaseUrl,
+                reconcileFailureRequest.body
+            );
+            assert.equal(reconcileFailureResponse.status, 202);
+            assert.equal(reconcileFailureResponse.json.status, 'published');
+            assert.equal(reconcileFailureResponse.json.submission.status, 'submitted');
+            assert.equal(
+                reconcileFailureResponse.json.submission.transactionHash,
+                reconcileFailureTxHash
+            );
+            assert.equal(reconcileFailureSubmitAttempts, 1);
+        } finally {
+            await reconcileFailureApi.stop();
         }
     } finally {
         Date.now = originalDateNow;

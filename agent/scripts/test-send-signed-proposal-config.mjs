@@ -318,6 +318,70 @@ async function run() {
         [137, 11155111]
     );
 
+    await createAgentModule(repoRootPath, 'overlay-propose', {
+        proposalPublishApi: {
+            enabled: true,
+            mode: 'propose',
+            host: 'overlay-propose.local',
+            port: 9796,
+            requireSignerAllowlist: false,
+        },
+        byChain: {
+            '11155111': {},
+        },
+    });
+    const submissionOverlayPath = path.join(repoRootPath, 'submission-overlay.json');
+    await writeFile(
+        submissionOverlayPath,
+        JSON.stringify(
+            {
+                byChain: {
+                    '11155111': {
+                        rpcUrl: 'https://rpc.overlay.sepolia.example',
+                        proposeEnabled: true,
+                    },
+                },
+            },
+            null,
+            2
+        ),
+        'utf8'
+    );
+
+    const overlayDrivenRuntimeResolver = await createProposalPublishSubmissionRuntimeResolver({
+        agentRef: 'overlay-propose',
+        env: {},
+        repoRootPath,
+        argv: [
+            'node',
+            'start-proposal-publish-node.mjs',
+            '--module=overlay-propose',
+            `--overlay=${submissionOverlayPath}`,
+        ],
+        createPublicClientFn: () => ({
+            async getChainId() {
+                return 11155111;
+            },
+        }),
+        createSignerClientFn: async () => ({
+            account: { address: '0x1111111111111111111111111111111111111111' },
+            walletClient: {
+                async request({ method }) {
+                    assert.equal(method, 'eth_chainId');
+                    return '0xaa36a7';
+                },
+            },
+        }),
+    });
+    const overlayDrivenRuntime = await overlayDrivenRuntimeResolver({
+        chainId: 11155111,
+    });
+    assert.equal(
+        overlayDrivenRuntime.runtimeConfig.rpcUrl,
+        'https://rpc.overlay.sepolia.example'
+    );
+    assert.equal(overlayDrivenRuntime.runtimeConfig.proposeEnabled, true);
+
     const mismatchedSignerRuntimeResolver = await createProposalPublishSubmissionRuntimeResolver({
         agentRef: 'multichain-propose',
         env: {},
