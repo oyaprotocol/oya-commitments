@@ -162,18 +162,20 @@ async function createProposalPublishSubmissionRuntimeResolver({
     agentRef,
     env = process.env,
     repoRootPath = repoRoot,
-    overlayPaths = resolveExplicitOverlayPaths({ argv: process.argv }),
     argv = process.argv,
+    overlayPaths = undefined,
     createPublicClientFn = createPublicClient,
     createSignerClientFn = createSignerClient,
 } = {}) {
+    const resolvedOverlayPaths =
+        overlayPaths === undefined ? resolveExplicitOverlayPaths({ argv }) : overlayPaths;
     const cache = new Map();
     const serverRuntimeConfig = await resolveProposalPublishApiConfigForAgent({
         agentRef,
         chainId: undefined,
         repoRootPath,
         env,
-        overlayPaths,
+        overlayPaths: resolvedOverlayPaths,
         argv,
         allowAmbiguousChainId: true,
     });
@@ -203,7 +205,7 @@ async function createProposalPublishSubmissionRuntimeResolver({
                             chainId: normalizedChainId,
                             repoRootPath,
                             env,
-                            overlayPaths,
+                            overlayPaths: resolvedOverlayPaths,
                             argv,
                         });
                     } catch (error) {
