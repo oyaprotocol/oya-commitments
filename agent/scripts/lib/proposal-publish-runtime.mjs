@@ -169,15 +169,18 @@ async function createProposalPublishSubmissionRuntimeResolver({
 } = {}) {
     const resolvedOverlayPaths =
         overlayPaths === undefined ? resolveExplicitOverlayPaths({ argv }) : overlayPaths;
+    const explicitChainIdRaw = getArgValue('--chain-id=', argv);
+    const explicitChainId =
+        explicitChainIdRaw === null ? undefined : parseInteger(explicitChainIdRaw, 'chainId');
     const cache = new Map();
     const serverRuntimeConfig = await resolveProposalPublishApiConfigForAgent({
         agentRef,
-        chainId: undefined,
+        chainId: explicitChainId,
         repoRootPath,
         env,
         overlayPaths: resolvedOverlayPaths,
         argv,
-        allowAmbiguousChainId: true,
+        allowAmbiguousChainId: explicitChainId === undefined,
     });
     const servedChainIds = listServedChainIds(
         serverRuntimeConfig,
