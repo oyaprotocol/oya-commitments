@@ -51,6 +51,8 @@ Out of scope for this ExecPlan:
 - [x] 2026-03-31: Extended the shared validated runtime helper to own read/signer client construction and migrated additional write-capable scripts (`execute-og-proposal.mjs` and `register-erc8004.mjs`) onto it, with a regression for config-vs-RPC mismatch in ERC-8004 registration.
 - [x] 2026-03-31: Deferred propose-mode runtime resolution until after deterministic expired/conflict checks, made post-submit reconciliation failures fall back to the known submitted record when a transaction hash is already persisted, and fixed injected-`argv` overlay resolution in the proposal runtime helper.
 - [x] 2026-03-31: Fixed propose-mode submission runtime bootstrap so explicit startup `--chain-id` selection constrains the served chain set, preventing a selected single-chain node from later accepting requests for other configured chains.
+- [x] 2026-04-01: Hardened the publication persistence boundary so a successful IPFS add retains its first CID in volatile server state until it is durably saved, allowing exact retries to persist and pin the original artifact instead of republishing with a new timestamp/CID after a local store failure.
+- [x] 2026-04-02: Added crash-safe publication recovery by durably checkpointing the exact artifact plus `publishedAtMs` before IPFS add, reusing that checkpoint after restart, and clearing it only for true pre-publication add failures.
 
 ## Surprises & Discoveries
 
@@ -66,6 +68,9 @@ Out of scope for this ExecPlan:
 - Observation: Multi-chain propose mode needed one additional shared runtime capability that publication-only mode did not: chain-specific `rpcUrl` selection from config rather than a single process-wide `RPC_URL`.
   Evidence: `agent/src/lib/config.js` previously sourced `rpcUrl` only from env, while `agent/src/lib/agent-config.js` did not expose `rpcUrl` as a shared override field. The implementation promoted `rpcUrl` into the shared config layer and updated `agent/src/lib/runtime-bootstrap.js` to honor config-selected RPC endpoints.
 
+- Observation: Recovering a stable publication CID across process restart required a durable pre-add artifact checkpoint because `publishedAtMs` is embedded inside the published artifact bytes.
+  Evidence: `agent/src/lib/proposal-publication-api.js` now persists `artifact` plus `publishedAtMs` before `publishIpfsContent(...)`, and `agent/scripts/test-proposal-publication-api.mjs` now covers a two-process scenario where the first node publishes successfully, fails to save the CID, and the second node recovers the same CID from the checkpointed artifact.
+
 ## Decision Log
 
 - Decision: Keep the same signed proposal envelope and the same `POST /v1/proposals/publish` endpoint for both modes.
@@ -79,6 +84,10 @@ Out of scope for this ExecPlan:
 - Decision: In `propose` mode, publish first and submit second.
   Rationale: This preserves an immutable public artifact before the node spends gas or creates an OG proposal. If submission later fails, the archived request still exists and retries can reuse the same CID.
   Date/Author: 2026-03-31 / Codex.
+
+- Decision: Treat `artifact` plus `publishedAtMs` with `cid = null` as a durable pending-publication checkpoint, and clear that checkpoint only when IPFS add definitively fails before a CID exists.
+  Rationale: This preserves stable-CID recovery across process restart without changing the external API shape, while still allowing fresh timestamps for ordinary add failures that never produced a recoverable CID.
+  Date/Author: 2026-04-02 / Codex.
 
 - Decision: In v1, the node will trust any allowlisted signer for any signed `commitmentSafe` / `ogModule` pair and will not enforce commitment-specific policy.
   Rationale: The user explicitly wants the first version to skip rule validation and treat the node's internal allowlist as sufficient authorization.
