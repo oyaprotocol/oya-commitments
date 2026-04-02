@@ -58,7 +58,13 @@ function buildEnvelopeIdentityIgnoringTimestamp(envelope) {
 }
 
 function canRefreshPendingRecord({ existingRecord, envelope }) {
-    if (!existingRecord || existingRecord.cid !== null || existingRecord.pinned) {
+    if (
+        !existingRecord ||
+        existingRecord.cid !== null ||
+        existingRecord.pinned ||
+        existingRecord.artifact !== null ||
+        existingRecord.publishedAtMs !== null
+    ) {
         return false;
     }
 
@@ -209,6 +215,16 @@ function canReuseVolatilePublicationState(record, publicationState) {
     );
 }
 
+function hasDurablePendingPublicationArtifact(record) {
+    return Boolean(
+        record &&
+            record.cid === null &&
+            record.artifact !== null &&
+            Number.isInteger(record.publishedAtMs) &&
+            record.publishedAtMs >= 0
+    );
+}
+
 function createProposalPublicationApiServer({
     config,
     store,
@@ -313,22 +329,30 @@ function createProposalPublicationApiServer({
         }
 
         if (!nextRecord.cid) {
-            const envelope = parseEnvelopeFromCanonicalMessage(nextRecord.canonicalMessage);
-            const publishedAtMs = Date.now();
-            const artifact = buildProposalPublicationArtifact({
-                signer: nextRecord.signer,
-                signature: nextRecord.signature,
-                signedAtMs: envelope.timestampMs,
-                canonicalMessage: nextRecord.canonicalMessage,
-                envelope,
-                receivedAtMs: nextRecord.receivedAtMs,
-                publishedAtMs,
-                signerAllowlistMode,
-                nodeName,
-            });
+            if (!hasDurablePendingPublicationArtifact(nextRecord)) {
+                const envelope = parseEnvelopeFromCanonicalMessage(nextRecord.canonicalMessage);
+                const publishedAtMs = Date.now();
+                const artifact = buildProposalPublicationArtifact({
+                    signer: nextRecord.signer,
+                    signature: nextRecord.signature,
+                    signedAtMs: envelope.timestampMs,
+                    canonicalMessage: nextRecord.canonicalMessage,
+                    envelope,
+                    receivedAtMs: nextRecord.receivedAtMs,
+                    publishedAtMs,
+                    signerAllowlistMode,
+                    nodeName,
+                });
+                nextRecord = await store.saveRecord({
+                    ...nextRecord,
+                    artifact,
+                    publishedAtMs,
+                    lastError: null,
+                });
+            }
             const publishResponse = await publishIpfsContent({
                 config,
-                json: artifact,
+                json: nextRecord.artifact,
                 filename: buildProposalPublicationFilename({
                     requestId: nextRecord.requestId,
                     signer: nextRecord.signer,
@@ -338,8 +362,8 @@ function createProposalPublicationApiServer({
             const publicationState = {
                 signature: nextRecord.signature,
                 canonicalMessage: nextRecord.canonicalMessage,
-                artifact,
-                publishedAtMs,
+                artifact: nextRecord.artifact,
+                publishedAtMs: nextRecord.publishedAtMs,
                 cid: publishResponse.cid,
                 uri: publishResponse.uri,
                 publishResult: publishResponse.publishResult,
@@ -1026,9 +1050,17 @@ function createProposalPublicationApiServer({
                         ? 'pin_failed'
                         : 'publish_failed';
                 if (record) {
+                    const shouldClearDurablePendingPublication =
+                        code === 'publish_failed' && record.cid === null;
                     try {
                         record = await store.saveRecord({
                             ...record,
+                            ...(shouldClearDurablePendingPublication
+                                ? {
+                                      artifact: null,
+                                      publishedAtMs: null,
+                                  }
+                                : {}),
                             lastError: {
                                 code,
                                 message: error?.message ?? String(error),
@@ -1041,6 +1073,12 @@ function createProposalPublicationApiServer({
                     } catch (_persistError) {
                         record = {
                             ...record,
+                            ...(shouldClearDurablePendingPublication
+                                ? {
+                                      artifact: null,
+                                      publishedAtMs: null,
+                                  }
+                                : {}),
                             lastError: {
                                 code,
                                 message: error?.message ?? String(error),

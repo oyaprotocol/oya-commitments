@@ -456,6 +456,137 @@ async function main() {
             await publishPersistApi.stop();
         }
 
+        const publishPersistRestartStateFile = path.join(
+            tempDir,
+            'proposal-publications-persist-restart.json'
+        );
+        const publishPersistRestartStoreBase = createProposalPublicationStore({
+            stateFile: publishPersistRestartStateFile,
+        });
+        let publishPersistRestartFailures = 0;
+        const publishPersistRestartFailingStore = {
+            async getRecord(args) {
+                return publishPersistRestartStoreBase.getRecord(args);
+            },
+            async prepareRecord(args) {
+                return publishPersistRestartStoreBase.prepareRecord(args);
+            },
+            async saveRecord(record) {
+                if (record.cid && !record.pinned && publishPersistRestartFailures < 3) {
+                    publishPersistRestartFailures += 1;
+                    throw new Error('simulated publish persistence failure across restart');
+                }
+                return publishPersistRestartStoreBase.saveRecord(record);
+            },
+        };
+        const publishPersistRestartApi = createProposalPublicationApiServer({
+            config: buildServerConfig(account.address),
+            store: publishPersistRestartFailingStore,
+            logger: {
+                info() {},
+                warn() {},
+            },
+        });
+        const publishPersistRestartServer = await publishPersistRestartApi.start();
+        const publishPersistRestartAddress = publishPersistRestartServer.address();
+        assert.ok(
+            publishPersistRestartAddress &&
+                typeof publishPersistRestartAddress === 'object' &&
+                typeof publishPersistRestartAddress.port === 'number'
+        );
+        const publishPersistRestartBaseUrl = `http://127.0.0.1:${publishPersistRestartAddress.port}`;
+        let publishPersistRestartStopped = false;
+
+        try {
+            const publishPersistRestartRequest = await buildSignedBody({
+                account,
+                requestId: 'publish-persist-restart',
+                explanation: 'Recover stable CID after node restart.',
+            });
+            const publishPersistRestartFirst = await postPublication(
+                publishPersistRestartBaseUrl,
+                publishPersistRestartRequest.body
+            );
+            assert.equal(publishPersistRestartFirst.status, 502);
+            assert.equal(publishPersistRestartFirst.json.code, 'publish_persist_failed');
+            assert.ok(publishPersistRestartFirst.json.cid);
+            assert.equal(addAttemptsByRequestId.get('publish-persist-restart'), 1);
+            assert.equal(pinAttemptsByRequestId.get('publish-persist-restart') ?? 0, 0);
+
+            const publishPersistRestartCheckpoint =
+                await publishPersistRestartStoreBase.getRecord({
+                    signer: account.address,
+                    chainId: TEST_CHAIN_ID,
+                    requestId: 'publish-persist-restart',
+                });
+            assert.equal(publishPersistRestartCheckpoint.cid, null);
+            assert.equal(publishPersistRestartCheckpoint.pinned, false);
+            assert.ok(publishPersistRestartCheckpoint.artifact);
+            assert.equal(
+                publishPersistRestartCheckpoint.publishedAtMs,
+                publishPersistRestartFirst.json.publishedAtMs
+            );
+
+            await publishPersistRestartApi.stop();
+            publishPersistRestartStopped = true;
+
+            const publishPersistRestartRecoveryApi = createProposalPublicationApiServer({
+                config: buildServerConfig(account.address),
+                store: publishPersistRestartStoreBase,
+                logger: {
+                    info() {},
+                    warn() {},
+                },
+            });
+            const publishPersistRestartRecoveryServer =
+                await publishPersistRestartRecoveryApi.start();
+            const publishPersistRestartRecoveryAddress =
+                publishPersistRestartRecoveryServer.address();
+            assert.ok(
+                publishPersistRestartRecoveryAddress &&
+                    typeof publishPersistRestartRecoveryAddress === 'object' &&
+                    typeof publishPersistRestartRecoveryAddress.port === 'number'
+            );
+            const publishPersistRestartRecoveryBaseUrl = `http://127.0.0.1:${publishPersistRestartRecoveryAddress.port}`;
+
+            try {
+                const publishPersistRestartSecond = await postPublication(
+                    publishPersistRestartRecoveryBaseUrl,
+                    publishPersistRestartRequest.body
+                );
+                assert.equal(publishPersistRestartSecond.status, 202);
+                assert.equal(publishPersistRestartSecond.json.status, 'published');
+                assert.equal(
+                    publishPersistRestartSecond.json.cid,
+                    publishPersistRestartFirst.json.cid
+                );
+                assert.equal(addAttemptsByRequestId.get('publish-persist-restart'), 2);
+                assert.equal(pinAttemptsByRequestId.get('publish-persist-restart'), 1);
+
+                const publishPersistRestartRecovered =
+                    await publishPersistRestartStoreBase.getRecord({
+                        signer: account.address,
+                        chainId: TEST_CHAIN_ID,
+                        requestId: 'publish-persist-restart',
+                    });
+                assert.equal(
+                    publishPersistRestartRecovered.cid,
+                    publishPersistRestartFirst.json.cid
+                );
+                assert.equal(publishPersistRestartRecovered.pinned, true);
+                assert.equal(
+                    publishPersistRestartRecovered.publishedAtMs,
+                    publishPersistRestartFirst.json.publishedAtMs
+                );
+            } finally {
+                await publishPersistRestartRecoveryApi.stop();
+            }
+        } finally {
+            if (!publishPersistRestartStopped) {
+                await publishPersistRestartApi.stop();
+            }
+        }
+
         const retryBaseNowMs = originalDateNow();
         Date.now = () => retryBaseNowMs;
         const publishRetryRequest = await buildSignedBody({
