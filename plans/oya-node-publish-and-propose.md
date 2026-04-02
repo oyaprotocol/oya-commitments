@@ -51,6 +51,7 @@ Out of scope for this ExecPlan:
 - [x] 2026-03-31: Extended the shared validated runtime helper to own read/signer client construction and migrated additional write-capable scripts (`execute-og-proposal.mjs` and `register-erc8004.mjs`) onto it, with a regression for config-vs-RPC mismatch in ERC-8004 registration.
 - [x] 2026-03-31: Deferred propose-mode runtime resolution until after deterministic expired/conflict checks, made post-submit reconciliation failures fall back to the known submitted record when a transaction hash is already persisted, and fixed injected-`argv` overlay resolution in the proposal runtime helper.
 - [x] 2026-03-31: Fixed propose-mode submission runtime bootstrap so explicit startup `--chain-id` selection constrains the served chain set, preventing a selected single-chain node from later accepting requests for other configured chains.
+- [x] 2026-04-01: Hardened the publication persistence boundary so a successful IPFS add retains its first CID in volatile server state until it is durably saved, allowing exact retries to persist and pin the original artifact instead of republishing with a new timestamp/CID after a local store failure.
 
 ## Surprises & Discoveries
 
