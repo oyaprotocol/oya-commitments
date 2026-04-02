@@ -361,6 +361,101 @@ async function main() {
         assert.equal(pinnedRecord.cid, pinRetryFirst.json.cid);
         assert.equal(pinnedRecord.lastError, null);
 
+        const publishPersistStateFile = path.join(
+            tempDir,
+            'proposal-publications-persist-retry.json'
+        );
+        const publishPersistStoreBase = createProposalPublicationStore({
+            stateFile: publishPersistStateFile,
+        });
+        let publishPersistFailures = 0;
+        const publishPersistStore = {
+            async getRecord(args) {
+                return publishPersistStoreBase.getRecord(args);
+            },
+            async prepareRecord(args) {
+                return publishPersistStoreBase.prepareRecord(args);
+            },
+            async saveRecord(record) {
+                if (record.cid && !record.pinned && publishPersistFailures < 3) {
+                    publishPersistFailures += 1;
+                    throw new Error('simulated publish persistence failure');
+                }
+                return publishPersistStoreBase.saveRecord(record);
+            },
+        };
+        const publishPersistApi = createProposalPublicationApiServer({
+            config: buildServerConfig(account.address),
+            store: publishPersistStore,
+            logger: {
+                info() {},
+                warn() {},
+            },
+        });
+        const publishPersistServer = await publishPersistApi.start();
+        const publishPersistAddress = publishPersistServer.address();
+        assert.ok(
+            publishPersistAddress &&
+                typeof publishPersistAddress === 'object' &&
+                typeof publishPersistAddress.port === 'number'
+        );
+        const publishPersistBaseUrl = `http://127.0.0.1:${publishPersistAddress.port}`;
+
+        try {
+            const publishPersistRequest = await buildSignedBody({
+                account,
+                requestId: 'publish-persist-retry',
+                explanation: 'Reuse CID after persistence failure.',
+            });
+            const publishPersistFirst = await postPublication(
+                publishPersistBaseUrl,
+                publishPersistRequest.body
+            );
+            assert.equal(publishPersistFirst.status, 502);
+            assert.equal(publishPersistFirst.json.code, 'publish_persist_failed');
+            assert.ok(publishPersistFirst.json.cid);
+            assert.equal(addAttemptsByRequestId.get('publish-persist-retry'), 1);
+            assert.equal(pinAttemptsByRequestId.get('publish-persist-retry') ?? 0, 0);
+
+            const publishPersistPendingRecord = await publishPersistStoreBase.getRecord({
+                signer: account.address,
+                chainId: TEST_CHAIN_ID,
+                requestId: 'publish-persist-retry',
+            });
+            assert.equal(publishPersistPendingRecord.cid, null);
+            assert.equal(publishPersistPendingRecord.pinned, false);
+
+            const publishPersistSecond = await postPublication(
+                publishPersistBaseUrl,
+                publishPersistRequest.body
+            );
+            assert.equal(publishPersistSecond.status, 202);
+            assert.equal(publishPersistSecond.json.status, 'published');
+            assert.equal(
+                publishPersistSecond.json.cid,
+                publishPersistFirst.json.cid
+            );
+            assert.equal(addAttemptsByRequestId.get('publish-persist-retry'), 1);
+            assert.equal(pinAttemptsByRequestId.get('publish-persist-retry'), 1);
+
+            const publishPersistRecoveredRecord = await publishPersistStoreBase.getRecord({
+                signer: account.address,
+                chainId: TEST_CHAIN_ID,
+                requestId: 'publish-persist-retry',
+            });
+            assert.equal(
+                publishPersistRecoveredRecord.cid,
+                publishPersistFirst.json.cid
+            );
+            assert.equal(publishPersistRecoveredRecord.pinned, true);
+            assert.equal(
+                publishPersistRecoveredRecord.publishedAtMs,
+                publishPersistFirst.json.publishedAtMs
+            );
+        } finally {
+            await publishPersistApi.stop();
+        }
+
         const retryBaseNowMs = originalDateNow();
         Date.now = () => retryBaseNowMs;
         const publishRetryRequest = await buildSignedBody({
