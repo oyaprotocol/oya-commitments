@@ -12,10 +12,10 @@ The user-visible outcome is a more consistent commitment-authoring process. A hu
 
 - [x] 2026-04-03 23:35Z: Reviewed `PLANS.md`, `AGENTS.md`, `agent-library/AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `agent-library/README.md`, `skills/add-agent-commitment/SKILL.md`, and `agent-library/RULE_TEMPLATES.md`.
 - [x] 2026-04-03 23:35Z: Audited the current commitment-creation workflow and identified the main documentation gaps around template-first rule authoring and template maintenance.
-- [ ] Update `agent-library/RULE_TEMPLATES.md` so it explains how to use the file as the first stop for new commitment rules and how to propose new reusable templates.
-- [ ] Update human-facing workflow docs so the "new agentic commitment" path consistently points to `agent-library/RULE_TEMPLATES.md` before `commitment.txt`.
-- [ ] Update machine-targeted workflow docs so future coding agents are explicitly told to reuse existing templates first and suggest new templates when needed.
-- [ ] Run a consistency pass over the edited docs, record outcomes here, and summarize any remaining ambiguity.
+- [x] 2026-04-03 23:39Z: Updated `agent-library/RULE_TEMPLATES.md` with a templates-first preamble and guidance for suggesting reusable new templates.
+- [x] 2026-04-03 23:39Z: Updated human-facing workflow docs in `README.md`, `agent-library/README.md`, and `CONTRIBUTING.md` so new commitments route through `agent-library/RULE_TEMPLATES.md` before `commitment.txt`.
+- [x] 2026-04-03 23:39Z: Updated machine-targeted workflow docs in `agent-library/AGENTS.md` and `skills/add-agent-commitment/SKILL.md` so future coding agents reuse templates first and report reusable template gaps.
+- [x] 2026-04-03 23:39Z: Ran the planned wording sweep and reviewed the resulting documentation diff.
 
 ## Surprises & Discoveries
 
@@ -57,7 +57,16 @@ The user-visible outcome is a more consistent commitment-authoring process. A hu
 
 ## Outcomes & Retrospective
 
-Pending implementation. Record the final documentation changes, consistency checks, and any remaining workflow ambiguities here after the rollout lands.
+The documentation rollout is complete. The repo now points future commitment authors and coding agents to `agent-library/RULE_TEMPLATES.md` before they draft `commitment.txt`, and the reusable `add-agent-commitment` skill now requires template selection as part of its workflow.
+
+What changed:
+
+- `agent-library/RULE_TEMPLATES.md` now explains that it is the primary source for new commitment rules and tells contributors to suggest new template entries when a reusable pattern is missing.
+- `README.md` and `agent-library/README.md` now route the new-commitment flow through `agent-library/RULE_TEMPLATES.md` before `commitment.txt`, and they explicitly say the copied default `commitment.txt` is not the intended final rule set.
+- `CONTRIBUTING.md` now points commitment-rule drafting at `agent-library/RULE_TEMPLATES.md`.
+- `agent-library/AGENTS.md` and `skills/add-agent-commitment/SKILL.md` now require coding agents to reuse existing templates first and suggest new shared templates when needed.
+
+The main follow-up risk is not technical but editorial: if future workflow docs are added elsewhere, they should preserve the same templates-first ordering instead of reintroducing a "write rules from scratch" path.
 
 ## Context and Orientation
 
@@ -164,7 +173,18 @@ Current workflow audit notes:
 - `skills/add-agent-commitment/SKILL.md` currently asks for commitment rules as an input but does not name `agent-library/RULE_TEMPLATES.md`.
 - `agent-library/RULE_TEMPLATES.md` already contains reusable rule text for agent proxying, proposal delegation, fee structures, pause behavior, rule updates, and related constraints, so the rollout should focus on discoverability and contribution policy rather than inventing a new catalog.
 
-Fill this section with final wording notes or notable diff snippets after implementation.
+Implementation notes:
+
+- `README.md` now inserts `agent-library/RULE_TEMPLATES.md` between copying the default module and writing `commitment.txt`.
+- `agent-library/README.md` now says `commitment.txt` should usually be assembled from shared templates and warns that the copied default `commitment.txt` is only a runnable example.
+- `skills/add-agent-commitment/SKILL.md` now requires agents to identify applicable templates, build `commitment.txt` from them, and report suggested new templates when reusable gaps are found.
+
+Validation evidence:
+
+- Wording sweep command:
+  `rg -n "RULE_TEMPLATES|Write the commitment rules|commitment.txt|template" README.md CONTRIBUTING.md agent-library skills -g '*.md'`
+- Diff review command:
+  `git diff -- README.md CONTRIBUTING.md agent-library/AGENTS.md agent-library/README.md agent-library/RULE_TEMPLATES.md skills/add-agent-commitment/SKILL.md`
 
 ## Interfaces and Dependencies
 

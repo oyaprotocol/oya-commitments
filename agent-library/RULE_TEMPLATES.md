@@ -1,4 +1,17 @@
-The following is a list of templates for general-purpose rules that may be adopted for specific commitments. The spaces in between [ ] brackets should be filled with relevant values for the commitment. The format is a rule title, a --- separator, and a template for the rule with that title.
+# Rule Templates
+
+Use this file as the primary source when writing rules for a new agentic commitment. Before drafting fresh prose in `agent-library/agents/<agent-name>/commitment.txt`, review the templates below, select the ones that apply, and fill in the `[ ]` placeholders with commitment-specific values.
+
+The usual workflow is:
+
+1. Copy `agent-library/agents/default/` to `agent-library/agents/<agent-name>/`.
+2. Review this file and select the applicable rule templates.
+3. Assemble `commitment.txt` from those templates, replacing the copied default rule text.
+4. Add custom rule language only for behavior that is not already covered here.
+
+When a new commitment needs a reusable rule pattern that is missing from this file, coding agents and contributors should suggest a new template title plus body for later addition to `agent-library/RULE_TEMPLATES.md`. Prefer new templates for patterns likely to recur across commitments, not one-off value substitutions for a single deployment.
+
+The format below is a rule title, a `---` separator, and the template text for that rule.
 
 Agent Proxy
 ---
