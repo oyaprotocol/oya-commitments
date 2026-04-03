@@ -18,11 +18,12 @@ When instructions conflict:
 - `src/`, `script/`, `test/`: Solidity contracts, scripts, and tests.
 - `agent/`: shared offchain runner and reusable agent infrastructure.
 - `agent-library/agents/<name>/`: agent-specific implementations.
+- `agent-library/RULE_TEMPLATES.md`: shared rule templates for drafting new commitment rules.
 - `docs/`: operational and architecture docs.
 
 ## Required Contributor Workflow
 
-1. Read relevant local docs before editing (`AGENTS.md`, `README.md`).
+1. Read relevant local docs before editing (`AGENTS.md`, `README.md`). For new or revised commitment rules, start from `agent-library/RULE_TEMPLATES.md` before editing `agent-library/agents/<name>/commitment.txt`.
 2. Keep changes scoped to the correct area.
 Agent-specific behavior belongs in `agent-library/agents/<name>/`.
 Shared runner changes in `agent/` require cross-agent justification.
