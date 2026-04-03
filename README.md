@@ -30,11 +30,12 @@ By default this leaves the deployer as the Safe's sole owner so you can do a tes
 
 The fastest path to a new commitment/agent combo is:
 1. Copy `agent-library/agents/default/` to `agent-library/agents/<agent-name>/`.
-2. Write the commitment rules in `agent-library/agents/<agent-name>/commitment.txt`.
-3. Implement commitment-specific behavior in `agent-library/agents/<agent-name>/agent.js`.
-4. Put non-secret runtime settings in `agent-library/agents/<agent-name>/config.json`.
-5. Keep only secrets in `agent/.env`.
-6. Validate and smoke test locally:
+2. Review `agent-library/RULE_TEMPLATES.md` and select the rule templates that apply to the new commitment.
+3. Assemble `agent-library/agents/<agent-name>/commitment.txt` from those templates, filling the placeholders and replacing the copied default rule text. If a reusable rule pattern is missing, suggest a new template for `agent-library/RULE_TEMPLATES.md`.
+4. Implement commitment-specific behavior in `agent-library/agents/<agent-name>/agent.js`.
+5. Put non-secret runtime settings in `agent-library/agents/<agent-name>/config.json`.
+6. Keep only secrets in `agent/.env`.
+7. Validate and smoke test locally:
 
 ```bash
 node agent/scripts/validate-agent.mjs --module=<agent-name>
@@ -47,6 +48,7 @@ The detailed workflow for module structure, `config.json`, and local/remote harn
 ## Documentation
 
 - Contribution workflow and policy: `CONTRIBUTING.md`
+- Shared commitment rule templates: `agent-library/RULE_TEMPLATES.md`
 - Skill for new agent/commitment combos: `skills/add-agent-commitment/SKILL.md`
 - Agent module layout and new-commitment workflow: `agent-library/README.md`
 - Runner config, message API, and harness usage: `agent/README.md`

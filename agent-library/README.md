@@ -2,7 +2,7 @@
 
 Each agent lives under `agent-library/agents/<agent-name>/` and must include:
 - `agent.js`: decision logic and prompt construction.
-- `commitment.txt`: plain language commitment that the agent is designed to serve.
+- `commitment.txt`: plain language commitment that the agent is designed to serve. For new commitments, this should usually be assembled from `agent-library/RULE_TEMPLATES.md` plus any truly commitment-specific rules.
 - `agent.json`: registration/metadata document for external indexing and ERC-8004 flows.
 
 Optional module-local files:
@@ -18,15 +18,16 @@ The runner loads the agent module via `AGENT_MODULE` (agent name) and reads the 
 
 Recommended workflow:
 1. Copy `agent-library/agents/default/` to `agent-library/agents/<agent-name>/`.
-2. Write the commitment rules in `commitment.txt`.
-3. Implement commitment-specific behavior in `agent.js`.
-4. Add `config.json` for non-secret commitment/runtime config:
+2. Review `agent-library/RULE_TEMPLATES.md` and identify the rule templates that apply to the new commitment.
+3. Replace the copied `commitment.txt` contents with rules assembled from those templates. Fill each `[ ]` placeholder with commitment-specific values, add custom rules only for behavior not covered by the shared templates, and note any reusable missing rule patterns as candidate additions to `agent-library/RULE_TEMPLATES.md`.
+4. Implement commitment-specific behavior in `agent.js`.
+5. Add `config.json` for non-secret commitment/runtime config:
    - `byChain.<chainId>.commitmentSafe` and `byChain.<chainId>.ogModule` for real deployments
    - `messageApi` when the commitment accepts signed user messages
    - `harness.deployment` and optional `harness.seedErc20Holders` for local/remote smoke flows
-5. Add `harness.mjs` when the module needs a custom one-command smoke scenario.
-6. Keep secrets in `agent/.env` only: signer keys, bearer/API tokens, `OPENAI_API_KEY`, authenticated `IPFS_HEADERS_JSON`, and similar credentials.
-7. Validate the module and run the harness:
+6. Add `harness.mjs` when the module needs a custom one-command smoke scenario.
+7. Keep secrets in `agent/.env` only: signer keys, bearer/API tokens, `OPENAI_API_KEY`, authenticated `IPFS_HEADERS_JSON`, and similar credentials.
+8. Validate the module and run the harness:
 
 ```bash
 node agent/scripts/validate-agent.mjs --module=<agent-name>
@@ -45,6 +46,8 @@ node agent/scripts/testnet-harness.mjs down --module=<agent-name> --profile=loca
 ```
 
 Use `signed-message-smoke` as the simplest reference module for a harness-ready agent with local message ingress.
+
+The default module's `commitment.txt` is a runnable example copied by step 1, not the intended final rule set for new commitments. Replace it with the templates and values selected for the actual commitment you are creating.
 
 Example agents:
 - `agent-library/agents/default/`: generic agent using the commitment text.
