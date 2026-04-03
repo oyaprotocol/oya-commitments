@@ -55,7 +55,7 @@ User withdrawals are limited to [ ] dollars in value every [ ] days.
 
 Commitment Pause
 ---
-This commitment may be paused by a proposal from the guardian address [ ]. The proposal should contain no transactions, but include a signed message of the word "pause" as the explanation field. During a pause, the agent may propose withdrawals only to close trades already initiated by a deposit from the agent, or fees owed to the agent. Additionally, if account recovery and rule updates are allowed, the recovery signers may propose a rule update during the pause. No other transaction proposals are valid during a pause. The guardian address [ ] may unpause the commitment with a proposal containing no transactions a signed message of the word "unpause" as the explanation field.
+This commitment may be paused by a proposal from the guardian address [ ]. The proposal should contain no transactions, but include a signed message of the word "pause" as the explanation field. During a pause, the agent may propose withdrawals only to close trades already initiated by a deposit from the agent, or fees owed to the agent. Additionally, if account recovery and rule updates are allowed, the recovery signers may propose a rule update during the pause. The guardian address [ ] may unpause the commitment with a proposal containing no transactions and a signed message of the word "unpause" as the explanation field. No other transaction proposals are valid during a pause.
 
 Account Recovery and Rule Updates
 ---
