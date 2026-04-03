@@ -69,14 +69,6 @@ Polymarket Liquidity
 ---
 The agent may only trade in Polymarket markets with a minimum liquidity of [ ].
 
-Fast Withdrawal
----
-(Define fast withdrawal rules later)
-
-Multiuser Commitments
----
-(Define later)
-
 Transfer Address Restrictions
 ---
 Transfers from this Safe are limited to the primary user's address [ ], the designated agent's address [ ], and the following additional addresses: [ ]
