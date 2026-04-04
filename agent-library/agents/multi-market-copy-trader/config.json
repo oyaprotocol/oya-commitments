@@ -1,0 +1,27 @@
+{
+  "ipfsEnabled": true,
+  "byChain": {
+    "137": {
+      "commitmentSafe": "0x7A02D5FD504437D07Be55B60E851A12119dCF650",
+      "ogModule": "0x98913C65D0b552c1996988142aF76F89d0838cCd",
+      "copyTrading": {
+        "sourceUser": "0x777fae71d2ff9ec48a1213d48ba1d9d91024a1bb",
+        "collateralToken": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+      },
+      "fundingWallet": "0x2Ee0F0767af62b7D4C5faFcd3879487AfB229659",
+      "polymarketClobAddress": "0x2Ee0F0767af62b7D4C5faFcd3879487AfB229659",
+      "proposalPublishApi": {
+        "enabled": true,
+        "host": "127.0.0.1",
+        "port": 9892,
+        "requireSignerAllowlist": true,
+        "signerAllowlist": [
+          "0x2Ee0F0767af62b7D4C5faFcd3879487AfB229659"
+        ],
+        "signatureMaxAgeSeconds": 300,
+        "maxBodyBytes": 65536,
+        "nodeName": "multi-market-publisher"
+      }
+    }
+  }
+}

@@ -25,9 +25,6 @@ const BPS_DENOMINATOR = 10_000n;
 const PRICE_SCALE = 1_000_000n;
 const REIMBURSEMENT_SUBMISSION_TIMEOUT_MS = 60_000;
 
-// On first run, we snapshot the latest source trade so we don't copy stale/old trades.
-let _initializedSeenTrade = false;
-
 let copyTradingState = {
     seenSourceTradeId: null,
     activeSourceTradeId: null,
@@ -398,12 +395,6 @@ function getPolicy(config) {
         errors.push('copyTrading.ctfContract invalid and polymarketConditionalTokens unavailable.');
     }
 
-    // Optional max trade cap in USDC (6 decimals)
-    const maxTradeAmountUsdc = Number(policyConfig.maxTradeAmountUsdc ?? 0);
-    const maxTradeAmountWei = maxTradeAmountUsdc > 0
-        ? BigInt(Math.round(maxTradeAmountUsdc * 1e6))
-        : null; // null = no cap, use 99% of Safe balance
-
     return {
         sourceUser,
         market,
@@ -411,13 +402,12 @@ function getPolicy(config) {
         noTokenId,
         collateralToken,
         ctfContract,
-        maxTradeAmountWei,
         ready: errors.length === 0,
         errors,
     };
 }
 
-function calculateCopyAmounts(safeBalanceWei, maxTradeAmountWei = null) {
+function calculateCopyAmounts(safeBalanceWei) {
     const normalized = BigInt(safeBalanceWei ?? 0);
     if (normalized <= 0n) {
         return {
@@ -427,14 +417,7 @@ function calculateCopyAmounts(safeBalanceWei, maxTradeAmountWei = null) {
         };
     }
 
-    let copyAmountWei = (normalized * COPY_BPS) / BPS_DENOMINATOR;
-
-    // Apply max trade cap if configured
-    if (maxTradeAmountWei !== null && maxTradeAmountWei > 0n && copyAmountWei > maxTradeAmountWei) {
-        console.log(`[copy-trading] Capping trade amount from ${copyAmountWei} to ${maxTradeAmountWei} (maxTradeAmountUsdc cap)`);
-        copyAmountWei = maxTradeAmountWei;
-    }
-
+    const copyAmountWei = (normalized * COPY_BPS) / BPS_DENOMINATOR;
     const feeAmountWei = normalized - copyAmountWei;
 
     return {
@@ -460,15 +443,14 @@ function computeBuyOrderAmounts({ collateralAmountWei, price }) {
         throw new Error('price is too small for buy-order sizing.');
     }
 
-    // For a BUY order: makerAmount = collateral offered (USDC), takerAmount = tokens received
-    const tokenAmount = (normalizedCollateralAmountWei * PRICE_SCALE) / priceScaled;
-    if (tokenAmount <= 0n) {
-        throw new Error('takerAmount (token amount) computed to zero; refusing order.');
+    const makerAmount = (normalizedCollateralAmountWei * PRICE_SCALE) / priceScaled;
+    if (makerAmount <= 0n) {
+        throw new Error('makerAmount computed to zero; refusing order.');
     }
 
     return {
-        makerAmount: normalizedCollateralAmountWei.toString(),
-        takerAmount: tokenAmount.toString(),
+        makerAmount: makerAmount.toString(),
+        takerAmount: normalizedCollateralAmountWei.toString(),
         priceScaled: priceScaled.toString(),
     };
 }
@@ -591,11 +573,6 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
     const policy = getPolicy(config);
     const stateSnapshot = { ...copyTradingState };
 
-    console.log('[copy-trading] enrichSignals called, policy.ready:', policy.ready);
-    if (!policy.ready) {
-        console.log('[copy-trading] Policy errors:', policy.errors);
-    }
-
     const outSignals = [...signals];
     if (!policy.ready) {
         outSignals.push({
@@ -610,24 +587,10 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
     let latestTrade = null;
     let tradeFetchError;
     try {
-        console.log('[copy-trading] Fetching latest trade for', policy.sourceUser, 'market:', policy.market);
         latestTrade = await fetchLatestSourceTrade({ policy });
-        console.log('[copy-trading] Trade result:', latestTrade ? `${latestTrade.side} ${latestTrade.outcome} id:${latestTrade.id?.substring(0, 20)}...` : 'none');
     } catch (error) {
         tradeFetchError = error?.message ?? String(error);
-        console.log('[copy-trading] Trade fetch error:', tradeFetchError);
     }
-
-    // On first successful fetch, snapshot the latest trade as "already seen"
-    // so we only copy truly NEW trades that appear after the agent starts.
-    if (!_initializedSeenTrade && latestTrade && !tradeFetchError) {
-        _initializedSeenTrade = true;
-        if (!copyTradingState.seenSourceTradeId && !copyTradingState.activeSourceTradeId) {
-            copyTradingState.seenSourceTradeId = latestTrade.id;
-            console.log('[copy-trading] Initialized seenSourceTradeId to current latest:', latestTrade.id?.substring(0, 20));
-        }
-    }
-
     const configuredClobAddress = normalizeAddress(config?.polymarketClobAddress);
     const runtimeSignerAddress = normalizeAddress(account.address);
     const clobAuthAddress = configuredClobAddress ?? runtimeSignerAddress;
@@ -674,48 +637,22 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
             args: [tokenHolderAddress, BigInt(policy.noTokenId)],
         })
         : Promise.resolve(0n);
-    // Check if the Safe already holds YES/NO tokens for this market.
-    // If it does, a previous trade cycle deposited tokens but hasn't completed
-    // reimbursement yet — the agent must not start a new trade.
-    const safeYesBalancePromise = publicClient.readContract({
-        address: policy.ctfContract,
-        abi: erc1155Abi,
-        functionName: 'balanceOf',
-        args: [config.commitmentSafe, BigInt(policy.yesTokenId)],
-    });
-    const safeNoBalancePromise = publicClient.readContract({
-        address: policy.ctfContract,
-        abi: erc1155Abi,
-        functionName: 'balanceOf',
-        args: [config.commitmentSafe, BigInt(policy.noTokenId)],
-    });
 
-    const [safeCollateralWei, yesBalance, noBalance, safeYesBalance, safeNoBalance] = await Promise.all([
+    const [safeCollateralWei, yesBalance, noBalance] = await Promise.all([
         safeCollateralPromise,
         yesBalancePromise,
         noBalancePromise,
-        safeYesBalancePromise,
-        safeNoBalancePromise,
     ]);
-    const safeHasExistingPosition = safeYesBalance > 0n || safeNoBalance > 0n;
 
-    const amounts = calculateCopyAmounts(safeCollateralWei, policy.maxTradeAmountWei);
-    console.log('[copy-trading] Safe collateral:', safeCollateralWei.toString(), 'copyAmountWei:', amounts.copyAmountWei, 'walletAlignmentError:', walletAlignmentError);
-    console.log('[copy-trading] Safe YES balance:', safeYesBalance.toString(), 'Safe NO balance:', safeNoBalance.toString(), 'hasExistingPosition:', safeHasExistingPosition);
-    console.log('[copy-trading] seenSourceTradeId:', copyTradingState.seenSourceTradeId?.substring(0, 20), 'activeSourceTradeId:', copyTradingState.activeSourceTradeId?.substring(0, 20));
-    if (safeHasExistingPosition) {
-        console.log('[copy-trading] Safe already holds tokens for this market — skipping new trades until reimbursement cycle completes.');
-    }
+    const amounts = calculateCopyAmounts(safeCollateralWei);
     if (
         latestTrade &&
         latestTrade.side === 'BUY' &&
         latestTrade.id !== copyTradingState.seenSourceTradeId &&
         !copyTradingState.activeSourceTradeId &&
         !walletAlignmentError &&
-        !safeHasExistingPosition &&
         BigInt(amounts.copyAmountWei) > 0n
     ) {
-        console.log('[copy-trading] *** ACTIVATING TRADE CANDIDATE ***', latestTrade.id?.substring(0, 20), latestTrade.outcome);
         const targetTokenId = latestTrade.outcome === 'YES' ? policy.yesTokenId : policy.noTokenId;
         activateTradeCandidate({
             trade: latestTrade,
@@ -847,9 +784,6 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
             safeCollateralWei: safeCollateralWei.toString(),
             yesBalance: yesBalance.toString(),
             noBalance: noBalance.toString(),
-            safeYesBalance: safeYesBalance.toString(),
-            safeNoBalance: safeNoBalance.toString(),
-            safeHasExistingPosition,
             activeTokenBalance: activeTokenBalance.toString(),
             tokenHolderAddress,
         },
@@ -1030,38 +964,16 @@ function onToolOutput({ name, parsedOutput }) {
 
     if (name === 'polymarket_clob_build_sign_and_place_order' && parsedOutput.status === 'submitted') {
         const submittedOrderId = extractOrderIdFromSubmission(parsedOutput);
-        copyTradingState.orderSubmitted = true;
+        copyTradingState.orderSubmitted = Boolean(submittedOrderId);
         copyTradingState.copyOrderId = submittedOrderId;
-        copyTradingState.copyOrderStatus = extractOrderStatusFromSubmission(parsedOutput) ?? 'CONFIRMED';
-        copyTradingState.copyOrderSubmittedMs = Date.now();
-
-        // For FOK orders: if the tool returned 'submitted' (not 'error'),
-        // the order filled completely. FOK is all-or-nothing — success means filled.
-        // Mark as filled immediately so the deposit step triggers right away
-        // without waiting for a separate fill-check poll.
-        const orderType = copyTradingState.activeTradeSide === 'BUY' ? 'FOK' : null;
-        if (!submittedOrderId || orderType === 'FOK') {
-            copyTradingState.copyOrderFilled = true;
-            console.log('[copy-trading] FOK order filled (status=submitted). Marking as filled for immediate deposit.');
-        } else {
-            copyTradingState.copyOrderFilled = false;
-        }
+        copyTradingState.copyOrderStatus = extractOrderStatusFromSubmission(parsedOutput);
+        copyTradingState.copyOrderFilled = false;
+        copyTradingState.copyOrderSubmittedMs = submittedOrderId ? Date.now() : null;
         return;
     }
 
     if (name === 'make_erc1155_deposit' && parsedOutput.status === 'confirmed') {
         copyTradingState.tokenDeposited = true;
-        return;
-    }
-
-    if (
-        (name === 'post_bond_and_propose' || name === 'auto_post_bond_and_propose') &&
-        parsedOutput.status === 'awaiting_approval'
-    ) {
-        // Proposal was built but requires manual approval before posting bond.
-        // Mark as "pending" so the agent doesn't keep rebuilding it each loop.
-        copyTradingState.reimbursementSubmissionPending = true;
-        console.log('[copy-trading] Proposal awaiting manual approval. Set PROPOSE_REQUIRES_APPROVAL=false and restart to submit.');
         return;
     }
 
@@ -1164,83 +1076,11 @@ function resetCopyTradingState() {
     };
 }
 
-/**
- * Deterministic decision engine for copy-trading.
- * Removes the need for an LLM (OpenAI API key) by directly returning
- * the tool calls that the state machine dictates.
- */
-async function getDeterministicToolCalls({
-    signals,
-    onchainPendingProposal = false,
-}) {
-    const copySignal = signals.find((s) => s?.kind === 'copyTradingState');
-    if (!copySignal || !copySignal.policy?.ready) {
-        return [];
-    }
-    const state = copySignal.state ?? {};
-    const pendingProposal = Boolean(onchainPendingProposal || copySignal.pendingProposal);
-
-    // Step 1: Place CLOB order when trade is activated but order not yet submitted
-    if (
-        state.activeSourceTradeId &&
-        !state.orderSubmitted &&
-        state.activeTradeSide === 'BUY' &&
-        state.activeTokenId &&
-        BigInt(state.copyTradeAmountWei ?? 0) > 0n
-    ) {
-        console.log('[copy-trading] Deterministic: placing CLOB order for', state.activeSourceTradeId?.substring(0, 20));
-        return [{
-            name: 'polymarket_clob_build_sign_and_place_order',
-            callId: `det_clob_${Date.now()}`,
-            arguments: {
-                side: 'BUY',
-                tokenId: String(state.activeTokenId),
-                orderType: 'FOK',
-            },
-        }];
-    }
-
-    // Step 2: Deposit tokens after order is filled
-    if (
-        state.orderSubmitted &&
-        state.copyOrderFilled &&
-        !state.tokenDeposited &&
-        state.activeTokenId
-    ) {
-        console.log('[copy-trading] Deterministic: depositing tokens for', state.activeSourceTradeId?.substring(0, 20));
-        return [{
-            name: 'make_erc1155_deposit',
-            callId: `det_deposit_${Date.now()}`,
-            arguments: {
-                tokenId: String(state.activeTokenId),
-            },
-        }];
-    }
-
-    // Step 3: Propose reimbursement after deposit
-    if (
-        state.tokenDeposited &&
-        !state.reimbursementProposed &&
-        !state.reimbursementSubmissionPending &&
-        !pendingProposal
-    ) {
-        console.log('[copy-trading] Deterministic: building reimbursement proposal for', state.activeSourceTradeId?.substring(0, 20));
-        return [{
-            name: 'build_og_transactions',
-            callId: `det_reimburse_${Date.now()}`,
-            arguments: {},
-        }];
-    }
-
-    return [];
-}
-
 export {
     calculateCopyAmounts,
     computeBuyOrderAmounts,
     enrichSignals,
     getCopyTradingState,
-    getDeterministicToolCalls,
     getPollingOptions,
     getSystemPrompt,
     onProposalEvents,

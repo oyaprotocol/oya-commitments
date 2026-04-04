@@ -8,6 +8,7 @@
     "test": "node ./scripts/run-local-tests.mjs"
   },
   "dependencies": {
+    "@polymarket/clob-client": "^5.8.1",
     "dotenv": "^16.4.5",
     "ethers": "^6.12.0",
     "viem": "^2.20.0"

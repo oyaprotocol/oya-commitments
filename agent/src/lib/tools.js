@@ -12,6 +12,8 @@ import { publishIpfsContent } from './ipfs.js';
 import {
     buildClobOrderFromRaw,
     cancelClobOrders,
+    checkNegRisk,
+    getFeeRateBps,
     placeClobOrder,
     resolveClobExchangeAddress,
     signClobOrder,
@@ -1016,6 +1018,7 @@ async function executeToolCalls({
             }
 
         if (call.name === 'polymarket_clob_build_sign_and_place_order') {
+            console.log('[agent] CLOB tool called. polymarketClobEnabled:', config.polymarketClobEnabled);
             if (!config.polymarketClobEnabled) {
                 outputs.push({
                     callId: call.callId,
@@ -1087,9 +1090,11 @@ async function executeToolCalls({
                         'chainId is required to sign CLOB orders (provide chainId or use a client with getChainId).'
                     );
                 }
+                const negRisk = await checkNegRisk({ config, tokenId: declaredTokenId });
                 const exchange = resolveClobExchangeAddress({
                     chainId,
                     exchangeOverride: args.exchange ?? config.polymarketExchange,
+                    negRisk,
                 });
                 const normalizedSalt = normalizeOptionalUintString(args.salt, 'salt');
                 const normalizedExpiration = normalizeOptionalUintString(
@@ -1097,8 +1102,17 @@ async function executeToolCalls({
                     'expiration'
                 );
                 const normalizedNonce = normalizeOptionalUintString(args.nonce, 'nonce');
+                // Fetch the current fee rate from the CLOB API if not explicitly provided
+                let feeRateBpsValue = args.feeRateBps;
+                if (feeRateBpsValue === undefined || feeRateBpsValue === null || feeRateBpsValue === '') {
+                    feeRateBpsValue = await getFeeRateBps({
+                        config,
+                        signingAddress: clobAuthAddress,
+                        tokenId: declaredTokenId,
+                    });
+                }
                 const normalizedFeeRateBps = normalizeOptionalUintString(
-                    args.feeRateBps,
+                    feeRateBpsValue,
                     'feeRateBps'
                 );
                 const configuredSignatureType =
@@ -1548,6 +1562,44 @@ async function executeToolCalls({
         if (builtTransactions && !hasPostProposal) {
             if (!config.proposeEnabled) {
                 console.log('[agent] Built transactions but proposals are disabled; skipping propose.');
+            } else if (config.proposeRequiresApproval) {
+                // Log full proposal details for manual review before posting bond
+                console.log('\n[agent] ========================================');
+                console.log('[agent] PROPOSAL READY FOR MANUAL APPROVAL');
+                console.log('[agent] ========================================');
+                console.log('[agent] The following proposal has been built but NOT submitted.');
+                console.log('[agent] Review the details below and restart with proposeRequiresApproval=false to submit.');
+                console.log('[agent] Transactions:');
+                for (let i = 0; i < builtTransactions.length; i++) {
+                    const tx = builtTransactions[i];
+                    console.log(`[agent]   TX[${i}]:`);
+                    console.log(`[agent]     to:        ${tx.to}`);
+                    console.log(`[agent]     value:     ${tx.value}`);
+                    console.log(`[agent]     data:      ${tx.data}`);
+                    console.log(`[agent]     operation: ${tx.operation}`);
+                    // Decode ERC20 transfer if possible
+                    if (tx.data && tx.data.startsWith('0xa9059cbb')) {
+                        const recipient = '0x' + tx.data.slice(34, 74);
+                        const amountHex = tx.data.slice(74);
+                        const amountWei = BigInt('0x' + amountHex);
+                        console.log(`[agent]     [decoded] ERC-20 transfer`);
+                        console.log(`[agent]       token:     ${tx.to}`);
+                        console.log(`[agent]       recipient: ${recipient}`);
+                        console.log(`[agent]       amount:    ${amountWei} wei (${Number(amountWei) / 1e6} USDC)`);
+                    }
+                }
+                console.log('[agent] OG Module:', config.ogModule);
+                console.log('[agent] Safe:', config.commitmentSafe);
+                console.log('[agent] ========================================\n');
+                outputs.push({
+                    callId: 'auto_post_bond_and_propose',
+                    name: 'post_bond_and_propose',
+                    output: safeStringify({
+                        status: 'awaiting_approval',
+                        message: 'Proposal built but requires manual approval. Check agent logs for details.',
+                        transactions: builtTransactions,
+                    }),
+                });
             } else {
                 try {
                     const result = await postBondAndPropose({

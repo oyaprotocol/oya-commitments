@@ -25,8 +25,10 @@ const BPS_DENOMINATOR = 10_000n;
 const PRICE_SCALE = 1_000_000n;
 const REIMBURSEMENT_SUBMISSION_TIMEOUT_MS = 60_000;
 
-// On first run, we snapshot the latest source trade so we don't copy stale/old trades.
-let _initializedSeenTrade = false;
+// Gamma API for dynamic market/token resolution
+const GAMMA_API_HOST = 'https://gamma-api.polymarket.com';
+// Cache resolved market tokens to avoid repeated API calls
+const marketTokenCache = new Map();
 
 let copyTradingState = {
     seenSourceTradeId: null,
@@ -35,6 +37,9 @@ let copyTradingState = {
     activeTradePrice: null,
     activeOutcome: null,
     activeTokenId: null,
+    activeMarket: null,           // NEW: dynamic market conditionId
+    activeYesTokenId: null,       // NEW: dynamically resolved YES token
+    activeNoTokenId: null,        // NEW: dynamically resolved NO token
     copyTradeAmountWei: null,
     reimbursementAmountWei: null,
     reimbursementRecipientAddress: null,
@@ -340,7 +345,6 @@ function resolveOgProposalHashFromToolOutput(parsedOutput) {
 
     const legacyHash = normalizeHash(parsedOutput?.proposalHash);
     if (!legacyHash) return null;
-    // In legacy output shape `proposalHash` is the tx hash, not OG proposal hash.
     if (txHash && legacyHash === txHash) return null;
     return legacyHash;
 }
@@ -367,17 +371,87 @@ function parseActivityEntry(entry) {
         outcome,
         price,
         market: entry.conditionId ? String(entry.conditionId) : undefined,
+        slug: entry.slug ? String(entry.slug) : undefined,
+        title: entry.title ? String(entry.title) : undefined,
+        asset: entry.asset ? String(entry.asset) : undefined,
         timestamp: entry.timestamp ? String(entry.timestamp) : undefined,
         txHash: entry.transactionHash ? String(entry.transactionHash) : undefined,
     };
 }
 
+// ─── NEW: Dynamic market token resolution via Gamma API ───
+
+async function resolveMarketTokens(slug) {
+    if (!slug) return null;
+
+    // Check cache first
+    if (marketTokenCache.has(slug)) {
+        return marketTokenCache.get(slug);
+    }
+
+    try {
+        const url = `${GAMMA_API_HOST}/markets?slug=${encodeURIComponent(slug)}`;
+        console.log('[multi-market] Gamma API query:', url);
+        const response = await fetch(url, {
+            signal: AbortSignal.timeout(10_000),
+        });
+        if (!response.ok) {
+            throw new Error(`Gamma API request failed (${response.status}).`);
+        }
+
+        const data = await response.json();
+        // Gamma API returns an array of markets matching the slug
+        const market = Array.isArray(data) ? data[0] : data;
+        if (!market) return null;
+
+        // Gamma API returns clobTokenIds as a JSON string: '["yesId", "noId"]'
+        // Index 0 = YES token, Index 1 = NO token
+        let yesTokenId = null;
+        let noTokenId = null;
+
+        if (market.clobTokenIds) {
+            try {
+                const tokenIds = typeof market.clobTokenIds === 'string'
+                    ? JSON.parse(market.clobTokenIds)
+                    : market.clobTokenIds;
+                if (Array.isArray(tokenIds) && tokenIds.length >= 2) {
+                    yesTokenId = String(tokenIds[0]).trim();
+                    noTokenId = String(tokenIds[1]).trim();
+                }
+            } catch (parseErr) {
+                console.log('[multi-market] Failed to parse clobTokenIds:', market.clobTokenIds);
+            }
+        }
+
+        if (!yesTokenId || !noTokenId) {
+            console.log('[multi-market] Could not extract YES/NO token IDs from Gamma response');
+            return null;
+        }
+
+        const result = {
+            conditionId: market.condition_id ?? market.conditionId ?? null,
+            slug: market.slug ?? slug,
+            question: market.question ?? market.title ?? null,
+            yesTokenId,
+            noTokenId,
+        };
+
+        // Cache the result
+        marketTokenCache.set(slug, result);
+        console.log('[multi-market] Resolved tokens for', slug, '→ YES:', yesTokenId.substring(0, 20) + '...', 'NO:', noTokenId.substring(0, 20) + '...');
+        return result;
+    } catch (error) {
+        console.log('[multi-market] Token resolution error:', error.message);
+        // Log but don't throw — trade detection can retry next poll
+        return null;
+    }
+}
+
+// ─── Modified getPolicy: no longer requires market/yesTokenId/noTokenId ───
+
 function getPolicy(config) {
     const policyConfig = getCopyTradingConfig(config);
     const sourceUserRaw = policyConfig.sourceUser;
-    const market = String(policyConfig.market ?? '').trim() || null;
-    const yesTokenId = normalizeTokenId(policyConfig.yesTokenId);
-    const noTokenId = normalizeTokenId(policyConfig.noTokenId);
     const collateralToken =
         normalizeAddress(policyConfig.collateralToken) ??
         normalizeAddress(DEFAULT_COLLATERAL_TOKEN);
@@ -388,9 +462,6 @@ function getPolicy(config) {
     const errors = [];
     const sourceUser = normalizeAddress(sourceUserRaw);
     if (!sourceUser) errors.push('copyTrading.sourceUser missing or invalid address.');
-    if (!market) errors.push('copyTrading.market is required.');
-    if (!yesTokenId) errors.push('copyTrading.yesTokenId is required.');
-    if (!noTokenId) errors.push('copyTrading.noTokenId is required.');
     if (!collateralToken) {
         errors.push('copyTrading.collateralToken invalid and no default available.');
     }
@@ -398,26 +469,16 @@ function getPolicy(config) {
         errors.push('copyTrading.ctfContract invalid and polymarketConditionalTokens unavailable.');
     }
 
-    // Optional max trade cap in USDC (6 decimals)
-    const maxTradeAmountUsdc = Number(policyConfig.maxTradeAmountUsdc ?? 0);
-    const maxTradeAmountWei = maxTradeAmountUsdc > 0
-        ? BigInt(Math.round(maxTradeAmountUsdc * 1e6))
-        : null; // null = no cap, use 99% of Safe balance
-
     return {
         sourceUser,
-        market,
-        yesTokenId,
-        noTokenId,
         collateralToken,
         ctfContract,
-        maxTradeAmountWei,
         ready: errors.length === 0,
         errors,
     };
 }
 
-function calculateCopyAmounts(safeBalanceWei, maxTradeAmountWei = null) {
+function calculateCopyAmounts(safeBalanceWei) {
     const normalized = BigInt(safeBalanceWei ?? 0);
     if (normalized <= 0n) {
         return {
@@ -427,14 +488,7 @@ function calculateCopyAmounts(safeBalanceWei, maxTradeAmountWei = null) {
         };
     }
 
-    let copyAmountWei = (normalized * COPY_BPS) / BPS_DENOMINATOR;
-
-    // Apply max trade cap if configured
-    if (maxTradeAmountWei !== null && maxTradeAmountWei > 0n && copyAmountWei > maxTradeAmountWei) {
-        console.log(`[copy-trading] Capping trade amount from ${copyAmountWei} to ${maxTradeAmountWei} (maxTradeAmountUsdc cap)`);
-        copyAmountWei = maxTradeAmountWei;
-    }
-
+    const copyAmountWei = (normalized * COPY_BPS) / BPS_DENOMINATOR;
     const feeAmountWei = normalized - copyAmountWei;
 
     return {
@@ -460,18 +514,19 @@ function computeBuyOrderAmounts({ collateralAmountWei, price }) {
         throw new Error('price is too small for buy-order sizing.');
     }
 
-    // For a BUY order: makerAmount = collateral offered (USDC), takerAmount = tokens received
-    const tokenAmount = (normalizedCollateralAmountWei * PRICE_SCALE) / priceScaled;
-    if (tokenAmount <= 0n) {
-        throw new Error('takerAmount (token amount) computed to zero; refusing order.');
+    const makerAmount = (normalizedCollateralAmountWei * PRICE_SCALE) / priceScaled;
+    if (makerAmount <= 0n) {
+        throw new Error('makerAmount computed to zero; refusing order.');
     }
 
     return {
-        makerAmount: normalizedCollateralAmountWei.toString(),
-        takerAmount: tokenAmount.toString(),
+        makerAmount: makerAmount.toString(),
+        takerAmount: normalizedCollateralAmountWei.toString(),
         priceScaled: priceScaled.toString(),
     };
 }
+
+// ─── Modified fetchLatestSourceTrade: NO market filter ───
 
 async function fetchLatestSourceTrade({ policy }) {
     const params = new URLSearchParams({
@@ -480,7 +535,7 @@ async function fetchLatestSourceTrade({ policy }) {
         offset: '0',
     });
     params.set('type', 'TRADE');
-    params.set('market', policy.market);
+    // NOTE: No market filter — fetch ALL trades across all markets
 
     const response = await fetch(`${DATA_API_HOST}/activity?${params.toString()}`, {
         signal: AbortSignal.timeout(10_000),
@@ -499,15 +554,22 @@ async function fetchLatestSourceTrade({ policy }) {
         if (!parsed) continue;
         if (parsed.outcome !== 'YES' && parsed.outcome !== 'NO') continue;
         if (parsed.side !== 'BUY') continue;
+        // Must have a conditionId so we can resolve tokens dynamically
+        if (!parsed.market) continue;
         return parsed;
     }
 
     return null;
 }
 
+// ─── Modified activateTradeCandidate: includes market context ───
+
 function activateTradeCandidate({
     trade,
     tokenId,
+    yesTokenId,
+    noTokenId,
+    market,
     copyTradeAmountWei,
     reimbursementAmountWei,
     reimbursementRecipientAddress,
@@ -517,6 +579,9 @@ function activateTradeCandidate({
     copyTradingState.activeTradePrice = trade.price;
     copyTradingState.activeOutcome = trade.outcome;
     copyTradingState.activeTokenId = tokenId;
+    copyTradingState.activeMarket = market;
+    copyTradingState.activeYesTokenId = yesTokenId;
+    copyTradingState.activeNoTokenId = noTokenId;
     copyTradingState.copyTradeAmountWei = copyTradeAmountWei;
     copyTradingState.reimbursementAmountWei = reimbursementAmountWei;
     copyTradingState.reimbursementRecipientAddress = reimbursementRecipientAddress;
@@ -543,6 +608,9 @@ function clearActiveTrade({ markSeen = false } = {}) {
     copyTradingState.activeTradePrice = null;
     copyTradingState.activeOutcome = null;
     copyTradingState.activeTokenId = null;
+    copyTradingState.activeMarket = null;
+    copyTradingState.activeYesTokenId = null;
+    copyTradingState.activeNoTokenId = null;
     copyTradingState.copyTradeAmountWei = null;
     copyTradingState.reimbursementAmountWei = null;
     copyTradingState.reimbursementRecipientAddress = null;
@@ -571,8 +639,9 @@ function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
             : 'You may not propose or dispute; provide opinions only.';
 
     return [
-        'You are a copy-trading commitment agent.',
-        'Copy only BUY trades from the configured source user and configured market.',
+        'You are a multi-market copy-trading commitment agent.',
+        'Copy only BUY trades from the configured source user across ANY Polymarket market they trade in.',
+        'When the source trader makes a BUY trade in any market, dynamically resolve the market token IDs and copy the trade.',
         'Trade size must be exactly 99% of Safe collateral at detection time. Keep 1% in the Safe as fee.',
         'Flow must stay simple: place CLOB order from your configured trading wallet, wait for CLOB fill confirmation and YES/NO token receipt, deposit tokens to Safe, then propose reimbursement transfer to the same wallet that funded the copy trade.',
         'Never trade more than 99% of Safe collateral. Reimburse exactly the stored reimbursement amount (full Safe collateral at detection).',
@@ -587,14 +656,11 @@ function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
         .join(' ');
 }
 
+// ─── Modified enrichSignals: dynamic token resolution ───
+
 async function enrichSignals(signals, { publicClient, config, account, onchainPendingProposal }) {
     const policy = getPolicy(config);
     const stateSnapshot = { ...copyTradingState };
-
-    console.log('[copy-trading] enrichSignals called, policy.ready:', policy.ready);
-    if (!policy.ready) {
-        console.log('[copy-trading] Policy errors:', policy.errors);
-    }
 
     const outSignals = [...signals];
     if (!policy.ready) {
@@ -610,30 +676,24 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
     let latestTrade = null;
     let tradeFetchError;
     try {
-        console.log('[copy-trading] Fetching latest trade for', policy.sourceUser, 'market:', policy.market);
+        console.log('[multi-market] Fetching latest source trade for', policy.sourceUser);
         latestTrade = await fetchLatestSourceTrade({ policy });
-        console.log('[copy-trading] Trade result:', latestTrade ? `${latestTrade.side} ${latestTrade.outcome} id:${latestTrade.id?.substring(0, 20)}...` : 'none');
+        if (latestTrade) {
+            console.log('[multi-market] Found trade:', latestTrade.id, latestTrade.side, latestTrade.outcome, 'market:', latestTrade.market);
+        } else {
+            console.log('[multi-market] No BUY trades found for source user.');
+        }
     } catch (error) {
         tradeFetchError = error?.message ?? String(error);
-        console.log('[copy-trading] Trade fetch error:', tradeFetchError);
+        console.error('[multi-market] Trade fetch error:', tradeFetchError);
     }
-
-    // On first successful fetch, snapshot the latest trade as "already seen"
-    // so we only copy truly NEW trades that appear after the agent starts.
-    if (!_initializedSeenTrade && latestTrade && !tradeFetchError) {
-        _initializedSeenTrade = true;
-        if (!copyTradingState.seenSourceTradeId && !copyTradingState.activeSourceTradeId) {
-            copyTradingState.seenSourceTradeId = latestTrade.id;
-            console.log('[copy-trading] Initialized seenSourceTradeId to current latest:', latestTrade.id?.substring(0, 20));
-        }
-    }
-
     const configuredClobAddress = normalizeAddress(config?.polymarketClobAddress);
     const runtimeSignerAddress = normalizeAddress(account.address);
     const clobAuthAddress = configuredClobAddress ?? runtimeSignerAddress;
     const clobAuthAddressLabel = configuredClobAddress
         ? 'POLYMARKET_CLOB_ADDRESS'
         : 'runtime signer address (fallback for POLYMARKET_CLOB_ADDRESS)';
+
     const { tokenHolderAddress, tokenHolderResolutionError } = await resolveTokenHolderAddress({
         publicClient,
         config,
@@ -652,78 +712,69 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
         }
     }
 
-    const safeCollateralPromise = publicClient.readContract({
+    const safeCollateralWei = await publicClient.readContract({
         address: policy.collateralToken,
         abi: erc20Abi,
         functionName: 'balanceOf',
         args: [config.commitmentSafe],
     });
-    const yesBalancePromise = tokenHolderAddress
-        ? publicClient.readContract({
-            address: policy.ctfContract,
-            abi: erc1155Abi,
-            functionName: 'balanceOf',
-            args: [tokenHolderAddress, BigInt(policy.yesTokenId)],
-        })
-        : Promise.resolve(0n);
-    const noBalancePromise = tokenHolderAddress
-        ? publicClient.readContract({
-            address: policy.ctfContract,
-            abi: erc1155Abi,
-            functionName: 'balanceOf',
-            args: [tokenHolderAddress, BigInt(policy.noTokenId)],
-        })
-        : Promise.resolve(0n);
-    // Check if the Safe already holds YES/NO tokens for this market.
-    // If it does, a previous trade cycle deposited tokens but hasn't completed
-    // reimbursement yet — the agent must not start a new trade.
-    const safeYesBalancePromise = publicClient.readContract({
-        address: policy.ctfContract,
-        abi: erc1155Abi,
-        functionName: 'balanceOf',
-        args: [config.commitmentSafe, BigInt(policy.yesTokenId)],
-    });
-    const safeNoBalancePromise = publicClient.readContract({
-        address: policy.ctfContract,
-        abi: erc1155Abi,
-        functionName: 'balanceOf',
-        args: [config.commitmentSafe, BigInt(policy.noTokenId)],
-    });
 
-    const [safeCollateralWei, yesBalance, noBalance, safeYesBalance, safeNoBalance] = await Promise.all([
-        safeCollateralPromise,
-        yesBalancePromise,
-        noBalancePromise,
-        safeYesBalancePromise,
-        safeNoBalancePromise,
-    ]);
-    const safeHasExistingPosition = safeYesBalance > 0n || safeNoBalance > 0n;
+    const amounts = calculateCopyAmounts(safeCollateralWei);
 
-    const amounts = calculateCopyAmounts(safeCollateralWei, policy.maxTradeAmountWei);
-    console.log('[copy-trading] Safe collateral:', safeCollateralWei.toString(), 'copyAmountWei:', amounts.copyAmountWei, 'walletAlignmentError:', walletAlignmentError);
-    console.log('[copy-trading] Safe YES balance:', safeYesBalance.toString(), 'Safe NO balance:', safeNoBalance.toString(), 'hasExistingPosition:', safeHasExistingPosition);
-    console.log('[copy-trading] seenSourceTradeId:', copyTradingState.seenSourceTradeId?.substring(0, 20), 'activeSourceTradeId:', copyTradingState.activeSourceTradeId?.substring(0, 20));
-    if (safeHasExistingPosition) {
-        console.log('[copy-trading] Safe already holds tokens for this market — skipping new trades until reimbursement cycle completes.');
-    }
+    // ─── NEW: Dynamic token resolution + trade activation ───
+    let tokenResolutionError = null;
     if (
         latestTrade &&
         latestTrade.side === 'BUY' &&
+        latestTrade.slug &&
         latestTrade.id !== copyTradingState.seenSourceTradeId &&
         !copyTradingState.activeSourceTradeId &&
         !walletAlignmentError &&
-        !safeHasExistingPosition &&
         BigInt(amounts.copyAmountWei) > 0n
     ) {
-        console.log('[copy-trading] *** ACTIVATING TRADE CANDIDATE ***', latestTrade.id?.substring(0, 20), latestTrade.outcome);
-        const targetTokenId = latestTrade.outcome === 'YES' ? policy.yesTokenId : policy.noTokenId;
-        activateTradeCandidate({
-            trade: latestTrade,
-            tokenId: targetTokenId,
-            copyTradeAmountWei: amounts.copyAmountWei,
-            reimbursementAmountWei: amounts.safeBalanceWei,
-            reimbursementRecipientAddress: clobAuthAddress,
-        });
+        // Dynamically resolve YES/NO token IDs from the trade's slug via Gamma API
+        console.log('[multi-market] Resolving tokens for slug:', latestTrade.slug);
+        const marketTokens = await resolveMarketTokens(latestTrade.slug);
+        console.log('[multi-market] Token resolution result:', marketTokens ? 'success' : 'failed');
+        if (marketTokens && marketTokens.yesTokenId && marketTokens.noTokenId) {
+            const targetTokenId = latestTrade.outcome === 'YES'
+                ? marketTokens.yesTokenId
+                : marketTokens.noTokenId;
+            activateTradeCandidate({
+                trade: latestTrade,
+                tokenId: targetTokenId,
+                yesTokenId: marketTokens.yesTokenId,
+                noTokenId: marketTokens.noTokenId,
+                market: latestTrade.market || marketTokens.conditionId,
+                copyTradeAmountWei: amounts.copyAmountWei,
+                reimbursementAmountWei: amounts.safeBalanceWei,
+                reimbursementRecipientAddress: clobAuthAddress,
+            });
+        } else {
+            tokenResolutionError = `Failed to resolve YES/NO token IDs for market slug: ${latestTrade.slug}`;
+        }
+    }
+
+    // ─── Read balances for the ACTIVE trade's token IDs (dynamic) ───
+    let yesBalance = 0n;
+    let noBalance = 0n;
+    if (tokenHolderAddress && copyTradingState.activeYesTokenId && copyTradingState.activeNoTokenId) {
+        const [yesBal, noBal] = await Promise.all([
+            publicClient.readContract({
+                address: policy.ctfContract,
+                abi: erc1155Abi,
+                functionName: 'balanceOf',
+                args: [tokenHolderAddress, BigInt(copyTradingState.activeYesTokenId)],
+            }),
+            publicClient.readContract({
+                address: policy.ctfContract,
+                abi: erc1155Abi,
+                functionName: 'balanceOf',
+                args: [tokenHolderAddress, BigInt(copyTradingState.activeNoTokenId)],
+            }),
+        ]);
+        yesBalance = yesBal;
+        noBalance = noBal;
     }
 
     let orderFillCheckError;
@@ -748,11 +799,12 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
                     copyTradingState.copyOrderStatus = orderSummary.status;
                 }
 
+                // Use the active market from state for CLOB trade lookup
                 const relatedTrades = await fetchRelatedClobTrades({
                     config,
                     signingAddress,
                     orderId: copyTradingState.copyOrderId,
-                    market: policy.market,
+                    market: copyTradingState.activeMarket,
                     clobAuthAddress,
                     submittedMs: copyTradingState.copyOrderSubmittedMs,
                 });
@@ -831,10 +883,11 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
         }
     }
 
+    // Use dynamically resolved token IDs from state
     const activeTokenBalance =
-        copyTradingState.activeTokenId === policy.yesTokenId
+        copyTradingState.activeTokenId === copyTradingState.activeYesTokenId
             ? yesBalance
-            : copyTradingState.activeTokenId === policy.noTokenId
+            : copyTradingState.activeTokenId === copyTradingState.activeNoTokenId
               ? noBalance
               : 0n;
 
@@ -847,9 +900,6 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
             safeCollateralWei: safeCollateralWei.toString(),
             yesBalance: yesBalance.toString(),
             noBalance: noBalance.toString(),
-            safeYesBalance: safeYesBalance.toString(),
-            safeNoBalance: safeNoBalance.toString(),
-            safeHasExistingPosition,
             activeTokenBalance: activeTokenBalance.toString(),
             tokenHolderAddress,
         },
@@ -865,6 +915,7 @@ async function enrichSignals(signals, { publicClient, config, account, onchainPe
         ),
         tradeFetchError,
         orderFillCheckError,
+        tokenResolutionError,
         tokenHolderResolutionError,
         walletAlignmentError,
     });
@@ -1030,38 +1081,16 @@ function onToolOutput({ name, parsedOutput }) {
 
     if (name === 'polymarket_clob_build_sign_and_place_order' && parsedOutput.status === 'submitted') {
         const submittedOrderId = extractOrderIdFromSubmission(parsedOutput);
-        copyTradingState.orderSubmitted = true;
+        copyTradingState.orderSubmitted = Boolean(submittedOrderId);
         copyTradingState.copyOrderId = submittedOrderId;
-        copyTradingState.copyOrderStatus = extractOrderStatusFromSubmission(parsedOutput) ?? 'CONFIRMED';
-        copyTradingState.copyOrderSubmittedMs = Date.now();
-
-        // For FOK orders: if the tool returned 'submitted' (not 'error'),
-        // the order filled completely. FOK is all-or-nothing — success means filled.
-        // Mark as filled immediately so the deposit step triggers right away
-        // without waiting for a separate fill-check poll.
-        const orderType = copyTradingState.activeTradeSide === 'BUY' ? 'FOK' : null;
-        if (!submittedOrderId || orderType === 'FOK') {
-            copyTradingState.copyOrderFilled = true;
-            console.log('[copy-trading] FOK order filled (status=submitted). Marking as filled for immediate deposit.');
-        } else {
-            copyTradingState.copyOrderFilled = false;
-        }
+        copyTradingState.copyOrderStatus = extractOrderStatusFromSubmission(parsedOutput);
+        copyTradingState.copyOrderFilled = false;
+        copyTradingState.copyOrderSubmittedMs = submittedOrderId ? Date.now() : null;
         return;
     }
 
     if (name === 'make_erc1155_deposit' && parsedOutput.status === 'confirmed') {
         copyTradingState.tokenDeposited = true;
-        return;
-    }
-
-    if (
-        (name === 'post_bond_and_propose' || name === 'auto_post_bond_and_propose') &&
-        parsedOutput.status === 'awaiting_approval'
-    ) {
-        // Proposal was built but requires manual approval before posting bond.
-        // Mark as "pending" so the agent doesn't keep rebuilding it each loop.
-        copyTradingState.reimbursementSubmissionPending = true;
-        console.log('[copy-trading] Proposal awaiting manual approval. Set PROPOSE_REQUIRES_APPROVAL=false and restart to submit.');
         return;
     }
 
@@ -1115,7 +1144,6 @@ function onProposalEvents({
         clearReimbursementSubmissionTracking();
     }
 
-    // Backward-compatible fallback for environments that only pass counts and no hashes.
     if (
         !trackedHash &&
         copyTradingState.reimbursementProposed &&
@@ -1147,6 +1175,9 @@ function resetCopyTradingState() {
         activeTradePrice: null,
         activeOutcome: null,
         activeTokenId: null,
+        activeMarket: null,
+        activeYesTokenId: null,
+        activeNoTokenId: null,
         copyTradeAmountWei: null,
         reimbursementAmountWei: null,
         reimbursementRecipientAddress: null,
@@ -1164,87 +1195,16 @@ function resetCopyTradingState() {
     };
 }
 
-/**
- * Deterministic decision engine for copy-trading.
- * Removes the need for an LLM (OpenAI API key) by directly returning
- * the tool calls that the state machine dictates.
- */
-async function getDeterministicToolCalls({
-    signals,
-    onchainPendingProposal = false,
-}) {
-    const copySignal = signals.find((s) => s?.kind === 'copyTradingState');
-    if (!copySignal || !copySignal.policy?.ready) {
-        return [];
-    }
-    const state = copySignal.state ?? {};
-    const pendingProposal = Boolean(onchainPendingProposal || copySignal.pendingProposal);
-
-    // Step 1: Place CLOB order when trade is activated but order not yet submitted
-    if (
-        state.activeSourceTradeId &&
-        !state.orderSubmitted &&
-        state.activeTradeSide === 'BUY' &&
-        state.activeTokenId &&
-        BigInt(state.copyTradeAmountWei ?? 0) > 0n
-    ) {
-        console.log('[copy-trading] Deterministic: placing CLOB order for', state.activeSourceTradeId?.substring(0, 20));
-        return [{
-            name: 'polymarket_clob_build_sign_and_place_order',
-            callId: `det_clob_${Date.now()}`,
-            arguments: {
-                side: 'BUY',
-                tokenId: String(state.activeTokenId),
-                orderType: 'FOK',
-            },
-        }];
-    }
-
-    // Step 2: Deposit tokens after order is filled
-    if (
-        state.orderSubmitted &&
-        state.copyOrderFilled &&
-        !state.tokenDeposited &&
-        state.activeTokenId
-    ) {
-        console.log('[copy-trading] Deterministic: depositing tokens for', state.activeSourceTradeId?.substring(0, 20));
-        return [{
-            name: 'make_erc1155_deposit',
-            callId: `det_deposit_${Date.now()}`,
-            arguments: {
-                tokenId: String(state.activeTokenId),
-            },
-        }];
-    }
-
-    // Step 3: Propose reimbursement after deposit
-    if (
-        state.tokenDeposited &&
-        !state.reimbursementProposed &&
-        !state.reimbursementSubmissionPending &&
-        !pendingProposal
-    ) {
-        console.log('[copy-trading] Deterministic: building reimbursement proposal for', state.activeSourceTradeId?.substring(0, 20));
-        return [{
-            name: 'build_og_transactions',
-            callId: `det_reimburse_${Date.now()}`,
-            arguments: {},
-        }];
-    }
-
-    return [];
-}
-
 export {
     calculateCopyAmounts,
     computeBuyOrderAmounts,
     enrichSignals,
     getCopyTradingState,
-    getDeterministicToolCalls,
     getPollingOptions,
     getSystemPrompt,
     onProposalEvents,
     onToolOutput,
     resetCopyTradingState,
+    resolveMarketTokens,
     validateToolCalls,
 };

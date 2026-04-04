@@ -1,0 +1,20 @@
+{
+  "polymarketClobEnabled": true,
+  "startBlock": "85044000",
+  "byChain": {
+    "137": {
+      "commitmentSafe": "0x0b8f80755D2621C62D669e2aBd7B8ABA73230887",
+      "ogModule": "0xDA99A5B4c181D673275c3253EA3cf90E98eD2C27",
+      "copyTrading": {
+        "sourceUser": "0x2b76c1d12cd928b1d95a6d2c7f1e6f6e7f14edef",
+        "market": "0x924a2942747dd75703321a7c8d809c68f6a514c3b0f2a2e64274e02310634669",
+        "yesTokenId": "77893140510362582253172593084218413010407941075415081594586195705930819989216",
+        "noTokenId": "56231474151770057648855426299021396541474371449092934400587810748856711049761",
+        "collateralToken": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+        "maxTradeAmountUsdc": 10
+      },
+      "fundingWallet": "0x2Ee0F0767af62b7D4C5faFcd3879487AfB229659",
+      "polymarketClobAddress": "0x2Ee0F0767af62b7D4C5faFcd3879487AfB229659"
+    }
+  }
+}

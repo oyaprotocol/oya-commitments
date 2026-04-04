@@ -3,15 +3,22 @@ This commitment accepts USDC deposits for copy-trading on one configured Polymar
 
 The agent monitors a single source trader (idfinsider0228) on this market.
 When the source trader executes a BUY trade in this market, the agent may copy
-that trade direction using the YES or NO outcome token.
+that trade direction using the YES outcome token.
 
 The agent must size the copied trade to exactly 99% of the Safe's USDC collateral
-balance at detection time. The remaining 1% represents the agent fee.
+balance at detection time. The remaining 1% stays in the Safe as the agent fee.
+
+The agent executes the copied trade from the configured copy-trading funding wallet
+through the Polymarket CLOB API.
 
 After receiving YES or NO outcome tokens (ERC-1155), the agent deposits those tokens
 into this Safe.
 
 After token deposit confirmation, the agent proposes one reimbursement transfer from
-this Safe to their own wallet, for all of the USDC in the Safe.
+this Safe to the same copy-trading funding wallet, equal to the USDC amount actually
+spent on the fill.
 
-When the market closes, if the outcome tokens paid off, any address may propose to redeem the outcome tokens and withdrawn the winnings to the Safe. Then, any address may propose to transfer the winnings to the depositor's address.
+No other transfers are allowed.
+The agent may not sell or transfer outcome tokens except back to the depositor.
+The agent may not execute trades on any market other than the configured one.
+Maximum single trade size: $50 USDC.

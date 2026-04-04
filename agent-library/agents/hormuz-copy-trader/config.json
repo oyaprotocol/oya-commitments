@@ -1,0 +1,19 @@
+{
+  "byChain": {
+    "chainId": "137",
+    "commitmentSafe": "0x835c89350EF4e8FDA41968eD39e6289515bA1B8a",
+    "ogModule": "0x316B35FD11212B62491E9a97603586c499526C5e",
+    "sourceTraderAddress": "0x2b76c1d12cd928b1d95a6d2c7f1e6f6e7f14edef",
+    "polymarketMarketSlug": "strait-of-hormuz-traffic-returns-to-normal-by-april-30",
+    "polymarketYesTokenId": "77893140510362582253172593084218413010407941075415081594586195705930819989216",
+    "polymarketNoTokenId": "56231474151770057648855426299021396541474371449092934400587810748856711049761",
+    "fundingWallet": "0x2Ee0F0767af62b7D4C5faFcd3879487AfB229659",
+    "copyBps": 9900,
+    "feeBps": 100,
+    "bpsDenominator": 10000,
+    "maxTradeUsdc": 50,
+    "reimbursementSubmissionTimeoutMs": 60000,
+    "usdcAddress": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+    "clobHost": "https://clob.polymarket.com"
+  }
+}

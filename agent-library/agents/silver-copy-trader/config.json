@@ -1,0 +1,30 @@
+{
+  "ipfsEnabled": true,
+  "byChain": {
+    "137": {
+      "commitmentSafe": "0x9Db1E0Dc57bfb7e615aE1cAB71b0f02A71A17b7d",
+      "ogModule": "0xf9fb3ade16A5Ca97Ca600d7D0ee7beD3FDe34e75",
+      "copyTrading": {
+        "sourceUser": "0x777fae71d2ff9ec48a1213d48ba1d9d91024a1bb",
+        "market": "si-hit-65-low-jun-2026-261-825-319-223-543",
+        "yesTokenId": "89711701068231326395952574389657933749656698993366237610102678365760256777628",
+        "noTokenId": "93095193496936988821733869158878875379608103963688797281928145548724041285605",
+        "collateralToken": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+      },
+      "fundingWallet": "0x2Ee0F0767af62b7D4C5faFcd3879487AfB229659",
+      "polymarketClobAddress": "0x2Ee0F0767af62b7D4C5faFcd3879487AfB229659",
+      "proposalPublishApi": {
+        "enabled": true,
+        "host": "127.0.0.1",
+        "port": 9891,
+        "requireSignerAllowlist": true,
+        "signerAllowlist": [
+          "0x2Ee0F0767af62b7D4C5faFcd3879487AfB229659"
+        ],
+        "signatureMaxAgeSeconds": 300,
+        "maxBodyBytes": 65536,
+        "nodeName": "silver-publisher"
+      }
+    }
+  }
+}

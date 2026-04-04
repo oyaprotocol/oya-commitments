@@ -229,7 +229,10 @@ export function createAgentLoopRunner({
 
             const onchainPendingProposal = proposalsByHash.size > 0;
             let decisionStatus = DECISION_STATUS.NO_ACTION;
-            if (baseSignals.length > 0) {
+            // Always run signal preparation — agent modules like copy-trading
+            // generate their own signals via enrichSignals even when there are
+            // no base signals (deposits, proposals, timelocks, etc.).
+            {
                 const signalsToProcess = await runLoopPhase(
                     'prepare_base_signals',
                     async () =>

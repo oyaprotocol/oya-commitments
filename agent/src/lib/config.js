@@ -443,6 +443,7 @@ function createDefaultRuntimeConfig({ env = process.env, rpcUrl } = {}) {
         executeRetryMs: 60_000,
         executePendingTxTimeoutMs: 900_000,
         proposeEnabled: true,
+        proposeRequiresApproval: env.PROPOSE_REQUIRES_APPROVAL === 'true',
         disputeEnabled: true,
         disputeRetryMs: 60_000,
         proposalHashResolveTimeoutMs: 15_000,

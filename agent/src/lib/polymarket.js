@@ -48,6 +48,10 @@ const DEFAULT_CTF_EXCHANGE_BY_CHAIN_ID = Object.freeze({
     137: '0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e',
     80002: '0xdfe02eb6733538f8ea35d585af8de5958ad99e40',
 });
+const DEFAULT_NEG_RISK_CTF_EXCHANGE_BY_CHAIN_ID = Object.freeze({
+    137: '0xC5d563A36AE78145C45a50134d48A1215220f80a',
+    80002: '0xdfe02eb6733538f8ea35d585af8de5958ad99e40',
+});
 
 function normalizeNonNegativeInteger(value, fallback) {
     const parsed = Number(value);
@@ -122,21 +126,100 @@ function normalizeSignatureTypeIndex(value) {
 }
 
 function randomSalt() {
-    return BigInt(`0x${crypto.randomBytes(32).toString('hex')}`).toString();
+    // Match the official Polymarket clob-order-utils generateOrderSalt():
+    //   Math.round(Math.random() * Date.now())
+    // This produces salts ~10-13 digits long, which fit safely in
+    // JSON integers and JS Number.parseInt (used by the TS client).
+    return String(Math.round(Math.random() * Date.now()));
 }
 
-function resolveClobExchangeAddress({ chainId, exchangeOverride }) {
+function resolveClobExchangeAddress({ chainId, exchangeOverride, negRisk = false }) {
     if (exchangeOverride) {
         return getAddress(exchangeOverride);
     }
 
-    const exchange = DEFAULT_CTF_EXCHANGE_BY_CHAIN_ID[Number(chainId)];
+    const lookup = negRisk
+        ? DEFAULT_NEG_RISK_CTF_EXCHANGE_BY_CHAIN_ID
+        : DEFAULT_CTF_EXCHANGE_BY_CHAIN_ID;
+    const exchange = lookup[Number(chainId)];
     if (!exchange) {
         throw new Error(
-            `No default Polymarket exchange for chainId=${chainId}. Set POLYMARKET_EXCHANGE or provide exchange in tool args.`
+            `No default Polymarket ${negRisk ? 'neg-risk ' : ''}exchange for chainId=${chainId}.`
         );
     }
     return getAddress(exchange);
+}
+
+// Cache for neg risk lookups
+const _negRiskCache = {};
+
+async function checkNegRisk({ config, tokenId }) {
+    if (tokenId in _negRiskCache) {
+        return _negRiskCache[tokenId];
+    }
+    try {
+        const host = normalizeClobHost(config.polymarketClobHost);
+        const response = await fetch(
+            `${host}/neg-risk?token_id=${encodeURIComponent(tokenId)}`,
+            { signal: AbortSignal.timeout(5000) }
+        );
+        if (response.ok) {
+            const data = await response.json();
+            const isNegRisk = Boolean(data?.neg_risk);
+            _negRiskCache[tokenId] = isNegRisk;
+            console.log(`[polymarket] Token ${tokenId.substring(0, 20)}... neg_risk=${isNegRisk}`);
+            return isNegRisk;
+        }
+    } catch (error) {
+        console.warn('[polymarket] Failed to check neg-risk:', error?.message);
+    }
+    // Default to true since most Polymarket markets are neg risk
+    _negRiskCache[tokenId] = true;
+    return true;
+}
+
+// Cache for fee rate lookups
+const _feeRateCache = {};
+
+async function getFeeRateBps({ config, signingAddress, tokenId }) {
+    const cacheKey = `${signingAddress}:${tokenId}`;
+    if (cacheKey in _feeRateCache) {
+        return _feeRateCache[cacheKey];
+    }
+    try {
+        const host = normalizeClobHost(config.polymarketClobHost);
+        const url = `${host}/fee-rate?token_id=${encodeURIComponent(tokenId)}`;
+        const timestamp = Math.floor(Date.now() / 1000);
+        const headers = {
+            'Content-Type': 'application/json',
+            ...buildClobAuthHeaders({
+                config,
+                signingAddress,
+                timestamp,
+                method: 'GET',
+                path: `/fee-rate?token_id=${encodeURIComponent(tokenId)}`,
+            }),
+        };
+        const response = await fetch(url, {
+            method: 'GET',
+            headers,
+            signal: AbortSignal.timeout(5000),
+        });
+        if (response.ok) {
+            const data = await response.json();
+            // The API returns { base_fee: "100" } or similar
+            const feeRateBps = String(data?.base_fee ?? data?.fee_rate_bps ?? data?.feeRateBps ?? '0');
+            _feeRateCache[cacheKey] = feeRateBps;
+            console.log(`[polymarket] Fee rate for token ${tokenId.substring(0, 20)}...: ${feeRateBps} bps`);
+            return feeRateBps;
+        }
+        const text = await response.text();
+        console.warn(`[polymarket] Fee rate request failed: ${response.status} ${text}`);
+        return '0';
+    } catch (error) {
+        console.warn('[polymarket] Failed to fetch fee rate:', error?.message);
+        return '0';
+    }
 }
 
 function buildClobOrderFromRaw({
@@ -291,6 +374,19 @@ function buildClobAuthHeaders({
         .replace(/\+/g, '-')
         .replace(/\//g, '_');
 
+    if (method.toUpperCase() === 'POST') {
+        console.log('[polymarket] HMAC debug:', {
+            timestamp,
+            method: method.toUpperCase(),
+            path,
+            bodyLength: (bodyText ?? '').length,
+            bodyFirst100: (bodyText ?? '').substring(0, 100),
+            payloadFirst100: payload.substring(0, 100),
+            signingAddress,
+            hmacSignature: signature,
+        });
+    }
+
     return {
         'POLY_ADDRESS': signingAddress,
         'POLY_API_KEY': apiKey,
@@ -308,7 +404,14 @@ async function clobRequest({
     body,
 }) {
     const host = normalizeClobHost(config.polymarketClobHost);
-    const bodyText = body === undefined ? '' : JSON.stringify(body);
+    // Salt is now a small integer (matching official generateOrderSalt()),
+    // so JSON.stringify handles it correctly as a bare number.
+    let bodyText;
+    if (body === undefined) {
+        bodyText = '';
+    } else {
+        bodyText = JSON.stringify(body);
+    }
     const timeoutMs = normalizeNonNegativeInteger(
         config.polymarketClobRequestTimeoutMs,
         DEFAULT_CLOB_REQUEST_TIMEOUT_MS
@@ -322,6 +425,10 @@ async function clobRequest({
         config.polymarketClobRetryDelayMs,
         DEFAULT_CLOB_RETRY_DELAY_MS
     );
+
+    if (method === 'POST' && path === '/order') {
+        console.log('[polymarket] POST /order payload:', bodyText);
+    }
 
     for (let attempt = 0; attempt <= retriesAllowed; attempt += 1) {
         const timestamp = Math.floor(Date.now() / 1000);
@@ -397,15 +504,43 @@ async function placeClobOrder({
             ? signedOrder.order
             : signedOrder;
 
+    // Match the official Polymarket clob-client orderToJson format exactly:
+    // - salt: bare integer (Number.parseInt) — handled by custom JSON serialization in clobRequest
+    // - side: string "BUY" or "SELL" (the TS Side enum is string-based, NOT numeric)
+    // - signatureType: numeric (passed through from signing)
+    // - makerAmount/takerAmount/feeRateBps/expiration/nonce: strings
+    // - deferExec: required field, defaults to false
+    const sideNum = Number(normalizedOrder.side);
+    const sideStr = sideNum === 0 ? 'BUY' : 'SELL';
+
+    // Match the EXACT key ordering from the official TS client's orderToJson:
+    const apiOrder = {
+        salt: Number.parseInt(normalizedOrder.salt, 10),
+        maker: normalizedOrder.maker,
+        signer: normalizedOrder.signer,
+        taker: normalizedOrder.taker,
+        tokenId: normalizedOrder.tokenId,
+        makerAmount: normalizedOrder.makerAmount,
+        takerAmount: normalizedOrder.takerAmount,
+        side: sideStr,
+        expiration: normalizedOrder.expiration,
+        nonce: normalizedOrder.nonce,
+        feeRateBps: normalizedOrder.feeRateBps,
+        signatureType: Number(normalizedOrder.signatureType),
+        signature: normalizedOrder.signature,
+    };
+
     return clobRequest({
         config,
         signingAddress,
         method: 'POST',
         path: '/order',
         body: {
-            order: normalizedOrder,
+            deferExec: false,
+            order: apiOrder,
             owner: ownerApiKey,
             orderType,
+            postOnly: false,
         },
     });
 }
@@ -504,8 +639,10 @@ export {
     DEFAULT_COLLATERAL_TOKEN,
     buildClobOrderFromRaw,
     cancelClobOrders,
+    checkNegRisk,
     getClobOrder,
     getClobTrades,
+    getFeeRateBps,
     placeClobOrder,
     resolveClobExchangeAddress,
     signClobOrder,

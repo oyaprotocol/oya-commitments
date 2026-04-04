@@ -1,0 +1,8 @@
+{
+  "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+  "name": "Oya Hormuz Copy Trader",
+  "description": "Copy-trading agent that mirrors BUY trades from idfinsider0228 on the Strait of Hormuz Polymarket market. Trades are executed through the Polymarket CLOB and outcome tokens are deposited into a Safe wallet.",
+  "image": "",
+  "endpoints": [],
+  "registrations": []
+}

@@ -67,9 +67,11 @@ export function createDecisionRuntime({
         }
 
         if (approvedToolCalls.length === 0) {
+            console.log('[agent] No approved tool calls after validation');
             return DECISION_STATUS.NO_ACTION;
         }
 
+        console.log('[agent] Executing', approvedToolCalls.length, 'approved tool call(s):', approvedToolCalls.map(c => c.name).join(', '));
         let toolOutputs;
         try {
             toolOutputs = await executeToolCalls({
@@ -125,6 +127,7 @@ export function createDecisionRuntime({
             }
         }
 
+        console.log('[agent] Tool outputs count:', toolOutputs.length, 'outputs:', JSON.stringify(toolOutputs.map(o => ({ name: o?.name, hasOutput: Boolean(o?.output), outputPreview: typeof o?.output === 'string' ? o.output.substring(0, 200) : String(o?.output) }))));
         if (toolOutputs.length > 0 && agentModule?.onToolOutput) {
             for (const output of toolOutputs) {
                 if (!output?.name || !output?.output) {
@@ -193,12 +196,15 @@ export function createDecisionRuntime({
                     onchainPendingProposal,
                 });
                 if (Array.isArray(deterministicCalls) && deterministicCalls.length > 0) {
-                    return processAgentToolCalls({
+                    console.log('[agent] Deterministic calls:', deterministicCalls.map(c => c.name).join(', '));
+                    const result = await processAgentToolCalls({
                         toolCalls: deterministicCalls,
                         signals,
                         onchainPendingProposal,
                         decisionResponseId: null,
                     });
+                    console.log('[agent] Deterministic result:', result);
+                    return result;
                 }
                 return DECISION_STATUS.NO_ACTION;
             } catch (error) {

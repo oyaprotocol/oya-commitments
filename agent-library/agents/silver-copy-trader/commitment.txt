@@ -1,7 +1,7 @@
 This commitment accepts USDC deposits for copy-trading on one configured Polymarket market:
-"Strait of Hormuz traffic returns to normal by end of April?"
+"Will Silver (SI) hit (LOW) $65 by end of June?"
 
-The agent monitors a single source trader (idfinsider0228) on this market.
+The agent monitors a single source trader (Albert1953) on this market.
 When the source trader executes a BUY trade in this market, the agent may copy
 that trade direction using the YES or NO outcome token.
 
@@ -14,4 +14,4 @@ into this Safe.
 After token deposit confirmation, the agent proposes one reimbursement transfer from
 this Safe to their own wallet, for all of the USDC in the Safe.
 
-When the market closes, if the outcome tokens paid off, any address may propose to redeem the outcome tokens and withdrawn the winnings to the Safe. Then, any address may propose to transfer the winnings to the depositor's address.
+When the market closes, if the outcome tokens paid off, any address may propose to redeem the outcome tokens and withdraw the winnings to the Safe. Then, any address may propose to transfer the winnings to the depositor's address.
