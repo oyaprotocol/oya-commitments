@@ -72,3 +72,7 @@ The agent may only trade in Polymarket markets with a minimum liquidity of [ ].
 Transfer Address Restrictions
 ---
 Transfers from this Safe are limited to the primary user's address [ ], the designated agent's address [ ], and the following additional addresses: [ ]
+
+Trading Limits
+---
+The designated agent at address [ ] may not execute more than [ ] dollars worth of trades per [hour/day/week].
