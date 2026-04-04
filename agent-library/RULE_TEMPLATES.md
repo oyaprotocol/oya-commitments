@@ -37,6 +37,14 @@ Standard Period
 ---
 The standard period for calculating fees for this commitment is [ ] days, and the first period begins at deployment time.
 
+Day Definition
+---
+For the purposes of these rules, a day is 86,400 seconds.
+
+Time Period Start
+---
+Any time period specified in these rules begins at the deployment timestamp of this commitment.
+
 Fee Withholding
 ---
 Fees owed to the designated agent are withheld by the commitment until the agent withdraws them. The funds remaining in a commitment after user withdrawals must be enough to cover outstanding agent fees. If the funds remaining are less than or equal to what is still owed to an agent, the user may not make withdrawals.
