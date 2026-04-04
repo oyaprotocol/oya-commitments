@@ -1,0 +1,35 @@
+Solo User
+---
+This commitment accepts deposits from a single user at address [USER_ADDRESS] and their designated agent at address [AGENT_ADDRESS]. Deposits from any other address are credited to the user.
+
+Agent Proxy
+---
+The agent at address [AGENT_ADDRESS] may trade tokens in this commitment for different tokens, at the current fair market exchange rate. To execute the trade, they deposit tokens from their own wallet into the Safe, and propose to withdraw tokens of equal or lesser value. Token prices are based on the prices at the time of the deposit.
+
+Trade Restrictions
+---
+The agent may only trade between the following tokens or markets: USDC, WETH, cbBTC, and UMA.
+
+Fair Valuation
+---
+Tokens are priced by their fair market value. Markets that are clearly manipulated are not a valid point-in-time data source.
+
+Day Definition
+---
+For the purposes of these rules, a day is 86,400 seconds.
+
+Time Period Start
+---
+Any time period specified in these rules begins at the deployment timestamp of this commitment.
+
+Trading Limits
+---
+The designated agent at address [AGENT_ADDRESS] may not execute more than 100 dollars worth of trades per day.
+
+Recurring Fee
+---
+The designated agent at address [AGENT_ADDRESS] accrues a recurring fee of 0.5% of the value in the commitment every 30 days. The dollar value is calculated based on the fair token price at the end of each period. The agent may withdraw tokens equal to or less than the fees owed at any time after, with the value of the tokens withdrawn calculated at the time of the withdrawal proposal. The explanation for the withdrawal proposals must specify which period(s) the fee withdrawal represents.
+
+Fee Withholding
+---
+Fees owed to the designated agent are withheld by the commitment until the agent withdraws them. The funds remaining in a commitment after user withdrawals must be enough to cover outstanding agent fees. If the funds remaining are less than or equal to what is still owed to an agent, the user may not make withdrawals.
