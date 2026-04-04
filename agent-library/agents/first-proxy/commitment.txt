@@ -8,7 +8,7 @@ The agent at address [AGENT_ADDRESS] may trade tokens in this commitment for dif
 
 Trade Restrictions
 ---
-The agent may only trade between the following tokens or markets: USDC, WETH, cbBTC, and UMA.
+The agent may only trade between the following tokens or markets: USDC, WETH, and cbBTC.
 
 Fair Valuation
 ---
