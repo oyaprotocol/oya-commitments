@@ -1,0 +1,15 @@
+{
+  "policyName": "first-proxy",
+  "pollIntervalMs": 1000,
+  "firstProxy": {
+    "tradeAmountUsd": "25",
+    "epochSeconds": 21600,
+    "daySeconds": 86400,
+    "pendingEpochTtlMs": 1800000,
+    "tieBreakAssetOrder": [
+      "WETH",
+      "cbBTC"
+    ]
+  },
+  "byChain": {}
+}

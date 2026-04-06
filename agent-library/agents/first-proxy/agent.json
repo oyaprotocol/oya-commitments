@@ -1,7 +1,7 @@
 {
   "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
   "name": "Oya First Proxy Agent",
-  "description": "Example trading-proxy commitment agent for a single user. The designated agent may proxy trades between USDC, WETH, and cbBTC, subject to daily trading limits and a recurring fee.",
+  "description": "Example deterministic trading-proxy commitment agent for a single user. Every six hours it deposits the strongest of WETH or cbBTC into the Safe and proposes reimbursement from the weakest eligible Safe assets, subject to daily trading limits and a recurring fee.",
   "image": "https://raw.githubusercontent.com/oya-commitments/oya-commitments/main/agent-library/agents/default/agent.png",
   "endpoints": [],
   "registrations": []

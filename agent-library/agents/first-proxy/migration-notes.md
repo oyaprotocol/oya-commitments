@@ -1,15 +1,41 @@
 # First Proxy Agent Migration Notes
 
 This module now expects non-secret runtime config in the agent config stack instead of `.env`.
+It implements a deterministic six-hour momentum strategy as an `Agent Proxy`: the agent deposits the winning token into the Safe from its own wallet, then proposes reimbursement transfers out of the Safe.
 
 Minimum required config:
 
 ```json
 {
+  "firstProxy": {
+    "tradeAmountUsd": "25",
+    "epochSeconds": 21600,
+    "daySeconds": 86400
+  },
   "byChain": {
     "<chainId>": {
       "commitmentSafe": "0x...",
-      "ogModule": "0x..."
+      "ogModule": "0x...",
+      "watchAssets": [
+        "0x...USDC",
+        "0x...WETH",
+        "0x...cbBTC"
+      ],
+      "firstProxy": {
+        "tokens": {
+          "USDC": "0x...",
+          "WETH": "0x...",
+          "cbBTC": "0x..."
+        },
+        "valuationPools": {
+          "WETH": {
+            "pool": "0x..."
+          },
+          "cbBTC": {
+            "pool": "0x..."
+          }
+        }
+      }
     }
   }
 }
@@ -22,6 +48,9 @@ Common optional config:
 - `messageApi`
 - `ipfsEnabled`
 - proposal/dispute toggles and timing fields
+- `firstProxy.pendingEpochTtlMs`
+- `firstProxy.stateFile`
+- `firstProxy.tieBreakAssetOrder`
 
 Legacy non-secret env vars to migrate:
 - `COMMITMENT_SAFE`
