@@ -12,13 +12,13 @@ Minimum required config:
     "epochSeconds": 21600,
     "daySeconds": 86400,
     "priceFeed": {
-      "provider": "coingecko",
-      "apiBaseUrl": "https://api.coingecko.com/api/v3",
-      "vsCurrency": "usd",
-      "assetIds": {
-        "WETH": "weth",
-        "cbBTC": "coinbase-wrapped-btc",
-        "USDC": "usd-coin"
+      "provider": "alchemy",
+      "apiBaseUrl": "https://api.g.alchemy.com/prices/v1",
+      "quoteCurrency": "USD",
+      "symbols": {
+        "WETH": "ETH",
+        "cbBTC": "BTC",
+        "USDC": "USDC"
       }
     }
   },
@@ -74,7 +74,9 @@ node agent/scripts/migrate-agent-config-from-env.mjs --module=first-proxy --chai
 ```
 
 Runtime notes:
-- Prices and six-hour momentum are now sourced from CoinGecko, not onchain AMM pools.
-- If `COINGECKO_API_KEY` is present in `agent/.env`, the module uses CoinGecko Pro endpoints with the `x-cg-pro-api-key` header; otherwise it uses the public API base URL from config.
+- Prices and six-hour momentum are now sourced from Alchemy Prices API, not onchain AMM pools.
+- The module uses Alchemy's by-symbol and historical-price endpoints.
+- It resolves the Alchemy Prices API key from `ALCHEMY_PRICES_API_KEY`, then `ALCHEMY_API_KEY`, and finally by parsing an Alchemy `rpcUrl`.
+- Wrapped testnet assets are intentionally priced against their underlying symbols (`WETH` -> `ETH`, `cbBTC` -> `BTC`) so Sepolia testing does not depend on testnet-token-specific price support.
 
 Secrets stay in `agent/.env`, including signer keys, `OPENAI_API_KEY`, `MESSAGE_API_KEYS_JSON`, and authenticated `IPFS_HEADERS_JSON`.

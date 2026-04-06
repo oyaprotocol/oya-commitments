@@ -42,15 +42,16 @@ const DEFAULT_POLICY = Object.freeze({
     tieBreakAssetOrder: Object.freeze([CANONICAL_SYMBOLS.WETH, CANONICAL_SYMBOLS.CBBTC]),
 });
 const DEFAULT_PRICE_FEED = Object.freeze({
-    provider: 'coingecko',
-    apiBaseUrl: 'https://api.coingecko.com/api/v3',
-    vsCurrency: 'usd',
-    assetIds: Object.freeze({
-        WETH: 'weth',
-        cbBTC: 'coinbase-wrapped-btc',
-        USDC: 'usd-coin',
+    provider: 'alchemy',
+    apiBaseUrl: 'https://api.g.alchemy.com/prices/v1',
+    quoteCurrency: 'USD',
+    symbols: Object.freeze({
+        WETH: 'ETH',
+        cbBTC: 'BTC',
+        USDC: 'USDC',
     }),
 });
+const CURRENT_PRICE_CACHE_TTL_MS = 60_000;
 const MICRO_USD_SCALE = 1_000_000n;
 const STRATEGY_TAG = 'first-proxy-momentum';
 const moduleCaches = {
@@ -84,8 +85,16 @@ function normalizeAddress(value) {
     return normalizeAddressOrThrow(value, { requireHex: false });
 }
 
-function normalizeCoinGeckoId(value, label) {
-    const normalized = String(value ?? '').trim().toLowerCase();
+function normalizeAlchemySymbol(value, label) {
+    const normalized = String(value ?? '').trim().toUpperCase();
+    if (!normalized) {
+        throw new Error(`${label} is required.`);
+    }
+    return normalized;
+}
+
+function normalizeQuoteCurrency(value, label) {
+    const normalized = String(value ?? '').trim().toUpperCase();
     if (!normalized) {
         throw new Error(`${label} is required.`);
     }
@@ -334,41 +343,38 @@ function normalizePriceFeed(rawPriceFeed) {
     const provider = String(rawPriceFeed?.provider ?? DEFAULT_PRICE_FEED.provider)
         .trim()
         .toLowerCase();
-    if (provider !== 'coingecko') {
+    if (provider !== 'alchemy') {
         throw new Error(`Unsupported firstProxy.priceFeed.provider: ${provider}`);
     }
 
     const apiBaseUrl = String(rawPriceFeed?.apiBaseUrl ?? DEFAULT_PRICE_FEED.apiBaseUrl)
         .trim()
         .replace(/\/+$/, '');
-    const vsCurrency = String(rawPriceFeed?.vsCurrency ?? DEFAULT_PRICE_FEED.vsCurrency)
-        .trim()
-        .toLowerCase();
-    if (!vsCurrency) {
-        throw new Error('firstProxy.priceFeed.vsCurrency is required.');
-    }
-
-    const rawAssetIds = {
-        ...DEFAULT_PRICE_FEED.assetIds,
-        ...(rawPriceFeed?.assetIds ?? {}),
+    const quoteCurrency = normalizeQuoteCurrency(
+        rawPriceFeed?.quoteCurrency ?? rawPriceFeed?.vsCurrency ?? DEFAULT_PRICE_FEED.quoteCurrency,
+        'firstProxy.priceFeed.quoteCurrency'
+    );
+    const rawSymbols = {
+        ...DEFAULT_PRICE_FEED.symbols,
+        ...(rawPriceFeed?.symbols ?? rawPriceFeed?.assetIds ?? {}),
     };
 
     return {
         provider,
         apiBaseUrl,
-        vsCurrency,
-        assetIds: {
-            [CANONICAL_SYMBOLS.WETH]: normalizeCoinGeckoId(
-                rawAssetIds.WETH,
-                'firstProxy.priceFeed.assetIds.WETH'
+        quoteCurrency,
+        symbols: {
+            [CANONICAL_SYMBOLS.WETH]: normalizeAlchemySymbol(
+                rawSymbols.WETH,
+                'firstProxy.priceFeed.symbols.WETH'
             ),
-            [CANONICAL_SYMBOLS.CBBTC]: normalizeCoinGeckoId(
-                rawAssetIds.cbBTC ?? rawAssetIds.CBBTC,
-                'firstProxy.priceFeed.assetIds.cbBTC'
+            [CANONICAL_SYMBOLS.CBBTC]: normalizeAlchemySymbol(
+                rawSymbols.cbBTC ?? rawSymbols.CBBTC,
+                'firstProxy.priceFeed.symbols.cbBTC'
             ),
-            [CANONICAL_SYMBOLS.USDC]: normalizeCoinGeckoId(
-                rawAssetIds.USDC,
-                'firstProxy.priceFeed.assetIds.USDC'
+            [CANONICAL_SYMBOLS.USDC]: normalizeAlchemySymbol(
+                rawSymbols.USDC,
+                'firstProxy.priceFeed.symbols.USDC'
             ),
         },
     };
@@ -433,27 +439,69 @@ async function loadTokenDecimals({ publicClient, token }) {
     return decimals;
 }
 
-function getCoinGeckoRequestConfig(policy) {
-    const apiKey = process.env.COINGECKO_API_KEY;
-    const apiBaseUrl = apiKey
-        ? 'https://pro-api.coingecko.com/api/v3'
-        : policy.priceFeed.apiBaseUrl;
-    const headers = apiKey ? { 'x-cg-pro-api-key': apiKey } : {};
-    return {
-        apiBaseUrl,
-        headers,
-    };
+function extractAlchemyApiKeyFromRpcUrl(rpcUrl) {
+    if (typeof rpcUrl !== 'string' || !rpcUrl.trim()) {
+        return null;
+    }
+    try {
+        const url = new URL(rpcUrl);
+        if (!/alchemy\.com$/i.test(url.hostname)) {
+            return null;
+        }
+        const segments = url.pathname.split('/').filter(Boolean);
+        const versionIndex = segments.findIndex((segment) => /^v[23]$/i.test(segment));
+        if (versionIndex < 0 || versionIndex + 1 >= segments.length) {
+            return null;
+        }
+        return segments[versionIndex + 1] || null;
+    } catch {
+        return null;
+    }
 }
 
-async function fetchCoinGeckoJson({ policy, pathname, searchParams, cacheKey = null }) {
-    const requestKey = cacheKey ?? `${pathname}?${searchParams.toString()}`;
-    const { apiBaseUrl, headers } = getCoinGeckoRequestConfig(policy);
-    const url = new URL(`${apiBaseUrl}${pathname}`);
-    url.search = searchParams.toString();
+function resolveAlchemyApiKey({ config, chainId }) {
+    const explicitApiKey =
+        process.env.ALCHEMY_PRICES_API_KEY?.trim() || process.env.ALCHEMY_API_KEY?.trim();
+    if (explicitApiKey) {
+        return explicitApiKey;
+    }
+    const chainConfig = resolveChainConfig(config, chainId);
+    const candidateRpcUrls = [config?.rpcUrl, chainConfig?.rpcUrl];
+    for (const rpcUrl of candidateRpcUrls) {
+        const derivedApiKey = extractAlchemyApiKeyFromRpcUrl(rpcUrl);
+        if (derivedApiKey) {
+            return derivedApiKey;
+        }
+    }
+    throw new Error(
+        'Unable to resolve an Alchemy API key for first-proxy pricing. Set ALCHEMY_PRICES_API_KEY or use an Alchemy rpcUrl.'
+    );
+}
 
-    const response = await fetch(url, { headers });
+async function fetchAlchemyJson({
+    policy,
+    config,
+    chainId,
+    pathname,
+    method = 'GET',
+    searchParams = null,
+    body = null,
+    cacheKey = null,
+}) {
+    const requestKey = cacheKey ?? `${method}:${pathname}:${searchParams?.toString() ?? ''}`;
+    const apiKey = resolveAlchemyApiKey({ config, chainId });
+    const url = new URL(`${policy.priceFeed.apiBaseUrl}/${apiKey}${pathname}`);
+    if (searchParams) {
+        url.search = searchParams.toString();
+    }
+
+    const response = await fetch(url, {
+        method,
+        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+    });
     if (!response.ok) {
-        const error = new Error(`CoinGecko API error: ${response.status} ${url.pathname}`);
+        const error = new Error(`Alchemy Prices API error: ${response.status} ${url.pathname}`);
         error.statusCode = response.status;
         error.url = url.toString();
         error.cacheKey = requestKey;
@@ -462,60 +510,94 @@ async function fetchCoinGeckoJson({ policy, pathname, searchParams, cacheKey = n
     return response.json();
 }
 
-async function fetchCurrentPricesFromCoinGecko({ policy }) {
-    const coinIds = MOMENTUM_SYMBOLS.map((symbol) => policy.priceFeed.assetIds[symbol]).join(',');
-    const cacheKey = `simple-price:${policy.priceFeed.vsCurrency}:${coinIds}`;
-    if (moduleCaches.currentPrices.has(cacheKey)) {
-        return moduleCaches.currentPrices.get(cacheKey);
+async function fetchCurrentPricesFromAlchemy({ policy, config }) {
+    const requestedSymbols = REIMBURSEMENT_SYMBOLS.map((symbol) => policy.priceFeed.symbols[symbol]);
+    const cacheKey = `current:${policy.priceFeed.quoteCurrency}:${requestedSymbols.join(',')}`;
+    const cached = moduleCaches.currentPrices.get(cacheKey);
+    if (cached && cached.expiresAtMs > Date.now()) {
+        return cached.payload;
     }
 
-    const searchParams = new URLSearchParams({
-        ids: coinIds,
-        vs_currencies: policy.priceFeed.vsCurrency,
-    });
-    const payload = await fetchCoinGeckoJson({
+    const searchParams = new URLSearchParams();
+    for (const symbol of requestedSymbols) {
+        searchParams.append('symbols', symbol);
+    }
+    const payload = await fetchAlchemyJson({
         policy,
-        pathname: '/simple/price',
+        config,
+        chainId: policy.chainId,
+        pathname: '/tokens/by-symbol',
         searchParams,
         cacheKey,
     });
-    moduleCaches.currentPrices.set(cacheKey, payload);
+    moduleCaches.currentPrices.set(cacheKey, {
+        expiresAtMs: Date.now() + CURRENT_PRICE_CACHE_TTL_MS,
+        payload,
+    });
     return payload;
 }
 
-async function fetchHistoricalRangeFromCoinGecko({
+async function fetchHistoricalRangeFromAlchemy({
+    config,
     policy,
-    coinId,
+    symbol,
     fromSeconds,
     toSeconds,
 }) {
-    const cacheKey = `range:${coinId}:${policy.priceFeed.vsCurrency}:${fromSeconds}:${toSeconds}`;
+    const cacheKey = `historical:${symbol}:${policy.priceFeed.quoteCurrency}:${fromSeconds}:${toSeconds}`;
     if (moduleCaches.historicalRanges.has(cacheKey)) {
         return moduleCaches.historicalRanges.get(cacheKey);
     }
 
-    const searchParams = new URLSearchParams({
-        vs_currency: policy.priceFeed.vsCurrency,
-        from: String(fromSeconds),
-        to: String(toSeconds),
-    });
-    const payload = await fetchCoinGeckoJson({
+    const payload = await fetchAlchemyJson({
         policy,
-        pathname: `/coins/${coinId}/market_chart/range`,
-        searchParams,
+        config,
+        chainId: policy.chainId,
+        pathname: '/tokens/historical',
+        method: 'POST',
+        body: {
+            symbol,
+            startTime: new Date(fromSeconds * 1000).toISOString(),
+            endTime: new Date(toSeconds * 1000).toISOString(),
+        },
         cacheKey,
     });
     moduleCaches.historicalRanges.set(cacheKey, payload);
     return payload;
 }
 
-function normalizePriceSeries(payload, coinId) {
-    const series = Array.isArray(payload?.prices) ? payload.prices : [];
+function normalizeAlchemyCurrentPricePayload(payload, quoteCurrency) {
+    const entries = Array.isArray(payload?.data) ? payload.data : [];
+    const pricesBySymbol = new Map();
+    for (const entry of entries) {
+        const symbol = normalizeAlchemySymbol(entry?.symbol, 'Alchemy current price symbol');
+        if (entry?.error) {
+            throw new Error(`Alchemy current price error for ${symbol}: ${entry.error}`);
+        }
+        const prices = Array.isArray(entry?.prices) ? entry.prices : [];
+        const matchingPrice =
+            prices.find(
+                (priceEntry) =>
+                    normalizeQuoteCurrency(
+                        priceEntry?.currency,
+                        `Alchemy current price currency for ${symbol}`
+                    ) === quoteCurrency
+            ) ?? prices[0];
+        const price = Number(matchingPrice?.value);
+        if (!Number.isFinite(price) || price <= 0) {
+            throw new Error(`Alchemy current price missing for ${symbol}.`);
+        }
+        pricesBySymbol.set(symbol, price);
+    }
+    return pricesBySymbol;
+}
+
+function normalizeHistoricalPriceSeries(payload, symbol) {
+    const series = Array.isArray(payload?.data?.prices) ? payload.data.prices : [];
     const normalized = series
         .map((entry) => {
-            if (!Array.isArray(entry) || entry.length < 2) return null;
-            const timestampMs = Number(entry[0]);
-            const price = Number(entry[1]);
+            const timestampMs = Date.parse(String(entry?.timestamp ?? ''));
+            const price = Number(entry?.value);
             if (!Number.isFinite(timestampMs) || !Number.isFinite(price) || price <= 0) {
                 return null;
             }
@@ -524,26 +606,46 @@ function normalizePriceSeries(payload, coinId) {
                 price,
             };
         })
-        .filter(Boolean);
+        .filter(Boolean)
+        .sort((left, right) => left.timestampSeconds - right.timestampSeconds);
     if (normalized.length === 0) {
-        throw new Error(`CoinGecko returned no valid price points for ${coinId}.`);
+        throw new Error(`Alchemy historical prices returned no valid points for ${symbol}.`);
     }
     return normalized;
 }
 
-function pickPricePointAtOrBefore(series, targetSeconds) {
+function pickClosestPricePoint(series, targetSeconds) {
     let best = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
     for (const point of series) {
-        if (point.timestampSeconds <= targetSeconds) {
+        const distance = Math.abs(point.timestampSeconds - targetSeconds);
+        if (distance < bestDistance) {
             best = point;
+            bestDistance = distance;
             continue;
         }
-        if (!best) {
-            return point;
+        if (distance === bestDistance && best && point.timestampSeconds <= targetSeconds) {
+            best = point;
         }
-        break;
     }
     return best ?? series[series.length - 1];
+}
+
+async function fetchHistoricalPointFromAlchemy({
+    config,
+    policy,
+    symbol,
+    targetSeconds,
+    radiusSeconds,
+}) {
+    const payload = await fetchHistoricalRangeFromAlchemy({
+        config,
+        policy,
+        symbol,
+        fromSeconds: Math.max(0, targetSeconds - radiusSeconds),
+        toSeconds: targetSeconds + radiusSeconds,
+    });
+    return pickClosestPricePoint(normalizeHistoricalPriceSeries(payload, symbol), targetSeconds);
 }
 
 async function resolveStartBlock({ publicClient, config, latestBlock }) {
@@ -804,17 +906,17 @@ async function reconcileStrategyState({
 }
 
 async function resolveCurrentPrices({
+    config,
     policy,
 }) {
-    const payload = await fetchCurrentPricesFromCoinGecko({ policy });
-    const pricesBySymbol = {
-        [CANONICAL_SYMBOLS.USDC]: 1,
-    };
-    for (const symbol of MOMENTUM_SYMBOLS) {
-        const coinId = policy.priceFeed.assetIds[symbol];
-        const price = Number(payload?.[coinId]?.[policy.priceFeed.vsCurrency]);
+    const payload = await fetchCurrentPricesFromAlchemy({ policy, config });
+    const currentPrices = normalizeAlchemyCurrentPricePayload(payload, policy.priceFeed.quoteCurrency);
+    const pricesBySymbol = {};
+    for (const symbol of REIMBURSEMENT_SYMBOLS) {
+        const providerSymbol = policy.priceFeed.symbols[symbol];
+        const price = currentPrices.get(providerSymbol);
         if (!Number.isFinite(price) || price <= 0) {
-            throw new Error(`CoinGecko current price missing for ${symbol} (${coinId}).`);
+            throw new Error(`Alchemy current price missing for ${symbol} (${providerSymbol}).`);
         }
         pricesBySymbol[symbol] = price;
     }
@@ -822,6 +924,7 @@ async function resolveCurrentPrices({
 }
 
 async function resolveHistoricalReturns({
+    config,
     policy,
     windowStartSeconds,
     windowEndSeconds,
@@ -832,16 +935,38 @@ async function resolveHistoricalReturns({
     const pricesAtWindow = {};
 
     for (const symbol of MOMENTUM_SYMBOLS) {
-        const coinId = policy.priceFeed.assetIds[symbol];
-        const history = await fetchHistoricalRangeFromCoinGecko({
+        const providerSymbol = policy.priceFeed.symbols[symbol];
+        const history = await fetchHistoricalRangeFromAlchemy({
+            config,
             policy,
-            coinId,
+            symbol: providerSymbol,
             fromSeconds: Number(windowStartSeconds),
             toSeconds: Number(windowEndSeconds),
         });
-        const series = normalizePriceSeries(history, coinId);
-        const startPrice = pickPricePointAtOrBefore(series, Number(windowStartSeconds)).price;
-        const endPrice = pickPricePointAtOrBefore(series, Number(windowEndSeconds)).price;
+        const series = normalizeHistoricalPriceSeries(history, providerSymbol);
+        let startPoint = pickClosestPricePoint(series, Number(windowStartSeconds));
+        let endPoint = pickClosestPricePoint(series, Number(windowEndSeconds));
+        if (series.length < 2 || startPoint.timestampSeconds === endPoint.timestampSeconds) {
+            const fallbackRadiusSeconds = Math.max(300, Math.floor(policy.epochSeconds / 4));
+            [startPoint, endPoint] = await Promise.all([
+                fetchHistoricalPointFromAlchemy({
+                    config,
+                    policy,
+                    symbol: providerSymbol,
+                    targetSeconds: Number(windowStartSeconds),
+                    radiusSeconds: fallbackRadiusSeconds,
+                }),
+                fetchHistoricalPointFromAlchemy({
+                    config,
+                    policy,
+                    symbol: providerSymbol,
+                    targetSeconds: Number(windowEndSeconds),
+                    radiusSeconds: fallbackRadiusSeconds,
+                }),
+            ]);
+        }
+        const startPrice = startPoint.price;
+        const endPrice = endPoint.price;
         if (startPrice <= 0 || endPrice <= 0) {
             throw new Error(`Historical valuation for ${symbol} returned non-positive price.`);
         }
@@ -1053,6 +1178,7 @@ async function buildMomentumPlan({
         deploymentTimestampSeconds + BigInt((closedEpochIndex + 1) * policy.epochSeconds);
 
     const { returnsBySymbol, pricesAtWindow } = await resolveHistoricalReturns({
+        config,
         policy,
         windowStartSeconds: epochStartSeconds,
         windowEndSeconds: epochEndSeconds,
@@ -1062,10 +1188,11 @@ async function buildMomentumPlan({
         tieBreakAssetOrder: policy.tieBreakAssetOrder,
     });
     const currentPricesBySymbol = await resolveCurrentPrices({
+        config,
         policy,
     });
     const currentPriceMicrosBySymbol = {
-        [CANONICAL_SYMBOLS.USDC]: MICRO_USD_SCALE,
+        [CANONICAL_SYMBOLS.USDC]: priceMicrosFromFloat(currentPricesBySymbol[CANONICAL_SYMBOLS.USDC]),
         [CANONICAL_SYMBOLS.WETH]: priceMicrosFromFloat(currentPricesBySymbol[CANONICAL_SYMBOLS.WETH]),
         [CANONICAL_SYMBOLS.CBBTC]: priceMicrosFromFloat(currentPricesBySymbol[CANONICAL_SYMBOLS.CBBTC]),
     };

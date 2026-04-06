@@ -25,15 +25,17 @@ const ADDRESSES = Object.freeze({
     cbbtc: '0x3000000000000000000000000000000000000003',
 });
 
-const COIN_IDS = Object.freeze({
-    WETH: 'weth',
-    cbBTC: 'coinbase-wrapped-btc',
-    USDC: 'usd-coin',
+const ALCHEMY_API_KEY = 'test-alchemy-key';
+const PRICE_SYMBOLS = Object.freeze({
+    WETH: 'ETH',
+    cbBTC: 'BTC',
+    USDC: 'USDC',
 });
 
 function createConfig({ stateFile, startBlock = 0n, balances = {} } = {}) {
     return {
         chainId: 11155111,
+        rpcUrl: `https://eth-sepolia.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
         commitmentSafe: ADDRESSES.safe,
         ogModule: ADDRESSES.ogModule,
         startBlock: String(startBlock),
@@ -48,15 +50,16 @@ function createConfig({ stateFile, startBlock = 0n, balances = {} } = {}) {
             pendingEpochTtlMs: 60_000,
             stateFile,
             priceFeed: {
-                provider: 'coingecko',
-                apiBaseUrl: 'https://api.coingecko.com/api/v3',
-                vsCurrency: 'usd',
-                assetIds: COIN_IDS,
+                provider: 'alchemy',
+                apiBaseUrl: 'https://api.g.alchemy.com/prices/v1',
+                quoteCurrency: 'USD',
+                symbols: PRICE_SYMBOLS,
             },
             tieBreakAssetOrder: ['WETH', 'cbBTC'],
         },
         byChain: {
             '11155111': {
+                rpcUrl: `https://eth-sepolia.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
                 watchAssets: [ADDRESSES.usdc, ADDRESSES.weth, ADDRESSES.cbbtc],
                 firstProxy: {
                     tokens: {
@@ -143,26 +146,44 @@ function jsonResponse(payload) {
 
 async function withFetchMock(dataset, fn) {
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async (input) => {
+    globalThis.fetch = async (input, init = {}) => {
         const url = new URL(String(input));
-        if (url.pathname === '/api/v3/simple/price') {
-            const ids = (url.searchParams.get('ids') ?? '').split(',').filter(Boolean);
-            const vsCurrency = url.searchParams.get('vs_currencies');
-            const payload = {};
-            for (const id of ids) {
-                const price = dataset.current[id];
-                if (price !== undefined) {
-                    payload[id] = { [vsCurrency]: price };
-                }
-            }
-            return jsonResponse(payload);
+        if (url.pathname === `/prices/v1/${ALCHEMY_API_KEY}/tokens/by-symbol`) {
+            const symbols = url.searchParams.getAll('symbols');
+            return jsonResponse({
+                data: symbols.map((symbol) => ({
+                    symbol,
+                    prices:
+                        dataset.current[symbol] === undefined
+                            ? []
+                            : [
+                                  {
+                                      currency: 'USD',
+                                      value: String(dataset.current[symbol]),
+                                      lastUpdatedAt: '2026-04-06T00:00:00Z',
+                                  },
+                              ],
+                    error: null,
+                })),
+            });
         }
 
-        const match = url.pathname.match(/^\/api\/v3\/coins\/([^/]+)\/market_chart\/range$/);
-        if (match) {
-            const coinId = decodeURIComponent(match[1]);
+        if (url.pathname === `/prices/v1/${ALCHEMY_API_KEY}/tokens/historical`) {
+            const request = JSON.parse(String(init.body ?? '{}'));
+            const symbol = request.symbol;
+            const startTimeMs = Date.parse(String(request.startTime));
+            const endTimeMs = Date.parse(String(request.endTime));
+            const points = (dataset.range[symbol] ?? []).filter(
+                ([timestampMs]) => timestampMs >= startTimeMs && timestampMs <= endTimeMs
+            );
             return jsonResponse({
-                prices: dataset.range[coinId] ?? [],
+                data: {
+                    symbol,
+                    prices: points.map(([timestampMs, value]) => ({
+                        value: String(value),
+                        timestamp: new Date(timestampMs).toISOString(),
+                    })),
+                },
             });
         }
 
@@ -239,12 +260,13 @@ async function testNoProposalBeforeFirstEpochCloses() {
     });
     const prices = createPriceDataset({
         current: {
-            [COIN_IDS.WETH]: 2100,
-            [COIN_IDS.cbBTC]: 90,
+            [PRICE_SYMBOLS.WETH]: 2100,
+            [PRICE_SYMBOLS.cbBTC]: 90,
+            [PRICE_SYMBOLS.USDC]: 1,
         },
         range: {
-            [COIN_IDS.WETH]: [[0, 2000], [5 * 3600 * 1000, 2100]],
-            [COIN_IDS.cbBTC]: [[0, 100], [5 * 3600 * 1000, 90]],
+            [PRICE_SYMBOLS.WETH]: [[0, 2000], [5 * 3600 * 1000, 2100]],
+            [PRICE_SYMBOLS.cbBTC]: [[0, 100], [5 * 3600 * 1000, 90]],
         },
     });
     resetStrategyState({ config });
@@ -271,12 +293,13 @@ async function testWinnerSelectionAndSplitReimbursement() {
     };
     const prices = createPriceDataset({
         current: {
-            [COIN_IDS.WETH]: 2200,
-            [COIN_IDS.cbBTC]: 90,
+            [PRICE_SYMBOLS.WETH]: 2200,
+            [PRICE_SYMBOLS.cbBTC]: 90,
+            [PRICE_SYMBOLS.USDC]: 1,
         },
         range: {
-            [COIN_IDS.WETH]: [[0, 2000], [6 * 3600 * 1000, 2200]],
-            [COIN_IDS.cbBTC]: [[0, 100], [6 * 3600 * 1000, 90]],
+            [PRICE_SYMBOLS.WETH]: [[0, 2000], [6 * 3600 * 1000, 2200]],
+            [PRICE_SYMBOLS.cbBTC]: [[0, 100], [6 * 3600 * 1000, 90]],
         },
     });
     const config = createConfig({ stateFile, balances });
@@ -339,12 +362,13 @@ async function testUsdcPreferredWhenBothMomentumAssetsUp() {
     };
     const prices = createPriceDataset({
         current: {
-            [COIN_IDS.WETH]: 2300,
-            [COIN_IDS.cbBTC]: 55,
+            [PRICE_SYMBOLS.WETH]: 2300,
+            [PRICE_SYMBOLS.cbBTC]: 55,
+            [PRICE_SYMBOLS.USDC]: 1,
         },
         range: {
-            [COIN_IDS.WETH]: [[0, 2000], [6 * 3600 * 1000, 2300]],
-            [COIN_IDS.cbBTC]: [[0, 50], [6 * 3600 * 1000, 55]],
+            [PRICE_SYMBOLS.WETH]: [[0, 2000], [6 * 3600 * 1000, 2300]],
+            [PRICE_SYMBOLS.cbBTC]: [[0, 50], [6 * 3600 * 1000, 55]],
         },
     });
     const config = createConfig({ stateFile, balances });
@@ -379,12 +403,13 @@ async function testNoProposalWhenInsufficientReimbursementInventory() {
     };
     const prices = createPriceDataset({
         current: {
-            [COIN_IDS.WETH]: 2200,
-            [COIN_IDS.cbBTC]: 90,
+            [PRICE_SYMBOLS.WETH]: 2200,
+            [PRICE_SYMBOLS.cbBTC]: 90,
+            [PRICE_SYMBOLS.USDC]: 1,
         },
         range: {
-            [COIN_IDS.WETH]: [[0, 2000], [6 * 3600 * 1000, 2200]],
-            [COIN_IDS.cbBTC]: [[0, 100], [6 * 3600 * 1000, 90]],
+            [PRICE_SYMBOLS.WETH]: [[0, 2000], [6 * 3600 * 1000, 2200]],
+            [PRICE_SYMBOLS.cbBTC]: [[0, 100], [6 * 3600 * 1000, 90]],
         },
     });
     const config = createConfig({ stateFile, balances });
@@ -416,12 +441,13 @@ async function testPendingPlanReplayAfterDeposit() {
     };
     const prices = createPriceDataset({
         current: {
-            [COIN_IDS.WETH]: 1200,
-            [COIN_IDS.cbBTC]: 90,
+            [PRICE_SYMBOLS.WETH]: 1200,
+            [PRICE_SYMBOLS.cbBTC]: 90,
+            [PRICE_SYMBOLS.USDC]: 1,
         },
         range: {
-            [COIN_IDS.WETH]: [[0, 1000], [6 * 3600 * 1000, 1200]],
-            [COIN_IDS.cbBTC]: [[0, 100], [6 * 3600 * 1000, 90]],
+            [PRICE_SYMBOLS.WETH]: [[0, 1000], [6 * 3600 * 1000, 1200]],
+            [PRICE_SYMBOLS.cbBTC]: [[0, 100], [6 * 3600 * 1000, 90]],
         },
     });
     const config = createConfig({ stateFile, balances });
@@ -498,12 +524,13 @@ async function testSuppressesPendingOrPriorEpoch() {
     };
     const prices = createPriceDataset({
         current: {
-            [COIN_IDS.WETH]: 1200,
-            [COIN_IDS.cbBTC]: 90,
+            [PRICE_SYMBOLS.WETH]: 1200,
+            [PRICE_SYMBOLS.cbBTC]: 90,
+            [PRICE_SYMBOLS.USDC]: 1,
         },
         range: {
-            [COIN_IDS.WETH]: [[0, 1000], [6 * 3600 * 1000, 1200]],
-            [COIN_IDS.cbBTC]: [[0, 100], [6 * 3600 * 1000, 90]],
+            [PRICE_SYMBOLS.WETH]: [[0, 1000], [6 * 3600 * 1000, 1200]],
+            [PRICE_SYMBOLS.cbBTC]: [[0, 100], [6 * 3600 * 1000, 90]],
         },
     });
     const config = createConfig({ stateFile, balances });

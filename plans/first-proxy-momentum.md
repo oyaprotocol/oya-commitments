@@ -4,7 +4,7 @@ This ExecPlan is a living document and must be maintained according to `PLANS.md
 
 ## Purpose / Big Picture
 
-Turn `agent-library/agents/first-proxy/` into a deterministic `Agent Proxy` strategy with no LLM dependency. Every six hours, the agent evaluates WETH and cbBTC momentum over the preceding six-hour deployment-anchored window using CoinGecko USD prices, deposits the stronger performer into the Safe from the agent wallet, and proposes reimbursement out of the weakest eligible Safe assets. If both non-stablecoins are up and the Safe holds USDC, USDC is used first. The cadence is four $25 trades per deployment-anchored day, matching the commitment’s $100/day limit.
+Turn `agent-library/agents/first-proxy/` into a deterministic `Agent Proxy` strategy with no LLM dependency. Every six hours, the agent evaluates WETH and cbBTC momentum over the preceding six-hour deployment-anchored window using Alchemy Prices API USD prices, deposits the stronger performer into the Safe from the agent wallet, and proposes reimbursement out of the weakest eligible Safe assets. If both non-stablecoins are up and the Safe holds USDC, USDC is used first. The cadence is four $25 trades per deployment-anchored day, matching the commitment’s $100/day limit.
 
 ## Progress
 
@@ -18,6 +18,7 @@ Turn `agent-library/agents/first-proxy/` into a deterministic `Agent Proxy` stra
 - [x] 2026-04-04 22:39Z: Ran `node agent/scripts/validate-agent.mjs --module=first-proxy`.
 - [x] 2026-04-04 22:39Z: Ran `node agent-library/agents/first-proxy/test-first-proxy-agent.mjs`.
 - [x] 2026-04-06 18:02Z: Replaced onchain AMM valuation with CoinGecko current and historical USD prices, added always-on balance snapshot polling for deterministic reevaluation, and reran module validation.
+- [x] 2026-04-06 23:20Z: Replaced CoinGecko with Alchemy Prices API, derived price auth from Alchemy env/RPC configuration, fixed stale current-price caching, and reran module validation.
 
 ## Surprises & Discoveries
 
@@ -59,8 +60,8 @@ Turn `agent-library/agents/first-proxy/` into a deterministic `Agent Proxy` stra
   Rationale: The commitment states that token prices are based on the prices at the time of the deposit.
   Date/Author: 2026-04-04 / Codex.
 
-- Decision: Source current and historical prices from CoinGecko instead of onchain AMM pools.
-  Rationale: The user explicitly requested offchain price feeds for this strategy.
+- Decision: Source current and historical prices from Alchemy Prices API instead of CoinGecko or onchain AMM pools.
+  Rationale: The user explicitly requested Alchemy for simpler operational setup alongside the Alchemy node provider.
   Date/Author: 2026-04-06 / Codex.
 
 ## Outcomes & Retrospective
@@ -98,7 +99,7 @@ Completed implementation steps:
    The module now exports deterministic planning, heartbeat triggers, strict tool-call validation, and output hooks for pending-plan persistence.
 
 3. Implemented deployment-anchored epoch reconstruction and historical price lookup.
-   The module resolves the deployment block, computes closed six-hour epochs, and fetches CoinGecko historical USD prices for WETH and cbBTC at both epoch boundaries.
+   The module resolves the deployment block, computes closed six-hour epochs, and fetches Alchemy historical USD prices for WETH and cbBTC at both epoch boundaries.
 
 4. Implemented winner selection and reimbursement allocation.
    The winner is whichever of WETH or cbBTC performed better over the last closed epoch.
@@ -175,5 +176,5 @@ Files changed:
 Primary runtime dependencies:
 
 - viem `publicClient`
-- CoinGecko current-price and historical market-chart endpoints
+- Alchemy Prices API by-symbol and historical-price endpoints
 - OG proposal history for duplicate suppression
