@@ -10,7 +10,17 @@ Minimum required config:
   "firstProxy": {
     "tradeAmountUsd": "25",
     "epochSeconds": 21600,
-    "daySeconds": 86400
+    "daySeconds": 86400,
+    "priceFeed": {
+      "provider": "coingecko",
+      "apiBaseUrl": "https://api.coingecko.com/api/v3",
+      "vsCurrency": "usd",
+      "assetIds": {
+        "WETH": "weth",
+        "cbBTC": "coinbase-wrapped-btc",
+        "USDC": "usd-coin"
+      }
+    }
   },
   "byChain": {
     "<chainId>": {
@@ -26,14 +36,6 @@ Minimum required config:
           "USDC": "0x...",
           "WETH": "0x...",
           "cbBTC": "0x..."
-        },
-        "valuationPools": {
-          "WETH": {
-            "pool": "0x..."
-          },
-          "cbBTC": {
-            "pool": "0x..."
-          }
         }
       }
     }
@@ -49,6 +51,7 @@ Common optional config:
 - `ipfsEnabled`
 - proposal/dispute toggles and timing fields
 - `firstProxy.pendingEpochTtlMs`
+- `firstProxy.priceFeed.*`
 - `firstProxy.stateFile`
 - `firstProxy.tieBreakAssetOrder`
 
@@ -69,5 +72,9 @@ One-time helper:
 ```bash
 node agent/scripts/migrate-agent-config-from-env.mjs --module=first-proxy --chain-id=<chainId>
 ```
+
+Runtime notes:
+- Prices and six-hour momentum are now sourced from CoinGecko, not onchain AMM pools.
+- If `COINGECKO_API_KEY` is present in `agent/.env`, the module uses CoinGecko Pro endpoints with the `x-cg-pro-api-key` header; otherwise it uses the public API base URL from config.
 
 Secrets stay in `agent/.env`, including signer keys, `OPENAI_API_KEY`, `MESSAGE_API_KEYS_JSON`, and authenticated `IPFS_HEADERS_JSON`.

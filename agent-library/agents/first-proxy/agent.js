@@ -1,7 +1,7 @@
 import { readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { erc20Abi, hexToString, parseAbi } from 'viem';
+import { erc20Abi, hexToString } from 'viem';
 import {
     findContractDeploymentBlock,
     getBlockTimestampMs,
@@ -12,9 +12,9 @@ import {
     proposalExecutedEvent,
     transactionsProposedEvent,
 } from '../../../agent/src/lib/og.js';
+import { getAlwaysEmitBalanceSnapshotPollingOptions } from '../../../agent/src/lib/polling.js';
 import { buildOgTransactions } from '../../../agent/src/lib/tx.js';
 import {
-    normalizeAddressOrNull,
     normalizeAddressOrThrow,
     normalizeHashOrNull,
 } from '../../../agent/src/lib/utils.js';
@@ -41,16 +41,22 @@ const DEFAULT_POLICY = Object.freeze({
     proposalScanChunkSize: 5_000n,
     tieBreakAssetOrder: Object.freeze([CANONICAL_SYMBOLS.WETH, CANONICAL_SYMBOLS.CBBTC]),
 });
-const POOL_ABI = parseAbi([
-    'function token0() view returns (address)',
-    'function token1() view returns (address)',
-    'function slot0() view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)',
-]);
+const DEFAULT_PRICE_FEED = Object.freeze({
+    provider: 'coingecko',
+    apiBaseUrl: 'https://api.coingecko.com/api/v3',
+    vsCurrency: 'usd',
+    assetIds: Object.freeze({
+        WETH: 'weth',
+        cbBTC: 'coinbase-wrapped-btc',
+        USDC: 'usd-coin',
+    }),
+});
 const MICRO_USD_SCALE = 1_000_000n;
 const STRATEGY_TAG = 'first-proxy-momentum';
 const moduleCaches = {
     deployment: new Map(),
-    poolMeta: new Map(),
+    currentPrices: new Map(),
+    historicalRanges: new Map(),
     tokenMeta: new Map(),
 };
 const strategyState = {
@@ -76,6 +82,14 @@ function displaySymbol(symbol) {
 
 function normalizeAddress(value) {
     return normalizeAddressOrThrow(value, { requireHex: false });
+}
+
+function normalizeCoinGeckoId(value, label) {
+    const normalized = String(value ?? '').trim().toLowerCase();
+    if (!normalized) {
+        throw new Error(`${label} is required.`);
+    }
+    return normalized;
 }
 
 function parsePositiveInteger(value, label) {
@@ -316,19 +330,48 @@ function normalizeTieBreakOrder(rawOrder) {
     return order;
 }
 
-function normalizeValuationPools(rawPools, tokens) {
-    const out = {};
-    for (const symbol of MOMENTUM_SYMBOLS) {
-        const entry = rawPools?.[symbol] ?? rawPools?.[displaySymbol(symbol)] ?? null;
-        if (!entry) continue;
-        const pool = typeof entry === 'string' ? entry : entry.pool;
-        out[symbol] = {
-            pool: normalizeAddress(pool),
-            baseToken: normalizeAddress(entry.baseToken ?? tokens[symbol]),
-            quoteToken: normalizeAddress(entry.quoteToken ?? tokens[CANONICAL_SYMBOLS.USDC]),
-        };
+function normalizePriceFeed(rawPriceFeed) {
+    const provider = String(rawPriceFeed?.provider ?? DEFAULT_PRICE_FEED.provider)
+        .trim()
+        .toLowerCase();
+    if (provider !== 'coingecko') {
+        throw new Error(`Unsupported firstProxy.priceFeed.provider: ${provider}`);
     }
-    return out;
+
+    const apiBaseUrl = String(rawPriceFeed?.apiBaseUrl ?? DEFAULT_PRICE_FEED.apiBaseUrl)
+        .trim()
+        .replace(/\/+$/, '');
+    const vsCurrency = String(rawPriceFeed?.vsCurrency ?? DEFAULT_PRICE_FEED.vsCurrency)
+        .trim()
+        .toLowerCase();
+    if (!vsCurrency) {
+        throw new Error('firstProxy.priceFeed.vsCurrency is required.');
+    }
+
+    const rawAssetIds = {
+        ...DEFAULT_PRICE_FEED.assetIds,
+        ...(rawPriceFeed?.assetIds ?? {}),
+    };
+
+    return {
+        provider,
+        apiBaseUrl,
+        vsCurrency,
+        assetIds: {
+            [CANONICAL_SYMBOLS.WETH]: normalizeCoinGeckoId(
+                rawAssetIds.WETH,
+                'firstProxy.priceFeed.assetIds.WETH'
+            ),
+            [CANONICAL_SYMBOLS.CBBTC]: normalizeCoinGeckoId(
+                rawAssetIds.cbBTC ?? rawAssetIds.CBBTC,
+                'firstProxy.priceFeed.assetIds.cbBTC'
+            ),
+            [CANONICAL_SYMBOLS.USDC]: normalizeCoinGeckoId(
+                rawAssetIds.USDC,
+                'firstProxy.priceFeed.assetIds.USDC'
+            ),
+        },
+    };
 }
 
 function resolvePolicyConfig(config, chainId) {
@@ -346,10 +389,7 @@ function resolvePolicyConfig(config, chainId) {
         [CANONICAL_SYMBOLS.WETH]: normalizeAddress(rawPolicy?.tokens?.WETH),
         [CANONICAL_SYMBOLS.CBBTC]: normalizeAddress(rawPolicy?.tokens?.cbBTC ?? rawPolicy?.tokens?.CBBTC),
     };
-    const valuationPools = normalizeValuationPools(rawPolicy?.valuationPools ?? {}, tokens);
-    if (!valuationPools[CANONICAL_SYMBOLS.WETH] || !valuationPools[CANONICAL_SYMBOLS.CBBTC]) {
-        throw new Error('first-proxy requires valuationPools for WETH and cbBTC.');
-    }
+    const priceFeed = normalizePriceFeed(rawPolicy?.priceFeed ?? {});
     return {
         chainId: resolvedChainId,
         tradeAmountUsdMicros: parseUsdToMicros(
@@ -373,7 +413,7 @@ function resolvePolicyConfig(config, chainId) {
             : DEFAULT_POLICY.proposalScanChunkSize,
         tieBreakAssetOrder: normalizeTieBreakOrder(rawPolicy.tieBreakAssetOrder),
         tokens,
-        valuationPools,
+        priceFeed,
     };
 }
 
@@ -393,89 +433,117 @@ async function loadTokenDecimals({ publicClient, token }) {
     return decimals;
 }
 
-async function loadPoolMeta({ publicClient, pool }) {
-    const cacheKey = pool.toLowerCase();
-    if (moduleCaches.poolMeta.has(cacheKey)) {
-        return moduleCaches.poolMeta.get(cacheKey);
-    }
-
-    const [token0, token1] = await Promise.all([
-        publicClient.readContract({
-            address: pool,
-            abi: POOL_ABI,
-            functionName: 'token0',
-        }),
-        publicClient.readContract({
-            address: pool,
-            abi: POOL_ABI,
-            functionName: 'token1',
-        }),
-    ]);
-
-    const normalizedToken0 = normalizeAddress(token0);
-    const normalizedToken1 = normalizeAddress(token1);
-    const [token0Decimals, token1Decimals] = await Promise.all([
-        loadTokenDecimals({ publicClient, token: normalizedToken0 }),
-        loadTokenDecimals({ publicClient, token: normalizedToken1 }),
-    ]);
-
-    const meta = {
-        token0: normalizedToken0,
-        token1: normalizedToken1,
-        token0Decimals,
-        token1Decimals,
+function getCoinGeckoRequestConfig(policy) {
+    const apiKey = process.env.COINGECKO_API_KEY;
+    const apiBaseUrl = apiKey
+        ? 'https://pro-api.coingecko.com/api/v3'
+        : policy.priceFeed.apiBaseUrl;
+    const headers = apiKey ? { 'x-cg-pro-api-key': apiKey } : {};
+    return {
+        apiBaseUrl,
+        headers,
     };
-    moduleCaches.poolMeta.set(cacheKey, meta);
-    return meta;
 }
 
-function quotePerBaseFromSqrtPriceX96({
-    sqrtPriceX96,
-    token0Decimals,
-    token1Decimals,
-    baseIsToken0,
-}) {
-    const sqrt = Number(sqrtPriceX96);
-    if (!Number.isFinite(sqrt) || sqrt <= 0) {
-        throw new Error('Invalid sqrtPriceX96.');
+async function fetchCoinGeckoJson({ policy, pathname, searchParams, cacheKey = null }) {
+    const requestKey = cacheKey ?? `${pathname}?${searchParams.toString()}`;
+    const { apiBaseUrl, headers } = getCoinGeckoRequestConfig(policy);
+    const url = new URL(`${apiBaseUrl}${pathname}`);
+    url.search = searchParams.toString();
+
+    const response = await fetch(url, { headers });
+    if (!response.ok) {
+        const error = new Error(`CoinGecko API error: ${response.status} ${url.pathname}`);
+        error.statusCode = response.status;
+        error.url = url.toString();
+        error.cacheKey = requestKey;
+        throw error;
     }
-    const rawToken1PerToken0 = (sqrt * sqrt) / 2 ** 192;
-    if (baseIsToken0) {
-        return rawToken1PerToken0 * 10 ** (token0Decimals - token1Decimals);
-    }
-    if (rawToken1PerToken0 === 0) {
-        throw new Error('Pool price resolved to zero.');
-    }
-    return (1 / rawToken1PerToken0) * 10 ** (token1Decimals - token0Decimals);
+    return response.json();
 }
 
-async function readPoolPriceQuotePerBase({
-    publicClient,
-    pool,
-    baseToken,
-    quoteToken,
-    blockNumber,
-}) {
-    const meta = await loadPoolMeta({ publicClient, pool });
-    const base = normalizeAddress(baseToken);
-    const quote = normalizeAddress(quoteToken);
-    const baseIsToken0 = meta.token0 === base && meta.token1 === quote;
-    const baseIsToken1 = meta.token1 === base && meta.token0 === quote;
-    if (!baseIsToken0 && !baseIsToken1) {
-        throw new Error(`Pool ${pool} does not match requested base/quote tokens.`);
+async function fetchCurrentPricesFromCoinGecko({ policy }) {
+    const coinIds = MOMENTUM_SYMBOLS.map((symbol) => policy.priceFeed.assetIds[symbol]).join(',');
+    const cacheKey = `simple-price:${policy.priceFeed.vsCurrency}:${coinIds}`;
+    if (moduleCaches.currentPrices.has(cacheKey)) {
+        return moduleCaches.currentPrices.get(cacheKey);
     }
-    const slot0 = await publicClient.readContract({
-        address: pool,
-        abi: POOL_ABI,
-        functionName: 'slot0',
-        blockNumber,
+
+    const searchParams = new URLSearchParams({
+        ids: coinIds,
+        vs_currencies: policy.priceFeed.vsCurrency,
     });
-    return quotePerBaseFromSqrtPriceX96({
-        sqrtPriceX96: slot0[0],
-        token0Decimals: meta.token0Decimals,
-        token1Decimals: meta.token1Decimals,
-        baseIsToken0,
+    const payload = await fetchCoinGeckoJson({
+        policy,
+        pathname: '/simple/price',
+        searchParams,
+        cacheKey,
     });
+    moduleCaches.currentPrices.set(cacheKey, payload);
+    return payload;
+}
+
+async function fetchHistoricalRangeFromCoinGecko({
+    policy,
+    coinId,
+    fromSeconds,
+    toSeconds,
+}) {
+    const cacheKey = `range:${coinId}:${policy.priceFeed.vsCurrency}:${fromSeconds}:${toSeconds}`;
+    if (moduleCaches.historicalRanges.has(cacheKey)) {
+        return moduleCaches.historicalRanges.get(cacheKey);
+    }
+
+    const searchParams = new URLSearchParams({
+        vs_currency: policy.priceFeed.vsCurrency,
+        from: String(fromSeconds),
+        to: String(toSeconds),
+    });
+    const payload = await fetchCoinGeckoJson({
+        policy,
+        pathname: `/coins/${coinId}/market_chart/range`,
+        searchParams,
+        cacheKey,
+    });
+    moduleCaches.historicalRanges.set(cacheKey, payload);
+    return payload;
+}
+
+function normalizePriceSeries(payload, coinId) {
+    const series = Array.isArray(payload?.prices) ? payload.prices : [];
+    const normalized = series
+        .map((entry) => {
+            if (!Array.isArray(entry) || entry.length < 2) return null;
+            const timestampMs = Number(entry[0]);
+            const price = Number(entry[1]);
+            if (!Number.isFinite(timestampMs) || !Number.isFinite(price) || price <= 0) {
+                return null;
+            }
+            return {
+                timestampSeconds: Math.floor(timestampMs / 1000),
+                price,
+            };
+        })
+        .filter(Boolean);
+    if (normalized.length === 0) {
+        throw new Error(`CoinGecko returned no valid price points for ${coinId}.`);
+    }
+    return normalized;
+}
+
+function pickPricePointAtOrBefore(series, targetSeconds) {
+    let best = null;
+    for (const point of series) {
+        if (point.timestampSeconds <= targetSeconds) {
+            best = point;
+            continue;
+        }
+        if (!best) {
+            return point;
+        }
+        break;
+    }
+    return best ?? series[series.length - 1];
 }
 
 async function resolveStartBlock({ publicClient, config, latestBlock }) {
@@ -736,93 +804,44 @@ async function reconcileStrategyState({
 }
 
 async function resolveCurrentPrices({
-    signals,
-    publicClient,
     policy,
-    latestBlock,
 }) {
-    const pricesBySymbol = {};
-    for (const signal of signals ?? []) {
-        if (signal?.kind !== 'priceTrigger') continue;
-        const baseToken = normalizeAddressOrNull(signal?.baseToken, { requireHex: false });
-        if (!baseToken) continue;
-        for (const symbol of MOMENTUM_SYMBOLS) {
-            if (baseToken === policy.tokens[symbol]) {
-                const observedPrice = Number(signal?.observedPrice);
-                if (Number.isFinite(observedPrice) && observedPrice > 0) {
-                    pricesBySymbol[symbol] = observedPrice;
-                }
-            }
-        }
-    }
-
+    const payload = await fetchCurrentPricesFromCoinGecko({ policy });
+    const pricesBySymbol = {
+        [CANONICAL_SYMBOLS.USDC]: 1,
+    };
     for (const symbol of MOMENTUM_SYMBOLS) {
-        if (Number.isFinite(pricesBySymbol[symbol]) && pricesBySymbol[symbol] > 0) {
-            continue;
+        const coinId = policy.priceFeed.assetIds[symbol];
+        const price = Number(payload?.[coinId]?.[policy.priceFeed.vsCurrency]);
+        if (!Number.isFinite(price) || price <= 0) {
+            throw new Error(`CoinGecko current price missing for ${symbol} (${coinId}).`);
         }
-        const valuation = policy.valuationPools[symbol];
-        pricesBySymbol[symbol] = await readPoolPriceQuotePerBase({
-            publicClient,
-            pool: valuation.pool,
-            baseToken: valuation.baseToken,
-            quoteToken: valuation.quoteToken,
-            blockNumber: latestBlock,
-        });
+        pricesBySymbol[symbol] = price;
     }
-    pricesBySymbol[CANONICAL_SYMBOLS.USDC] = 1;
     return pricesBySymbol;
 }
 
 async function resolveHistoricalReturns({
-    publicClient,
     policy,
-    startBlock,
-    latestBlock,
     windowStartSeconds,
     windowEndSeconds,
 }) {
-    const blockTimestampCache = new Map();
-    const windowStartBlock =
-        windowStartSeconds === 0n
-            ? startBlock
-            : await findBlockAtOrBeforeTimestamp({
-                  publicClient,
-                  fromBlock: startBlock,
-                  toBlock: latestBlock,
-                  targetTimestampSeconds: windowStartSeconds,
-                  cache: blockTimestampCache,
-              });
-    const windowEndBlock = await findBlockAtOrBeforeTimestamp({
-        publicClient,
-        fromBlock: startBlock,
-        toBlock: latestBlock,
-        targetTimestampSeconds: windowEndSeconds,
-        cache: blockTimestampCache,
-    });
-
     const returnsBySymbol = {
         [CANONICAL_SYMBOLS.USDC]: 0,
     };
     const pricesAtWindow = {};
 
     for (const symbol of MOMENTUM_SYMBOLS) {
-        const valuation = policy.valuationPools[symbol];
-        const [startPrice, endPrice] = await Promise.all([
-            readPoolPriceQuotePerBase({
-                publicClient,
-                pool: valuation.pool,
-                baseToken: valuation.baseToken,
-                quoteToken: valuation.quoteToken,
-                blockNumber: windowStartBlock,
-            }),
-            readPoolPriceQuotePerBase({
-                publicClient,
-                pool: valuation.pool,
-                baseToken: valuation.baseToken,
-                quoteToken: valuation.quoteToken,
-                blockNumber: windowEndBlock,
-            }),
-        ]);
+        const coinId = policy.priceFeed.assetIds[symbol];
+        const history = await fetchHistoricalRangeFromCoinGecko({
+            policy,
+            coinId,
+            fromSeconds: Number(windowStartSeconds),
+            toSeconds: Number(windowEndSeconds),
+        });
+        const series = normalizePriceSeries(history, coinId);
+        const startPrice = pickPricePointAtOrBefore(series, Number(windowStartSeconds)).price;
+        const endPrice = pickPricePointAtOrBefore(series, Number(windowEndSeconds)).price;
         if (startPrice <= 0 || endPrice <= 0) {
             throw new Error(`Historical valuation for ${symbol} returned non-positive price.`);
         }
@@ -1034,10 +1053,7 @@ async function buildMomentumPlan({
         deploymentTimestampSeconds + BigInt((closedEpochIndex + 1) * policy.epochSeconds);
 
     const { returnsBySymbol, pricesAtWindow } = await resolveHistoricalReturns({
-        publicClient,
         policy,
-        startBlock,
-        latestBlock,
         windowStartSeconds: epochStartSeconds,
         windowEndSeconds: epochEndSeconds,
     });
@@ -1046,10 +1062,7 @@ async function buildMomentumPlan({
         tieBreakAssetOrder: policy.tieBreakAssetOrder,
     });
     const currentPricesBySymbol = await resolveCurrentPrices({
-        signals,
-        publicClient,
         policy,
-        latestBlock,
     });
     const currentPriceMicrosBySymbol = {
         [CANONICAL_SYMBOLS.USDC]: MICRO_USD_SCALE,
@@ -1155,23 +1168,20 @@ function getSystemPrompt({ commitmentText }) {
         .join(' ');
 }
 
+function augmentSignals(signals, { nowMs } = {}) {
+    return [
+        ...signals,
+        {
+            kind: 'deterministicTick',
+            nowMs: nowMs ?? Date.now(),
+        },
+    ];
+}
+
+const getPollingOptions = getAlwaysEmitBalanceSnapshotPollingOptions;
+
 function getPriceTriggers({ config }) {
-    try {
-        const policy = resolvePolicyConfig(config, getConfigChainId(config));
-        return MOMENTUM_SYMBOLS.map((symbol, index) => ({
-            id: `first-proxy-heartbeat-${symbol}`,
-            label: `First Proxy ${displaySymbol(symbol)} heartbeat`,
-            pool: policy.valuationPools[symbol].pool,
-            baseToken: policy.tokens[symbol],
-            quoteToken: policy.tokens[CANONICAL_SYMBOLS.USDC],
-            comparator: 'gte',
-            threshold: 0,
-            priority: index,
-            emitOnce: false,
-        }));
-    } catch {
-        return [];
-    }
+    return [];
 }
 
 async function getDeterministicToolCalls({
@@ -1491,6 +1501,8 @@ function resetStrategyState({ config } = {}) {
     hydratedStatePath = statePath;
     strategyState.submittedEpochs = new Map();
     strategyState.pendingPlan = null;
+    moduleCaches.currentPrices.clear();
+    moduleCaches.historicalRanges.clear();
     lastValidatedEpoch = null;
     lastValidatedPendingPlan = null;
     void unlink(statePath).catch(() => {});
@@ -1505,10 +1517,12 @@ function getPendingPlan() {
 }
 
 export {
+    augmentSignals,
     buildMomentumPlan,
     computeClosedEpochIndex,
     getDeterministicToolCalls,
     getPendingPlan,
+    getPollingOptions,
     getPriceTriggers,
     getSubmittedEpochs,
     getSystemPrompt,

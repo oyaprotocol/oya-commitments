@@ -6,6 +6,16 @@
     "epochSeconds": 21600,
     "daySeconds": 86400,
     "pendingEpochTtlMs": 1800000,
+    "priceFeed": {
+      "provider": "coingecko",
+      "apiBaseUrl": "https://api.coingecko.com/api/v3",
+      "vsCurrency": "usd",
+      "assetIds": {
+        "WETH": "weth",
+        "cbBTC": "coinbase-wrapped-btc",
+        "USDC": "usd-coin"
+      }
+    },
     "tieBreakAssetOrder": [
       "WETH",
       "cbBTC"
