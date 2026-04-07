@@ -6,6 +6,7 @@ import {
     buildMomentumPlan,
     computeClosedEpochIndex,
     getDeterministicToolCalls,
+    getPendingDeposit,
     getPendingPlan,
     getPollingOptions,
     getPriceTriggers,
@@ -85,6 +86,7 @@ function createPublicClient({
     history = {},
     deploymentBlock = 0n,
     onGetCode = null,
+    onGetLogs = null,
     transactionReceiptsByHash = {},
     transactionsByHash = {},
 }) {
@@ -149,6 +151,11 @@ function createPublicClient({
             throw new Error(`Unexpected readContract ${functionName} ${address}`);
         },
         async getLogs({ event, fromBlock, toBlock }) {
+            onGetLogs?.({
+                eventName: event?.name,
+                fromBlock: BigInt(fromBlock),
+                toBlock: BigInt(toBlock),
+            });
             const source =
                 event?.name === 'TransactionsProposed'
                     ? proposalLogs
@@ -243,6 +250,61 @@ function parseToolArgs(call) {
     return JSON.parse(call.arguments);
 }
 
+async function advanceToProposalPhase({
+    commitmentSafe = ADDRESSES.safe,
+    agentAddress = ADDRESSES.agent,
+    publicClient,
+    config,
+    depositTxHash,
+}) {
+    const depositCalls = await getDeterministicToolCalls({
+        signals: [],
+        commitmentSafe,
+        agentAddress,
+        publicClient,
+        config,
+        onchainPendingProposal: false,
+    });
+    assert.equal(depositCalls.length, 1);
+    assert.equal(depositCalls[0].name, 'make_deposit');
+
+    const validatedDeposit = await validateToolCalls({
+        toolCalls: depositCalls.map((call) => ({
+            ...call,
+            parsedArguments: parseToolArgs(call),
+        })),
+        commitmentSafe,
+        agentAddress,
+        publicClient,
+        config,
+        onchainPendingProposal: false,
+    });
+    assert.equal(validatedDeposit.length, 1);
+
+    await onToolOutput({
+        name: 'make_deposit',
+        parsedOutput: {
+            status: 'confirmed',
+            transactionHash: depositTxHash,
+        },
+        config,
+    });
+
+    const proposalCalls = await getDeterministicToolCalls({
+        signals: [],
+        commitmentSafe,
+        agentAddress,
+        publicClient,
+        config,
+        onchainPendingProposal: false,
+    });
+    return {
+        depositCalls,
+        validatedDeposit,
+        proposalCalls,
+    };
+}
+
 async function testPromptAndPolling() {
     const stateFile = await createStateFile();
     const config = createConfig({ stateFile });
@@ -323,6 +385,7 @@ async function testNoProposalBeforeFirstEpochCloses() {
 
 async function testWinnerSelectionAndSplitReimbursement() {
     const stateFile = await createStateFile();
+    const depositTxHash = `0x${'a'.repeat(64)}`;
     const balances = {
         cbBTC: 22_222_223n,
         USDC: 5_000_000n,
@@ -337,44 +400,48 @@ async function testWinnerSelectionAndSplitReimbursement() {
         range: {
             [PRICE_SYMBOLS.WETH]: [[0, 2000], [6 * 3600 * 1000, 2200]],
             [PRICE_SYMBOLS.cbBTC]: [[0, 100], [6 * 3600 * 1000, 90]],
+            [PRICE_SYMBOLS.USDC]: [[0, 1], [6 * 3600 * 1000, 1]],
         },
     });
     const config = createConfig({ stateFile, balances });
     const publicClient = createPublicClient({
         latestBlock: 7n,
         balances,
+        transactionReceiptsByHash: {
+            [depositTxHash.toLowerCase()]: {
+                status: 'success',
+                blockNumber: 7n,
+            },
+        },
     });
     resetStrategyState({ config });
 
     await withFetchMock(prices, async () => {
-        const toolCalls = await getDeterministicToolCalls({
-            signals: [],
-            commitmentSafe: ADDRESSES.safe,
-            agentAddress: ADDRESSES.agent,
+        const { depositCalls, proposalCalls } = await advanceToProposalPhase({
             publicClient,
             config,
-            onchainPendingProposal: false,
+            depositTxHash,
         });
 
-        assert.equal(toolCalls.length, 3);
-        assert.equal(toolCalls[0].name, 'make_deposit');
-        assert.equal(parseToolArgs(toolCalls[0]).asset.toLowerCase(), ADDRESSES.weth.toLowerCase());
+        assert.equal(parseToolArgs(depositCalls[0]).asset.toLowerCase(), ADDRESSES.weth.toLowerCase());
+        assert.ok(getPendingDeposit());
+        assert.equal(proposalCalls.length, 2);
 
-        const buildArgs = parseToolArgs(toolCalls[1]);
+        const buildArgs = parseToolArgs(proposalCalls[0]);
         assert.equal(buildArgs.actions.length, 2);
         assert.equal(buildArgs.actions[0].token.toLowerCase(), ADDRESSES.cbbtc.toLowerCase());
         assert.equal(buildArgs.actions[1].token.toLowerCase(), ADDRESSES.usdc.toLowerCase());
         assert.equal(buildArgs.actions[0].to.toLowerCase(), ADDRESSES.agent.toLowerCase());
         assert.equal(buildArgs.actions[1].to.toLowerCase(), ADDRESSES.agent.toLowerCase());
 
-        const postArgs = parseToolArgs(toolCalls[2]);
+        const postArgs = parseToolArgs(proposalCalls[1]);
         assert.ok(postArgs.explanation.includes('strategy=first-proxy-momentum'));
         assert.ok(postArgs.explanation.includes('epoch=0'));
         assert.ok(postArgs.explanation.includes('winner=WETH'));
         assert.ok(postArgs.explanation.includes('funding=cbBTC,USDC'));
 
         const validated = await validateToolCalls({
-            toolCalls: toolCalls.map((call) => ({
+            toolCalls: proposalCalls.map((call) => ({
                 ...call,
                 parsedArguments: parseToolArgs(call),
             })),
@@ -384,14 +451,15 @@ async function testWinnerSelectionAndSplitReimbursement() {
             config,
             onchainPendingProposal: false,
         });
-        assert.equal(validated.length, 3);
-        assert.equal(validated[1].parsedArguments.actions.length, 2);
-        assert.equal(validated[2].parsedArguments.transactions.length, 2);
+        assert.equal(validated.length, 2);
+        assert.equal(validated[0].parsedArguments.actions.length, 2);
+        assert.equal(validated[1].parsedArguments.transactions.length, 2);
     });
 }
 
 async function testUsdcPreferredWhenBothMomentumAssetsUp() {
     const stateFile = await createStateFile();
+    const depositTxHash = `0x${'b'.repeat(64)}`;
     const balances = {
         USDC: 25_000_000n,
         WETH: 10_000_000_000_000_000n,
@@ -406,33 +474,37 @@ async function testUsdcPreferredWhenBothMomentumAssetsUp() {
         range: {
             [PRICE_SYMBOLS.WETH]: [[0, 2000], [6 * 3600 * 1000, 2300]],
             [PRICE_SYMBOLS.cbBTC]: [[0, 50], [6 * 3600 * 1000, 55]],
+            [PRICE_SYMBOLS.USDC]: [[0, 1], [6 * 3600 * 1000, 1]],
         },
     });
     const config = createConfig({ stateFile, balances });
     const publicClient = createPublicClient({
         latestBlock: 7n,
         balances,
+        transactionReceiptsByHash: {
+            [depositTxHash.toLowerCase()]: {
+                status: 'success',
+                blockNumber: 7n,
+            },
+        },
     });
     resetStrategyState({ config });
 
     await withFetchMock(prices, async () => {
-        const plan = await buildMomentumPlan({
-            signals: [],
-            commitmentSafe: ADDRESSES.safe,
-            agentAddress: ADDRESSES.agent,
+        const { proposalCalls } = await advanceToProposalPhase({
             publicClient,
             config,
-            onchainPendingProposal: false,
+            depositTxHash,
         });
-
-        assert.equal(plan.winnerSymbol, 'WETH');
-        assert.equal(plan.reimbursementLegs[0].tokenSymbol, 'USDC');
-        assert.equal(plan.reimbursementLegs.length, 1);
+        const buildArgs = parseToolArgs(proposalCalls[0]);
+        assert.equal(buildArgs.actions.length, 1);
+        assert.equal(buildArgs.actions[0].token.toLowerCase(), ADDRESSES.usdc.toLowerCase());
     });
 }
 
 async function testValidateUsesUsdcSnapshotPrice() {
     const stateFile = await createStateFile();
+    const depositTxHash = `0x${'c'.repeat(64)}`;
     const balances = {
         USDC: 30_000_000n,
         WETH: 10_000_000_000_000_000n,
@@ -447,27 +519,31 @@ async function testValidateUsesUsdcSnapshotPrice() {
         range: {
             [PRICE_SYMBOLS.WETH]: [[0, 2000], [6 * 3600 * 1000, 2300]],
             [PRICE_SYMBOLS.cbBTC]: [[0, 50], [6 * 3600 * 1000, 55]],
+            [PRICE_SYMBOLS.USDC]: [[0, 1], [6 * 3600 * 1000, 0.999]],
         },
     });
     const config = createConfig({ stateFile, balances });
     const publicClient = createPublicClient({
         latestBlock: 7n,
         balances,
+        transactionReceiptsByHash: {
+            [depositTxHash.toLowerCase()]: {
+                status: 'success',
+                blockNumber: 7n,
+            },
+        },
     });
     resetStrategyState({ config });
 
     await withFetchMock(prices, async () => {
-        const toolCalls = await getDeterministicToolCalls({
-            signals: [],
-            commitmentSafe: ADDRESSES.safe,
-            agentAddress: ADDRESSES.agent,
+        const { proposalCalls } = await advanceToProposalPhase({
             publicClient,
             config,
-            onchainPendingProposal: false,
+            depositTxHash,
         });
 
         const validated = await validateToolCalls({
-            toolCalls: toolCalls.map((call) => ({
+            toolCalls: proposalCalls.map((call) => ({
                 ...call,
                 parsedArguments: parseToolArgs(call),
             })),
@@ -478,10 +554,10 @@ async function testValidateUsesUsdcSnapshotPrice() {
             onchainPendingProposal: false,
         });
 
-        const explanation = validated[2].parsedArguments.explanation;
+        const explanation = validated[1].parsedArguments.explanation;
         assert.ok(explanation.includes('usdcPriceMicros=999000'));
-        assert.equal(validated[1].parsedArguments.actions.length, 1);
-        assert.equal(validated[1].parsedArguments.actions[0].token.toLowerCase(), ADDRESSES.usdc.toLowerCase());
+        assert.equal(validated[0].parsedArguments.actions.length, 1);
+        assert.equal(validated[0].parsedArguments.actions[0].token.toLowerCase(), ADDRESSES.usdc.toLowerCase());
     });
 }
 
@@ -525,6 +601,8 @@ async function testNoProposalWhenInsufficientReimbursementInventory() {
 
 async function testPendingPlanReplayAfterDeposit() {
     const stateFile = await createStateFile();
+    const depositTxHash = `0x${'2'.repeat(64)}`;
+    const proposalTxHash = `0x${'6'.repeat(64)}`;
     const balances = {
         USDC: 25_000_000n,
         cbBTC: 0n,
@@ -539,26 +617,33 @@ async function testPendingPlanReplayAfterDeposit() {
         range: {
             [PRICE_SYMBOLS.WETH]: [[0, 1000], [6 * 3600 * 1000, 1200]],
             [PRICE_SYMBOLS.cbBTC]: [[0, 100], [6 * 3600 * 1000, 90]],
+            [PRICE_SYMBOLS.USDC]: [[0, 1], [6 * 3600 * 1000, 1]],
         },
     });
     const config = createConfig({ stateFile, balances });
     const publicClient = createPublicClient({
         latestBlock: 7n,
         balances,
+        transactionReceiptsByHash: {
+            [depositTxHash.toLowerCase()]: {
+                status: 'success',
+                blockNumber: 7n,
+            },
+        },
     });
     resetStrategyState({ config });
 
     await withFetchMock(prices, async () => {
-        const baseCalls = await getDeterministicToolCalls({
-            signals: [],
-            commitmentSafe: ADDRESSES.safe,
-            agentAddress: ADDRESSES.agent,
+        const { proposalCalls } = await advanceToProposalPhase({
             publicClient,
             config,
-            onchainPendingProposal: false,
+            depositTxHash,
         });
+        assert.ok(getPendingDeposit());
+        assert.equal(getPendingPlan(), null);
+
         const validated = await validateToolCalls({
-            toolCalls: baseCalls.map((call) => ({
+            toolCalls: proposalCalls.map((call) => ({
                 ...call,
                 parsedArguments: parseToolArgs(call),
             })),
@@ -569,45 +654,123 @@ async function testPendingPlanReplayAfterDeposit() {
             onchainPendingProposal: false,
         });
         await onToolOutput({
-            name: 'make_deposit',
+            name: 'post_bond_and_propose',
             parsedOutput: {
-                status: 'confirmed',
-                transactionHash: `0x${'2'.repeat(64)}`,
+                status: 'submitted',
+                transactionHash: proposalTxHash,
             },
             config,
         });
         assert.ok(getPendingPlan());
+        assert.equal(getPendingDeposit(), null);
+        assert.equal(validated[1].parsedArguments.explanation, getPendingPlan().explanation);
+    });
+}
+
+async function testDeletedProposalReplaysWithoutRedeposit() {
+    const stateFile = await createStateFile();
+    const depositTxHash = `0x${'9'.repeat(64)}`;
+    const proposalTxHash = `0x${'a'.repeat(64)}`;
+    const ogProposalHash = `0x${'b'.repeat(64)}`;
+    const balances = {
+        USDC: 25_000_000n,
+        cbBTC: 0n,
+        WETH: 0n,
+    };
+    const prices = createPriceDataset({
+        current: {
+            [PRICE_SYMBOLS.WETH]: 1200,
+            [PRICE_SYMBOLS.cbBTC]: 90,
+            [PRICE_SYMBOLS.USDC]: 1,
+        },
+        range: {
+            [PRICE_SYMBOLS.WETH]: [[0, 1000], [6 * 3600 * 1000, 1200]],
+            [PRICE_SYMBOLS.cbBTC]: [[0, 100], [6 * 3600 * 1000, 90]],
+            [PRICE_SYMBOLS.USDC]: [[0, 1], [6 * 3600 * 1000, 1]],
+        },
+    });
+    const config = createConfig({ stateFile, balances });
+    const initialClient = createPublicClient({
+        latestBlock: 7n,
+        balances,
+        transactionReceiptsByHash: {
+            [depositTxHash.toLowerCase()]: {
+                status: 'success',
+                blockNumber: 7n,
+            },
+        },
+    });
+    resetStrategyState({ config });
+
+    await withFetchMock(prices, async () => {
+        const { proposalCalls } = await advanceToProposalPhase({
+            publicClient: initialClient,
+            config,
+            depositTxHash,
+        });
+        await validateToolCalls({
+            toolCalls: proposalCalls.map((call) => ({
+                ...call,
+                parsedArguments: parseToolArgs(call),
+            })),
+            commitmentSafe: ADDRESSES.safe,
+            agentAddress: ADDRESSES.agent,
+            publicClient: initialClient,
+            config,
+            onchainPendingProposal: false,
+        });
+        await onToolOutput({
+            name: 'post_bond_and_propose',
+            parsedOutput: {
+                status: 'submitted',
+                transactionHash: proposalTxHash,
+                ogProposalHash,
+            },
+            config,
+        });
+
+        const explanation = getPendingPlan().explanation;
+        const deletedClient = createPublicClient({
+            latestBlock: 8n,
+            balances,
+            history: {
+                proposalLogs: [
+                    {
+                        blockNumber: 7n,
+                        args: {
+                            proposalHash: ogProposalHash,
+                            explanation,
+                        },
+                    },
+                ],
+                deletedLogs: [
+                    {
+                        blockNumber: 8n,
+                        args: {
+                            proposalHash: ogProposalHash,
+                        },
+                    },
+                ],
+            },
+        });
 
         const replayCalls = await getDeterministicToolCalls({
             signals: [],
             commitmentSafe: ADDRESSES.safe,
             agentAddress: ADDRESSES.agent,
-            publicClient,
+            publicClient: deletedClient,
             config,
             onchainPendingProposal: false,
         });
         assert.equal(replayCalls.length, 2);
         assert.equal(replayCalls[0].name, 'build_og_transactions');
         assert.equal(replayCalls[1].name, 'post_bond_and_propose');
-
-        const replayValidated = await validateToolCalls({
-            toolCalls: replayCalls.map((call) => ({
-                ...call,
-                parsedArguments: parseToolArgs(call),
-            })),
-            commitmentSafe: ADDRESSES.safe,
-            agentAddress: ADDRESSES.agent,
-            publicClient,
-            config,
-            onchainPendingProposal: false,
-        });
-        assert.equal(replayValidated.length, 2);
-        assert.equal(validated[2].parsedArguments.explanation, replayValidated[1].parsedArguments.explanation);
     });
 }
 
 async function testSuppressesPendingOrPriorEpoch() {
     const stateFile = await createStateFile();
+    const depositTxHash = `0x${'3'.repeat(64)}`;
     const balances = {
         USDC: 25_000_000n,
         cbBTC: 0n,
@@ -622,26 +785,30 @@ async function testSuppressesPendingOrPriorEpoch() {
         range: {
             [PRICE_SYMBOLS.WETH]: [[0, 1000], [6 * 3600 * 1000, 1200]],
             [PRICE_SYMBOLS.cbBTC]: [[0, 100], [6 * 3600 * 1000, 90]],
+            [PRICE_SYMBOLS.USDC]: [[0, 1], [6 * 3600 * 1000, 1]],
         },
     });
     const config = createConfig({ stateFile, balances });
     const publicClient = createPublicClient({
         latestBlock: 7n,
         balances,
+        transactionReceiptsByHash: {
+            [depositTxHash.toLowerCase()]: {
+                status: 'success',
+                blockNumber: 7n,
+            },
+        },
     });
     resetStrategyState({ config });
 
     await withFetchMock(prices, async () => {
-        const baseCalls = await getDeterministicToolCalls({
-            signals: [],
-            commitmentSafe: ADDRESSES.safe,
-            agentAddress: ADDRESSES.agent,
+        const { proposalCalls } = await advanceToProposalPhase({
             publicClient,
             config,
-            onchainPendingProposal: false,
+            depositTxHash,
         });
         const validated = await validateToolCalls({
-            toolCalls: baseCalls.map((call) => ({
+            toolCalls: proposalCalls.map((call) => ({
                 ...call,
                 parsedArguments: parseToolArgs(call),
             })),
@@ -652,14 +819,6 @@ async function testSuppressesPendingOrPriorEpoch() {
             onchainPendingProposal: false,
         });
 
-        await onToolOutput({
-            name: 'make_deposit',
-            parsedOutput: {
-                status: 'confirmed',
-                transactionHash: `0x${'3'.repeat(64)}`,
-            },
-            config,
-        });
         await onToolOutput({
             name: 'post_bond_and_propose',
             parsedOutput: {
@@ -669,7 +828,7 @@ async function testSuppressesPendingOrPriorEpoch() {
             config,
         });
         assert.ok(getSubmittedEpochs().has(0));
-        assert.equal(getPendingPlan(), null);
+        assert.ok(getPendingPlan());
 
         const suppressedByState = await getDeterministicToolCalls({
             signals: [],
@@ -751,7 +910,7 @@ async function testDeploymentLookupCachedAcrossPolls() {
     });
 }
 
-async function testSubmittedEpochRetainedWhileProposalTxPending() {
+async function testProposalHistoryScannedIncrementally() {
     const stateFile = await createStateFile();
     const balances = {
         USDC: 25_000_000n,
@@ -769,14 +928,84 @@ async function testSubmittedEpochRetainedWhileProposalTxPending() {
             [PRICE_SYMBOLS.cbBTC]: [[0, 100], [6 * 3600 * 1000, 90]],
         },
     });
-    const txHash = `0x${'4'.repeat(64)}`;
+    const getLogsCalls = [];
+    const config = createConfig({ stateFile, balances, omitStartBlock: true });
+    const publicClient = createPublicClient({
+        latestBlock: 7n,
+        balances,
+        deploymentBlock: 3n,
+        onGetLogs: (entry) => {
+            getLogsCalls.push(entry);
+        },
+    });
+    resetStrategyState({ config });
+
+    await withFetchMock(prices, async () => {
+        await buildMomentumPlan({
+            signals: [],
+            commitmentSafe: ADDRESSES.safe,
+            agentAddress: ADDRESSES.agent,
+            publicClient,
+            config,
+            onchainPendingProposal: false,
+        });
+        const firstPassCalls = getLogsCalls.slice(-3);
+        assert.deepEqual(
+            firstPassCalls.map((entry) => entry.fromBlock.toString()),
+            ['3', '3', '3']
+        );
+
+        publicClient.__setLatestBlock(8n);
+        await buildMomentumPlan({
+            signals: [],
+            commitmentSafe: ADDRESSES.safe,
+            agentAddress: ADDRESSES.agent,
+            publicClient,
+            config,
+            onchainPendingProposal: false,
+        });
+        const secondPassCalls = getLogsCalls.slice(-3);
+        assert.deepEqual(
+            secondPassCalls.map((entry) => entry.fromBlock.toString()),
+            ['8', '8', '8']
+        );
+    });
+}
+
+async function testSubmittedEpochRetainedWhileProposalTxPending() {
+    const stateFile = await createStateFile();
+    const depositTxHash = `0x${'4'.repeat(64)}`;
+    const proposalTxHash = `0x${'7'.repeat(64)}`;
+    const balances = {
+        USDC: 25_000_000n,
+        cbBTC: 0n,
+        WETH: 0n,
+    };
+    const prices = createPriceDataset({
+        current: {
+            [PRICE_SYMBOLS.WETH]: 1200,
+            [PRICE_SYMBOLS.cbBTC]: 90,
+            [PRICE_SYMBOLS.USDC]: 1,
+        },
+        range: {
+            [PRICE_SYMBOLS.WETH]: [[0, 1000], [6 * 3600 * 1000, 1200]],
+            [PRICE_SYMBOLS.cbBTC]: [[0, 100], [6 * 3600 * 1000, 90]],
+            [PRICE_SYMBOLS.USDC]: [[0, 1], [6 * 3600 * 1000, 1]],
+        },
+    });
     const config = createConfig({ stateFile, balances });
     config.firstProxy.pendingEpochTtlMs = 1;
     const publicClient = createPublicClient({
         latestBlock: 7n,
         balances,
+        transactionReceiptsByHash: {
+            [depositTxHash.toLowerCase()]: {
+                status: 'success',
+                blockNumber: 7n,
+            },
+        },
         transactionsByHash: {
-            [txHash.toLowerCase()]: { hash: txHash },
+            [proposalTxHash.toLowerCase()]: { hash: proposalTxHash },
         },
     });
     resetStrategyState({ config });
@@ -784,16 +1013,13 @@ async function testSubmittedEpochRetainedWhileProposalTxPending() {
     const originalDateNow = Date.now;
     try {
         await withFetchMock(prices, async () => {
-            const baseCalls = await getDeterministicToolCalls({
-                signals: [],
-                commitmentSafe: ADDRESSES.safe,
-                agentAddress: ADDRESSES.agent,
+            const { proposalCalls } = await advanceToProposalPhase({
                 publicClient,
                 config,
-                onchainPendingProposal: false,
+                depositTxHash,
             });
             await validateToolCalls({
-                toolCalls: baseCalls.map((call) => ({
+                toolCalls: proposalCalls.map((call) => ({
                     ...call,
                     parsedArguments: parseToolArgs(call),
                 })),
@@ -808,7 +1034,7 @@ async function testSubmittedEpochRetainedWhileProposalTxPending() {
                 name: 'post_bond_and_propose',
                 parsedOutput: {
                     status: 'submitted',
-                    transactionHash: txHash,
+                    transactionHash: proposalTxHash,
                 },
                 config,
             });
@@ -831,6 +1057,8 @@ async function testSubmittedEpochRetainedWhileProposalTxPending() {
 
 async function testSubmittedEpochRecoversAfterDroppedTxAndExpiredTtl() {
     const stateFile = await createStateFile();
+    const depositTxHash = `0x${'5'.repeat(64)}`;
+    const proposalTxHash = `0x${'8'.repeat(64)}`;
     const balances = {
         USDC: 25_000_000n,
         cbBTC: 0n,
@@ -845,30 +1073,33 @@ async function testSubmittedEpochRecoversAfterDroppedTxAndExpiredTtl() {
         range: {
             [PRICE_SYMBOLS.WETH]: [[0, 1000], [6 * 3600 * 1000, 1200]],
             [PRICE_SYMBOLS.cbBTC]: [[0, 100], [6 * 3600 * 1000, 90]],
+            [PRICE_SYMBOLS.USDC]: [[0, 1], [6 * 3600 * 1000, 1]],
         },
     });
-    const txHash = `0x${'5'.repeat(64)}`;
     const config = createConfig({ stateFile, balances });
     config.firstProxy.pendingEpochTtlMs = 1;
     const publicClient = createPublicClient({
         latestBlock: 7n,
         balances,
+        transactionReceiptsByHash: {
+            [depositTxHash.toLowerCase()]: {
+                status: 'success',
+                blockNumber: 7n,
+            },
+        },
     });
     resetStrategyState({ config });
 
     const originalDateNow = Date.now;
     try {
         await withFetchMock(prices, async () => {
-            const baseCalls = await getDeterministicToolCalls({
-                signals: [],
-                commitmentSafe: ADDRESSES.safe,
-                agentAddress: ADDRESSES.agent,
+            const { proposalCalls } = await advanceToProposalPhase({
                 publicClient,
                 config,
-                onchainPendingProposal: false,
+                depositTxHash,
             });
             await validateToolCalls({
-                toolCalls: baseCalls.map((call) => ({
+                toolCalls: proposalCalls.map((call) => ({
                     ...call,
                     parsedArguments: parseToolArgs(call),
                 })),
@@ -883,7 +1114,7 @@ async function testSubmittedEpochRecoversAfterDroppedTxAndExpiredTtl() {
                 name: 'post_bond_and_propose',
                 parsedOutput: {
                     status: 'submitted',
-                    transactionHash: txHash,
+                    transactionHash: proposalTxHash,
                 },
                 config,
             });
@@ -897,8 +1128,9 @@ async function testSubmittedEpochRecoversAfterDroppedTxAndExpiredTtl() {
                 config,
                 onchainPendingProposal: false,
             });
-            assert.equal(retried.length, 3);
-            assert.equal(retried[0].name, 'make_deposit');
+            assert.equal(retried.length, 2);
+            assert.equal(retried[0].name, 'build_og_transactions');
+            assert.equal(retried[1].name, 'post_bond_and_propose');
         });
     } finally {
         Date.now = originalDateNow;
@@ -914,8 +1146,10 @@ async function run() {
     await testValidateUsesUsdcSnapshotPrice();
     await testNoProposalWhenInsufficientReimbursementInventory();
     await testPendingPlanReplayAfterDeposit();
+    await testDeletedProposalReplaysWithoutRedeposit();
     await testSuppressesPendingOrPriorEpoch();
     await testDeploymentLookupCachedAcrossPolls();
+    await testProposalHistoryScannedIncrementally();
     await testSubmittedEpochRetainedWhileProposalTxPending();
     await testSubmittedEpochRecoversAfterDroppedTxAndExpiredTtl();
     console.log('[test] first-proxy deterministic momentum agent OK');

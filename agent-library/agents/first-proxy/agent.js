@@ -21,6 +21,7 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 const CANONICAL_SYMBOLS = Object.freeze({
     USDC: 'USDC',
@@ -62,11 +63,16 @@ const moduleCaches = {
 };
 const strategyState = {
     submittedEpochs: new Map(),
+    pendingDeposit: null,
     pendingPlan: null,
+    lastScannedProposalBlock: null,
+    proposalEpochByHash: new Map(),
+    proposalStatusByHash: new Map(),
 };
 let activeStatePath = null;
 let hydratedStatePath = null;
 let lastValidatedEpoch = null;
+let lastValidatedPendingDeposit = null;
 let lastValidatedPendingPlan = null;
 
 function canonicalizeSymbol(value) {
@@ -211,14 +217,47 @@ function normalizePendingPlan(rawPlan) {
     }
 }
 
+function normalizePendingDeposit(rawDeposit) {
+    if (!rawDeposit || typeof rawDeposit !== 'object') return null;
+    const epochIndex = Number(rawDeposit.epochIndex);
+    if (!Number.isInteger(epochIndex) || epochIndex < 0) {
+        return null;
+    }
+    try {
+        const winnerSymbol = canonicalizeSymbol(rawDeposit.winnerSymbol);
+        const depositAsset = normalizeAddress(rawDeposit.depositAsset);
+        const depositAmountWei = BigInt(String(rawDeposit.depositAmountWei));
+        const depositTxHash = normalizeHashOrNull(rawDeposit.depositTxHash);
+        if (!MOMENTUM_SYMBOLS.includes(winnerSymbol) || depositAmountWei <= 0n || !depositTxHash) {
+            return null;
+        }
+        return {
+            epochIndex,
+            winnerSymbol,
+            depositAsset,
+            depositAmountWei: depositAmountWei.toString(),
+            depositTxHash,
+            submittedAtMs: Number(rawDeposit.submittedAtMs ?? 0),
+        };
+    } catch {
+        return null;
+    }
+}
+
 function ensureStateScope(config) {
     const statePath = getStatePath(config);
-    if (activeStatePath !== statePath) {
-        activeStatePath = statePath;
+    const scopeKey = `${statePath}:${normalizeAddress(config?.ogModule ?? ZERO_ADDRESS)}`;
+    if (activeStatePath !== scopeKey) {
+        activeStatePath = scopeKey;
         hydratedStatePath = null;
         strategyState.submittedEpochs = new Map();
+        strategyState.pendingDeposit = null;
         strategyState.pendingPlan = null;
+        strategyState.lastScannedProposalBlock = null;
+        strategyState.proposalEpochByHash = new Map();
+        strategyState.proposalStatusByHash = new Map();
         lastValidatedEpoch = null;
+        lastValidatedPendingDeposit = null;
         lastValidatedPendingPlan = null;
     }
     return statePath;
@@ -245,6 +284,7 @@ async function hydrateStrategyState(config) {
             });
         }
         strategyState.submittedEpochs = submittedEpochs;
+        strategyState.pendingDeposit = normalizePendingDeposit(parsed?.pendingDeposit);
         strategyState.pendingPlan = normalizePendingPlan(parsed?.pendingPlan);
     } catch {
         // Missing/corrupt state file is treated as empty.
@@ -267,6 +307,7 @@ async function persistStrategyState(config) {
         JSON.stringify(
             {
                 submittedEpochs,
+                pendingDeposit: strategyState.pendingDeposit,
                 pendingPlan: strategyState.pendingPlan,
             },
             null,
@@ -278,6 +319,17 @@ async function persistStrategyState(config) {
 
 async function setPendingPlan({ plan, config }) {
     strategyState.pendingPlan = normalizePendingPlan(plan);
+    await persistStrategyState(config);
+}
+
+async function setPendingDeposit({ deposit, config }) {
+    strategyState.pendingDeposit = normalizePendingDeposit(deposit);
+    await persistStrategyState(config);
+}
+
+async function clearPendingDeposit({ config }) {
+    if (!strategyState.pendingDeposit) return;
+    strategyState.pendingDeposit = null;
     await persistStrategyState(config);
 }
 
@@ -298,9 +350,6 @@ async function markEpochSubmitted({
         ogProposalHash: normalizeHashOrNull(ogProposalHash) ?? null,
         submittedAtMs: Date.now(),
     });
-    if (strategyState.pendingPlan?.epochIndex === epochIndex) {
-        strategyState.pendingPlan = null;
-    }
     await persistStrategyState(config);
 }
 
@@ -845,7 +894,29 @@ function mergeEpochStatus(existing, incoming) {
     return rank[incoming.status] >= rank[existing.status] ? incoming : existing;
 }
 
-async function collectEpochStatuses({
+function mergeProposalStatus(existingStatus, incomingStatus) {
+    const rank = { pending: 1, deleted: 2, executed: 3 };
+    if (!existingStatus) return incomingStatus;
+    return rank[incomingStatus] >= rank[existingStatus] ? incomingStatus : existingStatus;
+}
+
+function aggregateEpochStatusesFromProposalCache() {
+    const statusesByEpoch = new Map();
+    for (const [proposalHash, status] of strategyState.proposalStatusByHash.entries()) {
+        const epochIndex = strategyState.proposalEpochByHash.get(proposalHash);
+        if (epochIndex === undefined) continue;
+        statusesByEpoch.set(
+            epochIndex,
+            mergeEpochStatus(statusesByEpoch.get(epochIndex), {
+                status,
+                proposalHash,
+            })
+        );
+    }
+    return statusesByEpoch;
+}
+
+async function scanEpochStatuses({
     publicClient,
     ogModule,
     fromBlock,
@@ -879,33 +950,49 @@ async function collectEpochStatuses({
         }),
     ]);
 
-    const executedHashes = new Set(
-        executedLogs.map((log) => normalizeHashOrNull(log?.args?.proposalHash)).filter(Boolean)
-    );
-    const deletedHashes = new Set(
-        deletedLogs.map((log) => normalizeHashOrNull(log?.args?.proposalHash)).filter(Boolean)
-    );
-
-    const statusesByEpoch = new Map();
     for (const log of proposedLogs) {
         const proposalHash = normalizeHashOrNull(log?.args?.proposalHash);
         if (!proposalHash) continue;
         const epochIndex = parseStrategyEpochFromExplanation(decodeExplanation(log?.args?.explanation));
         if (epochIndex === null) continue;
-        const status = executedHashes.has(proposalHash)
-            ? 'executed'
-            : deletedHashes.has(proposalHash)
-              ? 'deleted'
-              : 'pending';
-        statusesByEpoch.set(
-            epochIndex,
-            mergeEpochStatus(statusesByEpoch.get(epochIndex), {
-                status,
-                proposalHash,
-            })
+        strategyState.proposalEpochByHash.set(proposalHash, epochIndex);
+        strategyState.proposalStatusByHash.set(
+            proposalHash,
+            mergeProposalStatus(strategyState.proposalStatusByHash.get(proposalHash), 'pending')
         );
     }
-    return statusesByEpoch;
+
+    const ensureProposalEpochMapping = (proposalHash) => {
+        if (strategyState.proposalEpochByHash.has(proposalHash)) {
+            return;
+        }
+        for (const [epochIndex, entry] of strategyState.submittedEpochs.entries()) {
+            if (normalizeHashOrNull(entry?.ogProposalHash) === proposalHash) {
+                strategyState.proposalEpochByHash.set(proposalHash, epochIndex);
+                return;
+            }
+        }
+    };
+
+    for (const log of deletedLogs) {
+        const proposalHash = normalizeHashOrNull(log?.args?.proposalHash);
+        if (!proposalHash) continue;
+        ensureProposalEpochMapping(proposalHash);
+        strategyState.proposalStatusByHash.set(
+            proposalHash,
+            mergeProposalStatus(strategyState.proposalStatusByHash.get(proposalHash), 'deleted')
+        );
+    }
+
+    for (const log of executedLogs) {
+        const proposalHash = normalizeHashOrNull(log?.args?.proposalHash);
+        if (!proposalHash) continue;
+        ensureProposalEpochMapping(proposalHash);
+        strategyState.proposalStatusByHash.set(
+            proposalHash,
+            mergeProposalStatus(strategyState.proposalStatusByHash.get(proposalHash), 'executed')
+        );
+    }
 }
 
 async function reconcileStrategyState({
@@ -916,18 +1003,35 @@ async function reconcileStrategyState({
 }) {
     await hydrateStrategyState(config);
     const startBlock = await resolveStartBlock({ publicClient, config, latestBlock });
-    const statusesByEpoch = await collectEpochStatuses({
-        publicClient,
-        ogModule: config.ogModule,
-        fromBlock: startBlock,
-        toBlock: latestBlock,
-        chunkSize: policy.proposalScanChunkSize,
-    });
+    const lastScannedBlock = strategyState.lastScannedProposalBlock;
+    const scanFromBlock =
+        lastScannedBlock !== null && lastScannedBlock + 1n > startBlock
+            ? lastScannedBlock + 1n
+            : startBlock;
+    if (scanFromBlock <= latestBlock) {
+        await scanEpochStatuses({
+            publicClient,
+            ogModule: config.ogModule,
+            fromBlock: scanFromBlock,
+            toBlock: latestBlock,
+            chunkSize: policy.proposalScanChunkSize,
+        });
+        strategyState.lastScannedProposalBlock = latestBlock;
+    } else if (strategyState.lastScannedProposalBlock === null) {
+        strategyState.lastScannedProposalBlock = latestBlock;
+    }
+    const statusesByEpoch = aggregateEpochStatusesFromProposalCache();
 
     let changed = false;
     const nowMs = Date.now();
     for (const [epochIndex, entry] of [...strategyState.submittedEpochs.entries()]) {
-        if (statusesByEpoch.has(epochIndex)) {
+        const epochStatus = statusesByEpoch.get(epochIndex);
+        if (epochStatus?.status === 'deleted') {
+            strategyState.submittedEpochs.delete(epochIndex);
+            changed = true;
+            continue;
+        }
+        if (epochStatus && epochStatus.status !== 'deleted') {
             strategyState.submittedEpochs.delete(epochIndex);
             changed = true;
             continue;
@@ -947,12 +1051,17 @@ async function reconcileStrategyState({
     const pendingPlanEpoch = strategyState.pendingPlan?.epochIndex;
     if (pendingPlanEpoch !== undefined) {
         const pendingStatus = statusesByEpoch.get(pendingPlanEpoch);
-        if (pendingStatus && pendingStatus.status !== 'deleted') {
+        if (pendingStatus && pendingStatus.status === 'executed') {
             strategyState.pendingPlan = null;
             changed = true;
         }
-        if (strategyState.submittedEpochs.has(pendingPlanEpoch)) {
-            strategyState.pendingPlan = null;
+    }
+
+    const pendingDepositEpoch = strategyState.pendingDeposit?.epochIndex;
+    if (pendingDepositEpoch !== undefined) {
+        const pendingStatus = statusesByEpoch.get(pendingDepositEpoch);
+        if (pendingStatus && pendingStatus.status !== 'deleted') {
+            strategyState.pendingDeposit = null;
             changed = true;
         }
     }
@@ -1039,6 +1148,65 @@ async function resolveHistoricalReturns({
         returnsBySymbol,
         pricesAtWindow,
     };
+}
+
+async function resolvePriceSnapshotAtTimestamp({
+    config,
+    policy,
+    timestampSeconds,
+}) {
+    const radiusSeconds = Math.max(300, Math.floor(policy.epochSeconds / 4));
+    const pricesBySymbol = {};
+    await Promise.all(
+        REIMBURSEMENT_SYMBOLS.map(async (symbol) => {
+            const providerSymbol = policy.priceFeed.symbols[symbol];
+            const point = await fetchHistoricalPointFromAlchemy({
+                config,
+                policy,
+                symbol: providerSymbol,
+                targetSeconds: Number(timestampSeconds),
+                radiusSeconds,
+            });
+            pricesBySymbol[symbol] = point.price;
+        })
+    );
+    return pricesBySymbol;
+}
+
+async function resolvePendingDepositState({
+    pendingDeposit,
+    publicClient,
+    pendingEpochTtlMs,
+    nowMs = Date.now(),
+}) {
+    if (!pendingDeposit?.depositTxHash) {
+        return { status: 'expired' };
+    }
+    const ageMs = nowMs - Number(pendingDeposit.submittedAtMs ?? 0);
+    try {
+        const receipt = await publicClient.getTransactionReceipt({
+            hash: pendingDeposit.depositTxHash,
+        });
+        if (!receipt) {
+            return { status: 'pending' };
+        }
+        if (receipt.status === 'reverted') {
+            return { status: 'failed', receipt };
+        }
+        return { status: 'confirmed', receipt };
+    } catch {
+        try {
+            const transaction = await publicClient.getTransaction({
+                hash: pendingDeposit.depositTxHash,
+            });
+            if (transaction) {
+                return { status: 'pending', transaction };
+            }
+        } catch {
+            // Fall through to TTL-based recovery.
+        }
+    }
+    return ageMs > pendingEpochTtlMs ? { status: 'expired' } : { status: 'pending' };
 }
 
 async function readCurrentBalances({ publicClient, policy, commitmentSafe, latestBlock }) {
@@ -1162,17 +1330,37 @@ function buildExplanation({
     ].join('|');
 }
 
-function buildReplayPlan({ pendingPlan, config }) {
+function buildProposalPlan({
+    epochIndex,
+    winnerSymbol,
+    depositAsset,
+    depositAmountWei,
+    actions,
+    explanation,
+    config,
+}) {
     return {
+        epochIndex,
+        winnerSymbol,
+        requiresDeposit: false,
+        depositAsset,
+        depositAmountWei: depositAmountWei.toString(),
+        actions,
+        transactions: buildOgTransactions(actions, { config }),
+        explanation,
+    };
+}
+
+function buildReplayPlan({ pendingPlan, config }) {
+    return buildProposalPlan({
         epochIndex: pendingPlan.epochIndex,
         winnerSymbol: pendingPlan.winnerSymbol,
-        requiresDeposit: false,
         depositAsset: pendingPlan.depositAsset,
         depositAmountWei: pendingPlan.depositAmountWei,
         actions: pendingPlan.actions,
-        transactions: buildOgTransactions(pendingPlan.actions, { config }),
         explanation: pendingPlan.explanation,
-    };
+        config,
+    });
 }
 
 async function buildMomentumPlan({
@@ -1198,8 +1386,20 @@ async function buildMomentumPlan({
         latestBlock,
     });
 
+    const deploymentTimestampSeconds = BigInt(
+        Math.floor((await getBlockTimestampMs(publicClient, startBlock, new Map())) / 1000)
+    );
+
     if (strategyState.pendingPlan) {
-        if (onchainPendingProposal) {
+        const pendingPlanStatus = statusesByEpoch.get(strategyState.pendingPlan.epochIndex);
+        if (pendingPlanStatus?.status === 'executed') {
+            await clearPendingPlan({ config });
+            return null;
+        }
+        if (strategyState.submittedEpochs.has(strategyState.pendingPlan.epochIndex)) {
+            return null;
+        }
+        if (onchainPendingProposal || pendingPlanStatus?.status === 'pending') {
             return null;
         }
         return buildReplayPlan({
@@ -1208,9 +1408,129 @@ async function buildMomentumPlan({
         });
     }
 
-    const deploymentTimestampSeconds = BigInt(
-        Math.floor((await getBlockTimestampMs(publicClient, startBlock, new Map())) / 1000)
-    );
+    if (strategyState.pendingDeposit) {
+        const pendingDeposit = strategyState.pendingDeposit;
+        const pendingDepositStatus = statusesByEpoch.get(pendingDeposit.epochIndex);
+        if (pendingDepositStatus && pendingDepositStatus.status !== 'deleted') {
+            await clearPendingDeposit({ config });
+            return null;
+        }
+
+        const depositState = await resolvePendingDepositState({
+            pendingDeposit,
+            publicClient,
+            pendingEpochTtlMs: policy.pendingEpochTtlMs,
+        });
+        if (depositState.status === 'pending') {
+            return null;
+        }
+        if (depositState.status === 'failed' || depositState.status === 'expired') {
+            await clearPendingDeposit({ config });
+        } else if (depositState.status === 'confirmed') {
+            const epochStartSeconds =
+                deploymentTimestampSeconds + BigInt(pendingDeposit.epochIndex * policy.epochSeconds);
+            const epochEndSeconds =
+                deploymentTimestampSeconds + BigInt((pendingDeposit.epochIndex + 1) * policy.epochSeconds);
+            const { returnsBySymbol } = await resolveHistoricalReturns({
+                config,
+                policy,
+                windowStartSeconds: epochStartSeconds,
+                windowEndSeconds: epochEndSeconds,
+            });
+            const depositTimestampSeconds = BigInt(
+                Math.floor(
+                    (await getBlockTimestampMs(
+                        publicClient,
+                        BigInt(depositState.receipt.blockNumber),
+                        new Map()
+                    )) / 1000
+                )
+            );
+            const snapshotPricesBySymbol = await resolvePriceSnapshotAtTimestamp({
+                config,
+                policy,
+                timestampSeconds: depositTimestampSeconds,
+            });
+            const snapshotPriceMicrosBySymbol = {
+                [CANONICAL_SYMBOLS.USDC]: priceMicrosFromFloat(
+                    snapshotPricesBySymbol[CANONICAL_SYMBOLS.USDC]
+                ),
+                [CANONICAL_SYMBOLS.WETH]: priceMicrosFromFloat(
+                    snapshotPricesBySymbol[CANONICAL_SYMBOLS.WETH]
+                ),
+                [CANONICAL_SYMBOLS.CBBTC]: priceMicrosFromFloat(
+                    snapshotPricesBySymbol[CANONICAL_SYMBOLS.CBBTC]
+                ),
+            };
+            const { balancesBySymbol, decimalsBySymbol } = await readCurrentBalances({
+                publicClient,
+                policy,
+                commitmentSafe: safeAddress,
+                latestBlock,
+            });
+            const depositDecimals = decimalsBySymbol[pendingDeposit.winnerSymbol];
+            const depositUsdMicros = computeUsdValueMicros({
+                amountWei: BigInt(pendingDeposit.depositAmountWei),
+                decimals: depositDecimals,
+                priceMicros: snapshotPriceMicrosBySymbol[pendingDeposit.winnerSymbol],
+            });
+            if (depositUsdMicros <= 0n) {
+                return null;
+            }
+
+            const reimbursementOrder = resolveFundingOrder({
+                winnerSymbol: pendingDeposit.winnerSymbol,
+                returnsBySymbol,
+                balancesBySymbol,
+            });
+            const {
+                reimbursementLegs,
+                totalAvailableUsdMicros,
+                reimbursedUsdMicros,
+            } = allocateReimbursementLegs({
+                reimbursementOrder,
+                balancesBySymbol,
+                currentPriceMicrosBySymbol: snapshotPriceMicrosBySymbol,
+                decimalsBySymbol,
+                reimbursementTargetUsdMicros: depositUsdMicros,
+            });
+            if (reimbursementLegs.length === 0 || totalAvailableUsdMicros < depositUsdMicros) {
+                return null;
+            }
+            if (reimbursedUsdMicros <= 0n) {
+                return null;
+            }
+
+            const actions = reimbursementLegs.map((leg) => ({
+                kind: 'erc20_transfer',
+                token: policy.tokens[leg.tokenSymbol],
+                to: normalizedAgentAddress,
+                amountWei: leg.amountWei.toString(),
+                operation: 0,
+            }));
+            const explanation = buildExplanation({
+                epochIndex: pendingDeposit.epochIndex,
+                winnerSymbol: pendingDeposit.winnerSymbol,
+                reimbursementLegs,
+                windowStartSeconds: epochStartSeconds,
+                windowEndSeconds: epochEndSeconds,
+                returnsBySymbol,
+                currentPriceMicrosBySymbol: snapshotPriceMicrosBySymbol,
+                depositUsdMicros,
+                reimbursedUsdMicros,
+            });
+            return buildProposalPlan({
+                epochIndex: pendingDeposit.epochIndex,
+                winnerSymbol: pendingDeposit.winnerSymbol,
+                depositAsset: pendingDeposit.depositAsset,
+                depositAmountWei: pendingDeposit.depositAmountWei,
+                actions,
+                explanation,
+                config,
+            });
+        }
+    }
+
     const closedEpochIndex = computeClosedEpochIndex({
         nowSeconds,
         deploymentTimestampSeconds,
@@ -1226,7 +1546,7 @@ async function buildMomentumPlan({
         return null;
     }
     const chainEpochStatus = statusesByEpoch.get(closedEpochIndex);
-    if (chainEpochStatus && chainEpochStatus.status !== 'deleted') {
+    if (chainEpochStatus) {
         return null;
     }
 
@@ -1285,12 +1605,7 @@ async function buildMomentumPlan({
         returnsBySymbol,
         balancesBySymbol,
     });
-    const {
-        reimbursementLegs,
-        remainingUsdMicros,
-        totalAvailableUsdMicros,
-        reimbursedUsdMicros,
-    } = allocateReimbursementLegs({
+    const { reimbursementLegs, totalAvailableUsdMicros } = allocateReimbursementLegs({
         reimbursementOrder,
         balancesBySymbol,
         currentPriceMicrosBySymbol,
@@ -1300,29 +1615,6 @@ async function buildMomentumPlan({
     if (reimbursementLegs.length === 0 || totalAvailableUsdMicros < depositUsdMicros) {
         return null;
     }
-    if (reimbursedUsdMicros <= 0n) {
-        return null;
-    }
-
-    const actions = reimbursementLegs.map((leg) => ({
-        kind: 'erc20_transfer',
-        token: policy.tokens[leg.tokenSymbol],
-        to: normalizedAgentAddress,
-        amountWei: leg.amountWei.toString(),
-        operation: 0,
-    }));
-    const explanation = buildExplanation({
-        epochIndex: closedEpochIndex,
-        winnerSymbol,
-        reimbursementLegs,
-        windowStartSeconds: epochStartSeconds,
-        windowEndSeconds: epochEndSeconds,
-        returnsBySymbol,
-        currentPriceMicrosBySymbol,
-        depositUsdMicros,
-        reimbursedUsdMicros,
-    });
-    const transactions = buildOgTransactions(actions, { config });
 
     return {
         epochIndex: closedEpochIndex,
@@ -1330,16 +1622,10 @@ async function buildMomentumPlan({
         requiresDeposit: true,
         depositAsset,
         depositAmountWei: depositAmountWei.toString(),
-        actions,
-        transactions,
-        explanation,
         returnsBySymbol,
-        reimbursementLegs,
         pricesAtWindow,
         currentPriceMicrosBySymbol,
         depositUsdMicros,
-        reimbursedUsdMicros,
-        remainingUsdMicros,
     };
 }
 
@@ -1391,14 +1677,16 @@ async function getDeterministicToolCalls({
 
     const toolCalls = [];
     if (plan.requiresDeposit) {
-        toolCalls.push({
+        return [
+            {
             callId: `first-proxy-deposit-epoch-${plan.epochIndex}`,
             name: 'make_deposit',
             arguments: JSON.stringify({
                 asset: plan.depositAsset,
                 amountWei: plan.depositAmountWei,
             }),
-        });
+            },
+        ];
     }
     toolCalls.push(
         {
@@ -1454,7 +1742,6 @@ async function validateToolCalls({
 }) {
     const chainId = getConfigChainId(config) ?? (await publicClient.getChainId());
     const policy = resolvePolicyConfig(config, chainId);
-    const safeAddress = normalizeAddress(commitmentSafe);
     const normalizedAgentAddress = normalizeAddress(agentAddress);
 
     if (!Array.isArray(toolCalls) || toolCalls.length === 0) {
@@ -1470,27 +1757,99 @@ async function validateToolCalls({
     }
 
     const hasDeposit = toolCalls.some((call) => call?.name === 'make_deposit');
+    if (hasDeposit && toolCalls.length === 1 && toolCalls[0]?.name === 'make_deposit') {
+        const depositArgs = parseCallArgs(toolCalls[0]);
+        if (!depositArgs) {
+            throw new Error('Invalid JSON arguments for make_deposit.');
+        }
+        const asset = normalizeAddress(depositArgs.asset);
+        const amountWei = BigInt(String(depositArgs.amountWei));
+        if (amountWei <= 0n) {
+            throw new Error('make_deposit amountWei must be positive.');
+        }
+
+        const latestBlock = await publicClient.getBlockNumber();
+        const startBlock = await resolveStartBlock({ publicClient, config, latestBlock });
+        const nowSeconds = BigInt((await publicClient.getBlock({ blockNumber: latestBlock })).timestamp);
+        const deploymentTimestampSeconds = BigInt(
+            Math.floor((await getBlockTimestampMs(publicClient, startBlock, new Map())) / 1000)
+        );
+        const epochIndex = computeClosedEpochIndex({
+            nowSeconds,
+            deploymentTimestampSeconds,
+            epochSeconds: policy.epochSeconds,
+        });
+        if (epochIndex < 0) {
+            throw new Error('No closed first-proxy epoch is available for a deposit.');
+        }
+        const epochStartSeconds =
+            deploymentTimestampSeconds + BigInt(epochIndex * policy.epochSeconds);
+        const epochEndSeconds =
+            deploymentTimestampSeconds + BigInt((epochIndex + 1) * policy.epochSeconds);
+        const { returnsBySymbol } = await resolveHistoricalReturns({
+            config,
+            policy,
+            windowStartSeconds: epochStartSeconds,
+            windowEndSeconds: epochEndSeconds,
+        });
+        const winnerSymbol = rankMomentumWinner({
+            returnsBySymbol,
+            tieBreakAssetOrder: policy.tieBreakAssetOrder,
+        });
+        if (asset !== policy.tokens[winnerSymbol]) {
+            throw new Error('make_deposit asset must match the current epoch winner token.');
+        }
+
+        const currentPricesBySymbol = await resolveCurrentPrices({
+            config,
+            policy,
+        });
+        const currentPriceMicrosBySymbol = {
+            [CANONICAL_SYMBOLS.USDC]: priceMicrosFromFloat(currentPricesBySymbol[CANONICAL_SYMBOLS.USDC]),
+            [CANONICAL_SYMBOLS.WETH]: priceMicrosFromFloat(currentPricesBySymbol[CANONICAL_SYMBOLS.WETH]),
+            [CANONICAL_SYMBOLS.CBBTC]: priceMicrosFromFloat(currentPricesBySymbol[CANONICAL_SYMBOLS.CBBTC]),
+        };
+        const depositDecimals = await loadTokenDecimals({ publicClient, token: asset });
+        const expectedAmountWei = computeTokenAmountForUsdMicros({
+            usdMicros: policy.tradeAmountUsdMicros,
+            decimals: depositDecimals,
+            priceMicros: currentPriceMicrosBySymbol[winnerSymbol],
+        });
+        if (expectedAmountWei !== amountWei) {
+            throw new Error('make_deposit amountWei does not match the deterministic deposit sizing.');
+        }
+
+        lastValidatedEpoch = epochIndex;
+        lastValidatedPendingDeposit = {
+            epochIndex,
+            winnerSymbol,
+            depositAsset: asset,
+            depositAmountWei: amountWei.toString(),
+        };
+        lastValidatedPendingPlan = null;
+        return [
+            {
+                name: 'make_deposit',
+                callId: toolCalls[0].callId,
+                parsedArguments: {
+                    asset,
+                    amountWei: amountWei.toString(),
+                },
+            },
+        ];
+    }
+
     if (hasDeposit) {
-        if (toolCalls.length !== 3) {
-            throw new Error('Fresh first-proxy runs must include make_deposit, build_og_transactions, and post_bond_and_propose.');
-        }
-        if (
-            toolCalls[0]?.name !== 'make_deposit' ||
-            toolCalls[1]?.name !== 'build_og_transactions' ||
-            toolCalls[2]?.name !== 'post_bond_and_propose'
-        ) {
-            throw new Error('first-proxy must execute make_deposit before build_og_transactions and post_bond_and_propose.');
-        }
-    } else {
-        if (toolCalls.length !== 2) {
-            throw new Error('Replay first-proxy runs must include build_og_transactions and post_bond_and_propose only.');
-        }
-        if (
-            toolCalls[0]?.name !== 'build_og_transactions' ||
-            toolCalls[1]?.name !== 'post_bond_and_propose'
-        ) {
-            throw new Error('Replay first-proxy runs must execute build_og_transactions before post_bond_and_propose.');
-        }
+        throw new Error('Fresh first-proxy runs must emit only make_deposit before the reimbursement proposal is built.');
+    }
+    if (toolCalls.length !== 2) {
+        throw new Error('Proposal/replay first-proxy runs must include build_og_transactions and post_bond_and_propose only.');
+    }
+    if (
+        toolCalls[0]?.name !== 'build_og_transactions' ||
+        toolCalls[1]?.name !== 'post_bond_and_propose'
+    ) {
+        throw new Error('Proposal/replay first-proxy runs must execute build_og_transactions before post_bond_and_propose.');
     }
 
     const buildCall = toolCalls.find((call) => call?.name === 'build_og_transactions');
@@ -1577,60 +1936,45 @@ async function validateToolCalls({
         throw new Error('Reimbursement value must not exceed the deposited winner-token value.');
     }
 
-    let normalizedDepositCall = null;
-    if (hasDeposit) {
-        const depositCall = toolCalls[0];
-        const depositArgs = parseCallArgs(depositCall);
-        if (!depositArgs) {
-            throw new Error('Invalid JSON arguments for make_deposit.');
-        }
-        const asset = normalizeAddress(depositArgs.asset);
-        const amountWei = BigInt(String(depositArgs.amountWei));
-        if (asset !== policy.tokens[winnerSymbol]) {
-            throw new Error('make_deposit asset must match the explanation winner token.');
-        }
-        if (amountWei <= 0n) {
-            throw new Error('make_deposit amountWei must be positive.');
-        }
-        const depositDecimals = await loadTokenDecimals({ publicClient, token: asset });
-        const winnerPriceMicros = getPriceMicrosFromExplanationFields(explanationFields, winnerSymbol);
-        const computedDepositUsdMicros = computeUsdValueMicros({
-            amountWei,
-            decimals: depositDecimals,
-            priceMicros: winnerPriceMicros,
-        });
-        if (computedDepositUsdMicros !== depositUsdMicros) {
-            throw new Error('make_deposit does not match the explanation deposit value snapshot.');
-        }
-        normalizedDepositCall = {
-            name: 'make_deposit',
-            callId: depositCall.callId,
-            parsedArguments: {
-                asset,
-                amountWei: amountWei.toString(),
-            },
-        };
-        lastValidatedPendingPlan = {
-            epochIndex,
-            winnerSymbol,
-            depositAsset: asset,
-            depositAmountWei: amountWei.toString(),
-            actions: normalizedActions,
-            explanation: normalizedExplanation,
-            plannedAtMs: Date.now(),
-        };
-    } else {
-        if (!strategyState.pendingPlan || strategyState.pendingPlan.epochIndex !== epochIndex) {
-            throw new Error('Replay proposals require a matching persisted pending plan.');
-        }
-        lastValidatedPendingPlan = null;
+    const planSource =
+        strategyState.pendingPlan?.epochIndex === epochIndex
+            ? strategyState.pendingPlan
+            : strategyState.pendingDeposit?.epochIndex === epochIndex
+              ? strategyState.pendingDeposit
+              : null;
+    if (!planSource) {
+        throw new Error('Proposal/replay runs require a matching pending deposit or replay plan.');
     }
+    const depositAsset = normalizeAddress(planSource.depositAsset);
+    const depositAmountWei = BigInt(String(planSource.depositAmountWei));
+    if (depositAsset !== policy.tokens[winnerSymbol]) {
+        throw new Error('Proposal source deposit asset must match the explanation winner token.');
+    }
+    const depositDecimals = await loadTokenDecimals({ publicClient, token: depositAsset });
+    const winnerPriceMicros = getPriceMicrosFromExplanationFields(explanationFields, winnerSymbol);
+    const computedDepositUsdMicros = computeUsdValueMicros({
+        amountWei: depositAmountWei,
+        decimals: depositDecimals,
+        priceMicros: winnerPriceMicros,
+    });
+    if (computedDepositUsdMicros !== depositUsdMicros) {
+        throw new Error('Proposal reimbursement does not match the deposited winner-token value snapshot.');
+    }
+    lastValidatedPendingDeposit = null;
+    lastValidatedPendingPlan = {
+        epochIndex,
+        winnerSymbol,
+        depositAsset,
+        depositAmountWei: depositAmountWei.toString(),
+        actions: normalizedActions,
+        explanation: normalizedExplanation,
+        plannedAtMs: Date.now(),
+    };
 
     const normalizedTransactions = buildOgTransactions(normalizedActions, { config });
     lastValidatedEpoch = epochIndex;
 
     return [
-        ...(normalizedDepositCall ? [normalizedDepositCall] : []),
         {
             name: 'build_og_transactions',
             callId: buildCall.callId,
@@ -1659,9 +2003,13 @@ async function onToolOutput({ name, parsedOutput, config }) {
     const successish = status === 'confirmed' || status === 'submitted' || status === 'pending' || committed || hasHash;
 
     if (name === 'make_deposit') {
-        if (successish && lastValidatedPendingPlan) {
-            await setPendingPlan({
-                plan: lastValidatedPendingPlan,
+        if (successish && lastValidatedPendingDeposit) {
+            await setPendingDeposit({
+                deposit: {
+                    ...lastValidatedPendingDeposit,
+                    depositTxHash: normalizeHashOrNull(parsedOutput?.transactionHash),
+                    submittedAtMs: Date.now(),
+                },
                 config,
             });
         }
@@ -1675,11 +2023,19 @@ async function onToolOutput({ name, parsedOutput, config }) {
         return;
     }
 
+    if (lastValidatedPendingPlan) {
+        await setPendingPlan({
+            plan: lastValidatedPendingPlan,
+            config,
+        });
+    }
+    await clearPendingDeposit({ config });
     await markEpochSubmitted({
         epochIndex: lastValidatedEpoch,
         ...resolveSubmissionTracking(parsedOutput),
         config,
     });
+    lastValidatedPendingDeposit = null;
     lastValidatedPendingPlan = null;
 }
 
@@ -1687,11 +2043,16 @@ function resetStrategyState({ config } = {}) {
     const statePath = ensureStateScope(config);
     hydratedStatePath = statePath;
     strategyState.submittedEpochs = new Map();
+    strategyState.pendingDeposit = null;
     strategyState.pendingPlan = null;
+    strategyState.lastScannedProposalBlock = null;
+    strategyState.proposalEpochByHash = new Map();
+    strategyState.proposalStatusByHash = new Map();
     moduleCaches.deployment.clear();
     moduleCaches.currentPrices.clear();
     moduleCaches.historicalRanges.clear();
     lastValidatedEpoch = null;
+    lastValidatedPendingDeposit = null;
     lastValidatedPendingPlan = null;
     void unlink(statePath).catch(() => {});
 }
@@ -1704,11 +2065,16 @@ function getPendingPlan() {
     return strategyState.pendingPlan ? { ...strategyState.pendingPlan } : null;
 }
 
+function getPendingDeposit() {
+    return strategyState.pendingDeposit ? { ...strategyState.pendingDeposit } : null;
+}
+
 export {
     augmentSignals,
     buildMomentumPlan,
     computeClosedEpochIndex,
     getDeterministicToolCalls,
+    getPendingDeposit,
     getPendingPlan,
     getPollingOptions,
     getPriceTriggers,

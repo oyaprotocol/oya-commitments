@@ -19,6 +19,7 @@ Turn `agent-library/agents/first-proxy/` into a deterministic `Agent Proxy` stra
 - [x] 2026-04-04 22:39Z: Ran `node agent-library/agents/first-proxy/test-first-proxy-agent.mjs`.
 - [x] 2026-04-06 18:02Z: Replaced onchain AMM valuation with CoinGecko current and historical USD prices, added always-on balance snapshot polling for deterministic reevaluation, and reran module validation.
 - [x] 2026-04-06 23:20Z: Replaced CoinGecko with Alchemy Prices API, derived price auth from Alchemy env/RPC configuration, fixed stale current-price caching, and reran module validation.
+- [x] 2026-04-07: Reworked the proposal flow to price reimbursement from the confirmed deposit tx, retain deleted-epoch replay plans without re-depositing, and switch OG proposal status reconciliation to incremental log scans.
 
 ## Surprises & Discoveries
 
@@ -33,6 +34,9 @@ Turn `agent-library/agents/first-proxy/` into a deterministic `Agent Proxy` stra
 
 - Observation: Once valuation moved offchain, AMM-backed price triggers were no longer the right heartbeat mechanism.
   Evidence: the module now relies on always-emitted balance snapshots plus deterministic enrichment instead of onchain pool trigger collection.
+
+- Observation: Pricing reimbursement at confirmed deposit time requires a two-phase agent flow.
+  Evidence: the deterministic runner executes one tool-call batch at a time, so a fresh epoch cannot both deposit first and still produce a deposit-time-priced reimbursement explanation in the same batch.
 
 ## Decision Log
 
@@ -64,9 +68,21 @@ Turn `agent-library/agents/first-proxy/` into a deterministic `Agent Proxy` stra
   Rationale: The user explicitly requested Alchemy for simpler operational setup alongside the Alchemy node provider.
   Date/Author: 2026-04-06 / Codex.
 
+- Decision: Fresh epochs emit `make_deposit` first, and the reimbursement proposal is built on the next tick from the confirmed deposit receipt.
+  Rationale: This makes the reimbursement snapshot align with the commitment’s “prices at the time of the deposit” rule.
+  Date/Author: 2026-04-07 / Codex.
+
+- Decision: Retain replay plans for deleted/dropped proposal flows and replay reimbursement without making a second deposit.
+  Rationale: A deleted or dropped reimbursement proposal should not cause duplicate trading activity for the same epoch.
+  Date/Author: 2026-04-07 / Codex.
+
+- Decision: Reconcile OG proposal status incrementally after the first history scan.
+  Rationale: Full-history rescans on every deterministic poll do not scale for a long-lived agent.
+  Date/Author: 2026-04-07 / Codex.
+
 ## Outcomes & Retrospective
 
-`first-proxy` now runs as a deterministic proxy-trading module with no OpenAI dependency. The agent reconstructs six-hour deployment-anchored epochs, ranks WETH versus cbBTC by historical performance, deposits the winning asset from the agent wallet, and proposes one or more ERC20 reimbursement transfers back to the agent. The module also persists pending deposit state so a successful deposit is not repeated if proposal submission has to be retried later.
+`first-proxy` now runs as a deterministic proxy-trading module with no OpenAI dependency. The agent reconstructs six-hour deployment-anchored epochs, ranks WETH versus cbBTC by historical performance, emits a deposit for the winning asset, then builds the reimbursement proposal from the confirmed deposit receipt on the next tick. The module persists pending deposit and replay-plan state so deleted or dropped proposal flows can be retried without repeating the deposit, and it now scans OG status logs incrementally instead of rescanning from deployment on every poll.
 
 ## Context and Orientation
 
@@ -106,7 +122,8 @@ Completed implementation steps:
    Reimbursement is sourced from USDC first only when both momentum assets are up; otherwise the Safe reimburses from the weakest eligible assets first, spilling into the next asset when needed.
 
 5. Implemented true `Agent Proxy` execution.
-   Fresh runs emit `make_deposit` for the winner token followed by `build_og_transactions` and `post_bond_and_propose` for the reimbursement transfers.
+   Fresh runs emit `make_deposit` for the winner token.
+   Once the deposit is confirmed, the next tick builds `build_og_transactions` and `post_bond_and_propose` using the confirmed deposit-time price snapshot.
    Replay runs emit only `build_og_transactions` and `post_bond_and_propose` using the persisted deposit-time plan.
 
 6. Added regression tests and validation evidence.
@@ -134,12 +151,15 @@ Acceptance status:
 - The agent deposits the winner token and reimburses from the weakest eligible Safe assets: complete.
 - Split reimbursement across multiple tokens works: complete.
 - Deposit-success / proposal-retry recovery is covered: complete.
+- Deleted proposals are retried without re-depositing: complete.
+- OG proposal history is reconciled incrementally after the first scan: complete.
 
 ## Idempotence and Recovery
 
-This implementation is safe to retry because it is confined to `agent-library/agents/first-proxy/` plus this plan file. The module persists two pieces of local state in its module state file:
+This implementation is safe to retry because it is confined to `agent-library/agents/first-proxy/` plus this plan file. The module persists three pieces of local state in its module state file:
 
 - submitted epochs waiting for chain reconciliation
+- a pending confirmed deposit waiting for reimbursement proposal construction
 - a pending deposit-time proposal plan that should be replayed without re-depositing
 
 If work is resumed later, start by reading this ExecPlan, inspecting `agent-library/agents/first-proxy/agent.js`, and re-running the two validation commands above.

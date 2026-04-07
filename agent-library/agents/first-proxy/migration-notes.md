@@ -78,5 +78,8 @@ Runtime notes:
 - The module uses Alchemy's by-symbol and historical-price endpoints.
 - It resolves the Alchemy Prices API key from `ALCHEMY_PRICES_API_KEY`, then `ALCHEMY_API_KEY`, and finally by parsing an Alchemy `rpcUrl`.
 - Wrapped testnet assets are intentionally priced against their underlying symbols (`WETH` -> `ETH`, `cbBTC` -> `BTC`) so Sepolia testing does not depend on testnet-token-specific price support.
+- Fresh epochs now emit only `make_deposit`. The reimbursement proposal is built on the next tick from the confirmed deposit tx, so the valuation snapshot in the explanation is anchored to deposit time.
+- If a reimbursement proposal is deleted or a submission tx disappears, the module retries the reimbursement proposal without making a second deposit for that epoch.
+- OG proposal status scans are incremental after the first pass; the module does not rescan from deployment on every poll.
 
 Secrets stay in `agent/.env`, including signer keys, `OPENAI_API_KEY`, `MESSAGE_API_KEYS_JSON`, and authenticated `IPFS_HEADERS_JSON`.
