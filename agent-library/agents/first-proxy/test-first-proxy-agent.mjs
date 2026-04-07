@@ -32,13 +32,12 @@ const PRICE_SYMBOLS = Object.freeze({
     USDC: 'USDC',
 });
 
-function createConfig({ stateFile, startBlock = 0n, balances = {} } = {}) {
-    return {
+function createConfig({ stateFile, startBlock = 0n, balances = {}, omitStartBlock = false } = {}) {
+    const config = {
         chainId: 11155111,
         rpcUrl: `https://eth-sepolia.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
         commitmentSafe: ADDRESSES.safe,
         ogModule: ADDRESSES.ogModule,
-        startBlock: String(startBlock),
         proposeEnabled: true,
         disputeEnabled: false,
         proposalHashResolveTimeoutMs: 1_000,
@@ -74,26 +73,37 @@ function createConfig({ stateFile, startBlock = 0n, balances = {} } = {}) {
             balances,
         },
     };
+    if (!omitStartBlock && startBlock !== undefined && startBlock !== null) {
+        config.startBlock = String(startBlock);
+    }
+    return config;
 }
 
 function createPublicClient({
     latestBlock = 7n,
     balances = {},
     history = {},
+    deploymentBlock = 0n,
+    onGetCode = null,
 }) {
     const proposalLogs = history.proposalLogs ?? [];
     const executedLogs = history.executedLogs ?? [];
     const deletedLogs = history.deletedLogs ?? [];
+    let currentLatestBlock = BigInt(latestBlock);
 
     return {
         async getChainId() {
             return 11155111;
         },
         async getBlockNumber() {
-            return latestBlock;
+            return currentLatestBlock;
         },
         async getBlock({ blockNumber }) {
             return { timestamp: BigInt(blockNumber) * 3600n };
+        },
+        async getCode({ blockNumber }) {
+            onGetCode?.(BigInt(blockNumber));
+            return BigInt(blockNumber) >= BigInt(deploymentBlock) ? '0x1234' : '0x';
         },
         async readContract({ address, functionName, args }) {
             const normalized = address.toLowerCase();
@@ -126,6 +136,9 @@ function createPublicClient({
             return source.filter(
                 (log) => BigInt(log.blockNumber) >= BigInt(fromBlock) && BigInt(log.blockNumber) <= BigInt(toBlock)
             );
+        },
+        __setLatestBlock(nextBlock) {
+            currentLatestBlock = BigInt(nextBlock);
         },
     };
 }
@@ -394,6 +407,60 @@ async function testUsdcPreferredWhenBothMomentumAssetsUp() {
     });
 }
 
+async function testValidateUsesUsdcSnapshotPrice() {
+    const stateFile = await createStateFile();
+    const balances = {
+        USDC: 30_000_000n,
+        WETH: 10_000_000_000_000_000n,
+        cbBTC: 10_000_000n,
+    };
+    const prices = createPriceDataset({
+        current: {
+            [PRICE_SYMBOLS.WETH]: 2300,
+            [PRICE_SYMBOLS.cbBTC]: 55,
+            [PRICE_SYMBOLS.USDC]: 0.999,
+        },
+        range: {
+            [PRICE_SYMBOLS.WETH]: [[0, 2000], [6 * 3600 * 1000, 2300]],
+            [PRICE_SYMBOLS.cbBTC]: [[0, 50], [6 * 3600 * 1000, 55]],
+        },
+    });
+    const config = createConfig({ stateFile, balances });
+    const publicClient = createPublicClient({
+        latestBlock: 7n,
+        balances,
+    });
+    resetStrategyState({ config });
+
+    await withFetchMock(prices, async () => {
+        const toolCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: ADDRESSES.safe,
+            agentAddress: ADDRESSES.agent,
+            publicClient,
+            config,
+            onchainPendingProposal: false,
+        });
+
+        const validated = await validateToolCalls({
+            toolCalls: toolCalls.map((call) => ({
+                ...call,
+                parsedArguments: parseToolArgs(call),
+            })),
+            commitmentSafe: ADDRESSES.safe,
+            agentAddress: ADDRESSES.agent,
+            publicClient,
+            config,
+            onchainPendingProposal: false,
+        });
+
+        const explanation = validated[2].parsedArguments.explanation;
+        assert.ok(explanation.includes('usdcPriceMicros=999000'));
+        assert.equal(validated[1].parsedArguments.actions.length, 1);
+        assert.equal(validated[1].parsedArguments.actions[0].token.toLowerCase(), ADDRESSES.usdc.toLowerCase());
+    });
+}
+
 async function testNoProposalWhenInsufficientReimbursementInventory() {
     const stateFile = await createStateFile();
     const balances = {
@@ -605,15 +672,72 @@ async function testSuppressesPendingOrPriorEpoch() {
     });
 }
 
+async function testDeploymentLookupCachedAcrossPolls() {
+    const stateFile = await createStateFile();
+    const balances = {
+        USDC: 25_000_000n,
+        cbBTC: 0n,
+        WETH: 0n,
+    };
+    const prices = createPriceDataset({
+        current: {
+            [PRICE_SYMBOLS.WETH]: 1200,
+            [PRICE_SYMBOLS.cbBTC]: 90,
+            [PRICE_SYMBOLS.USDC]: 1,
+        },
+        range: {
+            [PRICE_SYMBOLS.WETH]: [[0, 1000], [6 * 3600 * 1000, 1200]],
+            [PRICE_SYMBOLS.cbBTC]: [[0, 100], [6 * 3600 * 1000, 90]],
+        },
+    });
+    const config = createConfig({ stateFile, balances, omitStartBlock: true });
+    let getCodeCallCount = 0;
+    const publicClient = createPublicClient({
+        latestBlock: 7n,
+        balances,
+        deploymentBlock: 3n,
+        onGetCode: () => {
+            getCodeCallCount += 1;
+        },
+    });
+    resetStrategyState({ config });
+
+    await withFetchMock(prices, async () => {
+        await buildMomentumPlan({
+            signals: [],
+            commitmentSafe: ADDRESSES.safe,
+            agentAddress: ADDRESSES.agent,
+            publicClient,
+            config,
+            onchainPendingProposal: false,
+        });
+        const afterFirstPlan = getCodeCallCount;
+        assert.ok(afterFirstPlan > 0);
+
+        publicClient.__setLatestBlock(8n);
+        await buildMomentumPlan({
+            signals: [],
+            commitmentSafe: ADDRESSES.safe,
+            agentAddress: ADDRESSES.agent,
+            publicClient,
+            config,
+            onchainPendingProposal: false,
+        });
+        assert.equal(getCodeCallCount, afterFirstPlan);
+    });
+}
+
 async function run() {
     await testPromptAndPolling();
     await testClosedEpochComputation();
     await testNoProposalBeforeFirstEpochCloses();
     await testWinnerSelectionAndSplitReimbursement();
     await testUsdcPreferredWhenBothMomentumAssetsUp();
+    await testValidateUsesUsdcSnapshotPrice();
     await testNoProposalWhenInsufficientReimbursementInventory();
     await testPendingPlanReplayAfterDeposit();
     await testSuppressesPendingOrPriorEpoch();
+    await testDeploymentLookupCachedAcrossPolls();
     console.log('[test] first-proxy deterministic momentum agent OK');
 }
 

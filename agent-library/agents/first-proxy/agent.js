@@ -652,7 +652,7 @@ async function resolveStartBlock({ publicClient, config, latestBlock }) {
     if (config?.startBlock !== undefined && config?.startBlock !== null) {
         return BigInt(config.startBlock);
     }
-    const deploymentKey = `${config?.ogModule ?? 'no-og'}:${latestBlock.toString()}`;
+    const deploymentKey = normalizeAddress(config?.ogModule ?? '0x0000000000000000000000000000000000000000');
     if (moduleCaches.deployment.has(deploymentKey)) {
         return moduleCaches.deployment.get(deploymentKey);
     }
@@ -1377,10 +1377,12 @@ function parseCallArgs(call) {
 }
 
 function getPriceMicrosFromExplanationFields(fields, symbol) {
-    if (symbol === CANONICAL_SYMBOLS.USDC) {
-        return MICRO_USD_SCALE;
-    }
-    const fieldName = symbol === CANONICAL_SYMBOLS.WETH ? 'wethPriceMicros' : 'cbBtcPriceMicros';
+    const fieldName =
+        symbol === CANONICAL_SYMBOLS.USDC
+            ? 'usdcPriceMicros'
+            : symbol === CANONICAL_SYMBOLS.WETH
+              ? 'wethPriceMicros'
+              : 'cbBtcPriceMicros';
     return parseBigIntValue(fields[fieldName], fieldName);
 }
 
@@ -1628,6 +1630,7 @@ function resetStrategyState({ config } = {}) {
     hydratedStatePath = statePath;
     strategyState.submittedEpochs = new Map();
     strategyState.pendingPlan = null;
+    moduleCaches.deployment.clear();
     moduleCaches.currentPrices.clear();
     moduleCaches.historicalRanges.clear();
     lastValidatedEpoch = null;
