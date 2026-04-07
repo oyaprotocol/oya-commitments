@@ -236,7 +236,11 @@ async function hydrateStrategyState(config) {
             const epochIndex = Number(epochKey);
             if (!Number.isInteger(epochIndex) || epochIndex < 0) continue;
             submittedEpochs.set(epochIndex, {
-                proposalHash: normalizeHashOrNull(value?.proposalHash) ?? null,
+                submissionTxHash:
+                    normalizeHashOrNull(value?.submissionTxHash) ??
+                    normalizeHashOrNull(value?.proposalHash) ??
+                    null,
+                ogProposalHash: normalizeHashOrNull(value?.ogProposalHash) ?? null,
                 submittedAtMs: Number(value?.submittedAtMs ?? 0),
             });
         }
@@ -252,7 +256,9 @@ async function persistStrategyState(config) {
     const submittedEpochs = {};
     for (const [epochIndex, entry] of strategyState.submittedEpochs.entries()) {
         submittedEpochs[String(epochIndex)] = {
-            proposalHash: entry?.proposalHash ?? null,
+            proposalHash: entry?.submissionTxHash ?? entry?.ogProposalHash ?? null,
+            submissionTxHash: entry?.submissionTxHash ?? null,
+            ogProposalHash: entry?.ogProposalHash ?? null,
             submittedAtMs: Number(entry?.submittedAtMs ?? 0),
         };
     }
@@ -281,9 +287,15 @@ async function clearPendingPlan({ config }) {
     await persistStrategyState(config);
 }
 
-async function markEpochSubmitted({ epochIndex, proposalHash = null, config }) {
+async function markEpochSubmitted({
+    epochIndex,
+    submissionTxHash = null,
+    ogProposalHash = null,
+    config,
+}) {
     strategyState.submittedEpochs.set(epochIndex, {
-        proposalHash: normalizeHashOrNull(proposalHash) ?? null,
+        submissionTxHash: normalizeHashOrNull(submissionTxHash) ?? null,
+        ogProposalHash: normalizeHashOrNull(ogProposalHash) ?? null,
         submittedAtMs: Date.now(),
     });
     if (strategyState.pendingPlan?.epochIndex === epochIndex) {
@@ -292,11 +304,51 @@ async function markEpochSubmitted({ epochIndex, proposalHash = null, config }) {
     await persistStrategyState(config);
 }
 
-function resolveSubmittedProposalHash(parsedOutput) {
-    const txHash = normalizeHashOrNull(parsedOutput?.transactionHash);
-    const explicitOgHash = normalizeHashOrNull(parsedOutput?.ogProposalHash);
-    const legacyHash = normalizeHashOrNull(parsedOutput?.proposalHash);
-    return explicitOgHash ?? txHash ?? legacyHash ?? null;
+function resolveSubmissionTracking(parsedOutput) {
+    return {
+        submissionTxHash:
+            normalizeHashOrNull(parsedOutput?.transactionHash) ??
+            normalizeHashOrNull(parsedOutput?.proposalHash) ??
+            null,
+        ogProposalHash: normalizeHashOrNull(parsedOutput?.ogProposalHash) ?? null,
+    };
+}
+
+async function shouldRetainSubmittedEpochEntry({
+    entry,
+    publicClient,
+    pendingEpochTtlMs,
+    nowMs = Date.now(),
+}) {
+    const ageMs = nowMs - Number(entry?.submittedAtMs ?? 0);
+    const submissionTxHash = normalizeHashOrNull(entry?.submissionTxHash ?? entry?.proposalHash);
+    const ogProposalHash = normalizeHashOrNull(entry?.ogProposalHash);
+    if (ogProposalHash) {
+        return true;
+    }
+    if (!submissionTxHash) {
+        return ageMs <= pendingEpochTtlMs;
+    }
+
+    try {
+        const receipt = await publicClient.getTransactionReceipt({ hash: submissionTxHash });
+        if (receipt) {
+            return receipt.status !== 'reverted';
+        }
+    } catch {
+        // Fall through to pending-transaction lookup.
+    }
+
+    try {
+        const transaction = await publicClient.getTransaction({ hash: submissionTxHash });
+        if (transaction) {
+            return true;
+        }
+    } catch {
+        // Fall through to TTL-based recovery if the node no longer knows the tx.
+    }
+
+    return ageMs <= pendingEpochTtlMs;
 }
 
 function getConfigChainId(config) {
@@ -880,7 +932,13 @@ async function reconcileStrategyState({
             changed = true;
             continue;
         }
-        if (nowMs - Number(entry?.submittedAtMs ?? 0) > policy.pendingEpochTtlMs) {
+        const shouldRetain = await shouldRetainSubmittedEpochEntry({
+            entry,
+            publicClient,
+            pendingEpochTtlMs: policy.pendingEpochTtlMs,
+            nowMs,
+        });
+        if (!shouldRetain) {
             strategyState.submittedEpochs.delete(epochIndex);
             changed = true;
         }
@@ -1619,7 +1677,7 @@ async function onToolOutput({ name, parsedOutput, config }) {
 
     await markEpochSubmitted({
         epochIndex: lastValidatedEpoch,
-        proposalHash: resolveSubmittedProposalHash(parsedOutput),
+        ...resolveSubmissionTracking(parsedOutput),
         config,
     });
     lastValidatedPendingPlan = null;

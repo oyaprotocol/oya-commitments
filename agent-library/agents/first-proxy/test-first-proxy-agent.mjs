@@ -85,6 +85,8 @@ function createPublicClient({
     history = {},
     deploymentBlock = 0n,
     onGetCode = null,
+    transactionReceiptsByHash = {},
+    transactionsByHash = {},
 }) {
     const proposalLogs = history.proposalLogs ?? [];
     const executedLogs = history.executedLogs ?? [];
@@ -104,6 +106,28 @@ function createPublicClient({
         async getCode({ blockNumber }) {
             onGetCode?.(BigInt(blockNumber));
             return BigInt(blockNumber) >= BigInt(deploymentBlock) ? '0x1234' : '0x';
+        },
+        async getTransactionReceipt({ hash }) {
+            const key = String(hash).toLowerCase();
+            if (Object.hasOwn(transactionReceiptsByHash, key)) {
+                const value = transactionReceiptsByHash[key];
+                if (value instanceof Error) throw value;
+                return value;
+            }
+            const error = new Error(`Transaction receipt not found for ${hash}`);
+            error.name = 'TransactionReceiptNotFoundError';
+            throw error;
+        },
+        async getTransaction({ hash }) {
+            const key = String(hash).toLowerCase();
+            if (Object.hasOwn(transactionsByHash, key)) {
+                const value = transactionsByHash[key];
+                if (value instanceof Error) throw value;
+                return value;
+            }
+            const error = new Error(`Transaction not found for ${hash}`);
+            error.name = 'TransactionNotFoundError';
+            throw error;
         },
         async readContract({ address, functionName, args }) {
             const normalized = address.toLowerCase();
@@ -727,6 +751,160 @@ async function testDeploymentLookupCachedAcrossPolls() {
     });
 }
 
+async function testSubmittedEpochRetainedWhileProposalTxPending() {
+    const stateFile = await createStateFile();
+    const balances = {
+        USDC: 25_000_000n,
+        cbBTC: 0n,
+        WETH: 0n,
+    };
+    const prices = createPriceDataset({
+        current: {
+            [PRICE_SYMBOLS.WETH]: 1200,
+            [PRICE_SYMBOLS.cbBTC]: 90,
+            [PRICE_SYMBOLS.USDC]: 1,
+        },
+        range: {
+            [PRICE_SYMBOLS.WETH]: [[0, 1000], [6 * 3600 * 1000, 1200]],
+            [PRICE_SYMBOLS.cbBTC]: [[0, 100], [6 * 3600 * 1000, 90]],
+        },
+    });
+    const txHash = `0x${'4'.repeat(64)}`;
+    const config = createConfig({ stateFile, balances });
+    config.firstProxy.pendingEpochTtlMs = 1;
+    const publicClient = createPublicClient({
+        latestBlock: 7n,
+        balances,
+        transactionsByHash: {
+            [txHash.toLowerCase()]: { hash: txHash },
+        },
+    });
+    resetStrategyState({ config });
+
+    const originalDateNow = Date.now;
+    try {
+        await withFetchMock(prices, async () => {
+            const baseCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: ADDRESSES.safe,
+                agentAddress: ADDRESSES.agent,
+                publicClient,
+                config,
+                onchainPendingProposal: false,
+            });
+            await validateToolCalls({
+                toolCalls: baseCalls.map((call) => ({
+                    ...call,
+                    parsedArguments: parseToolArgs(call),
+                })),
+                commitmentSafe: ADDRESSES.safe,
+                agentAddress: ADDRESSES.agent,
+                publicClient,
+                config,
+                onchainPendingProposal: false,
+            });
+
+            await onToolOutput({
+                name: 'post_bond_and_propose',
+                parsedOutput: {
+                    status: 'submitted',
+                    transactionHash: txHash,
+                },
+                config,
+            });
+
+            Date.now = () => originalDateNow() + 5_000;
+            const suppressed = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: ADDRESSES.safe,
+                agentAddress: ADDRESSES.agent,
+                publicClient,
+                config,
+                onchainPendingProposal: false,
+            });
+            assert.deepEqual(suppressed, []);
+        });
+    } finally {
+        Date.now = originalDateNow;
+    }
+}
+
+async function testSubmittedEpochRecoversAfterDroppedTxAndExpiredTtl() {
+    const stateFile = await createStateFile();
+    const balances = {
+        USDC: 25_000_000n,
+        cbBTC: 0n,
+        WETH: 0n,
+    };
+    const prices = createPriceDataset({
+        current: {
+            [PRICE_SYMBOLS.WETH]: 1200,
+            [PRICE_SYMBOLS.cbBTC]: 90,
+            [PRICE_SYMBOLS.USDC]: 1,
+        },
+        range: {
+            [PRICE_SYMBOLS.WETH]: [[0, 1000], [6 * 3600 * 1000, 1200]],
+            [PRICE_SYMBOLS.cbBTC]: [[0, 100], [6 * 3600 * 1000, 90]],
+        },
+    });
+    const txHash = `0x${'5'.repeat(64)}`;
+    const config = createConfig({ stateFile, balances });
+    config.firstProxy.pendingEpochTtlMs = 1;
+    const publicClient = createPublicClient({
+        latestBlock: 7n,
+        balances,
+    });
+    resetStrategyState({ config });
+
+    const originalDateNow = Date.now;
+    try {
+        await withFetchMock(prices, async () => {
+            const baseCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: ADDRESSES.safe,
+                agentAddress: ADDRESSES.agent,
+                publicClient,
+                config,
+                onchainPendingProposal: false,
+            });
+            await validateToolCalls({
+                toolCalls: baseCalls.map((call) => ({
+                    ...call,
+                    parsedArguments: parseToolArgs(call),
+                })),
+                commitmentSafe: ADDRESSES.safe,
+                agentAddress: ADDRESSES.agent,
+                publicClient,
+                config,
+                onchainPendingProposal: false,
+            });
+
+            await onToolOutput({
+                name: 'post_bond_and_propose',
+                parsedOutput: {
+                    status: 'submitted',
+                    transactionHash: txHash,
+                },
+                config,
+            });
+
+            Date.now = () => originalDateNow() + 5_000;
+            const retried = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: ADDRESSES.safe,
+                agentAddress: ADDRESSES.agent,
+                publicClient,
+                config,
+                onchainPendingProposal: false,
+            });
+            assert.equal(retried.length, 3);
+            assert.equal(retried[0].name, 'make_deposit');
+        });
+    } finally {
+        Date.now = originalDateNow;
+    }
+}
+
 async function run() {
     await testPromptAndPolling();
     await testClosedEpochComputation();
@@ -738,6 +916,8 @@ async function run() {
     await testPendingPlanReplayAfterDeposit();
     await testSuppressesPendingOrPriorEpoch();
     await testDeploymentLookupCachedAcrossPolls();
+    await testSubmittedEpochRetainedWhileProposalTxPending();
+    await testSubmittedEpochRecoversAfterDroppedTxAndExpiredTtl();
     console.log('[test] first-proxy deterministic momentum agent OK');
 }
 
