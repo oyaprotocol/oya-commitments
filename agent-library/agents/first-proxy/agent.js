@@ -1371,11 +1371,11 @@ async function buildMomentumPlan({
     config,
     onchainPendingProposal,
 }) {
-    const chainId = getConfigChainId(config) ?? (await publicClient.getChainId());
-    const policy = resolvePolicyConfig(config, chainId);
     if (!config?.proposeEnabled) {
         return null;
     }
+    const chainId = getConfigChainId(config) ?? (await publicClient.getChainId());
+    const policy = resolvePolicyConfig(config, chainId);
     const safeAddress = normalizeAddress(commitmentSafe);
     const normalizedAgentAddress = normalizeAddress(agentAddress);
     const latestBlock = await publicClient.getBlockNumber();
@@ -1743,16 +1743,15 @@ async function validateToolCalls({
     config,
     onchainPendingProposal,
 }) {
-    const chainId = getConfigChainId(config) ?? (await publicClient.getChainId());
-    const policy = resolvePolicyConfig(config, chainId);
-    const normalizedAgentAddress = normalizeAddress(agentAddress);
-
     if (!Array.isArray(toolCalls) || toolCalls.length === 0) {
         return [];
     }
     if (!config?.proposeEnabled) {
         throw new Error('first-proxy requires proposeEnabled=true before emitting deposit or proposal tool calls.');
     }
+    const chainId = getConfigChainId(config) ?? (await publicClient.getChainId());
+    const policy = resolvePolicyConfig(config, chainId);
+    const normalizedAgentAddress = normalizeAddress(agentAddress);
     if (onchainPendingProposal) {
         throw new Error('Pending proposal exists onchain; wait before proposing again.');
     }

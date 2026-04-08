@@ -423,6 +423,48 @@ async function testNoActionsWhenProposalsDisabled() {
     });
 }
 
+async function testNoActionsWhenProposalsDisabledWithoutTokenConfig() {
+    const stateFile = await createStateFile();
+    const config = createConfig({ stateFile });
+    config.proposeEnabled = false;
+    config.disputeEnabled = true;
+    config.byChain = {};
+    const publicClient = createPublicClient({
+        latestBlock: 7n,
+    });
+    resetStrategyState({ config });
+
+    const toolCalls = await getDeterministicToolCalls({
+        signals: [],
+        commitmentSafe: ADDRESSES.safe,
+        agentAddress: ADDRESSES.agent,
+        publicClient,
+        config,
+        onchainPendingProposal: false,
+    });
+    assert.deepEqual(toolCalls, []);
+}
+
+async function testEmptyValidationShortCircuitsWithoutTokenConfig() {
+    const stateFile = await createStateFile();
+    const config = createConfig({ stateFile });
+    config.byChain = {};
+    const publicClient = createPublicClient({
+        latestBlock: 7n,
+    });
+    resetStrategyState({ config });
+
+    const validated = await validateToolCalls({
+        toolCalls: [],
+        commitmentSafe: ADDRESSES.safe,
+        agentAddress: ADDRESSES.agent,
+        publicClient,
+        config,
+        onchainPendingProposal: false,
+    });
+    assert.deepEqual(validated, []);
+}
+
 async function testWinnerSelectionAndSplitReimbursement() {
     const stateFile = await createStateFile();
     const depositTxHash = `0x${'a'.repeat(64)}`;
@@ -1244,6 +1286,8 @@ async function run() {
     await testClosedEpochComputation();
     await testNoProposalBeforeFirstEpochCloses();
     await testNoActionsWhenProposalsDisabled();
+    await testNoActionsWhenProposalsDisabledWithoutTokenConfig();
+    await testEmptyValidationShortCircuitsWithoutTokenConfig();
     await testWinnerSelectionAndSplitReimbursement();
     await testUsdcPreferredWhenBothMomentumAssetsUp();
     await testValidateUsesUsdcSnapshotPrice();
