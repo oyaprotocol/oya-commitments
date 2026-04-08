@@ -84,3 +84,19 @@ Transfers from this Safe are limited to the primary user's address [ ], the desi
 Trading Limits
 ---
 The designated agent at address [ ] may not execute more than [ ] dollars worth of trades per [hour/day/week].
+
+Staked External Polymarket Execution
+---
+The designated agent at address [ ] must deposit a stake of [ ] to be considered the active agent. The agent will faithfully trade on Polymarket on behalf of the user outside of the commitment, with final execution settled within the commitment.
+
+To track this external trading, the agent will periodically sign an updated log documenting all of their trades, and send to the node at address [ ] for a second signature, and publication to IPFS.
+
+When a Polymarket market resolves, the agent must deposit the resulting winnings (if any) into the commitment to receive reimbursement for the initial trade(s). Or, if the agent has already exited the position before the market resolved, they must deposit any proceeds into the commitment to receive reimbursement. If the position was held until market resolution and it was a losing position, no deposit is necessary from the agent to claim reimbursement, since the value of the position is zero.
+
+If the agent does not make the required deposit within [ ] hours of market resolution, they shall be considered in violation of this rule, and their stake will be forfeit in its entirety to the user.
+
+After a rule violation, the agent may not claim any further reimbursement for any trades until they have deposited what they owe. They also may not make any additional trades on behalf of the user until they make another deposit renewing their stake.
+
+The agent may quit the commitment by proposing to withdraw their stake, and writing "quit" as the proposal explanation. After proposing to quit, the agent may claim reimbursement for any valid trades up to that point, but may not perform any additional trades on behalf of the user.
+
+If the agent's stake has been slashed due to a rule violation, and the agent does not deposit what they owe within [ ] (hours/days), the agent is considered to be in full default, and will not be reimbursed for any outstanding trades. All assets in the commitment at this point belong fully to the user. The user may update the rules to appoint a new agent.
