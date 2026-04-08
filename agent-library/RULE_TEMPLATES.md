@@ -84,3 +84,13 @@ Transfers from this Safe are limited to the primary user's address [ ], the desi
 Trading Limits
 ---
 The designated agent at address [ ] may not execute more than [ ] dollars worth of trades per [hour/day/week].
+
+Staked External Polymarket Execution
+---
+The designated agent at address [ ] must deposit a stake of [ ] to be considered the active agent. The agent will faithfully trade on Polymarket on behalf of the user outside of the commitment, with final execution settled within the commitment.
+
+To track this external trading, the agent will periodically sign an updated log documenting all of their trades, and send to the node at address [ ] for a second signature, and publication to IPFS.
+
+When a Polymarket market resolves, the agent must deposit the resulting winnings (if any) into the commitment to receive reimbursement for the initial trade(s). Or, if the agent has already exited the position before the market resolved, they must deposit any proceeds into the commitment to receive reimbursement. If the position was held until market resolution and it was a losing position, no deposit is necessary from the agent to claim reimbursement, since the value of the position is zero.
+
+If the agent does not make the required deposit within [ ] hours of market resolution, they shall be considered in violation of this rule, and their stake will be forfeit in its entirety to the user.
