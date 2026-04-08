@@ -94,3 +94,7 @@ To track this external trading, the agent will periodically sign an updated log 
 When a Polymarket market resolves, the agent must deposit the resulting winnings (if any) into the commitment to receive reimbursement for the initial trade(s). Or, if the agent has already exited the position before the market resolved, they must deposit any proceeds into the commitment to receive reimbursement. If the position was held until market resolution and it was a losing position, no deposit is necessary from the agent to claim reimbursement, since the value of the position is zero.
 
 If the agent does not make the required deposit within [ ] hours of market resolution, they shall be considered in violation of this rule, and their stake will be forfeit in its entirety to the user.
+
+After a rule violation, the agent may not claim any further reimbursement for any trades until they have deposited what they owe. They also may not make any additional trades on behalf of the user until they make another deposit renewing their stake.
+
+The agent may quit the commitment by proposing to withdraw their stake, and writing "quit" as the proposal explanation. After proposing to quit, the agent may claim reimbursement for any valid trades up to that point, but may not perform any additional trades on behalf of the user.
