@@ -25,6 +25,7 @@ Turn `agent-library/agents/first-proxy/` into a deterministic `Agent Proxy` stra
 - [x] 2026-04-07: Added regression coverage in `agent/scripts/test-tool-output-streaming.mjs` and `agent-library/agents/first-proxy/test-first-proxy-agent.mjs`, then reran shared and module validation.
 - [x] 2026-04-07: Gated `first-proxy` on `proposeEnabled=true` so the module cannot emit an agent-funded deposit when proposal publication is disabled.
 - [x] 2026-04-07: Reordered `first-proxy` no-op guards so disabled mode and empty validation inputs return cleanly before chain/token policy parsing.
+- [x] 2026-04-07: Restored a post-execution fallback `onToolOutput()` delivery pass in the shared decision runtime and converted the remaining `executeToolCalls()` branches to use notifier-aware emission.
 
 ## Surprises & Discoveries
 

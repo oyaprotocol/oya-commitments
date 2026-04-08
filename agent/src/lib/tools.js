@@ -767,6 +767,15 @@ async function executeToolCalls({
     let builtTransactions;
     let sideEffectsLikelyCommitted = false;
 
+    function markOutputDelivered(output) {
+        Object.defineProperty(output, '__agentToolOutputDelivered', {
+            value: true,
+            writable: true,
+            configurable: true,
+            enumerable: false,
+        });
+    }
+
     async function notifyOutput(output) {
         if (typeof onToolOutput === 'function') {
             await onToolOutput({
@@ -774,6 +783,7 @@ async function executeToolCalls({
                 name: output.name,
                 output: output.output,
             });
+            markOutputDelivered(output);
         }
     }
 
@@ -793,7 +803,7 @@ async function executeToolCalls({
             const args = parseToolArguments(call.arguments);
             if (!args) {
                 console.warn('[agent] Tool call has invalid args:', call);
-                outputs.push({
+                await emitOutput({
                     callId: call.callId,
                     name: call.name,
                     output: safeStringify({
@@ -1025,7 +1035,7 @@ async function executeToolCalls({
                         }),
                     });
                 } catch (error) {
-                    outputs.push({
+                    await emitOutput({
                         callId: call.callId,
                         name: call.name,
                         output: safeStringify({
@@ -1425,12 +1435,12 @@ async function executeToolCalls({
             continue;
         }
 
-        if (call.name === 'post_bond_and_propose') {
-            if (!config.proposeEnabled) {
-                outputs.push({
-                    callId: call.callId,
-                    name: call.name,
-                    output: safeStringify({
+            if (call.name === 'post_bond_and_propose') {
+                if (!config.proposeEnabled) {
+                    await emitOutput({
+                        callId: call.callId,
+                        name: call.name,
+                        output: safeStringify({
                         status: 'skipped',
                         reason: 'proposals disabled',
                     }),
@@ -1531,7 +1541,7 @@ async function executeToolCalls({
 
         if (call.name === 'dispute_assertion') {
             if (!config.disputeEnabled) {
-                outputs.push({
+                await emitOutput({
                     callId: call.callId,
                     name: call.name,
                     output: safeStringify({

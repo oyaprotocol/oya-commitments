@@ -150,6 +150,15 @@ export function createDecisionRuntime({
             }
         }
 
+        if (toolOutputs.length > 0 && agentModule?.onToolOutput) {
+            for (const output of toolOutputs) {
+                if (output?.__agentToolOutputDelivered === true) {
+                    continue;
+                }
+                await notifyAgentToolOutput(output);
+            }
+        }
+
         const modelCallIds = new Set(
             approvedToolCalls
                 .map((call) => call?.callId)
