@@ -23,6 +23,7 @@ Turn `agent-library/agents/first-proxy/` into a deterministic `Agent Proxy` stra
 - [x] 2026-04-07: Hardened shared tool execution so `onToolOutput()` is notified at tx-hash time for deposits and proposals, eliminating the restart window where a submitted side effect could be replayed before local state persisted.
 - [x] 2026-04-07: Tightened Alchemy historical lookup to use the latest sample at or before each epoch/deposit boundary, eliminating look-ahead pricing bias.
 - [x] 2026-04-07: Added regression coverage in `agent/scripts/test-tool-output-streaming.mjs` and `agent-library/agents/first-proxy/test-first-proxy-agent.mjs`, then reran shared and module validation.
+- [x] 2026-04-07: Gated `first-proxy` on `proposeEnabled=true` so the module cannot emit an agent-funded deposit when proposal publication is disabled.
 
 ## Surprises & Discoveries
 
@@ -95,6 +96,10 @@ Turn `agent-library/agents/first-proxy/` into a deterministic `Agent Proxy` stra
 
 - Decision: Use the latest historical price sample at or before each target timestamp, never the closest sample on either side.
   Rationale: Strategy decisions and reimbursement snapshots must not depend on future prices relative to the epoch or deposit boundary.
+  Date/Author: 2026-04-07 / Codex.
+
+- Decision: Treat `proposeEnabled=true` as a hard precondition for the `first-proxy` strategy.
+  Rationale: The strategy’s deposit leg is only safe when the reimbursement proposal leg is available in the same runtime.
   Date/Author: 2026-04-07 / Codex.
 
 ## Outcomes & Retrospective

@@ -383,6 +383,46 @@ async function testNoProposalBeforeFirstEpochCloses() {
     });
 }
 
+async function testNoActionsWhenProposalsDisabled() {
+    const stateFile = await createStateFile();
+    const balances = {
+        USDC: 25_000_000n,
+        WETH: 0n,
+        cbBTC: 0n,
+    };
+    const config = createConfig({ stateFile, balances });
+    config.proposeEnabled = false;
+    config.disputeEnabled = true;
+    const publicClient = createPublicClient({
+        latestBlock: 7n,
+        balances,
+    });
+    const prices = createPriceDataset({
+        current: {
+            [PRICE_SYMBOLS.WETH]: 2100,
+            [PRICE_SYMBOLS.cbBTC]: 90,
+            [PRICE_SYMBOLS.USDC]: 1,
+        },
+        range: {
+            [PRICE_SYMBOLS.WETH]: [[0, 2000], [6 * 3600 * 1000, 2100]],
+            [PRICE_SYMBOLS.cbBTC]: [[0, 100], [6 * 3600 * 1000, 90]],
+        },
+    });
+    resetStrategyState({ config });
+
+    await withFetchMock(prices, async () => {
+        const toolCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: ADDRESSES.safe,
+            agentAddress: ADDRESSES.agent,
+            publicClient,
+            config,
+            onchainPendingProposal: false,
+        });
+        assert.deepEqual(toolCalls, []);
+    });
+}
+
 async function testWinnerSelectionAndSplitReimbursement() {
     const stateFile = await createStateFile();
     const depositTxHash = `0x${'a'.repeat(64)}`;
@@ -1203,6 +1243,7 @@ async function run() {
     await testPromptAndPolling();
     await testClosedEpochComputation();
     await testNoProposalBeforeFirstEpochCloses();
+    await testNoActionsWhenProposalsDisabled();
     await testWinnerSelectionAndSplitReimbursement();
     await testUsdcPreferredWhenBothMomentumAssetsUp();
     await testValidateUsesUsdcSnapshotPrice();
