@@ -98,3 +98,5 @@ If the agent does not make the required deposit within [ ] hours of market resol
 After a rule violation, the agent may not claim any further reimbursement for any trades until they have deposited what they owe. They also may not make any additional trades on behalf of the user until they make another deposit renewing their stake.
 
 The agent may quit the commitment by proposing to withdraw their stake, and writing "quit" as the proposal explanation. After proposing to quit, the agent may claim reimbursement for any valid trades up to that point, but may not perform any additional trades on behalf of the user.
+
+If the agent's stake has been slashed due to a rule violation, and the agent does not deposit what they owe within [ ] (hours/days), the agent is considered to be in full default, and will not be reimbursed for any outstanding trades. All assets in the commitment at this point belong fully to the user. The user may update the rules to appoint a new agent.
