@@ -18,6 +18,30 @@ export function createDecisionRuntime({
     getOgContext,
     ensureOgContext,
 }) {
+    async function notifyAgentToolOutput(output) {
+        if (!output?.name || !output?.output || !agentModule?.onToolOutput) {
+            return;
+        }
+        let parsed;
+        try {
+            parsed = JSON.parse(output.output);
+        } catch (error) {
+            parsed = null;
+        }
+        try {
+            await agentModule.onToolOutput({
+                name: output.name,
+                parsedOutput: parsed,
+                commitmentText,
+                commitmentSafe: config.commitmentSafe,
+                agentAddress,
+                config,
+            });
+        } catch (error) {
+            console.warn('[agent] onToolOutput hook failed:', error?.message ?? error);
+        }
+    }
+
     async function processAgentToolCalls({
         toolCalls,
         signals,
@@ -79,6 +103,7 @@ export function createDecisionRuntime({
                 account,
                 config,
                 ogContext: getOgContext(),
+                onToolOutput: notifyAgentToolOutput,
             });
         } catch (error) {
             const sideEffectsLikelyCommitted = hasCommittedToolSideEffects(error);
@@ -127,27 +152,10 @@ export function createDecisionRuntime({
 
         if (toolOutputs.length > 0 && agentModule?.onToolOutput) {
             for (const output of toolOutputs) {
-                if (!output?.name || !output?.output) {
+                if (output?.__agentToolOutputDelivered === true) {
                     continue;
                 }
-                let parsed;
-                try {
-                    parsed = JSON.parse(output.output);
-                } catch (error) {
-                    parsed = null;
-                }
-                try {
-                    await agentModule.onToolOutput({
-                        name: output.name,
-                        parsedOutput: parsed,
-                        commitmentText,
-                        commitmentSafe: config.commitmentSafe,
-                        agentAddress,
-                        config,
-                    });
-                } catch (error) {
-                    console.warn('[agent] onToolOutput hook failed:', error?.message ?? error);
-                }
+                await notifyAgentToolOutput(output);
             }
         }
 

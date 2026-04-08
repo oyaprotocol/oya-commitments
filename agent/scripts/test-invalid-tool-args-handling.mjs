@@ -9,6 +9,7 @@ function parseOutput(result) {
 }
 
 async function testExecuteToolCallsInvalidArgsOutput() {
+    let callbackPayload = null;
     const results = await executeToolCalls({
         toolCalls: [
             {
@@ -28,6 +29,9 @@ async function testExecuteToolCallsInvalidArgsOutput() {
             ogModule: '0x3333333333333333333333333333333333333333',
         },
         ogContext: null,
+        onToolOutput: async (output) => {
+            callbackPayload = parseOutput(output);
+        },
     });
 
     assert.equal(results.length, 1);
@@ -36,6 +40,7 @@ async function testExecuteToolCallsInvalidArgsOutput() {
     assert.equal(output.code, 'invalid_tool_arguments');
     assert.equal(output.invalidArguments, true);
     assert.equal(output.retryable, false);
+    assert.deepEqual(callbackPayload, output);
 }
 
 async function testMessageLoopRequeuesInvalidToolArgsStatus() {

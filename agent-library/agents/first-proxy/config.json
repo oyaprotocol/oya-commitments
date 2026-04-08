@@ -1,0 +1,25 @@
+{
+  "policyName": "first-proxy",
+  "pollIntervalMs": 1000,
+  "firstProxy": {
+    "tradeAmountUsd": "25",
+    "epochSeconds": 21600,
+    "daySeconds": 86400,
+    "pendingEpochTtlMs": 1800000,
+    "priceFeed": {
+      "provider": "alchemy",
+      "apiBaseUrl": "https://api.g.alchemy.com/prices/v1",
+      "quoteCurrency": "USD",
+      "symbols": {
+        "WETH": "ETH",
+        "cbBTC": "BTC",
+        "USDC": "USDC"
+      }
+    },
+    "tieBreakAssetOrder": [
+      "WETH",
+      "cbBTC"
+    ]
+  },
+  "byChain": {}
+}
