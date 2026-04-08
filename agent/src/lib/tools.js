@@ -759,12 +759,34 @@ async function executeToolCalls({
     account,
     config,
     ogContext,
+    onToolOutput,
 }) {
     const outputs = [];
     const onchainToolsEnabled = config.proposeEnabled || config.disputeEnabled;
     const hasPostProposal = toolCalls.some((call) => call.name === 'post_bond_and_propose');
     let builtTransactions;
     let sideEffectsLikelyCommitted = false;
+
+    async function notifyOutput(output) {
+        if (typeof onToolOutput === 'function') {
+            await onToolOutput({
+                callId: output.callId,
+                name: output.name,
+                output: output.output,
+            });
+        }
+    }
+
+    async function emitOutput(output) {
+        outputs.push(output);
+        await notifyOutput(output);
+        return output;
+    }
+
+    async function updateOutput(output, payload) {
+        output.output = safeStringify(payload);
+        await notifyOutput(output);
+    }
 
     try {
         for (const call of toolCalls) {
@@ -789,13 +811,13 @@ async function executeToolCalls({
                 try {
                     const transactions = buildOgTransactions(args.actions ?? [], { config });
                     builtTransactions = transactions;
-                    outputs.push({
+                    await emitOutput({
                         callId: call.callId,
                         name: call.name,
                         output: safeStringify({ status: 'ok', transactions }),
                     });
                 } catch (error) {
-                    outputs.push({
+                    await emitOutput({
                         callId: call.callId,
                         name: call.name,
                         output: safeStringify({
@@ -809,7 +831,7 @@ async function executeToolCalls({
 
             if (call.name === 'ipfs_publish') {
                 if (!config.ipfsEnabled) {
-                    outputs.push({
+                    await emitOutput({
                         callId: call.callId,
                         name: call.name,
                         output: safeStringify({
@@ -830,7 +852,7 @@ async function executeToolCalls({
                         mediaType: args.mediaType,
                         pin: args.pin,
                     });
-                    outputs.push({
+                    await emitOutput({
                         callId: call.callId,
                         name: call.name,
                         output: safeStringify({
@@ -839,7 +861,7 @@ async function executeToolCalls({
                         }),
                     });
                 } catch (error) {
-                    outputs.push({
+                    await emitOutput({
                         callId: call.callId,
                         name: call.name,
                         output: safeStringify({
@@ -855,7 +877,7 @@ async function executeToolCalls({
 
             if (call.name === 'polymarket_clob_place_order') {
                 if (!config.polymarketClobEnabled) {
-                    outputs.push({
+                    await emitOutput({
                         callId: call.callId,
                         name: call.name,
                         output: safeStringify({
@@ -943,7 +965,7 @@ async function executeToolCalls({
                         ownerApiKey: configuredOwnerApiKey,
                         orderType,
                     });
-                    outputs.push({
+                    await emitOutput({
                         callId: call.callId,
                         name: call.name,
                         output: safeStringify({
@@ -952,7 +974,7 @@ async function executeToolCalls({
                         }),
                     });
                 } catch (error) {
-                    outputs.push({
+                    await emitOutput({
                         callId: call.callId,
                         name: call.name,
                         output: safeStringify({
@@ -966,7 +988,7 @@ async function executeToolCalls({
 
             if (call.name === 'polymarket_clob_cancel_orders') {
                 if (!config.polymarketClobEnabled) {
-                    outputs.push({
+                    await emitOutput({
                         callId: call.callId,
                         name: call.name,
                         output: safeStringify({
@@ -994,7 +1016,7 @@ async function executeToolCalls({
                         market: args.market,
                         assetId: args.assetId,
                     });
-                    outputs.push({
+                    await emitOutput({
                         callId: call.callId,
                         name: call.name,
                         output: safeStringify({
@@ -1017,7 +1039,7 @@ async function executeToolCalls({
 
         if (call.name === 'polymarket_clob_build_sign_and_place_order') {
             if (!config.polymarketClobEnabled) {
-                outputs.push({
+                await emitOutput({
                     callId: call.callId,
                     name: call.name,
                     output: safeStringify({
@@ -1168,7 +1190,7 @@ async function executeToolCalls({
                     ownerApiKey: configuredOwnerApiKey,
                     orderType,
                 });
-                outputs.push({
+                await emitOutput({
                     callId: call.callId,
                     name: call.name,
                     output: safeStringify({
@@ -1178,7 +1200,7 @@ async function executeToolCalls({
                     }),
                 });
             } catch (error) {
-                outputs.push({
+                await emitOutput({
                     callId: call.callId,
                     name: call.name,
                     output: safeStringify({
@@ -1192,7 +1214,7 @@ async function executeToolCalls({
 
         if (call.name === 'make_deposit') {
             if (!onchainToolsEnabled) {
-                outputs.push({
+                await emitOutput({
                     callId: call.callId,
                     name: call.name,
                     output: safeStringify({
@@ -1211,31 +1233,32 @@ async function executeToolCalls({
             });
             // A transaction hash indicates submission crossed a side-effect boundary.
             sideEffectsLikelyCommitted = true;
+            const output = await emitOutput({
+                callId: call.callId,
+                name: call.name,
+                output: safeStringify({
+                    status: 'submitted',
+                    transactionHash: String(txHash),
+                    pendingConfirmation: true,
+                }),
+            });
             try {
                 await publicClient.waitForTransactionReceipt({ hash: txHash });
-                outputs.push({
-                    callId: call.callId,
-                    name: call.name,
-                    output: safeStringify({
-                        status: 'confirmed',
-                        transactionHash: String(txHash),
-                    }),
+                await updateOutput(output, {
+                    status: 'confirmed',
+                    transactionHash: String(txHash),
                 });
             } catch (error) {
                 const timeout = isReceiptWaitTimeoutError(error);
-                outputs.push({
-                    callId: call.callId,
-                    name: call.name,
-                    output: safeStringify({
-                        status: 'submitted',
-                        transactionHash: String(txHash),
-                        pendingConfirmation: true,
-                        receiptCheckError: timeout ? undefined : error?.message ?? String(error),
-                        warning:
-                            timeout
-                                ? 'Timed out waiting for deposit receipt; transaction may still be pending or mined.'
-                                : 'Failed to verify deposit receipt after submission; transaction may still be pending or mined.',
-                    }),
+                await updateOutput(output, {
+                    status: 'submitted',
+                    transactionHash: String(txHash),
+                    pendingConfirmation: true,
+                    receiptCheckError: timeout ? undefined : error?.message ?? String(error),
+                    warning:
+                        timeout
+                            ? 'Timed out waiting for deposit receipt; transaction may still be pending or mined.'
+                            : 'Failed to verify deposit receipt after submission; transaction may still be pending or mined.',
                 });
             }
             continue;
@@ -1243,7 +1266,7 @@ async function executeToolCalls({
 
         if (call.name === 'make_transfer') {
             if (!onchainToolsEnabled) {
-                outputs.push({
+                await emitOutput({
                     callId: call.callId,
                     name: call.name,
                     output: safeStringify({
@@ -1261,31 +1284,32 @@ async function executeToolCalls({
                 amountWei: BigInt(args.amountWei),
             });
             sideEffectsLikelyCommitted = true;
+            const output = await emitOutput({
+                callId: call.callId,
+                name: call.name,
+                output: safeStringify({
+                    status: 'submitted',
+                    transactionHash: String(txHash),
+                    pendingConfirmation: true,
+                }),
+            });
             try {
                 await publicClient.waitForTransactionReceipt({ hash: txHash });
-                outputs.push({
-                    callId: call.callId,
-                    name: call.name,
-                    output: safeStringify({
-                        status: 'confirmed',
-                        transactionHash: String(txHash),
-                    }),
+                await updateOutput(output, {
+                    status: 'confirmed',
+                    transactionHash: String(txHash),
                 });
             } catch (error) {
                 const timeout = isReceiptWaitTimeoutError(error);
-                outputs.push({
-                    callId: call.callId,
-                    name: call.name,
-                    output: safeStringify({
-                        status: 'submitted',
-                        transactionHash: String(txHash),
-                        pendingConfirmation: true,
-                        receiptCheckError: timeout ? undefined : error?.message ?? String(error),
-                        warning:
-                            timeout
-                                ? 'Timed out waiting for transfer receipt; transaction may still be pending or mined.'
-                                : 'Failed to verify transfer receipt after submission; transaction may still be pending or mined.',
-                    }),
+                await updateOutput(output, {
+                    status: 'submitted',
+                    transactionHash: String(txHash),
+                    pendingConfirmation: true,
+                    receiptCheckError: timeout ? undefined : error?.message ?? String(error),
+                    warning:
+                        timeout
+                            ? 'Timed out waiting for transfer receipt; transaction may still be pending or mined.'
+                            : 'Failed to verify transfer receipt after submission; transaction may still be pending or mined.',
                 });
             }
             continue;
@@ -1293,7 +1317,7 @@ async function executeToolCalls({
 
         if (call.name === 'make_erc1155_deposit') {
             if (!onchainToolsEnabled) {
-                outputs.push({
+                await emitOutput({
                     callId: call.callId,
                     name: call.name,
                     output: safeStringify({
@@ -1315,31 +1339,32 @@ async function executeToolCalls({
             });
             // A transaction hash indicates submission crossed a side-effect boundary.
             sideEffectsLikelyCommitted = true;
+            const output = await emitOutput({
+                callId: call.callId,
+                name: call.name,
+                output: safeStringify({
+                    status: 'submitted',
+                    transactionHash: String(txHash),
+                    pendingConfirmation: true,
+                }),
+            });
             try {
                 await publicClient.waitForTransactionReceipt({ hash: txHash });
-                outputs.push({
-                    callId: call.callId,
-                    name: call.name,
-                    output: safeStringify({
-                        status: 'confirmed',
-                        transactionHash: String(txHash),
-                    }),
+                await updateOutput(output, {
+                    status: 'confirmed',
+                    transactionHash: String(txHash),
                 });
             } catch (error) {
                 const timeout = isReceiptWaitTimeoutError(error);
-                outputs.push({
-                    callId: call.callId,
-                    name: call.name,
-                    output: safeStringify({
-                        status: 'submitted',
-                        transactionHash: String(txHash),
-                        pendingConfirmation: true,
-                        receiptCheckError: timeout ? undefined : error?.message ?? String(error),
-                        warning:
-                            timeout
-                                ? 'Timed out waiting for ERC1155 deposit receipt; transaction may still be pending or mined.'
-                                : 'Failed to verify ERC1155 deposit receipt after submission; transaction may still be pending or mined.',
-                    }),
+                await updateOutput(output, {
+                    status: 'submitted',
+                    transactionHash: String(txHash),
+                    pendingConfirmation: true,
+                    receiptCheckError: timeout ? undefined : error?.message ?? String(error),
+                    warning:
+                        timeout
+                            ? 'Timed out waiting for ERC1155 deposit receipt; transaction may still be pending or mined.'
+                            : 'Failed to verify ERC1155 deposit receipt after submission; transaction may still be pending or mined.',
                 });
             }
             continue;
@@ -1347,7 +1372,7 @@ async function executeToolCalls({
 
         if (call.name === 'make_erc1155_transfer') {
             if (!onchainToolsEnabled) {
-                outputs.push({
+                await emitOutput({
                     callId: call.callId,
                     name: call.name,
                     output: safeStringify({
@@ -1369,31 +1394,32 @@ async function executeToolCalls({
                 data: args.data,
             });
             sideEffectsLikelyCommitted = true;
+            const output = await emitOutput({
+                callId: call.callId,
+                name: call.name,
+                output: safeStringify({
+                    status: 'submitted',
+                    transactionHash: String(txHash),
+                    pendingConfirmation: true,
+                }),
+            });
             try {
                 await publicClient.waitForTransactionReceipt({ hash: txHash });
-                outputs.push({
-                    callId: call.callId,
-                    name: call.name,
-                    output: safeStringify({
-                        status: 'confirmed',
-                        transactionHash: String(txHash),
-                    }),
+                await updateOutput(output, {
+                    status: 'confirmed',
+                    transactionHash: String(txHash),
                 });
             } catch (error) {
                 const timeout = isReceiptWaitTimeoutError(error);
-                outputs.push({
-                    callId: call.callId,
-                    name: call.name,
-                    output: safeStringify({
-                        status: 'submitted',
-                        transactionHash: String(txHash),
-                        pendingConfirmation: true,
-                        receiptCheckError: timeout ? undefined : error?.message ?? String(error),
-                        warning:
-                            timeout
-                                ? 'Timed out waiting for ERC1155 transfer receipt; transaction may still be pending or mined.'
-                                : 'Failed to verify ERC1155 transfer receipt after submission; transaction may still be pending or mined.',
-                    }),
+                await updateOutput(output, {
+                    status: 'submitted',
+                    transactionHash: String(txHash),
+                    pendingConfirmation: true,
+                    receiptCheckError: timeout ? undefined : error?.message ?? String(error),
+                    warning:
+                        timeout
+                            ? 'Timed out waiting for ERC1155 transfer receipt; transaction may still be pending or mined.'
+                            : 'Failed to verify ERC1155 transfer receipt after submission; transaction may still be pending or mined.',
                 });
             }
             continue;
@@ -1419,6 +1445,7 @@ async function executeToolCalls({
                 operation: Number(tx.operation),
             }));
             try {
+                let submittedOutput = null;
                 const result = await postBondAndPropose({
                     publicClient,
                     walletClient,
@@ -1427,6 +1454,19 @@ async function executeToolCalls({
                     ogModule: config.ogModule,
                     transactions,
                     explanation: args.explanation,
+                    onProposalTxSubmitted: async (proposalTxHash) => {
+                        submittedOutput = await emitOutput({
+                            callId: call.callId,
+                            name: call.name,
+                            output: safeStringify({
+                                status: 'submitted',
+                                transactionHash: String(proposalTxHash),
+                                proposalHash: String(proposalTxHash),
+                                ogProposalHash: null,
+                                pendingProposalHashResolution: true,
+                            }),
+                        });
+                    },
                 });
                 const proposalTxHash =
                     typeof result?.transactionHash === 'string' && result.transactionHash
@@ -1441,7 +1481,7 @@ async function executeToolCalls({
 
                 const submissionError = result?.submissionError ?? null;
                 if (!result?.skipped && !proposalTxHash && submissionError) {
-                    outputs.push({
+                    await emitOutput({
                         callId: call.callId,
                         name: call.name,
                         output: safeStringify({
@@ -1455,14 +1495,19 @@ async function executeToolCalls({
                         }),
                     });
                 } else {
-                    outputs.push({
-                        callId: call.callId,
-                        name: call.name,
-                        output: safeStringify({
-                            status: result?.skipped ? 'skipped' : 'submitted',
-                            ...result,
-                        }),
-                    });
+                    const finalPayload = {
+                        status: result?.skipped ? 'skipped' : 'submitted',
+                        ...result,
+                    };
+                    if (submittedOutput) {
+                        await updateOutput(submittedOutput, finalPayload);
+                    } else {
+                        await emitOutput({
+                            callId: call.callId,
+                            name: call.name,
+                            output: safeStringify(finalPayload),
+                        });
+                    }
                 }
             } catch (error) {
                 const timeout = isReceiptWaitTimeoutError(error);
@@ -1470,7 +1515,7 @@ async function executeToolCalls({
                 if (committedSideEffects) {
                     sideEffectsLikelyCommitted = true;
                 }
-                outputs.push({
+                await emitOutput({
                     callId: call.callId,
                     name: call.name,
                     output: safeStringify({
@@ -1510,7 +1555,7 @@ async function executeToolCalls({
                 if (result?.disputeHash) {
                     sideEffectsLikelyCommitted = true;
                 }
-                outputs.push({
+                await emitOutput({
                     callId: call.callId,
                     name: call.name,
                     output: safeStringify({
@@ -1523,7 +1568,7 @@ async function executeToolCalls({
                 if (committedSideEffects) {
                     sideEffectsLikelyCommitted = true;
                 }
-                outputs.push({
+                await emitOutput({
                     callId: call.callId,
                     name: call.name,
                     output: safeStringify({
@@ -1538,7 +1583,7 @@ async function executeToolCalls({
         }
 
         console.warn('[agent] Unknown tool call:', call.name);
-        outputs.push({
+        await emitOutput({
             callId: call.callId,
             name: call.name,
             output: safeStringify({ status: 'skipped', reason: 'unknown tool' }),
@@ -1550,6 +1595,7 @@ async function executeToolCalls({
                 console.log('[agent] Built transactions but proposals are disabled; skipping propose.');
             } else {
                 try {
+                    let submittedOutput = null;
                     const result = await postBondAndPropose({
                         publicClient,
                         walletClient,
@@ -1557,6 +1603,19 @@ async function executeToolCalls({
                         config,
                         ogModule: config.ogModule,
                         transactions: builtTransactions,
+                        onProposalTxSubmitted: async (proposalTxHash) => {
+                            submittedOutput = await emitOutput({
+                                callId: 'auto_post_bond_and_propose',
+                                name: 'post_bond_and_propose',
+                                output: safeStringify({
+                                    status: 'submitted',
+                                    transactionHash: String(proposalTxHash),
+                                    proposalHash: String(proposalTxHash),
+                                    ogProposalHash: null,
+                                    pendingProposalHashResolution: true,
+                                }),
+                            });
+                        },
                     });
                     const proposalTxHash =
                         typeof result?.transactionHash === 'string' && result.transactionHash
@@ -1571,7 +1630,7 @@ async function executeToolCalls({
 
                     const submissionError = result?.submissionError ?? null;
                     if (!result?.skipped && !proposalTxHash && submissionError) {
-                        outputs.push({
+                        await emitOutput({
                             callId: 'auto_post_bond_and_propose',
                             name: 'post_bond_and_propose',
                             output: safeStringify({
@@ -1586,14 +1645,19 @@ async function executeToolCalls({
                             }),
                         });
                     } else {
-                        outputs.push({
-                            callId: 'auto_post_bond_and_propose',
-                            name: 'post_bond_and_propose',
-                            output: safeStringify({
-                                status: result?.skipped ? 'skipped' : 'submitted',
-                                ...result,
-                            }),
-                        });
+                        const finalPayload = {
+                            status: result?.skipped ? 'skipped' : 'submitted',
+                            ...result,
+                        };
+                        if (submittedOutput) {
+                            await updateOutput(submittedOutput, finalPayload);
+                        } else {
+                            await emitOutput({
+                                callId: 'auto_post_bond_and_propose',
+                                name: 'post_bond_and_propose',
+                                output: safeStringify(finalPayload),
+                            });
+                        }
                     }
                 } catch (error) {
                     const timeout = isReceiptWaitTimeoutError(error);
@@ -1601,7 +1665,7 @@ async function executeToolCalls({
                     if (committedSideEffects) {
                         sideEffectsLikelyCommitted = true;
                     }
-                    outputs.push({
+                    await emitOutput({
                         callId: 'auto_post_bond_and_propose',
                         name: 'post_bond_and_propose',
                         output: safeStringify({

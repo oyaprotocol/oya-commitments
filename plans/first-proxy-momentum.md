@@ -20,6 +20,9 @@ Turn `agent-library/agents/first-proxy/` into a deterministic `Agent Proxy` stra
 - [x] 2026-04-06 18:02Z: Replaced onchain AMM valuation with CoinGecko current and historical USD prices, added always-on balance snapshot polling for deterministic reevaluation, and reran module validation.
 - [x] 2026-04-06 23:20Z: Replaced CoinGecko with Alchemy Prices API, derived price auth from Alchemy env/RPC configuration, fixed stale current-price caching, and reran module validation.
 - [x] 2026-04-07: Reworked the proposal flow to price reimbursement from the confirmed deposit tx, retain deleted-epoch replay plans without re-depositing, and switch OG proposal status reconciliation to incremental log scans.
+- [x] 2026-04-07: Hardened shared tool execution so `onToolOutput()` is notified at tx-hash time for deposits and proposals, eliminating the restart window where a submitted side effect could be replayed before local state persisted.
+- [x] 2026-04-07: Tightened Alchemy historical lookup to use the latest sample at or before each epoch/deposit boundary, eliminating look-ahead pricing bias.
+- [x] 2026-04-07: Added regression coverage in `agent/scripts/test-tool-output-streaming.mjs` and `agent-library/agents/first-proxy/test-first-proxy-agent.mjs`, then reran shared and module validation.
 
 ## Surprises & Discoveries
 
@@ -37,6 +40,12 @@ Turn `agent-library/agents/first-proxy/` into a deterministic `Agent Proxy` stra
 
 - Observation: Pricing reimbursement at confirmed deposit time requires a two-phase agent flow.
   Evidence: the deterministic runner executes one tool-call batch at a time, so a fresh epoch cannot both deposit first and still produce a deposit-time-priced reimbursement explanation in the same batch.
+
+- Observation: Persisting local recovery state only after `executeToolCalls()` returns leaves a crash window if a tx is submitted while the batch is still waiting on receipts or proposal-hash resolution.
+  Evidence: `agent/src/lib/tools.js` submits the deposit/proposal tx before returning, while `agent/src/lib/decision-runtime.js` previously invoked `onToolOutput()` only after the entire batch finished.
+
+- Observation: “closest historical point” is not a safe pricing primitive for deployment-anchored epochs.
+  Evidence: Alchemy historical samples can be sparse, so nearest-point matching can select a price after the requested timestamp and leak future information into momentum ranking or reimbursement valuation.
 
 ## Decision Log
 
@@ -80,9 +89,17 @@ Turn `agent-library/agents/first-proxy/` into a deterministic `Agent Proxy` stra
   Rationale: Full-history rescans on every deterministic poll do not scale for a long-lived agent.
   Date/Author: 2026-04-07 / Codex.
 
+- Decision: Treat tx-hash discovery as the durability boundary for stateful agents, and notify `onToolOutput()` immediately from shared tool execution rather than after the full batch completes.
+  Rationale: A process crash after tx submission but before batch return must not re-enable the same deposit/proposal flow on restart.
+  Date/Author: 2026-04-07 / Codex.
+
+- Decision: Use the latest historical price sample at or before each target timestamp, never the closest sample on either side.
+  Rationale: Strategy decisions and reimbursement snapshots must not depend on future prices relative to the epoch or deposit boundary.
+  Date/Author: 2026-04-07 / Codex.
+
 ## Outcomes & Retrospective
 
-`first-proxy` now runs as a deterministic proxy-trading module with no OpenAI dependency. The agent reconstructs six-hour deployment-anchored epochs, ranks WETH versus cbBTC by historical performance, emits a deposit for the winning asset, then builds the reimbursement proposal from the confirmed deposit receipt on the next tick. The module persists pending deposit and replay-plan state so deleted or dropped proposal flows can be retried without repeating the deposit, and it now scans OG status logs incrementally instead of rescanning from deployment on every poll.
+`first-proxy` now runs as a deterministic proxy-trading module with no OpenAI dependency. The agent reconstructs six-hour deployment-anchored epochs, ranks WETH versus cbBTC by historical performance, emits a deposit for the winning asset, then builds the reimbursement proposal from the confirmed deposit receipt on the next tick. The module persists pending deposit and replay-plan state so deleted or dropped proposal flows can be retried without repeating the deposit, scans OG status logs incrementally instead of rescanning from deployment on every poll, and now relies on shared tx-hash-time output notifications so a submitted deposit or proposal is durably tracked before receipt waiting or proposal-hash resolution completes.
 
 ## Context and Orientation
 
@@ -98,6 +115,7 @@ Shared runtime touchpoints used by the module:
 
 - `agent/src/lib/decision-runtime.js`
 - `agent/src/lib/tx.js`
+- `agent/src/lib/tools.js`
 - `agent/src/lib/chain-history.js`
 
 ## Plan of Work
@@ -126,7 +144,13 @@ Completed implementation steps:
    Once the deposit is confirmed, the next tick builds `build_og_transactions` and `post_bond_and_propose` using the confirmed deposit-time price snapshot.
    Replay runs emit only `build_og_transactions` and `post_bond_and_propose` using the persisted deposit-time plan.
 
-6. Added regression tests and validation evidence.
+6. Hardened shared state persistence around tx submission.
+   `agent/src/lib/tools.js` now surfaces deposit/proposal submissions to `onToolOutput()` as soon as a tx hash exists, and `agent/src/lib/decision-runtime.js` delivers those outputs immediately instead of waiting for the whole batch to finish.
+
+7. Removed look-ahead bias from historical pricing.
+   The Alchemy price helpers now select the latest sample at or before the requested timestamp for both momentum windows and deposit-time reimbursement valuation.
+
+8. Added regression tests and validation evidence.
 
 ## Validation and Acceptance
 
@@ -134,6 +158,9 @@ Commands run from `/Users/johnshutt/Code/oya-commitments`:
 
     node agent/scripts/validate-agent.mjs --module=first-proxy
     node agent-library/agents/first-proxy/test-first-proxy-agent.mjs
+    node agent/scripts/test-tool-output-streaming.mjs
+    node agent/scripts/test-tool-receipt-error-handling.mjs
+    node agent/scripts/test-tool-output-retryability.mjs
 
 Observed results:
 
@@ -142,6 +169,15 @@ Observed results:
 
 - `node agent-library/agents/first-proxy/test-first-proxy-agent.mjs`
   Result: `[test] first-proxy deterministic momentum agent OK`
+
+- `node agent/scripts/test-tool-output-streaming.mjs`
+  Result: `[test] tool output streaming OK`
+
+- `node agent/scripts/test-tool-receipt-error-handling.mjs`
+  Result: `[test] tool receipt-error handling OK`
+
+- `node agent/scripts/test-tool-output-retryability.mjs`
+  Result: `[test] tool output retryability classification OK`
 
 Acceptance status:
 
@@ -153,6 +189,8 @@ Acceptance status:
 - Deposit-success / proposal-retry recovery is covered: complete.
 - Deleted proposals are retried without re-depositing: complete.
 - OG proposal history is reconciled incrementally after the first scan: complete.
+- Deposit/proposal state is persisted at tx-hash time instead of after full batch completion: complete.
+- Historical pricing no longer looks ahead past epoch/deposit boundaries: complete.
 
 ## Idempotence and Recovery
 
@@ -191,6 +229,9 @@ Files changed:
 - `agent-library/agents/first-proxy/test-first-proxy-agent.mjs`
 - `agent-library/agents/first-proxy/agent.json`
 - `agent-library/agents/first-proxy/migration-notes.md`
+- `agent/src/lib/decision-runtime.js`
+- `agent/src/lib/tools.js`
+- `agent/scripts/test-tool-output-streaming.mjs`
 - `plans/first-proxy-momentum.md`
 
 Primary runtime dependencies:

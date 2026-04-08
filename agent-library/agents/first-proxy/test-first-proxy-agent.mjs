@@ -561,6 +561,68 @@ async function testValidateUsesUsdcSnapshotPrice() {
     });
 }
 
+async function testDepositSnapshotDoesNotLookAhead() {
+    const stateFile = await createStateFile();
+    const depositTxHash = `0x${'d'.repeat(64)}`;
+    const balances = {
+        USDC: 25_000_000n,
+        WETH: 0n,
+        cbBTC: 0n,
+    };
+    const prices = createPriceDataset({
+        current: {
+            [PRICE_SYMBOLS.WETH]: 2000,
+            [PRICE_SYMBOLS.cbBTC]: 90,
+            [PRICE_SYMBOLS.USDC]: 1,
+        },
+        range: {
+            [PRICE_SYMBOLS.WETH]: [
+                [0, 1000],
+                [6 * 3600 * 1000, 1200],
+                [7 * 3600 * 1000 - 60_000, 1500],
+                [7 * 3600 * 1000 + 60_000, 9000],
+            ],
+            [PRICE_SYMBOLS.cbBTC]: [
+                [0, 100],
+                [6 * 3600 * 1000, 90],
+                [7 * 3600 * 1000 - 60_000, 90],
+                [7 * 3600 * 1000 + 60_000, 900],
+            ],
+            [PRICE_SYMBOLS.USDC]: [
+                [0, 1],
+                [6 * 3600 * 1000, 1],
+                [7 * 3600 * 1000 - 60_000, 1],
+                [7 * 3600 * 1000 + 60_000, 2],
+            ],
+        },
+    });
+    const config = createConfig({ stateFile, balances });
+    const publicClient = createPublicClient({
+        latestBlock: 7n,
+        balances,
+        transactionReceiptsByHash: {
+            [depositTxHash.toLowerCase()]: {
+                status: 'success',
+                blockNumber: 7n,
+            },
+        },
+    });
+    resetStrategyState({ config });
+
+    await withFetchMock(prices, async () => {
+        const { proposalCalls } = await advanceToProposalPhase({
+            publicClient,
+            config,
+            depositTxHash,
+        });
+        const postArgs = parseToolArgs(proposalCalls[1]);
+        assert.ok(postArgs.explanation.includes('wethPriceMicros=1500000000'));
+        assert.ok(!postArgs.explanation.includes('wethPriceMicros=9000000000'));
+        assert.ok(postArgs.explanation.includes('usdcPriceMicros=1000000'));
+        assert.ok(!postArgs.explanation.includes('usdcPriceMicros=2000000'));
+    });
+}
+
 async function testNoProposalWhenInsufficientReimbursementInventory() {
     const stateFile = await createStateFile();
     const balances = {
@@ -1144,6 +1206,7 @@ async function run() {
     await testWinnerSelectionAndSplitReimbursement();
     await testUsdcPreferredWhenBothMomentumAssetsUp();
     await testValidateUsesUsdcSnapshotPrice();
+    await testDepositSnapshotDoesNotLookAhead();
     await testNoProposalWhenInsufficientReimbursementInventory();
     await testPendingPlanReplayAfterDeposit();
     await testDeletedProposalReplaysWithoutRedeposit();

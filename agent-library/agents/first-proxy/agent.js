@@ -715,38 +715,38 @@ function normalizeHistoricalPriceSeries(payload, symbol) {
     return normalized;
 }
 
-function pickClosestPricePoint(series, targetSeconds) {
+function pickLatestPricePointAtOrBefore(series, targetSeconds) {
     let best = null;
-    let bestDistance = Number.POSITIVE_INFINITY;
     for (const point of series) {
-        const distance = Math.abs(point.timestampSeconds - targetSeconds);
-        if (distance < bestDistance) {
-            best = point;
-            bestDistance = distance;
-            continue;
-        }
-        if (distance === bestDistance && best && point.timestampSeconds <= targetSeconds) {
+        if (point.timestampSeconds <= targetSeconds && (!best || point.timestampSeconds > best.timestampSeconds)) {
             best = point;
         }
     }
-    return best ?? series[series.length - 1];
+    return best;
 }
 
-async function fetchHistoricalPointFromAlchemy({
+async function fetchHistoricalPointAtOrBeforeAlchemy({
     config,
     policy,
     symbol,
     targetSeconds,
-    radiusSeconds,
+    lookbackSeconds,
 }) {
     const payload = await fetchHistoricalRangeFromAlchemy({
         config,
         policy,
         symbol,
-        fromSeconds: Math.max(0, targetSeconds - radiusSeconds),
-        toSeconds: targetSeconds + radiusSeconds,
+        fromSeconds: Math.max(0, targetSeconds - lookbackSeconds),
+        toSeconds: targetSeconds,
     });
-    return pickClosestPricePoint(normalizeHistoricalPriceSeries(payload, symbol), targetSeconds);
+    const point = pickLatestPricePointAtOrBefore(
+        normalizeHistoricalPriceSeries(payload, symbol),
+        targetSeconds
+    );
+    if (!point) {
+        throw new Error(`Alchemy historical prices returned no point at or before ${targetSeconds} for ${symbol}.`);
+    }
+    return point;
 }
 
 async function resolveStartBlock({ publicClient, config, latestBlock }) {
@@ -1103,32 +1103,32 @@ async function resolveHistoricalReturns({
 
     for (const symbol of MOMENTUM_SYMBOLS) {
         const providerSymbol = policy.priceFeed.symbols[symbol];
+        const lookbackSeconds = Math.max(300, Math.floor(policy.epochSeconds / 4));
         const history = await fetchHistoricalRangeFromAlchemy({
             config,
             policy,
             symbol: providerSymbol,
-            fromSeconds: Number(windowStartSeconds),
+            fromSeconds: Math.max(0, Number(windowStartSeconds) - lookbackSeconds),
             toSeconds: Number(windowEndSeconds),
         });
         const series = normalizeHistoricalPriceSeries(history, providerSymbol);
-        let startPoint = pickClosestPricePoint(series, Number(windowStartSeconds));
-        let endPoint = pickClosestPricePoint(series, Number(windowEndSeconds));
-        if (series.length < 2 || startPoint.timestampSeconds === endPoint.timestampSeconds) {
-            const fallbackRadiusSeconds = Math.max(300, Math.floor(policy.epochSeconds / 4));
+        let startPoint = pickLatestPricePointAtOrBefore(series, Number(windowStartSeconds));
+        let endPoint = pickLatestPricePointAtOrBefore(series, Number(windowEndSeconds));
+        if (!startPoint || !endPoint) {
             [startPoint, endPoint] = await Promise.all([
-                fetchHistoricalPointFromAlchemy({
+                fetchHistoricalPointAtOrBeforeAlchemy({
                     config,
                     policy,
                     symbol: providerSymbol,
                     targetSeconds: Number(windowStartSeconds),
-                    radiusSeconds: fallbackRadiusSeconds,
+                    lookbackSeconds,
                 }),
-                fetchHistoricalPointFromAlchemy({
+                fetchHistoricalPointAtOrBeforeAlchemy({
                     config,
                     policy,
                     symbol: providerSymbol,
                     targetSeconds: Number(windowEndSeconds),
-                    radiusSeconds: fallbackRadiusSeconds,
+                    lookbackSeconds,
                 }),
             ]);
         }
@@ -1160,12 +1160,12 @@ async function resolvePriceSnapshotAtTimestamp({
     await Promise.all(
         REIMBURSEMENT_SYMBOLS.map(async (symbol) => {
             const providerSymbol = policy.priceFeed.symbols[symbol];
-            const point = await fetchHistoricalPointFromAlchemy({
+            const point = await fetchHistoricalPointAtOrBeforeAlchemy({
                 config,
                 policy,
                 symbol: providerSymbol,
                 targetSeconds: Number(timestampSeconds),
-                radiusSeconds,
+                lookbackSeconds: radiusSeconds,
             });
             pricesBySymbol[symbol] = point.price;
         })
