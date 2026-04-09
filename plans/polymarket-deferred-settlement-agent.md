@@ -8,9 +8,9 @@ Build a new example agent that trades on Polymarket with the agent's own wallet 
 
 After this work, a reviewer or operator should be able to:
 
-- run a standalone Oya trade-log publication node for a selected agent module
+- run a standalone Oya signed-message publication node for a selected agent module
 - run a new agent module under `agent-library/agents/` that executes external Polymarket trades and maintains durable per-market liability ledgers
-- inspect IPFS-published trade-log artifacts that show what the agent says it did, what the node attested to, and what settlement is now owed
+- inspect IPFS-published message artifacts, including Polymarket trade-log messages that show what the agent says it did, what the node attested to, and what settlement is now owed
 - observe that the agent only proposes reimbursement after depositing the required final settlement amount into the Safe
 - observe that the agent disputes user withdrawals that violate the commitment's withdrawal rule while one or more market streams are still unsettled
 
@@ -26,7 +26,7 @@ This plan intentionally treats the result as an example module, not a general-pu
 - [x] 2026-04-09 17:22Z: Revised the plan after user clarification: the node is notary-only in v1, reimbursement is for the initially fronted principal, later trading affects only the final settlement deposit, and fixed stake is acceptable.
 - [x] 2026-04-09 17:30Z: Revised the plan after user clarification that each trade is either a reimbursable new trade or a continuation trade that does not create new reimbursement principal.
 - [x] 2026-04-09 17:30Z: Revised the plan to support any number of Polymarket markets per commitment by modeling the system as many concurrent per-market streams keyed by `marketId`.
-- [ ] Implement the Oya trade-log publication surface and its durable store.
+- [ ] Implement the generalized Oya signed-message publication surface and its durable store.
 - [ ] Create the new deferred-settlement Polymarket agent module and its commitment text.
 - [ ] Add tests, smoke harness coverage, and documentation updates.
 
@@ -35,8 +35,8 @@ This plan intentionally treats the result as an example module, not a general-pu
 - Observation: The repo already has the two halves this design needs, but not yet the combined flow.
   Evidence: `agent-library/agents/copy-trading/agent.js` already does external Polymarket execution with agent funds, while `agent-library/agents/polymarket-intent-trader/agent.js` already does durable IPFS archival and actual-spend reimbursement accounting.
 
-- Observation: The Oya node is currently split into a signed message inbox hosted by the main agent process and a separate standalone proposal-publication node.
-  Evidence: `agent/src/lib/message-api.js` is started from `agent/src/lib/runtime-loop.js`, while proposal publication runs from `agent/scripts/start-proposal-publish-node.mjs` and `agent/src/lib/proposal-publication-api.js`.
+- Observation: The node-side publish surface should be generalized beyond Polymarket-specific trade logs.
+  Evidence: The user wants the endpoint to accept arbitrary signed agent messages, with any domain-specific interpretation details embedded inside the message itself.
 
 - Observation: The existing `Staked External Polymarket Execution` rule template is directionally right but incomplete for the clarified accounting model.
   Evidence: `agent-library/RULE_TEMPLATES.md` defines stake, logging, and post-resolution settlement, but it does not yet spell out "initial principal reimbursement plus final settlement deposit" or misreporting-specific slash conditions.
@@ -60,12 +60,12 @@ This plan intentionally treats the result as an example module, not a general-pu
   Rationale: This reduces risk and keeps the new module local while reusing already-proven Polymarket execution and reimbursement logic.
   Date/Author: 2026-04-09 / Codex.
 
-- Decision: Add a new standalone Oya trade-log publication surface instead of overloading the existing message API or proposal-publication API.
-  Rationale: Trade-log publication has different request shape, persistence, and duplicate semantics. A sibling service keeps the current node behavior stable and avoids turning one endpoint into a multi-purpose protocol parser.
+- Decision: Add a new standalone Oya signed-message publication surface instead of overloading the existing message API or proposal-publication API.
+  Rationale: Publication has different persistence and duplicate semantics from the runtime inbox, but the endpoint itself should stay domain-agnostic so Polymarket-specific details live inside the signed message rather than the API schema.
   Date/Author: 2026-04-09 / Codex.
 
-- Decision: Use cumulative, hash-chained trade-log snapshots keyed by `(agent signer, chainId, commitmentSafe, user, marketId)` instead of fire-and-forget per-trade messages.
-  Rationale: The existing rule template already describes "an updated log documenting all trades." A cumulative stream with `sequence` and `previousCid` is easier to replay, verify, dedupe, and reason about during slashing or settlement.
+- Decision: The Polymarket example will use cumulative, hash-chained trade-log messages keyed by `(agent signer, chainId, commitmentSafe, user, marketId)` instead of fire-and-forget per-trade messages.
+  Rationale: The node endpoint is generic, but the existing rule template already describes "an updated log documenting all trades." A cumulative stream with `sequence` and `previousCid` is easier to replay, verify, dedupe, and reason about during slashing or settlement.
   Date/Author: 2026-04-09 / Codex.
 
 - Decision: Multi-market support will be implemented as a collection of independent per-market streams, not one merged portfolio log.
@@ -92,7 +92,7 @@ This plan intentionally treats the result as an example module, not a general-pu
   Rationale: The user explicitly accepts fixed slashing risk plus reputation damage as sufficient deterrence for this example.
   Date/Author: 2026-04-09 / Codex.
 
-- Decision: Keep v1 IPFS trade logs public and plaintext without treating that as a blocker.
+- Decision: Keep v1 Polymarket trade-log messages public and plaintext without treating that as a blocker.
   Rationale: The user explicitly accepts this because the underlying executed Polymarket trades are already public.
   Date/Author: 2026-04-09 / Codex.
 
@@ -105,7 +105,7 @@ This plan intentionally treats the result as an example module, not a general-pu
 Initial outcome: the repo already contains most of the reusable building blocks, but the user's proposed flow only works cleanly if the implementation adds three things that do not exist yet:
 
 1. A ledger system that separately tracks reimbursable initiated-trade principal and final settlement owed to the user for each active market.
-2. A dedicated Oya node publication surface for signed trade logs, not just signed proposals.
+2. A dedicated Oya node publication surface for arbitrary signed agent messages, which the Polymarket example will use for trade-log messages.
 3. A clearer commitment rule set covering misreporting slashing and withdrawal limits while any supported market remains unsettled.
 
 No implementation has started yet. This section must be updated after each milestone with the actual files changed, validation evidence, and any scope corrections.
@@ -131,16 +131,16 @@ The relevant current code paths are:
   - standalone node pattern for signed request authentication, IPFS publication, and durable dedupe
 
 - `agent/src/lib/proposal-publication-store.js`
-  - crash-safe durable JSON store pattern that can be mirrored for trade logs
+  - crash-safe durable JSON store pattern that can be mirrored for generalized signed-message publication
 
 - `agent/src/lib/polymarket.js` and `agent/src/lib/polymarket-relayer.js`
   - shared Polymarket execution helpers
-  - currently focused on CLOB orders, trades, and relayer wallet resolution, not on market-resolution or trade-log publication flows
+  - currently focused on CLOB orders, trades, and relayer wallet resolution, not on market-resolution or generalized message-publication flows
 
 The commitment side remains rule-driven rather than contract-driven. This means no new Solidity code should be assumed unless implementation proves a contract gap. The expected enforcement model is:
 
 - the agent deposits stake into the commitment
-- the agent publishes signed trade-log snapshots to the Oya node for each active market
+- the agent publishes signed messages to the Oya node for each active market, with Polymarket-specific trade details embedded in those messages
 - the agent deposits the final settlement amount owed to the user for a given market into the Safe before claiming reimbursement for that market
 - the agent disputes user withdrawals that violate the commitment's withdrawal rule while any market settlement is still outstanding
 - the user or another watcher can slash the agent's stake if the published log and market outcome show non-settlement or misreporting for any market
@@ -176,14 +176,14 @@ Milestone 0 must also define the portfolio-level rollups derived from those per-
 
 Milestone 0 must also define the module config shape for multi-market support. The plan should replace any single-market policy assumptions with a per-market policy map keyed by `marketId` so new markets can be added without changing the core ledger model.
 
-Milestone 1 adds a trade-log publication protocol to the Oya node. This should parallel the proposal-publication node but not replace it. Add a new config block such as `tradeLogPublishApi`, a canonical signed payload builder, a durable store, and a standalone startup helper. The node endpoint should accept a cumulative trade-log snapshot, authenticate the agent signature, attach a node signature, publish the final artifact to IPFS, pin it, and store duplicate-safe state keyed by the per-market stream identity plus sequence. In v1 the node is a notary and archivist, not an independent trade verifier. The node must be able to persist and serve arbitrarily many concurrent `marketId` streams for the same commitment and user.
+Milestone 1 adds a generalized signed-message publication protocol to the Oya node. This should parallel the proposal-publication node but not replace it. Add a new config block such as `messagePublishApi`, a canonical signed payload builder, a durable store, and a standalone startup helper. The node endpoint should accept an arbitrary signed message together with commitment addresses and the agent address, authenticate the agent signature, attach a node signature, publish the final artifact to IPFS, pin it, and store duplicate-safe state keyed by the signed message identity. In v1 the node is a notary and archivist, not an independent message verifier. The Polymarket example should use this generalized publication surface by embedding the market-specific trade details inside the opaque signed message payload.
 
 Milestone 2 creates the new agent module under `agent-library/agents/polymarket-staked-external-settlement/`. The module should own all agent-specific behavior. It should:
 
 - observe one configured trigger source for v1 trading decisions
 - execute external Polymarket trades from the agent wallet across any number of supported markets
 - update and persist per-market ledgers plus portfolio-level unsettled-state rollups locally
-- publish a signed ledger snapshot to the Oya node after every material state change in the affected market
+- publish a signed message to the Oya node after every material state change in the affected market
 - watch market status for every active market until that market is flat or resolved
 - deposit the final settlement amount owed to the user for a resolved market before requesting reimbursement for that market
 - refuse new trades when the fixed stake is not active or policy constraints are violated
@@ -209,25 +209,26 @@ From `/Users/johnshutt/Code/oya-commitments`:
 
    - `agent/src/lib/config.js`
    - `agent/src/lib/agent-config.js`
-   - `agent/src/lib/signed-trade-log.js` (new)
-   - `agent/src/lib/trade-log-publication-store.js` (new)
-   - `agent/src/lib/trade-log-publication-api.js` (new)
-   - `agent/scripts/lib/trade-log-publish-runtime.mjs` (new)
-   - `agent/scripts/start-trade-log-publish-node.mjs` (new)
-   - `agent/scripts/test-trade-log-publication-api.mjs` (new)
-   - `agent/scripts/test-trade-log-publication-store.mjs` (new)
+   - `agent/src/lib/signed-published-message.js` (new)
+   - `agent/src/lib/message-publication-store.js` (new)
+   - `agent/src/lib/message-publication-api.js` (new)
+   - `agent/scripts/lib/message-publish-runtime.mjs` (new)
+   - `agent/scripts/start-message-publish-node.mjs` (new)
+   - `agent/scripts/test-message-publication-api.mjs` (new)
+   - `agent/scripts/test-message-publication-store.mjs` (new)
 
    Commands:
 
-   - `node agent/scripts/start-trade-log-publish-node.mjs --module=polymarket-staked-external-settlement --dry-run`
-   - `node agent/scripts/test-trade-log-publication-store.mjs`
-   - `node agent/scripts/test-trade-log-publication-api.mjs`
+   - `node agent/scripts/start-message-publish-node.mjs --module=polymarket-staked-external-settlement --dry-run`
+   - `node agent/scripts/test-message-publication-store.mjs`
+   - `node agent/scripts/test-message-publication-api.mjs`
 
    Expected behavior:
 
    - dry-run prints resolved host, port, chain, state file, and node name
    - exact duplicate publication retries return the existing CID and node signature
-   - conflicting sequence or `previousCid` mismatches fail closed
+   - the API accepts arbitrary signed messages without needing Polymarket-specific top-level fields
+   - the Polymarket example can still reject malformed per-market sequence histories inside its own message payload processing
 
 2. Extend shared Polymarket helpers only where the functionality is clearly cross-agent.
 
@@ -303,15 +304,15 @@ From `/Users/johnshutt/Code/oya-commitments`:
    Expected behavior:
 
    - local harness starts the agent plus any required mock node services
-   - the scenario publishes trade-log artifacts for more than one `marketId`
+   - the scenario publishes message artifacts for more than one `marketId`
    - the scenario reaches either mock final exits or mock market resolutions and performs the expected deposit-plus-reimbursement sequence per market
 
 ## Validation and Acceptance
 
 Required validation commands:
 
-- `node agent/scripts/test-trade-log-publication-store.mjs`
-- `node agent/scripts/test-trade-log-publication-api.mjs`
+- `node agent/scripts/test-message-publication-store.mjs`
+- `node agent/scripts/test-message-publication-api.mjs`
 - `node agent-library/agents/polymarket-staked-external-settlement/test-polymarket-staked-external-settlement-agent.mjs`
 - `node agent/scripts/validate-agent.mjs --module=polymarket-staked-external-settlement`
 - `node agent/scripts/testnet-harness.mjs smoke --module=polymarket-staked-external-settlement --profile=local-mock`
@@ -319,7 +320,7 @@ Required validation commands:
 Acceptance requires all of the following:
 
 - the new module stays local to `agent-library/agents/polymarket-staked-external-settlement/`, except for clearly shared node or Polymarket infrastructure
-- the Oya node can archive, pin, and dedupe signed trade-log snapshots
+- the Oya node can archive, pin, and dedupe arbitrary signed messages
 - the node and module both support arbitrarily many concurrent `marketId` streams for the same commitment and user
 - the trade ledger preserves the separation between reimbursable initiated-trade principal and final settlement owed to the user for each market
 - continuation trades do not add reimbursement principal, but they do affect final settlement accounting
@@ -381,21 +382,18 @@ Primary source links used for the above summary:
 
 New node-side interface to add:
 
-- `POST /v1/trade-logs/publish`
+- `POST /v1/messages/publish`
 
 Proposed signed request body shape:
 
 - `chainId`
 - `requestId`
-- `commitmentSafe`
-- `user`
-- `marketId`
-- `sequence`
-- `previousCid`
-- `snapshot`
+- `commitmentAddresses`
+- `agentAddress`
+- `message`
 - `auth`
 
-Proposed snapshot contents:
+For endpoint purposes, `message` is opaque and domain-agnostic. Any details needed to interpret it must be included in the message itself. For the Polymarket example, that message should include at least:
 
 - stream identity (`commitmentSafe`, `user`, `marketId`, `tradingWallet`)
 - cumulative trade entries with timestamps, external identifiers, and `tradeEntryKind`
@@ -403,18 +401,18 @@ Proposed snapshot contents:
 - current position summary
 - settlement status summary
 
-The protocol stays per-market on purpose. Supporting many markets means supporting many independent snapshots and sequence chains in parallel, not removing `marketId` from the interface.
+The protocol stays generalized on the wire but per-market in the Polymarket payload design. Supporting many markets means publishing many independent messages and message histories in parallel, not removing `marketId` from the Polymarket message contents.
 
 New config dependency to add in module config:
 
-- `tradeLogPublishApi.enabled`
-- `tradeLogPublishApi.host`
-- `tradeLogPublishApi.port`
-- `tradeLogPublishApi.requireSignerAllowlist`
-- `tradeLogPublishApi.signerAllowlist`
-- `tradeLogPublishApi.signatureMaxAgeSeconds`
-- `tradeLogPublishApi.stateFile`
-- `tradeLogPublishApi.nodeName`
+- `messagePublishApi.enabled`
+- `messagePublishApi.host`
+- `messagePublishApi.port`
+- `messagePublishApi.requireSignerAllowlist`
+- `messagePublishApi.signerAllowlist`
+- `messagePublishApi.signatureMaxAgeSeconds`
+- `messagePublishApi.stateFile`
+- `messagePublishApi.nodeName`
 
 New per-market module config dependency to add:
 
@@ -434,6 +432,6 @@ Known design gaps that this plan must close before calling the agent sound:
 - reimbursable initiated-trade principal and final settlement value must stay distinct throughout the ledger and proposal flow
 - the implementation must encode the user-provided `initiated` versus `continuation` classification as deterministic state, not ad hoc operator judgment
 - the withdrawal rule still needs exact commitment wording and corresponding dispute logic across multiple simultaneous unsettled markets
-- the rule must say that false or misleading trade logs published through the node are slashable
+- the rule must say that false or misleading Polymarket messages published through the node are slashable
 - "market close" must be replaced with explicit resolution or flat-exit semantics
 - any shared rule-template edit must be minimal and user-approved before implementation
