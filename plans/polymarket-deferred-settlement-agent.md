@@ -4,15 +4,15 @@ This ExecPlan is a living document and must be maintained according to `PLANS.md
 
 ## Purpose / Big Picture
 
-Build a new example agent that trades on Polymarket with the agent's own wallet and funds, keeps the user's capital parked in the commitment Safe as reimbursement collateral, and settles the net result only when the market stream is over. In this design, the agent can change positions quickly offchain and off-Safe, but every material trade state change is recorded in a signed trade log that an Oya node archives to IPFS and co-signs. When the position is finally closed or the market resolves, the agent deposits the user's gross proceeds into the commitment and then claims reimbursement only for the still-outstanding agent-funded principal.
+Build a new example agent that trades on Polymarket with the agent's own wallet and funds, keeps the user's capital parked in the commitment Safe, and settles only when the market stream is over. In this design, the agent can change positions quickly offchain and off-Safe, but every material trade state change is recorded in a signed trade log that an Oya node archives to IPFS and co-signs. When the position is finally closed or the market resolves, the agent deposits whatever settlement amount is owed to the user under the logged trade history and then claims reimbursement for the initially fronted principal defined by the commitment rules.
 
 After this work, a reviewer or operator should be able to:
 
 - run a standalone Oya trade-log publication node for a selected agent module
 - run a new agent module under `agent-library/agents/` that executes external Polymarket trades and maintains a durable liability ledger
 - inspect IPFS-published trade-log artifacts that show what the agent says it did, what the node attested to, and what settlement is now owed
-- observe that the agent only proposes reimbursement after depositing the corresponding proceeds into the Safe
-- observe that the agent disputes user withdrawals that would break outstanding reimbursement coverage
+- observe that the agent only proposes reimbursement after depositing the required final settlement amount into the Safe
+- observe that the agent disputes user withdrawals that violate the commitment's withdrawal rule while the trade stream is still unsettled
 
 This plan intentionally treats the result as an example module, not a general-purpose production trading product. The goal is to prove the external-settlement pattern cleanly inside this repo.
 
@@ -23,7 +23,7 @@ This plan intentionally treats the result as an example module, not a general-pu
 - [x] 2026-04-09 17:10Z: Audited existing Polymarket-related modules, especially `agent-library/agents/copy-trading/` and `agent-library/agents/polymarket-intent-trader/`, plus shared Oya node surfaces under `agent/src/lib/`.
 - [x] 2026-04-09 17:11Z: Confirmed from current Polymarket docs that positions can be sold before resolution, but redemption into USDC only happens after resolution; "market close" and "market resolution" are not the same event.
 - [x] 2026-04-09 17:12Z: Wrote this initial ExecPlan in `plans/polymarket-deferred-settlement-agent.md`.
-- [ ] Prototype the node-side trade-verification path against Polymarket APIs and decide whether the node is a verifier or only a notary in v1.
+- [x] 2026-04-09 17:22Z: Revised the plan after user clarification: the node is notary-only in v1, reimbursement is for the initially fronted principal, later trading affects only the final settlement deposit, and fixed stake is acceptable.
 - [ ] Implement the Oya trade-log publication surface and its durable store.
 - [ ] Create the new deferred-settlement Polymarket agent module and its commitment text.
 - [ ] Add tests, smoke harness coverage, and documentation updates.
@@ -36,14 +36,17 @@ This plan intentionally treats the result as an example module, not a general-pu
 - Observation: The Oya node is currently split into a signed message inbox hosted by the main agent process and a separate standalone proposal-publication node.
   Evidence: `agent/src/lib/message-api.js` is started from `agent/src/lib/runtime-loop.js`, while proposal publication runs from `agent/scripts/start-proposal-publish-node.mjs` and `agent/src/lib/proposal-publication-api.js`.
 
-- Observation: The existing `Staked External Polymarket Execution` rule template is directionally right but incomplete for repeated flips and net settlement.
-  Evidence: `agent-library/RULE_TEMPLATES.md` defines stake, logging, and post-resolution settlement, but it does not define netted reimbursement across multiple buys and sells, dynamic stake sizing, or how user withdrawals are limited while offchain liabilities are open.
+- Observation: The existing `Staked External Polymarket Execution` rule template is directionally right but incomplete for the clarified accounting model.
+  Evidence: `agent-library/RULE_TEMPLATES.md` defines stake, logging, and post-resolution settlement, but it does not yet spell out "initial principal reimbursement plus final settlement deposit" or misreporting-specific slash conditions.
 
-- Observation: Public IPFS publication of live trade details is itself a product tradeoff.
-  Evidence: The user asked for trade details to be published on IPFS. That gives auditability, but it also leaks the agent's current position and timing while the market is still live.
+- Observation: In this design, the Oya node is an authenticated notary, not an independent trade verifier.
+  Evidence: The user clarified that inaccurate logs should be handled by proposal rejection and slashing, not by the node proving trade truth before publication.
 
 - Observation: "Wait until markets close" is not precise enough for a settlement rule.
   Evidence: Current Polymarket docs distinguish market close from resolution, and redemption is only available after resolution. An agent can also exit earlier by selling before resolution. The commitment must key settlement deadlines to resolution or earlier flat exit, not to close time alone.
+
+- Observation: The user accepts public IPFS publication of executed trades because the underlying Polymarket trades are already public.
+  Evidence: The user explicitly stated that the logs do not leak anything beyond already-public executed trades.
 
 ## Decision Log
 
@@ -67,21 +70,33 @@ This plan intentionally treats the result as an example module, not a general-pu
   Rationale: This matches Polymarket mechanics and the existing rule template better than a vague close-based deadline, while still avoiding proposals on every trade or flip.
   Date/Author: 2026-04-09 / Codex.
 
-- Decision: Treat fixed stake alone as insufficient. The v1 agent must compute a required stake from outstanding upside exposure and refuse trades when the active stake is too small.
-  Rationale: A binary market can produce gains larger than principal. The user's own example (`100 -> 250`) already shows that a flat "stake equals principal" assumption is unsafe.
+- Decision: In v1, the node is explicitly notary-only and does not need to verify trade truth before publication.
+  Rationale: The user wants false logs handled at settlement time by rejecting reimbursement and slashing stake, not by moving verification into the node.
   Date/Author: 2026-04-09 / Codex.
 
-- Decision: Keep v1 IPFS trade logs public and plaintext, but document the strategy-leakage tradeoff explicitly.
-  Rationale: This keeps the example auditable and simple. If the example graduates toward production use, the next version should replace this with delayed reveal or hash commitments.
+- Decision: Reimbursement accounting in v1 is "initial principal reimbursement plus separate final settlement deposit," not netted reimbursement across flips.
+  Rationale: The user clarified that later trading affects how much the agent must deposit into the commitment at settlement, but reimbursement is for the amount initially spent to open the user's market exposure.
+  Date/Author: 2026-04-09 / Codex.
+
+- Decision: A fixed stake is acceptable in v1; do not add dynamic stake sizing.
+  Rationale: The user explicitly accepts fixed slashing risk plus reputation damage as sufficient deterrence for this example.
+  Date/Author: 2026-04-09 / Codex.
+
+- Decision: Keep v1 IPFS trade logs public and plaintext without treating that as a blocker.
+  Rationale: The user explicitly accepts this because the underlying executed Polymarket trades are already public.
+  Date/Author: 2026-04-09 / Codex.
+
+- Decision: Do not update `agent-library/RULE_TEMPLATES.md` without explicit user approval.
+  Rationale: The user asked to keep any rule-template changes very minimal and to check first before making them.
   Date/Author: 2026-04-09 / Codex.
 
 ## Outcomes & Retrospective
 
 Initial outcome: the repo already contains most of the reusable building blocks, but the user's proposed flow only works cleanly if the implementation adds three things that do not exist yet:
 
-1. A netted external-trade liability ledger rather than one-off "buy then reimburse" accounting.
+1. A ledger that separately tracks reimbursable opening principal and final settlement owed to the user.
 2. A dedicated Oya node publication surface for signed trade logs, not just signed proposals.
-3. A clearer commitment rule set covering dynamic stake coverage and withdrawal limits during unsettled offchain exposure.
+3. A clearer commitment rule set covering misreporting slashing and withdrawal limits during unsettled offchain exposure.
 
 No implementation has started yet. This section must be updated after each milestone with the actual files changed, validation evidence, and any scope corrections.
 
@@ -103,21 +118,21 @@ The relevant current code paths are:
   - signed message ingestion for the main agent process
 
 - `agent/src/lib/proposal-publication-api.js`
-  - standalone node pattern for signed request verification, IPFS publication, and durable dedupe
+  - standalone node pattern for signed request authentication, IPFS publication, and durable dedupe
 
 - `agent/src/lib/proposal-publication-store.js`
   - crash-safe durable JSON store pattern that can be mirrored for trade logs
 
 - `agent/src/lib/polymarket.js` and `agent/src/lib/polymarket-relayer.js`
   - shared Polymarket execution helpers
-  - currently focused on CLOB orders, trades, and relayer wallet resolution, not on market-resolution or trade-log verification flows
+  - currently focused on CLOB orders, trades, and relayer wallet resolution, not on market-resolution or trade-log publication flows
 
 The commitment side remains rule-driven rather than contract-driven. This means no new Solidity code should be assumed unless implementation proves a contract gap. The expected enforcement model is:
 
 - the agent deposits stake into the commitment
 - the agent publishes signed trade-log snapshots to the Oya node
-- the agent deposits net proceeds into the Safe before claiming reimbursement
-- the agent disputes user withdrawals that violate outstanding reimbursement coverage
+- the agent deposits the final settlement amount owed to the user into the Safe before claiming reimbursement
+- the agent disputes user withdrawals that violate the commitment's withdrawal rule while settlement is still outstanding
 - the user or another watcher can slash the agent's stake if the published log and market outcome show non-settlement
 
 This plan assumes v1 remains an offchain-enforced commitment served by the current Oya runner and Optimistic Governor patterns.
@@ -126,18 +141,21 @@ This plan assumes v1 remains an offchain-enforced commitment served by the curre
 
 Milestone 0 freezes the accounting model before code spreads. The first task is to define the ledger fields the module and node both agree on. The core values are:
 
+- `initialPrincipalWei`: the reimbursable opening amount fronted by the agent for this market stream
 - `grossBuyCostWei`: total USDC the agent spent opening or adding to positions
 - `grossSellProceedsWei`: total USDC the agent received from offchain sales before resolution
 - `grossRedeemProceedsWei`: total USDC the agent received from onchain redemption after resolution
 - `feesWei`: total trading or redemption fees charged to the agent wallet
-- `netAgentAdvanceWei`: the still-unreimbursed external capital fronted by the agent after netting realized proceeds
-- `maxPotentialPayoutWei`: the maximum total payout still owed to the user from open positions if they all resolve favorably
-- `requiredStakeWei`: the minimum active stake needed so the agent cannot rationally default on upside owed to the user
-- `freeWithdrawalHeadroomWei`: Safe USDC not reserved for open reimbursement claims
+- `finalSettlementValueWei`: the amount the agent must deposit into the Safe at flat exit or resolution based on the cumulative logged trading result
+- `reimbursementEligibleWei`: the amount the agent may claim back after making that final settlement deposit; for v1 this is the opening principal defined by the commitment
+- `fixedStakeWei`: the active slashable stake deposited under the commitment rules
+- `withdrawalLimitState`: the values needed to decide whether a user withdrawal violates the commitment during an unsettled stream
 
-The reimbursement formula must be netted, not summed per buy. If the agent buys for 100, sells for 120, and later buys again for 110, the second buy should consume prior proceeds before creating a fresh reimbursement claim. Otherwise the agent can over-claim principal for the same economic stream.
+The critical accounting separation is: later trading affects `finalSettlementValueWei`, not `reimbursementEligibleWei`. The agent's reimbursement right is based on the initially fronted principal, while the agent's deposit duty is based on how the logged market stream ultimately performed.
 
-Milestone 1 adds a trade-log publication protocol to the Oya node. This should parallel the proposal-publication node but not replace it. Add a new config block such as `tradeLogPublishApi`, a canonical signed payload builder, a durable store, and a standalone startup helper. The node endpoint should accept a cumulative trade-log snapshot, authenticate the agent signature, optionally verify referenced Polymarket trades, attach a node signature, publish the final artifact to IPFS, pin it, and store duplicate-safe state keyed by the stream identity plus sequence.
+Milestone 0 must also decide one unresolved economic boundary: whether the agent may inject fresh external capital after the opening trade if that would increase exposure beyond the initially reimbursable principal. The safest v1 assumption is to keep `reimbursementEligibleWei` fixed at the opening amount and either forbid later capital increases or treat them as unreimbursable agent risk.
+
+Milestone 1 adds a trade-log publication protocol to the Oya node. This should parallel the proposal-publication node but not replace it. Add a new config block such as `tradeLogPublishApi`, a canonical signed payload builder, a durable store, and a standalone startup helper. The node endpoint should accept a cumulative trade-log snapshot, authenticate the agent signature, attach a node signature, publish the final artifact to IPFS, pin it, and store duplicate-safe state keyed by the stream identity plus sequence. In v1 the node is a notary and archivist, not an independent trade verifier.
 
 Milestone 2 creates the new agent module under `agent-library/agents/polymarket-staked-external-settlement/`. The module should own all agent-specific behavior. It should:
 
@@ -146,18 +164,18 @@ Milestone 2 creates the new agent module under `agent-library/agents/polymarket-
 - update and persist a market-stream ledger locally
 - publish a signed ledger snapshot to the Oya node after every material state change
 - watch market status until the stream is flat or resolved
-- deposit gross proceeds to the Safe before requesting reimbursement
-- refuse new trades when required stake, Safe reserve coverage, or policy constraints are violated
+- deposit the final settlement amount owed to the user before requesting reimbursement
+- refuse new trades when the fixed stake is not active or policy constraints are violated
 
-Milestone 3 completes the commitment semantics. Draft `commitment.txt` from `Solo User`, `Proposal Delegation`, `Fair Valuation`, `Trade Restrictions`, `Transfer Address Restrictions`, and `Staked External Polymarket Execution`, then add missing reusable rule language for:
+Milestone 3 completes the commitment semantics. Draft `commitment.txt` from `Solo User`, `Proposal Delegation`, `Fair Valuation`, `Trade Restrictions`, `Transfer Address Restrictions`, and `Staked External Polymarket Execution`, then add commitment-local language for:
 
-- netted reimbursement instead of per-trade reimbursement
+- initial-principal reimbursement plus final-settlement deposit semantics
 - withdrawal restrictions while unsettled external liabilities exist
-- dynamic required stake based on published exposure
+- slashability for false trade logging or misreporting through the node
 
-If those additions are generic enough, add them to `agent-library/RULE_TEMPLATES.md` instead of burying them only in the new module.
+Do not change `agent-library/RULE_TEMPLATES.md` during implementation unless the user explicitly approves a minimal shared-template update first.
 
-Milestone 4 adds proof-quality validation. The module and node need tests for restart recovery, duplicate publication, broken sequence chains, invalid prior-CID links, missing settlement, and incorrect reimbursement attempts. A local smoke flow should run with mocked Polymarket responses and mock IPFS, because a safe non-production path is required and live Polygon/Polymarket credentials are not guaranteed in every environment.
+Milestone 4 adds proof-quality validation. The module and node need tests for restart recovery, duplicate publication, broken sequence chains, invalid prior-CID links, missing settlement, false-log handling, and incorrect reimbursement attempts. A local smoke flow should run with mocked Polymarket responses and mock IPFS, because a safe non-production path is required and live Polygon/Polymarket credentials are not guaranteed in every environment.
 
 ## Concrete Steps
 
@@ -199,7 +217,6 @@ From `/Users/johnshutt/Code/oya-commitments`:
    Work:
 
    - add minimal market-status / resolution fetch helpers
-   - add whichever public or authenticated trade-verification helper Milestone 0 proves usable
    - keep strategy logic out of shared files
 
    Commands:
@@ -228,9 +245,9 @@ From `/Users/johnshutt/Code/oya-commitments`:
 
    Expected behavior:
 
-   - the module refuses to trade when stake or Safe reserve coverage is insufficient
+   - the module refuses to trade when fixed stake is inactive or policy gating fails
    - every accepted trade state change yields one signed publication request
-   - reimbursement proposals are only built after the corresponding proceeds deposit is recorded
+   - reimbursement proposals are only built after the required final settlement deposit is recorded
 
 4. Add reusable rule text and docs.
 
@@ -247,6 +264,7 @@ From `/Users/johnshutt/Code/oya-commitments`:
    Expected behavior:
 
    - the new commitment text is assembled mostly from templates
+   - any shared rule-template change remains pending explicit user approval
    - docs explain that this example is public-log and single-market by design
 
 5. Add smoke coverage with a safe mock environment.
@@ -276,12 +294,11 @@ Acceptance requires all of the following:
 
 - the new module stays local to `agent-library/agents/polymarket-staked-external-settlement/`, except for clearly shared node or Polymarket infrastructure
 - the Oya node can archive, pin, and dedupe signed trade-log snapshots
-- the trade ledger nets realized proceeds against later buys before computing reimbursement
-- the module enforces stake and Safe reserve checks before trading or approving reimbursement
-- the module deposits gross proceeds before proposing reimbursement
-- the commitment text and docs describe the exact trust model, especially the public-log tradeoff and the difference between market close and resolution
-
-If Milestone 0 shows that node-side verification cannot independently confirm trades with acceptable confidence, the v1 result must explicitly document that the node is a notary-only surface and must not claim stronger user protection than that.
+- the trade ledger preserves the separation between reimbursable opening principal and final settlement owed to the user
+- the module enforces active fixed-stake and withdrawal-policy assumptions before approving reimbursement
+- the module deposits the final settlement amount before proposing reimbursement
+- the commitment text and docs describe the exact trust model, especially the public-log assumption and the difference between market close and resolution
+- the docs explicitly state that the node is a notary/archive surface, not a trade verifier
 
 ## Idempotence and Recovery
 
@@ -320,7 +337,7 @@ External behavior summarized from current official Polymarket docs and embedded 
 - positions can be sold before resolution, so a market stream can settle before oracle resolution if the agent is flat
 - redemption into USDC only becomes available after resolution
 - market close and resolution are separate lifecycle stages
-- public APIs exist for market metadata and some trade or position data, but Milestone 0 must still confirm whether they are sufficient for node-side verification in this repo's exact flow
+- the node in this plan is intentionally not a trade verifier, so public market APIs are relevant mainly for market-status and resolution tracking, not for pre-publication attestation
 
 Primary source links used for the above summary:
 
@@ -353,7 +370,7 @@ Proposed snapshot contents:
 
 - stream identity (`commitmentSafe`, `user`, `marketId`, `tradingWallet`)
 - cumulative trade entries with timestamps and external identifiers
-- derived ledger fields (`netAgentAdvanceWei`, `maxPotentialPayoutWei`, `requiredStakeWei`)
+- derived ledger fields (`initialPrincipalWei`, `finalSettlementValueWei`, `reimbursementEligibleWei`, `fixedStakeWei`)
 - current position summary
 - settlement status summary
 
@@ -377,8 +394,9 @@ Existing secrets and runtime dependencies:
 
 Known design gaps that this plan must close before calling the agent sound:
 
-- reimbursement must be netted across flips, not summed per buy
-- required stake must cover upside exposure, not just principal
-- user withdrawals must be checked against open offchain liabilities
+- principal reimbursement and final settlement value must stay distinct throughout the ledger and proposal flow
+- the implementation must explicitly decide whether later trades may increase external capital at risk beyond the initially reimbursable principal
+- the withdrawal rule still needs exact commitment wording and corresponding dispute logic during unsettled streams
+- the rule must say that false or misleading trade logs published through the node are slashable
 - "market close" must be replaced with explicit resolution or flat-exit semantics
-- public IPFS trade logs are acceptable for an example, but not automatically acceptable for a profit-sensitive production strategy
+- any shared rule-template edit must be minimal and user-approved before implementation
