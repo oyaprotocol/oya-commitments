@@ -24,6 +24,7 @@ This plan intentionally treats the result as an example module, not a general-pu
 - [x] 2026-04-09 17:11Z: Confirmed from current Polymarket docs that positions can be sold before resolution, but redemption into USDC only happens after resolution; "market close" and "market resolution" are not the same event.
 - [x] 2026-04-09 17:12Z: Wrote this initial ExecPlan in `plans/polymarket-deferred-settlement-agent.md`.
 - [x] 2026-04-09 17:22Z: Revised the plan after user clarification: the node is notary-only in v1, reimbursement is for the initially fronted principal, later trading affects only the final settlement deposit, and fixed stake is acceptable.
+- [x] 2026-04-09 17:30Z: Revised the plan after user clarification that each trade is either a reimbursable new trade or a continuation trade that does not create new reimbursement principal.
 - [ ] Implement the Oya trade-log publication surface and its durable store.
 - [ ] Create the new deferred-settlement Polymarket agent module and its commitment text.
 - [ ] Add tests, smoke harness coverage, and documentation updates.
@@ -78,6 +79,10 @@ This plan intentionally treats the result as an example module, not a general-pu
   Rationale: The user clarified that later trading affects how much the agent must deposit into the commitment at settlement, but reimbursement is for the amount initially spent to open the user's market exposure.
   Date/Author: 2026-04-09 / Codex.
 
+- Decision: Every trade must be logged as either `initiated` or `continuation`.
+  Rationale: The user clarified that initiated trades create reimbursable principal, while continuation trades keep the overall profit-and-loss stream going without creating new reimbursement principal.
+  Date/Author: 2026-04-09 / Codex.
+
 - Decision: A fixed stake is acceptable in v1; do not add dynamic stake sizing.
   Rationale: The user explicitly accepts fixed slashing risk plus reputation damage as sufficient deterrence for this example.
   Date/Author: 2026-04-09 / Codex.
@@ -94,7 +99,7 @@ This plan intentionally treats the result as an example module, not a general-pu
 
 Initial outcome: the repo already contains most of the reusable building blocks, but the user's proposed flow only works cleanly if the implementation adds three things that do not exist yet:
 
-1. A ledger that separately tracks reimbursable opening principal and final settlement owed to the user.
+1. A ledger that separately tracks reimbursable initiated-trade principal and final settlement owed to the user.
 2. A dedicated Oya node publication surface for signed trade logs, not just signed proposals.
 3. A clearer commitment rule set covering misreporting slashing and withdrawal limits during unsettled offchain exposure.
 
@@ -141,19 +146,20 @@ This plan assumes v1 remains an offchain-enforced commitment served by the curre
 
 Milestone 0 freezes the accounting model before code spreads. The first task is to define the ledger fields the module and node both agree on. The core values are:
 
-- `initialPrincipalWei`: the reimbursable opening amount fronted by the agent for this market stream
+- `tradeEntryKind`: `initiated` or `continuation`
+- `tradeGroupId`: stable identifier tying continuation trades back to the reimbursable trade path they continue
+- `initiatedPrincipalContributionWei`: reimbursable principal contributed by a single initiated trade; always zero for continuation trades
+- `initiatedPrincipalWei`: cumulative reimbursable principal across all initiated trades in the market stream
 - `grossBuyCostWei`: total USDC the agent spent opening or adding to positions
 - `grossSellProceedsWei`: total USDC the agent received from offchain sales before resolution
 - `grossRedeemProceedsWei`: total USDC the agent received from onchain redemption after resolution
 - `feesWei`: total trading or redemption fees charged to the agent wallet
 - `finalSettlementValueWei`: the amount the agent must deposit into the Safe at flat exit or resolution based on the cumulative logged trading result
-- `reimbursementEligibleWei`: the amount the agent may claim back after making that final settlement deposit; for v1 this is the opening principal defined by the commitment
+- `reimbursementEligibleWei`: the amount the agent may claim back after making that final settlement deposit; for v1 this is the sum of reimbursable initiated-trade principal
 - `fixedStakeWei`: the active slashable stake deposited under the commitment rules
 - `withdrawalLimitState`: the values needed to decide whether a user withdrawal violates the commitment during an unsettled stream
 
-The critical accounting separation is: later trading affects `finalSettlementValueWei`, not `reimbursementEligibleWei`. The agent's reimbursement right is based on the initially fronted principal, while the agent's deposit duty is based on how the logged market stream ultimately performed.
-
-Milestone 0 must also decide one unresolved economic boundary: whether the agent may inject fresh external capital after the opening trade if that would increase exposure beyond the initially reimbursable principal. The safest v1 assumption is to keep `reimbursementEligibleWei` fixed at the opening amount and either forbid later capital increases or treat them as unreimbursable agent risk.
+The critical accounting separation is: all trades affect `finalSettlementValueWei`, but only trades marked `initiated` affect `reimbursementEligibleWei`. If a later trade uses fresh agent capital and should be reimbursable, it must be logged as a new initiated trade. If it continues an earlier trade path after that path was closed out with a sale, it must be logged as a continuation trade with zero new reimbursement principal.
 
 Milestone 1 adds a trade-log publication protocol to the Oya node. This should parallel the proposal-publication node but not replace it. Add a new config block such as `tradeLogPublishApi`, a canonical signed payload builder, a durable store, and a standalone startup helper. The node endpoint should accept a cumulative trade-log snapshot, authenticate the agent signature, attach a node signature, publish the final artifact to IPFS, pin it, and store duplicate-safe state keyed by the stream identity plus sequence. In v1 the node is a notary and archivist, not an independent trade verifier.
 
@@ -166,10 +172,11 @@ Milestone 2 creates the new agent module under `agent-library/agents/polymarket-
 - watch market status until the stream is flat or resolved
 - deposit the final settlement amount owed to the user before requesting reimbursement
 - refuse new trades when the fixed stake is not active or policy constraints are violated
+- classify each logged trade deterministically as `initiated` or `continuation` before it affects reimbursement accounting
 
 Milestone 3 completes the commitment semantics. Draft `commitment.txt` from `Solo User`, `Proposal Delegation`, `Fair Valuation`, `Trade Restrictions`, `Transfer Address Restrictions`, and `Staked External Polymarket Execution`, then add commitment-local language for:
 
-- initial-principal reimbursement plus final-settlement deposit semantics
+- initiated-trade reimbursement plus final-settlement deposit semantics
 - withdrawal restrictions while unsettled external liabilities exist
 - slashability for false trade logging or misreporting through the node
 
@@ -247,6 +254,7 @@ From `/Users/johnshutt/Code/oya-commitments`:
 
    - the module refuses to trade when fixed stake is inactive or policy gating fails
    - every accepted trade state change yields one signed publication request
+   - every logged trade is classified as `initiated` or `continuation`
    - reimbursement proposals are only built after the required final settlement deposit is recorded
 
 4. Add reusable rule text and docs.
@@ -294,7 +302,8 @@ Acceptance requires all of the following:
 
 - the new module stays local to `agent-library/agents/polymarket-staked-external-settlement/`, except for clearly shared node or Polymarket infrastructure
 - the Oya node can archive, pin, and dedupe signed trade-log snapshots
-- the trade ledger preserves the separation between reimbursable opening principal and final settlement owed to the user
+- the trade ledger preserves the separation between reimbursable initiated-trade principal and final settlement owed to the user
+- continuation trades do not add reimbursement principal, but they do affect final settlement accounting
 - the module enforces active fixed-stake and withdrawal-policy assumptions before approving reimbursement
 - the module deposits the final settlement amount before proposing reimbursement
 - the commitment text and docs describe the exact trust model, especially the public-log assumption and the difference between market close and resolution
@@ -369,8 +378,8 @@ Proposed signed request body shape:
 Proposed snapshot contents:
 
 - stream identity (`commitmentSafe`, `user`, `marketId`, `tradingWallet`)
-- cumulative trade entries with timestamps and external identifiers
-- derived ledger fields (`initialPrincipalWei`, `finalSettlementValueWei`, `reimbursementEligibleWei`, `fixedStakeWei`)
+- cumulative trade entries with timestamps, external identifiers, and `tradeEntryKind`
+- derived ledger fields (`initiatedPrincipalWei`, `finalSettlementValueWei`, `reimbursementEligibleWei`, `fixedStakeWei`)
 - current position summary
 - settlement status summary
 
@@ -394,8 +403,8 @@ Existing secrets and runtime dependencies:
 
 Known design gaps that this plan must close before calling the agent sound:
 
-- principal reimbursement and final settlement value must stay distinct throughout the ledger and proposal flow
-- the implementation must explicitly decide whether later trades may increase external capital at risk beyond the initially reimbursable principal
+- reimbursable initiated-trade principal and final settlement value must stay distinct throughout the ledger and proposal flow
+- the implementation must encode the user-provided `initiated` versus `continuation` classification as deterministic state, not ad hoc operator judgment
 - the withdrawal rule still needs exact commitment wording and corresponding dispute logic during unsettled streams
 - the rule must say that false or misleading trade logs published through the node are slashable
 - "market close" must be replaced with explicit resolution or flat-exit semantics
