@@ -26,7 +26,8 @@ This plan intentionally treats the result as an example module, not a general-pu
 - [x] 2026-04-09 17:22Z: Revised the plan after user clarification: the node is notary-only in v1, reimbursement is for the initially fronted principal, later trading affects only the final settlement deposit, and fixed stake is acceptable.
 - [x] 2026-04-09 17:30Z: Revised the plan after user clarification that each trade is either a reimbursable new trade or a continuation trade that does not create new reimbursement principal.
 - [x] 2026-04-09 17:30Z: Revised the plan to support any number of Polymarket markets per commitment by modeling the system as many concurrent per-market streams keyed by `marketId`.
-- [ ] Implement the generalized Oya signed-message publication surface and its durable store.
+- [x] 2026-04-09 23:20Z: Implemented a minimal generalized Oya signed-message publication surface under `agent/`: `messagePublishApi` config/runtime plumbing, canonical signed-message builder, durable store, generic `/v1/messages/publish` API, standalone startup script, and focused store/API tests. The minimal patch verifies the agent signature against the message, publishes and pins the artifact to IPFS, and dedupes by signer plus `(chainId, requestId)` from the signed message body.
+- [ ] Decide whether Milestone 1 still needs explicit node-side co-signing beyond archival publication metadata; the current minimal implementation does not add a node signature.
 - [ ] Create the new deferred-settlement Polymarket agent module and its commitment text.
 - [ ] Add tests, smoke harness coverage, and documentation updates.
 
@@ -108,7 +109,12 @@ Initial outcome: the repo already contains most of the reusable building blocks,
 2. A dedicated Oya node publication surface for arbitrary signed agent messages, which the Polymarket example will use for trade-log messages.
 3. A clearer commitment rule set covering misreporting slashing and withdrawal limits while any supported market remains unsettled.
 
-No implementation has started yet. This section must be updated after each milestone with the actual files changed, validation evidence, and any scope corrections.
+Milestone 1 status after the first implementation pass:
+
+- Completed: generic signed-message publication plumbing landed in `agent/src/lib/config.js`, `agent/src/lib/agent-config.js`, `agent/src/lib/signed-published-message.js`, `agent/src/lib/message-publication-store.js`, `agent/src/lib/message-publication-api.js`, `agent/scripts/lib/message-publish-runtime.mjs`, and `agent/scripts/start-message-publish-node.mjs`.
+- Completed: focused validation landed in `agent/scripts/test-message-publication-store.mjs`, `agent/scripts/test-message-publication-api.mjs`, and an extension to `agent/scripts/test-agent-config-file.mjs`.
+- Validated: `node agent/scripts/test-message-publication-store.mjs`, `node agent/scripts/test-message-publication-api.mjs`, and `node agent/scripts/test-agent-config-file.mjs`.
+- Remaining gap: the minimal artifact includes node publication metadata (`receivedAtMs`, `publishedAtMs`, `signerAllowlistMode`, optional `nodeName`) but does not yet include an explicit node cryptographic signature.
 
 ## Context and Orientation
 
@@ -176,7 +182,7 @@ Milestone 0 must also define the portfolio-level rollups derived from those per-
 
 Milestone 0 must also define the module config shape for multi-market support. The plan should replace any single-market policy assumptions with a per-market policy map keyed by `marketId` so new markets can be added without changing the core ledger model.
 
-Milestone 1 adds a generalized signed-message publication protocol to the Oya node. This should parallel the proposal-publication node but not replace it. Add a new config block such as `messagePublishApi`, a canonical signed payload builder, a durable store, and a standalone startup helper. The node endpoint should accept an arbitrary signed message, verify the submitted `auth` envelope against that message, attach a node signature, publish the final artifact to IPFS, pin it, and store duplicate-safe state keyed by the signed message identity. The signed message itself must carry `chainId`, `requestId`, `commitmentAddresses`, `agentAddress`, and any domain-specific payload. In v1 the node is a notary and archivist, not an independent message verifier. The Polymarket example should use this generalized publication surface by embedding the market-specific trade details inside the signed message payload.
+Milestone 1 adds a generalized signed-message publication protocol to the Oya node. This should parallel the proposal-publication node but not replace it. Add a new config block such as `messagePublishApi`, a canonical signed payload builder, a durable store, and a standalone startup helper. The node endpoint should accept an arbitrary signed message, verify the submitted `auth` envelope against that message, publish the final artifact to IPFS, pin it, and store duplicate-safe state keyed by the signed message identity. The signed message itself must carry `chainId`, `requestId`, `commitmentAddresses`, `agentAddress`, and any domain-specific payload. In v1 the node is a notary and archivist, not an independent message verifier. If we still want explicit node-side co-signing after review, that should be added as a follow-up to the minimal publication artifact now in place. The Polymarket example should use this generalized publication surface by embedding the market-specific trade details inside the signed message payload.
 
 Milestone 2 creates the new agent module under `agent-library/agents/polymarket-staked-external-settlement/`. The module should own all agent-specific behavior. It should:
 
@@ -226,7 +232,7 @@ From `/Users/johnshutt/Code/oya-commitments`:
    Expected behavior:
 
    - dry-run prints resolved host, port, chain, state file, and node name
-   - exact duplicate publication retries return the existing CID and node signature
+   - exact duplicate publication retries return the existing CID and archived artifact metadata
    - the API accepts arbitrary signed messages without needing any domain-specific top-level fields
    - duplicate detection and indexing are derived from fields inside the signed message rather than parallel top-level copies
    - the Polymarket example can still reject malformed per-market sequence histories inside its own message payload processing

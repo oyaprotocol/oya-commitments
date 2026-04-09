@@ -74,6 +74,10 @@ function parseProposalPublishApiKeys(raw) {
     return parseApiKeyMap(raw, 'PROPOSAL_PUBLISH_API_KEYS_JSON');
 }
 
+function parseMessagePublishApiKeys(raw) {
+    return parseApiKeyMap(raw, 'MESSAGE_PUBLISH_API_KEYS_JSON');
+}
+
 function parseApiKeyMap(raw, envName) {
     if (!raw) return {};
     let parsed;
@@ -226,12 +230,25 @@ const PROPOSAL_PUBLISH_API_DEFAULTS = Object.freeze({
     proposalPublishApiKeys: {},
 });
 
+const MESSAGE_PUBLISH_API_DEFAULTS = Object.freeze({
+    messagePublishApiHost: '127.0.0.1',
+    messagePublishApiPort: 9892,
+    messagePublishApiMaxBodyBytes: 65_536,
+    messagePublishApiRequireSignerAllowlist: true,
+    messagePublishApiSignerAllowlist: [],
+    messagePublishApiSignatureMaxAgeSeconds: 300,
+    messagePublishApiStateFile: undefined,
+    messagePublishApiNodeName: undefined,
+    messagePublishApiKeys: {},
+});
+
 const DEFAULT_POLYMARKET_CONDITIONAL_TOKENS =
     '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
 
 const MESSAGE_API_ENV_OVERRIDES = Symbol('messageApiEnvOverrides');
 const IPFS_ENV_OVERRIDES = Symbol('ipfsEnvOverrides');
 const PROPOSAL_PUBLISH_API_ENV_OVERRIDES = Symbol('proposalPublishApiEnvOverrides');
+const MESSAGE_PUBLISH_API_ENV_OVERRIDES = Symbol('messagePublishApiEnvOverrides');
 const DEPRECATED_SHARED_CONFIG_ENV_VARS = Object.freeze([
     'CHAIN_ID',
     'COMMITMENT_SAFE',
@@ -303,6 +320,15 @@ const DEPRECATED_SHARED_CONFIG_ENV_VARS = Object.freeze([
     'MESSAGE_API_IDEMPOTENCY_TTL_SECONDS',
     'MESSAGE_API_RATE_LIMIT_PER_MINUTE',
     'MESSAGE_API_RATE_LIMIT_BURST',
+    'MESSAGE_PUBLISH_API_ENABLED',
+    'MESSAGE_PUBLISH_API_HOST',
+    'MESSAGE_PUBLISH_API_PORT',
+    'MESSAGE_PUBLISH_API_REQUIRE_SIGNER_ALLOWLIST',
+    'MESSAGE_PUBLISH_API_SIGNER_ALLOWLIST',
+    'MESSAGE_PUBLISH_API_SIGNATURE_MAX_AGE_SECONDS',
+    'MESSAGE_PUBLISH_API_MAX_BODY_BYTES',
+    'MESSAGE_PUBLISH_API_STATE_FILE',
+    'MESSAGE_PUBLISH_API_NODE_NAME',
 ]);
 const DEPRECATED_AGENT_CONFIG_ENV_VARS = Object.freeze({
     'copy-trading': Object.freeze([
@@ -334,6 +360,12 @@ function collectIpfsEnvOverrides(env = process.env) {
 function collectProposalPublishApiEnvOverrides(env = process.env) {
     return {
         keysJson: env.PROPOSAL_PUBLISH_API_KEYS_JSON,
+    };
+}
+
+function collectMessagePublishApiEnvOverrides(env = process.env) {
+    return {
+        keysJson: env.MESSAGE_PUBLISH_API_KEYS_JSON,
     };
 }
 
@@ -379,6 +411,21 @@ function resolveProposalPublishApiEnvConfig({ enabled, envOverrides = {} } = {})
         proposalPublishApiEnabled: true,
         ...PROPOSAL_PUBLISH_API_DEFAULTS,
         proposalPublishApiKeys: parseProposalPublishApiKeys(envOverrides.keysJson),
+    };
+}
+
+function resolveMessagePublishApiEnvConfig({ enabled, envOverrides = {} } = {}) {
+    if (!enabled) {
+        return {
+            messagePublishApiEnabled: false,
+            ...MESSAGE_PUBLISH_API_DEFAULTS,
+        };
+    }
+
+    return {
+        messagePublishApiEnabled: true,
+        ...MESSAGE_PUBLISH_API_DEFAULTS,
+        messagePublishApiKeys: parseMessagePublishApiKeys(envOverrides.keysJson),
     };
 }
 
@@ -487,6 +534,8 @@ function createDefaultRuntimeConfig({ env = process.env, rpcUrl } = {}) {
         uniswapV3FeeTiers: [500, 3000, 10000],
         messageApiEnabled: false,
         ...MESSAGE_API_DEFAULTS,
+        messagePublishApiEnabled: false,
+        ...MESSAGE_PUBLISH_API_DEFAULTS,
         proposalPublishApiEnabled: false,
         ...PROPOSAL_PUBLISH_API_DEFAULTS,
         ipfsEnabled: false,
@@ -500,6 +549,7 @@ function buildConfig({ env = process.env, requireRpcUrl = true, fallbackRpcUrl =
     const messageApiEnvOverrides = collectMessageApiEnvOverrides(env);
     const ipfsEnvOverrides = collectIpfsEnvOverrides(env);
     const proposalPublishApiEnvOverrides = collectProposalPublishApiEnvOverrides(env);
+    const messagePublishApiEnvOverrides = collectMessagePublishApiEnvOverrides(env);
 
     const config = createDefaultRuntimeConfig({ env, rpcUrl });
 
@@ -515,6 +565,10 @@ function buildConfig({ env = process.env, requireRpcUrl = true, fallbackRpcUrl =
         value: proposalPublishApiEnvOverrides,
         enumerable: false,
     });
+    Object.defineProperty(config, MESSAGE_PUBLISH_API_ENV_OVERRIDES, {
+        value: messagePublishApiEnvOverrides,
+        enumerable: false,
+    });
 
     return config;
 }
@@ -528,9 +582,12 @@ export {
     IPFS_ENV_OVERRIDES,
     listDeprecatedConfigEnvVars,
     MESSAGE_API_ENV_OVERRIDES,
+    MESSAGE_PUBLISH_API_DEFAULTS,
+    MESSAGE_PUBLISH_API_ENV_OVERRIDES,
     PROPOSAL_PUBLISH_API_ENV_OVERRIDES,
     PROPOSAL_PUBLISH_API_DEFAULTS,
     resolveIpfsEnvConfig,
     resolveMessageApiEnvConfig,
+    resolveMessagePublishApiEnvConfig,
     resolveProposalPublishApiEnvConfig,
 };

@@ -4,9 +4,11 @@ import { getAddress } from 'viem';
 import {
     IPFS_ENV_OVERRIDES,
     MESSAGE_API_ENV_OVERRIDES,
+    MESSAGE_PUBLISH_API_ENV_OVERRIDES,
     PROPOSAL_PUBLISH_API_ENV_OVERRIDES,
     resolveIpfsEnvConfig,
     resolveMessageApiEnvConfig,
+    resolveMessagePublishApiEnvConfig,
     resolveProposalPublishApiEnvConfig,
 } from './config.js';
 
@@ -387,6 +389,46 @@ const PROPOSAL_PUBLISH_API_FIELD_DEFINITIONS = Object.freeze([
     },
 ]);
 
+const MESSAGE_PUBLISH_API_FIELD_DEFINITIONS = Object.freeze([
+    { key: 'enabled', runtimeKey: 'messagePublishApiEnabled', parser: parseBooleanValue },
+    { key: 'host', runtimeKey: 'messagePublishApiHost', parser: parseHostValue },
+    {
+        key: 'port',
+        runtimeKey: 'messagePublishApiPort',
+        parser: (value, label) => parseIntegerValue(value, label, { min: 1 }),
+    },
+    {
+        key: 'requireSignerAllowlist',
+        runtimeKey: 'messagePublishApiRequireSignerAllowlist',
+        parser: parseBooleanValue,
+    },
+    {
+        key: 'signerAllowlist',
+        runtimeKey: 'messagePublishApiSignerAllowlist',
+        parser: parseAddressArray,
+    },
+    {
+        key: 'signatureMaxAgeSeconds',
+        runtimeKey: 'messagePublishApiSignatureMaxAgeSeconds',
+        parser: (value, label) => parseIntegerValue(value, label, { min: 1 }),
+    },
+    {
+        key: 'maxBodyBytes',
+        runtimeKey: 'messagePublishApiMaxBodyBytes',
+        parser: (value, label) => parseIntegerValue(value, label, { min: 1 }),
+    },
+    {
+        key: 'stateFile',
+        runtimeKey: 'messagePublishApiStateFile',
+        parser: parseStringValue,
+    },
+    {
+        key: 'nodeName',
+        runtimeKey: 'messagePublishApiNodeName',
+        parser: parseStringValue,
+    },
+]);
+
 function isPlainObjectValue(value) {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -578,6 +620,42 @@ function resolveProposalPublishApiRuntimeConfig({ baseConfig, override, label })
         resolved.proposalPublishApiEnabled &&
         resolved.proposalPublishApiRequireSignerAllowlist &&
         resolved.proposalPublishApiSignerAllowlist.length === 0
+    ) {
+        throw new Error(
+            `${label} requires signerAllowlist when enabled=true and requireSignerAllowlist=true`
+        );
+    }
+
+    return resolved;
+}
+
+function parseMessagePublishApiOverride(value, label) {
+    const out = parseObjectWithFieldDefinitions(value, label, MESSAGE_PUBLISH_API_FIELD_DEFINITIONS);
+    if (!out) {
+        return undefined;
+    }
+    if (hasOwn(value, 'keys')) {
+        throw new Error(
+            `${label}.keys is not supported in config.json; use MESSAGE_PUBLISH_API_KEYS_JSON for secret bearer tokens`
+        );
+    }
+    return out;
+}
+
+function resolveMessagePublishApiRuntimeConfig({ baseConfig, override, label }) {
+    const resolved = {
+        ...resolveMappedRuntimeFields({
+            definitions: MESSAGE_PUBLISH_API_FIELD_DEFINITIONS,
+            baseConfig,
+            override,
+        }),
+        messagePublishApiKeys: override?.keys ?? baseConfig.messagePublishApiKeys,
+    };
+
+    if (
+        resolved.messagePublishApiEnabled &&
+        resolved.messagePublishApiRequireSignerAllowlist &&
+        resolved.messagePublishApiSignerAllowlist.length === 0
     ) {
         throw new Error(
             `${label} requires signerAllowlist when enabled=true and requireSignerAllowlist=true`
@@ -829,6 +907,8 @@ function resolveAgentRuntimeConfig({
             ipfsHeaders: baseConfig.ipfsHeaders,
             ...pickRuntimeFields(baseConfig, MESSAGE_API_FIELD_DEFINITIONS),
             messageApiKeys: baseConfig.messageApiKeys,
+            ...pickRuntimeFields(baseConfig, MESSAGE_PUBLISH_API_FIELD_DEFINITIONS),
+            messagePublishApiKeys: baseConfig.messagePublishApiKeys,
             ...pickRuntimeFields(baseConfig, PROPOSAL_PUBLISH_API_FIELD_DEFINITIONS),
             proposalPublishApiKeys: baseConfig.proposalPublishApiKeys,
         };
@@ -884,6 +964,21 @@ function resolveAgentRuntimeConfig({
                   ...(chainProposalPublishApi ?? {}),
               }
             : undefined;
+    const sharedMessagePublishApi = parseMessagePublishApiOverride(
+        sharedConfig.messagePublishApi,
+        `${configSourceLabel} field "messagePublishApi"`
+    );
+    const chainMessagePublishApi = parseMessagePublishApiOverride(
+        chainOverrides?.messagePublishApi,
+        `${configSourceLabel} field "byChain.${chainKey}.messagePublishApi"`
+    );
+    const mergedMessagePublishApiOverride =
+        sharedMessagePublishApi || chainMessagePublishApi
+            ? {
+                  ...(sharedMessagePublishApi ?? {}),
+                  ...(chainMessagePublishApi ?? {}),
+              }
+            : undefined;
     const effectiveIpfsEnabled = hasExplicitConfigValue(resolvedAgentConfig, 'ipfsEnabled')
         ? parseBooleanValue(
               resolvedAgentConfig.ipfsEnabled,
@@ -918,6 +1013,22 @@ function resolveAgentRuntimeConfig({
         baseConfig: deferredMessageApiBaseConfig,
         override: mergedMessageApiOverride,
         label: `${configSourceLabel} field "messageApi"`,
+    });
+    const effectiveMessagePublishApiEnabled =
+        mergedMessagePublishApiOverride?.enabled ?? baseConfig.messagePublishApiEnabled;
+    const deferredMessagePublishApiBaseConfig = {
+        ...runtimeBaseConfig,
+        ...(baseConfig[MESSAGE_PUBLISH_API_ENV_OVERRIDES] === undefined
+            ? { messagePublishApiEnabled: effectiveMessagePublishApiEnabled }
+            : resolveMessagePublishApiEnvConfig({
+                  enabled: effectiveMessagePublishApiEnabled,
+                  envOverrides: baseConfig[MESSAGE_PUBLISH_API_ENV_OVERRIDES],
+              })),
+    };
+    const resolvedMessagePublishApi = resolveMessagePublishApiRuntimeConfig({
+        baseConfig: deferredMessagePublishApiBaseConfig,
+        override: mergedMessagePublishApiOverride,
+        label: `${configSourceLabel} field "messagePublishApi"`,
     });
     const effectiveProposalPublishApiEnabled =
         mergedProposalPublishApiOverride?.enabled ?? baseConfig.proposalPublishApiEnabled;
@@ -966,6 +1077,15 @@ function resolveAgentRuntimeConfig({
             keys: resolvedProposalPublishApi.proposalPublishApiKeys,
         };
     }
+    if (mergedMessagePublishApiOverride) {
+        resolvedAgentConfig.messagePublishApi = {
+            ...serializeMappedRuntimeFields({
+                definitions: MESSAGE_PUBLISH_API_FIELD_DEFINITIONS,
+                runtimeConfig: resolvedMessagePublishApi,
+            }),
+            keys: resolvedMessagePublishApi.messagePublishApiKeys,
+        };
+    }
 
     return {
         agentConfig: resolvedAgentConfig,
@@ -974,6 +1094,7 @@ function resolveAgentRuntimeConfig({
         ...sharedRuntimeConfig,
         ipfsHeaders: runtimeBaseConfig.ipfsHeaders,
         ...resolvedMessageApi,
+        ...resolvedMessagePublishApi,
         ...resolvedProposalPublishApi,
     };
 }
