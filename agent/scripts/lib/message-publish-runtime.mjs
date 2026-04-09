@@ -29,6 +29,21 @@ function normalizeChainIdValue(value, label = 'chainId') {
     return parsed;
 }
 
+function overrideBaseConfigChainId(baseConfig, chainId) {
+    return Object.create(
+        Object.getPrototypeOf(baseConfig),
+        {
+            ...Object.getOwnPropertyDescriptors(baseConfig),
+            chainId: {
+                value: chainId,
+                writable: true,
+                enumerable: true,
+                configurable: true,
+            },
+        }
+    );
+}
+
 async function resolveMessagePublishApiConfigForAgent({
     agentRef,
     chainId,
@@ -74,10 +89,7 @@ async function resolveMessagePublishApiConfigForAgent({
     });
 
     const runtimeConfig = resolveAgentRuntimeConfig({
-        baseConfig: {
-            ...baseConfig,
-            chainId: runtimeChainId,
-        },
+        baseConfig: overrideBaseConfigChainId(baseConfig, runtimeChainId),
         agentConfigFile: agentConfigStack,
         chainId: runtimeChainId,
         allowAmbiguousChainId,

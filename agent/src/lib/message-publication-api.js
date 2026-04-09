@@ -481,6 +481,14 @@ function createMessagePublicationApiServer({
                 );
             } catch (error) {
                 try {
+                    const latestRecord = await store.getRecord({
+                        signer: signedAuth.sender.address,
+                        chainId: identity.chainId,
+                        requestId: identity.requestId,
+                    });
+                    if (latestRecord) {
+                        record = latestRecord;
+                    }
                     if (record) {
                         record = await store.saveRecord({
                             ...record,

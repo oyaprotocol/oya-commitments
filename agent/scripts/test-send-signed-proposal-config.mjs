@@ -37,6 +37,7 @@ async function run() {
         {
             chainId: 11155111,
             rpcUrl: 'https://rpc.sepolia.example',
+            ipfsEnabled: true,
             proposalPublishApi: {
                 enabled: true,
                 host: 'config-host.local',
@@ -208,6 +209,21 @@ async function run() {
             'single-chain-chain-11155111.json'
         )
     );
+
+    const envOverrideServerConfig = await resolveProposalPublishServerConfig({
+        argv: ['node', 'start-proposal-publish-node.mjs', '--module=single-chain'],
+        env: {
+            PROPOSAL_PUBLISH_API_KEYS_JSON: '{"ops":"k_env_override"}',
+            IPFS_HEADERS_JSON: '{"Authorization":"Bearer env-ipfs-token"}',
+        },
+        repoRootPath,
+    });
+    assert.deepEqual(envOverrideServerConfig.runtimeConfig.proposalPublishApiKeys, {
+        ops: 'k_env_override',
+    });
+    assert.deepEqual(envOverrideServerConfig.runtimeConfig.ipfsHeaders, {
+        Authorization: 'Bearer env-ipfs-token',
+    });
 
     const overlaidServerConfig = await resolveProposalPublishServerConfig({
         argv: [

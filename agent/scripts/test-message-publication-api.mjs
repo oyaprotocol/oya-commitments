@@ -140,6 +140,7 @@ async function main() {
     const pinAttemptsByRequestId = new Map();
     const artifactByCid = new Map();
     const requestIdByCid = new Map();
+    const failPinOnce = new Set(['pin-retry']);
 
     globalThis.fetch = async (url, options = {}) => {
         const urlString = String(url);
@@ -175,6 +176,10 @@ async function main() {
             const cid = parsed.searchParams.get('arg');
             const requestId = requestIdByCid.get(cid);
             pinAttemptsByRequestId.set(requestId, (pinAttemptsByRequestId.get(requestId) ?? 0) + 1);
+            if (failPinOnce.has(requestId)) {
+                failPinOnce.delete(requestId);
+                return textResponse(500, '{"error":"temporary pin failure"}', 'Internal Server Error');
+            }
             return textResponse(200, JSON.stringify({ Pins: [cid] }));
         }
 
@@ -308,6 +313,50 @@ async function main() {
         });
         const rejectedOtherSigner = await postPublication(baseUrl, rejectedOtherSignerRequest.body);
         assert.equal(rejectedOtherSigner.status, 401);
+
+        const pinRetryRequest = await buildSignedBody({
+            account,
+            requestId: 'pin-retry',
+            messagePatch: {
+                payload: {
+                    marketId: 'market-1',
+                    action: 'initiated',
+                    price: '0.55',
+                },
+            },
+        });
+        const pinRetryFirst = await postPublication(baseUrl, pinRetryRequest.body);
+        assert.equal(pinRetryFirst.status, 502);
+        assert.equal(pinRetryFirst.json.code, 'publish_failed');
+        assert.ok(pinRetryFirst.json.cid);
+        assert.equal(addAttemptsByRequestId.get('pin-retry'), 1);
+        assert.equal(pinAttemptsByRequestId.get('pin-retry'), 1);
+
+        const failedPinRecord = await store.getRecord({
+            signer: account.address,
+            chainId: TEST_CHAIN_ID,
+            requestId: 'pin-retry',
+        });
+        assert.equal(failedPinRecord.cid, pinRetryFirst.json.cid);
+        assert.equal(failedPinRecord.pinned, false);
+        assert.ok(failedPinRecord.artifact);
+        assert.ok(failedPinRecord.lastError);
+
+        const pinRetrySecond = await postPublication(baseUrl, pinRetryRequest.body);
+        assert.equal(pinRetrySecond.status, 200);
+        assert.equal(pinRetrySecond.json.status, 'duplicate');
+        assert.equal(pinRetrySecond.json.cid, pinRetryFirst.json.cid);
+        assert.equal(addAttemptsByRequestId.get('pin-retry'), 1);
+        assert.equal(pinAttemptsByRequestId.get('pin-retry'), 2);
+
+        const recoveredPinRecord = await store.getRecord({
+            signer: account.address,
+            chainId: TEST_CHAIN_ID,
+            requestId: 'pin-retry',
+        });
+        assert.equal(recoveredPinRecord.cid, pinRetryFirst.json.cid);
+        assert.equal(recoveredPinRecord.pinned, true);
+        assert.equal(recoveredPinRecord.lastError, null);
 
         const expiredFirstAttempt = await buildSignedBody({
             account,
