@@ -27,7 +27,7 @@ This plan intentionally treats the result as an example module, not a general-pu
 - [x] 2026-04-09 17:30Z: Revised the plan after user clarification that each trade is either a reimbursable new trade or a continuation trade that does not create new reimbursement principal.
 - [x] 2026-04-09 17:30Z: Revised the plan to support any number of Polymarket markets per commitment by modeling the system as many concurrent per-market streams keyed by `marketId`.
 - [x] 2026-04-09 23:20Z: Implemented a minimal generalized Oya signed-message publication surface under `agent/`: `messagePublishApi` config/runtime plumbing, canonical signed-message builder, durable store, generic `/v1/messages/publish` API, standalone startup script, and focused store/API tests. The minimal patch verifies the agent signature against the message, publishes and pins the artifact to IPFS, and dedupes by signer plus `(chainId, requestId)` from the signed message body.
-- [ ] Decide whether Milestone 1 still needs explicit node-side co-signing beyond archival publication metadata; the current minimal implementation does not add a node signature.
+- [x] 2026-04-09 23:26Z: Added explicit node-side co-signing to the generalized message publication artifact. The node now signs a canonical attestation over publication metadata plus the archived signed message, embeds that attestation in the artifact, and verifies it in the focused API test.
 - [ ] Create the new deferred-settlement Polymarket agent module and its commitment text.
 - [ ] Add tests, smoke harness coverage, and documentation updates.
 
@@ -114,7 +114,7 @@ Milestone 1 status after the first implementation pass:
 - Completed: generic signed-message publication plumbing landed in `agent/src/lib/config.js`, `agent/src/lib/agent-config.js`, `agent/src/lib/signed-published-message.js`, `agent/src/lib/message-publication-store.js`, `agent/src/lib/message-publication-api.js`, `agent/scripts/lib/message-publish-runtime.mjs`, and `agent/scripts/start-message-publish-node.mjs`.
 - Completed: focused validation landed in `agent/scripts/test-message-publication-store.mjs`, `agent/scripts/test-message-publication-api.mjs`, and an extension to `agent/scripts/test-agent-config-file.mjs`.
 - Validated: `node agent/scripts/test-message-publication-store.mjs`, `node agent/scripts/test-message-publication-api.mjs`, and `node agent/scripts/test-agent-config-file.mjs`.
-- Remaining gap: the minimal artifact includes node publication metadata (`receivedAtMs`, `publishedAtMs`, `signerAllowlistMode`, optional `nodeName`) but does not yet include an explicit node cryptographic signature.
+- Completed follow-up: the artifact now also includes an explicit node `eip191` attestation over publication metadata plus the archived signed message, and the publish-node startup path resolves a signer from `MESSAGE_PUBLISH_API_SIGNER_PRIVATE_KEY` or the shared signer configuration.
 
 ## Context and Orientation
 

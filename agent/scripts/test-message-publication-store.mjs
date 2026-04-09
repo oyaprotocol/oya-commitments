@@ -82,6 +82,29 @@ async function main() {
                     receivedAtMs: 1_700_000_000_100,
                     publishedAtMs: 1_700_000_000_400,
                     signerAllowlistMode: 'explicit',
+                    nodeAttestation: {
+                        authType: 'eip191',
+                        signer: signer.toLowerCase(),
+                        signature,
+                        signedAtMs: 1_700_000_000_400,
+                        canonicalMessage: canonicalMessage,
+                        envelope: {
+                            version: 'oya-node-message-publication-attestation-v1',
+                            kind: 'message_publication_attestation',
+                            address: signer.toLowerCase(),
+                            timestampMs: 1_700_000_000_400,
+                            publication: {
+                                receivedAtMs: 1_700_000_000_100,
+                                publishedAtMs: 1_700_000_000_400,
+                                signerAllowlistMode: 'explicit',
+                            },
+                            signedMessage: {
+                                signer: signer.toLowerCase(),
+                                signature,
+                                canonicalMessage,
+                            },
+                        },
+                    },
                 },
                 signedMessage: {
                     authType: 'eip191',
@@ -106,6 +129,7 @@ async function main() {
         assert.equal(loaded.uri, 'ipfs://bafy-store-test');
         assert.equal(loaded.pinned, true);
         assert.equal(loaded.artifact.signedMessage.envelope.message.requestId, requestId);
+        assert.equal(loaded.artifact.publication.nodeAttestation.signer, signer.toLowerCase());
     } finally {
         await rm(tempDir, { recursive: true, force: true });
     }

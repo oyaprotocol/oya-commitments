@@ -1,5 +1,8 @@
 import path from 'node:path';
+import { privateKeyToAccount } from 'viem/accounts';
 import { buildConfig } from '../../src/lib/config.js';
+import { createSignerClient } from '../../src/lib/signer.js';
+import { normalizePrivateKey } from '../../src/lib/utils.js';
 import { resolveAgentRuntimeConfig, resolveConfiguredChainId } from '../../src/lib/agent-config.js';
 import {
     getArgValue,
@@ -188,8 +191,45 @@ async function resolveMessagePublishServerConfig({
     };
 }
 
+async function resolveMessagePublishNodeSigner({
+    runtimeConfig,
+    env = process.env,
+} = {}) {
+    const explicitPrivateKey = normalizePrivateKey(
+        env.MESSAGE_PUBLISH_API_SIGNER_PRIVATE_KEY ?? env.MESSAGE_PUBLISH_SIGNER_PRIVATE_KEY
+    );
+    if (explicitPrivateKey) {
+        const account = privateKeyToAccount(explicitPrivateKey);
+        return {
+            address: account.address,
+            async signMessage(message) {
+                return account.signMessage({ message });
+            },
+        };
+    }
+
+    const rpcUrl =
+        runtimeConfig?.rpcUrl ??
+        env.RPC_URL ??
+        'http://127.0.0.1:8545';
+    const { account, walletClient } = await createSignerClient({ rpcUrl });
+    if (!walletClient || typeof walletClient.signMessage !== 'function') {
+        throw new Error('Configured node signer does not support signMessage.');
+    }
+    return {
+        address: account.address,
+        async signMessage(message) {
+            return walletClient.signMessage({
+                account,
+                message,
+            });
+        },
+    };
+}
+
 export {
     resolveMessagePublishApiConfigForAgent,
+    resolveMessagePublishNodeSigner,
     resolveMessagePublishServerConfig,
     resolveMessagePublishStateFile,
 };

@@ -5,7 +5,10 @@ import {
 } from './lib/cli-runtime.mjs';
 import { createMessagePublicationApiServer } from '../src/lib/message-publication-api.js';
 import { createMessagePublicationStore } from '../src/lib/message-publication-store.js';
-import { resolveMessagePublishServerConfig } from './lib/message-publish-runtime.mjs';
+import {
+    resolveMessagePublishNodeSigner,
+    resolveMessagePublishServerConfig,
+} from './lib/message-publish-runtime.mjs';
 
 loadScriptEnv();
 
@@ -18,6 +21,8 @@ Options:
   --chain-id=<int>                     Optional assertion; must match the module config's selected chain when provided
   --overlay=<path>                     Optional extra config overlay file for script-side config resolution
   --overlay-paths=<a,b>                Optional comma-separated extra overlay files
+  signer env                           Use MESSAGE_PUBLISH_API_SIGNER_PRIVATE_KEY for an explicit key
+                                       Or fall back to the shared SIGNER_TYPE-based signer config
   --dry-run                            Print resolved server config and supported chains without starting
   --help                               Show this help
 `);
@@ -63,9 +68,13 @@ async function main() {
     }
 
     const store = createMessagePublicationStore({ stateFile });
+    const nodeSigner = await resolveMessagePublishNodeSigner({
+        runtimeConfig,
+    });
     const api = createMessagePublicationApiServer({
         config: runtimeConfig,
         store,
+        nodeSigner,
     });
     await api.start();
 

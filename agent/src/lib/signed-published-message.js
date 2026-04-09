@@ -4,6 +4,9 @@ import { canonicalizeJson, isPlainObject, stringifyCanonicalJson } from './canon
 const SIGNED_PUBLISHED_MESSAGE_VERSION = 'oya-signed-message-v1';
 const SIGNED_PUBLISHED_MESSAGE_KIND = 'generic_message_publication';
 const MESSAGE_PUBLICATION_RECORD_VERSION = 'oya-message-publication-record-v1';
+const NODE_MESSAGE_PUBLICATION_ATTESTATION_VERSION =
+    'oya-node-message-publication-attestation-v1';
+const NODE_MESSAGE_PUBLICATION_ATTESTATION_KIND = 'message_publication_attestation';
 
 function parsePositiveInteger(value, label) {
     const parsed = Number(value);
@@ -69,6 +72,118 @@ function buildSignedPublishedMessagePayload(args) {
     return stringifyCanonicalJson(buildSignedPublishedMessageEnvelope(args));
 }
 
+function normalizePublicationMetadata({
+    receivedAtMs,
+    publishedAtMs,
+    signerAllowlistMode,
+    nodeName,
+}) {
+    return canonicalizeJson({
+        receivedAtMs: parsePositiveInteger(receivedAtMs, 'receivedAtMs'),
+        publishedAtMs: parsePositiveInteger(publishedAtMs, 'publishedAtMs'),
+        signerAllowlistMode: normalizeNonEmptyString(
+            signerAllowlistMode,
+            'signerAllowlistMode'
+        ),
+        ...(nodeName ? { nodeName: normalizeNonEmptyString(nodeName, 'nodeName') } : {}),
+    });
+}
+
+function normalizeSignedMessageReference({
+    signer,
+    signature,
+    canonicalMessage,
+}) {
+    if (typeof signature !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(signature)) {
+        throw new Error('signature must be a 65-byte hex string.');
+    }
+    if (typeof canonicalMessage !== 'string' || !canonicalMessage.trim()) {
+        throw new Error('canonicalMessage must be a non-empty string.');
+    }
+
+    return canonicalizeJson({
+        signer: getAddress(signer).toLowerCase(),
+        signature,
+        canonicalMessage,
+    });
+}
+
+function buildArchivedSignedMessageRecord({
+    signer,
+    signature,
+    signedAtMs,
+    canonicalMessage,
+    envelope,
+}) {
+    const normalizedEnvelope = buildSignedPublishedMessageEnvelope(envelope);
+    const normalizedCanonicalMessage = buildSignedPublishedMessagePayload(normalizedEnvelope);
+    if (canonicalMessage !== normalizedCanonicalMessage) {
+        throw new Error('canonicalMessage does not match the normalized signed message envelope.');
+    }
+    if (typeof signature !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(signature)) {
+        throw new Error('signature must be a 65-byte hex string.');
+    }
+
+    return canonicalizeJson({
+        authType: 'eip191',
+        signer: getAddress(signer).toLowerCase(),
+        signature,
+        signedAtMs: parsePositiveInteger(signedAtMs, 'signedAtMs'),
+        canonicalMessage: normalizedCanonicalMessage,
+        envelope: normalizedEnvelope,
+    });
+}
+
+function buildMessagePublicationNodeAttestationEnvelope({
+    address,
+    timestampMs,
+    publication,
+    signedMessage,
+}) {
+    return canonicalizeJson({
+        version: NODE_MESSAGE_PUBLICATION_ATTESTATION_VERSION,
+        kind: NODE_MESSAGE_PUBLICATION_ATTESTATION_KIND,
+        address: getAddress(address).toLowerCase(),
+        timestampMs: parsePositiveInteger(timestampMs, 'timestampMs'),
+        publication: normalizePublicationMetadata(publication),
+        signedMessage: normalizeSignedMessageReference(signedMessage),
+    });
+}
+
+function buildMessagePublicationNodeAttestationPayload(args) {
+    return stringifyCanonicalJson(buildMessagePublicationNodeAttestationEnvelope(args));
+}
+
+function buildMessagePublicationNodeAttestationRecord({
+    signer,
+    signature,
+    signedAtMs,
+    canonicalMessage,
+    envelope,
+}) {
+    const normalizedEnvelope = buildMessagePublicationNodeAttestationEnvelope(envelope);
+    const normalizedCanonicalMessage = buildMessagePublicationNodeAttestationPayload(
+        normalizedEnvelope
+    );
+    if (canonicalMessage !== normalizedCanonicalMessage) {
+        throw new Error(
+            'canonicalMessage does not match the normalized message publication node attestation envelope.'
+        );
+    }
+    if (typeof signature !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(signature)) {
+        throw new Error('signature must be a 65-byte hex string.');
+    }
+
+    return canonicalizeJson({
+        authType: 'eip191',
+        signer: getAddress(signer).toLowerCase(),
+        signature,
+        signedAtMs: parsePositiveInteger(signedAtMs, 'signedAtMs'),
+        canonicalMessage: normalizedCanonicalMessage,
+        envelope: normalizedEnvelope,
+    });
+}
+
 function sanitizeFilenameSegment(value) {
     return String(value)
         .trim()
@@ -94,35 +209,57 @@ function buildMessagePublicationArtifact({
     publishedAtMs,
     signerAllowlistMode,
     nodeName,
+    nodeAttestation,
 }) {
-    const normalizedEnvelope = buildSignedPublishedMessageEnvelope(envelope);
-    const normalizedCanonicalMessage = buildSignedPublishedMessagePayload(normalizedEnvelope);
-    if (canonicalMessage !== normalizedCanonicalMessage) {
-        throw new Error('canonicalMessage does not match the normalized signed message envelope.');
-    }
-    if (typeof signature !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(signature)) {
-        throw new Error('signature must be a 65-byte hex string.');
+    const normalizedPublication = normalizePublicationMetadata({
+        receivedAtMs,
+        publishedAtMs,
+        signerAllowlistMode,
+        nodeName,
+    });
+    const normalizedSignedMessage = buildArchivedSignedMessageRecord({
+        signer,
+        signature,
+        signedAtMs,
+        canonicalMessage,
+        envelope,
+    });
+    const normalizedNodeAttestation =
+        nodeAttestation === undefined || nodeAttestation === null
+            ? null
+            : buildMessagePublicationNodeAttestationRecord(nodeAttestation);
+
+    if (normalizedNodeAttestation) {
+        const expectedPublication = JSON.stringify(normalizedPublication);
+        const expectedSignedMessage = JSON.stringify(
+            normalizeSignedMessageReference(normalizedSignedMessage)
+        );
+        if (
+            JSON.stringify(normalizedNodeAttestation.envelope.publication) !== expectedPublication
+        ) {
+            throw new Error(
+                'nodeAttestation must attest to the same publication metadata embedded in the artifact.'
+            );
+        }
+        if (
+            JSON.stringify(normalizedNodeAttestation.envelope.signedMessage) !==
+            expectedSignedMessage
+        ) {
+            throw new Error(
+                'nodeAttestation must attest to the same signed message embedded in the artifact.'
+            );
+        }
     }
 
     return canonicalizeJson({
         version: MESSAGE_PUBLICATION_RECORD_VERSION,
         publication: {
-            receivedAtMs: parsePositiveInteger(receivedAtMs, 'receivedAtMs'),
-            publishedAtMs: parsePositiveInteger(publishedAtMs, 'publishedAtMs'),
-            signerAllowlistMode: normalizeNonEmptyString(
-                signerAllowlistMode,
-                'signerAllowlistMode'
-            ),
-            ...(nodeName ? { nodeName: normalizeNonEmptyString(nodeName, 'nodeName') } : {}),
+            ...normalizedPublication,
+            ...(normalizedNodeAttestation
+                ? { nodeAttestation: normalizedNodeAttestation }
+                : {}),
         },
-        signedMessage: {
-            authType: 'eip191',
-            signer: getAddress(signer).toLowerCase(),
-            signature,
-            signedAtMs: parsePositiveInteger(signedAtMs, 'signedAtMs'),
-            canonicalMessage: normalizedCanonicalMessage,
-            envelope: normalizedEnvelope,
-        },
+        signedMessage: normalizedSignedMessage,
     });
 }
 
@@ -140,78 +277,97 @@ async function verifySignedPublishedMessageArtifact(artifact) {
         throw new Error('artifact.signedMessage must be an object.');
     }
 
-    const publication = {
-        receivedAtMs: parsePositiveInteger(
-            artifact.publication.receivedAtMs,
-            'artifact.publication.receivedAtMs'
-        ),
-        publishedAtMs: parsePositiveInteger(
-            artifact.publication.publishedAtMs,
-            'artifact.publication.publishedAtMs'
-        ),
-        signerAllowlistMode: normalizeNonEmptyString(
-            artifact.publication.signerAllowlistMode,
-            'artifact.publication.signerAllowlistMode'
-        ),
-        ...(artifact.publication.nodeName !== undefined
-            ? {
-                  nodeName: normalizeNonEmptyString(
-                      artifact.publication.nodeName,
-                      'artifact.publication.nodeName'
-                  ),
-              }
-            : {}),
-    };
-
-    const normalizedEnvelope = buildSignedPublishedMessageEnvelope(artifact.signedMessage.envelope ?? {});
-    const canonicalMessage = buildSignedPublishedMessagePayload(normalizedEnvelope);
-    if (artifact.signedMessage.canonicalMessage !== canonicalMessage) {
-        throw new Error('artifact signedMessage.canonicalMessage does not match the normalized envelope.');
-    }
-    if (artifact.signedMessage.signedAtMs !== normalizedEnvelope.timestampMs) {
-        throw new Error('artifact signedMessage.signedAtMs does not match the signed envelope timestamp.');
-    }
-    if (
-        typeof artifact.signedMessage.signature !== 'string' ||
-        !/^0x[0-9a-fA-F]{130}$/.test(artifact.signedMessage.signature)
-    ) {
-        throw new Error('artifact signedMessage.signature must be a 65-byte hex string.');
-    }
+    const publication = normalizePublicationMetadata({
+        receivedAtMs: artifact.publication.receivedAtMs,
+        publishedAtMs: artifact.publication.publishedAtMs,
+        signerAllowlistMode: artifact.publication.signerAllowlistMode,
+        nodeName: artifact.publication.nodeName,
+    });
+    const normalizedSignedMessage = buildArchivedSignedMessageRecord({
+        signer: artifact.signedMessage.signer,
+        signature: artifact.signedMessage.signature,
+        signedAtMs: artifact.signedMessage.signedAtMs,
+        canonicalMessage: artifact.signedMessage.canonicalMessage,
+        envelope: artifact.signedMessage.envelope ?? {},
+    });
+    const canonicalMessage = normalizedSignedMessage.canonicalMessage;
 
     const recoveredSigner = getAddress(
         await recoverMessageAddress({
             message: canonicalMessage,
-            signature: artifact.signedMessage.signature,
+            signature: normalizedSignedMessage.signature,
         })
     ).toLowerCase();
-    const declaredSigner = getAddress(artifact.signedMessage.signer).toLowerCase();
+    const declaredSigner = normalizedSignedMessage.signer;
     if (recoveredSigner !== declaredSigner) {
         throw new Error('artifact signature does not recover to the archived signer.');
+    }
+
+    let normalizedNodeAttestation = null;
+    if (artifact.publication.nodeAttestation !== undefined) {
+        normalizedNodeAttestation = buildMessagePublicationNodeAttestationRecord(
+            artifact.publication.nodeAttestation
+        );
+        const expectedSignedMessageReference = normalizeSignedMessageReference(
+            normalizedSignedMessage
+        );
+        if (
+            JSON.stringify(normalizedNodeAttestation.envelope.publication) !==
+            JSON.stringify(publication)
+        ) {
+            throw new Error(
+                'artifact node attestation does not match the normalized publication metadata.'
+            );
+        }
+        if (
+            JSON.stringify(normalizedNodeAttestation.envelope.signedMessage) !==
+            JSON.stringify(expectedSignedMessageReference)
+        ) {
+            throw new Error(
+                'artifact node attestation does not match the normalized signed message.'
+            );
+        }
+
+        const recoveredNodeSigner = getAddress(
+            await recoverMessageAddress({
+                message: normalizedNodeAttestation.canonicalMessage,
+                signature: normalizedNodeAttestation.signature,
+            })
+        ).toLowerCase();
+        if (recoveredNodeSigner !== normalizedNodeAttestation.signer) {
+            throw new Error('artifact node attestation signature does not recover to the archived node signer.');
+        }
     }
 
     return {
         ok: true,
         signer: declaredSigner,
-        chainId: normalizedEnvelope.message.chainId,
-        requestId: normalizedEnvelope.message.requestId,
-        commitmentAddresses: normalizedEnvelope.message.commitmentAddresses,
-        agentAddress: normalizedEnvelope.message.agentAddress,
-        signedAtMs: normalizedEnvelope.timestampMs,
+        chainId: normalizedSignedMessage.envelope.message.chainId,
+        requestId: normalizedSignedMessage.envelope.message.requestId,
+        commitmentAddresses: normalizedSignedMessage.envelope.message.commitmentAddresses,
+        agentAddress: normalizedSignedMessage.envelope.message.agentAddress,
+        signedAtMs: normalizedSignedMessage.envelope.timestampMs,
         receivedAtMs: publication.receivedAtMs,
         publishedAtMs: publication.publishedAtMs,
         canonicalMessage,
         publication,
-        envelope: normalizedEnvelope,
-        message: normalizedEnvelope.message,
+        nodeAttestation: normalizedNodeAttestation,
+        envelope: normalizedSignedMessage.envelope,
+        message: normalizedSignedMessage.envelope.message,
     };
 }
 
 export {
     MESSAGE_PUBLICATION_RECORD_VERSION,
+    NODE_MESSAGE_PUBLICATION_ATTESTATION_KIND,
+    NODE_MESSAGE_PUBLICATION_ATTESTATION_VERSION,
     SIGNED_PUBLISHED_MESSAGE_KIND,
     SIGNED_PUBLISHED_MESSAGE_VERSION,
     buildMessagePublicationArtifact,
     buildMessagePublicationFilename,
+    buildMessagePublicationNodeAttestationEnvelope,
+    buildMessagePublicationNodeAttestationPayload,
+    buildMessagePublicationNodeAttestationRecord,
     buildSignedPublishedMessageEnvelope,
     buildSignedPublishedMessagePayload,
     normalizePublishedMessage,

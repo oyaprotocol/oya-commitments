@@ -11,6 +11,8 @@ import {
 import {
     buildMessagePublicationArtifact,
     buildMessagePublicationFilename,
+    buildMessagePublicationNodeAttestationEnvelope,
+    buildMessagePublicationNodeAttestationPayload,
     buildSignedPublishedMessageEnvelope,
     buildSignedPublishedMessagePayload,
 } from './signed-published-message.js';
@@ -93,6 +95,7 @@ function createMessagePublicationApiServer({
     config,
     store,
     logger = console,
+    nodeSigner,
 } = {}) {
     if (!config) {
         throw new Error('createMessagePublicationApiServer requires config.');
@@ -102,6 +105,15 @@ function createMessagePublicationApiServer({
     }
     if (!config.ipfsEnabled) {
         throw new Error('Message publication API requires ipfsEnabled=true.');
+    }
+    if (!nodeSigner || typeof nodeSigner !== 'object') {
+        throw new Error('Message publication API requires a nodeSigner.');
+    }
+    if (typeof nodeSigner.address !== 'string' || !nodeSigner.address.trim()) {
+        throw new Error('Message publication API nodeSigner.address must be a non-empty string.');
+    }
+    if (typeof nodeSigner.signMessage !== 'function') {
+        throw new Error('Message publication API nodeSigner.signMessage(message) is required.');
     }
 
     const keyEntries = buildBearerKeyEntries(config.messagePublishApiKeys ?? {});
@@ -138,6 +150,26 @@ function createMessagePublicationApiServer({
         if (!nextRecord.artifact || nextRecord.publishedAtMs === null) {
             const envelope = parseEnvelopeFromCanonicalMessage(nextRecord.canonicalMessage);
             const publishedAtMs = Date.now();
+            const nodeAttestationEnvelope = buildMessagePublicationNodeAttestationEnvelope({
+                address: nodeSigner.address,
+                timestampMs: publishedAtMs,
+                publication: {
+                    receivedAtMs: nextRecord.receivedAtMs,
+                    publishedAtMs,
+                    signerAllowlistMode,
+                    nodeName,
+                },
+                signedMessage: {
+                    signer: nextRecord.signer,
+                    signature: nextRecord.signature,
+                    canonicalMessage: nextRecord.canonicalMessage,
+                },
+            });
+            const nodeAttestationCanonicalMessage =
+                buildMessagePublicationNodeAttestationPayload(nodeAttestationEnvelope);
+            const nodeAttestationSignature = await nodeSigner.signMessage(
+                nodeAttestationCanonicalMessage
+            );
             const artifact = buildMessagePublicationArtifact({
                 signer: nextRecord.signer,
                 signature: nextRecord.signature,
@@ -148,6 +180,13 @@ function createMessagePublicationApiServer({
                 publishedAtMs,
                 signerAllowlistMode,
                 nodeName,
+                nodeAttestation: {
+                    signer: nodeSigner.address,
+                    signature: nodeAttestationSignature,
+                    signedAtMs: publishedAtMs,
+                    canonicalMessage: nodeAttestationCanonicalMessage,
+                    envelope: nodeAttestationEnvelope,
+                },
             });
             nextRecord = await store.saveRecord({
                 ...nextRecord,
@@ -478,6 +517,8 @@ function createMessagePublicationApiServer({
                 cid: record.cid,
                 uri: record.uri,
                 pinned: Boolean(record.pinned),
+                nodeSigner:
+                    record.artifact?.publication?.nodeAttestation?.signer ?? null,
             });
         });
 
@@ -491,7 +532,7 @@ function createMessagePublicationApiServer({
         server = nextServer;
         emitLog(
             'info',
-            `[oya-node] Message publish API listening on http://${config.messagePublishApiHost}:${config.messagePublishApiPort}`
+            `[oya-node] Message publish API listening on http://${config.messagePublishApiHost}:${config.messagePublishApiPort} (nodeSigner=${getAddress(nodeSigner.address).toLowerCase()})`
         );
         return server;
     }

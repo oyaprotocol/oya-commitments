@@ -120,6 +120,7 @@ async function postPublication(baseUrl, body, { bearerToken = 'k_test_ops_secret
 async function main() {
     const account = privateKeyToAccount(`0x${'1'.repeat(64)}`);
     const otherAccount = privateKeyToAccount(`0x${'2'.repeat(64)}`);
+    const nodeAccount = privateKeyToAccount(`0x${'3'.repeat(64)}`);
     const tempDir = await mkdtemp(path.join(os.tmpdir(), 'message-publication-api-'));
     const stateFile = path.join(tempDir, 'message-publications.json');
     const store = createMessagePublicationStore({ stateFile });
@@ -184,6 +185,12 @@ async function main() {
         config: buildServerConfig(account.address),
         store,
         logger,
+        nodeSigner: {
+            address: nodeAccount.address,
+            async signMessage(message) {
+                return nodeAccount.signMessage({ message });
+            },
+        },
     });
     const server = await api.start();
     const address = server.address();
@@ -191,6 +198,7 @@ async function main() {
     const baseUrl = `http://127.0.0.1:${address.port}`;
     assert.equal(logger.infos.length, 1);
     assert.match(logger.infos[0], /Message publish API listening on/);
+    assert.match(logger.infos[0], new RegExp(nodeAccount.address.slice(2, 8), 'i'));
 
     try {
         const health = await fetch(`${baseUrl}/healthz`);
@@ -248,11 +256,22 @@ async function main() {
             TEST_COMMITMENT_ADDRESSES.map((value) => value.toLowerCase())
         );
         assert.equal(verification.publishedAtMs >= verification.receivedAtMs, true);
+        assert.ok(verification.nodeAttestation);
+        assert.equal(
+            verification.nodeAttestation.signer,
+            nodeAccount.address.toLowerCase()
+        );
+        assert.equal(
+            verification.nodeAttestation.envelope.signedMessage.signer,
+            account.address.toLowerCase()
+        );
+        assert.equal(accepted.json.nodeSigner, nodeAccount.address.toLowerCase());
 
         const duplicate = await postPublication(baseUrl, acceptedRequest.body);
         assert.equal(duplicate.status, 200);
         assert.equal(duplicate.json.status, 'duplicate');
         assert.equal(duplicate.json.cid, accepted.json.cid);
+        assert.equal(duplicate.json.nodeSigner, nodeAccount.address.toLowerCase());
         assert.equal(addAttemptsByRequestId.get('publish-ok'), 1);
         assert.equal(pinAttemptsByRequestId.get('publish-ok'), 1);
 
