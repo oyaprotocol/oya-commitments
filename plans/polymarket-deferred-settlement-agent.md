@@ -176,7 +176,7 @@ Milestone 0 must also define the portfolio-level rollups derived from those per-
 
 Milestone 0 must also define the module config shape for multi-market support. The plan should replace any single-market policy assumptions with a per-market policy map keyed by `marketId` so new markets can be added without changing the core ledger model.
 
-Milestone 1 adds a generalized signed-message publication protocol to the Oya node. This should parallel the proposal-publication node but not replace it. Add a new config block such as `messagePublishApi`, a canonical signed payload builder, a durable store, and a standalone startup helper. The node endpoint should accept an arbitrary signed message, verify the submitted signature against that message, attach a node signature, publish the final artifact to IPFS, pin it, and store duplicate-safe state keyed by the signed message identity. The signed message itself must carry `chainId`, `requestId`, `commitmentAddresses`, `agentAddress`, and any domain-specific payload. In v1 the node is a notary and archivist, not an independent message verifier. The Polymarket example should use this generalized publication surface by embedding the market-specific trade details inside the signed message payload.
+Milestone 1 adds a generalized signed-message publication protocol to the Oya node. This should parallel the proposal-publication node but not replace it. Add a new config block such as `messagePublishApi`, a canonical signed payload builder, a durable store, and a standalone startup helper. The node endpoint should accept an arbitrary signed message, verify the submitted `auth` envelope against that message, attach a node signature, publish the final artifact to IPFS, pin it, and store duplicate-safe state keyed by the signed message identity. The signed message itself must carry `chainId`, `requestId`, `commitmentAddresses`, `agentAddress`, and any domain-specific payload. In v1 the node is a notary and archivist, not an independent message verifier. The Polymarket example should use this generalized publication surface by embedding the market-specific trade details inside the signed message payload.
 
 Milestone 2 creates the new agent module under `agent-library/agents/polymarket-staked-external-settlement/`. The module should own all agent-specific behavior. It should:
 
@@ -388,7 +388,7 @@ New node-side interface to add:
 Proposed signed request body shape:
 
 - `message`
-- `signature`
+- `auth`
 
 For endpoint purposes, `message` is opaque and domain-agnostic. Any details needed to interpret it must be included in the message itself. At minimum, the signed message format for this service should carry:
 
@@ -417,8 +417,6 @@ New config dependency to add in module config:
 - `messagePublishApi.signatureMaxAgeSeconds`
 - `messagePublishApi.stateFile`
 - `messagePublishApi.nodeName`
-
-For this new service, prefer the term `signature` over `auth` in both the request body and implementation names. Existing repo surfaces that already use `auth` do not need to be renamed as part of this milestone.
 
 New per-market module config dependency to add:
 
