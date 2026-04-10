@@ -52,6 +52,7 @@ The detailed workflow for module structure, `config.json`, and local/remote harn
 - Skill for new agent/commitment combos: `skills/add-agent-commitment/SKILL.md`
 - Agent module layout and new-commitment workflow: `agent-library/README.md`
 - Runner config, message APIs, publication nodes, and harness usage: `agent/README.md`
+- Standalone node daemons and startup commands: `node/README.md`
 - Deployment and configuration: `docs/deployment.md`
 - Signer options and `with-signer` helper: `docs/signers.md`
 - Offchain agent usage: `docs/agent.md`
@@ -65,5 +66,6 @@ The detailed workflow for module structure, `config.json`, and local/remote harn
 - `script/` Foundry deployment and ops scripts
 - `test/` Foundry tests
 - `agent/` Offchain agent scaffold
+- `node/` Standalone Oya node daemons and node-focused tests
 - `frontend/` Web UI
 - `lib/` External dependencies (Foundry)

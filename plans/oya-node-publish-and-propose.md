@@ -121,7 +121,7 @@ Validation completed during implementation:
 - `node agent/scripts/test-zero-first-erc20-allowance.mjs`
 - `node agent/scripts/test-tool-output-retryability.mjs`
 - `node agent-library/agents/signed-proposal-publish-smoke/test-signed-proposal-publish-smoke-agent.mjs`
-- `node agent/scripts/start-proposal-publish-node.mjs --module=signed-proposal-publish-smoke --dry-run`
+- `node node/scripts/start-proposal-publish-node.mjs --module=signed-proposal-publish-smoke --dry-run`
 
 ## Context and Orientation
 
@@ -130,7 +130,7 @@ The current publication-only node is implemented in the following shared files:
 - `agent/src/lib/signed-proposal.js`: defines the canonical signed proposal envelope, canonical JSON payload, publication artifact, and artifact verifier.
 - `agent/src/lib/proposal-publication-api.js`: serves `GET /healthz` and `POST /v1/proposals/publish`, authenticates the signed payload, publishes to IPFS, pins the CID, and returns a stable response.
 - `agent/src/lib/proposal-publication-store.js`: stores durable idempotency records keyed by `(signer, chainId, requestId)`.
-- `agent/scripts/start-proposal-publish-node.mjs`: resolves runtime config and starts the server.
+- `node/scripts/start-proposal-publish-node.mjs`: resolves runtime config and starts the server. `agent/scripts/start-proposal-publish-node.mjs` remains as a compatibility wrapper.
 - `agent/scripts/lib/proposal-publish-runtime.mjs`: resolves CLI overrides, module config, host/port, chain selection, and default state-file paths.
 - `agent/scripts/send-signed-proposal.mjs`: signs and submits the payload to the node.
 
@@ -213,7 +213,7 @@ Fifth, define the response and retry semantics clearly. The existing top-level p
 
 If the archive exists and the proposal has already been submitted, retries should return the stored `transactionHash` and `ogProposalHash` without a second onchain submission. If archive succeeded but submission failed before a transaction hash existed, the API should return a 502-style failure that still includes the existing CID and indicates the request can be retried safely. If a failure occurs after `sideEffectsLikelyCommitted=true` but before a transaction hash is known, the API should mark the record `uncertain` and refuse automatic retry until an operator investigates; that is safer than risking a duplicate proposal.
 
-Sixth, update startup, CLI, and docs. `agent/scripts/start-proposal-publish-node.mjs` should keep its current entrypoint for compatibility but expose the resolved mode and supported chain behavior in `--dry-run` output. If needed, a thin alias such as `start-proposal-node.mjs` can be added later, but this plan does not require a rename. `agent/README.md` and script help text must explain:
+Sixth, update startup, CLI, and docs. The primary startup path is now `node/scripts/start-proposal-publish-node.mjs`, while `agent/scripts/start-proposal-publish-node.mjs` is retained for compatibility and should expose the same resolved mode and supported chain behavior in `--dry-run` output. `agent/README.md`, `node/README.md`, and script help text must explain:
 
 - how to enable `proposalPublishApi.mode: "publish"` versus `"propose"`
 - that `propose` mode requires a real proposer signer and resolvable per-chain runtime config for every chain the node should serve
@@ -229,7 +229,7 @@ Sixth, update startup, CLI, and docs. `agent/scripts/start-proposal-publish-node
    - `agent/src/lib/config.js`
    - `agent/src/lib/agent-config.js`
    - `agent/scripts/lib/proposal-publish-runtime.mjs`
-   - `agent/scripts/start-proposal-publish-node.mjs`
+   - `node/scripts/start-proposal-publish-node.mjs`
    - `agent/scripts/test-send-signed-proposal-config.mjs`
 
    Work:
@@ -294,7 +294,7 @@ Sixth, update startup, CLI, and docs. `agent/scripts/start-proposal-publish-node
    Files:
 
    - `agent/README.md`
-   - `agent/scripts/start-proposal-publish-node.mjs`
+   - `node/scripts/start-proposal-publish-node.mjs`
    - possibly a new smoke module under `agent-library/agents/` if the existing `signed-proposal-publish-smoke` module becomes too publication-specific
 
    Work:
@@ -424,7 +424,7 @@ Primary files and interfaces:
   - node-side proposer signer resolution
 - `agent/scripts/lib/proposal-publish-runtime.mjs`
   - startup and CLI resolution for node host/port/chain/mode, plus per-request proposer runtime resolution
-- `agent/scripts/start-proposal-publish-node.mjs`
+- `node/scripts/start-proposal-publish-node.mjs`
   - standalone node process
 - `agent/scripts/send-signed-proposal.mjs`
   - unchanged request sender

@@ -75,6 +75,8 @@ For interactions, swap the env var (e.g., `PROPOSER_PK`, `EXECUTOR_PK`). For sig
 
 All other behavior is intentionally left out. Implement your own agent in `agent-library/agents/<name>/agent.js` to add commitment-specific logic and tool use.
 
+Primary standalone node startup docs now live in `node/README.md`. The protocol details below remain here because agent modules still configure and talk to those node surfaces.
+
 ### Price Trigger Config
 
 Export `getPriceTriggers({ commitmentText, config })` from `agent-library/agents/<name>/agent.js` when your agent needs price-trigger behavior. This keeps commitment interpretation local to the module.
@@ -257,10 +259,12 @@ Keep bearer tokens in env via `MESSAGE_PUBLISH_API_KEYS_JSON`; `messagePublishAp
 Start the node with:
 
 ```bash
-node agent/scripts/start-message-publish-node.mjs --module=<agent-name>
+node node/scripts/start-message-publish-node.mjs --module=<agent-name>
 ```
 
 Use `--chain-id=<id>` to assert a specific chain when the module serves more than one chain, or `--dry-run` to print the resolved bind host, port, state file, and supported chain IDs without starting the server.
+
+Compatibility note: `agent/scripts/start-message-publish-node.mjs` still works as a thin wrapper during the migration, but `node/scripts/start-message-publish-node.mjs` is now the primary path.
 
 Current request shape:
 
@@ -378,8 +382,10 @@ The signed-request signer and the node's proposer signer are different roles:
 Start the standalone node:
 
 ```bash
-node agent/scripts/start-proposal-publish-node.mjs --module=<agent-name>
+node node/scripts/start-proposal-publish-node.mjs --module=<agent-name>
 ```
+
+Compatibility note: `agent/scripts/start-proposal-publish-node.mjs` still works as a thin wrapper during the migration, but `node/scripts/start-proposal-publish-node.mjs` is now the primary path.
 
 Endpoints:
 

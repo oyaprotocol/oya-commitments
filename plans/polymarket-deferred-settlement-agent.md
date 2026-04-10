@@ -32,6 +32,8 @@ This plan intentionally treats the result as an example module, not a general-pu
 - [x] 2026-04-10 00:29Z: Fixed additional Milestone 1 hardening issues: `message-publication-api.start()` now rejects cleanly on bind/listen errors, and the signed-message artifact builders now require `signedAtMs === envelope.timestampMs` for both the archived agent signature and the node attestation.
 - [x] 2026-04-10 00:58Z: Fixed two more Milestone 1 review issues in the shared message publisher: signed-auth chain enforcement now accepts numeric-string `message.chainId` values by normalizing them before comparing to the configured chain, and IPFS uploads now keep a retry-safe in-memory CID snapshot so a transient post-publish store failure does not trigger duplicate uploads on the next identical request.
 - [x] 2026-04-10 01:16Z: Added operator-facing documentation for the signed message publication flow in `agent/README.md`, including config fields, request and artifact shapes, startup instructions, and retry semantics, with supporting doc signposts in the repo root and `agent-library/README.md`.
+- [x] 2026-04-10 01:45Z: Spun out the requested directory-refactor work into `plans/node-directory-extraction.md`. Any later implementation of this plan's node startup paths should follow that extraction plan so the primary entrypoints move from `agent/` to a dedicated `node/` workspace instead of growing more node-owned code under `agent/scripts/`.
+- [x] 2026-04-10 02:03Z: Implemented the first extraction pass for standalone node process surfaces: new primary startup paths now live under `node/scripts/`, `node/README.md` documents the node workspace, and the old `agent/scripts/start-...node.mjs` files now delegate to the new paths as compatibility wrappers.
 - [ ] Create the new deferred-settlement Polymarket agent module and its commitment text.
 - [ ] Add tests, smoke harness coverage, and documentation updates.
 
@@ -115,7 +117,7 @@ Initial outcome: the repo already contains most of the reusable building blocks,
 
 Milestone 1 status after the first implementation pass:
 
-- Completed: generic signed-message publication plumbing landed in `agent/src/lib/config.js`, `agent/src/lib/agent-config.js`, `agent/src/lib/signed-published-message.js`, `agent/src/lib/message-publication-store.js`, `agent/src/lib/message-publication-api.js`, `agent/scripts/lib/message-publish-runtime.mjs`, and `agent/scripts/start-message-publish-node.mjs`.
+- Completed: generic signed-message publication plumbing landed in `agent/src/lib/config.js`, `agent/src/lib/agent-config.js`, `agent/src/lib/signed-published-message.js`, `agent/src/lib/message-publication-store.js`, `agent/src/lib/message-publication-api.js`, the shared runtime helper under `agent/scripts/lib/message-publish-runtime.mjs`, and the standalone node entrypoint now exposed primarily at `node/scripts/start-message-publish-node.mjs` with a compatibility wrapper retained at `agent/scripts/start-message-publish-node.mjs`.
 - Completed: focused validation landed in `agent/scripts/test-message-publication-store.mjs`, `agent/scripts/test-message-publication-api.mjs`, and an extension to `agent/scripts/test-agent-config-file.mjs`.
 - Validated: `node agent/scripts/test-message-publication-store.mjs`, `node agent/scripts/test-message-publication-api.mjs`, and `node agent/scripts/test-agent-config-file.mjs`.
 - Completed follow-up: the artifact now also includes an explicit node `eip191` attestation over publication metadata plus the archived signed message, and the publish-node startup path resolves a signer from `MESSAGE_PUBLISH_API_SIGNER_PRIVATE_KEY` or the shared signer configuration.
@@ -223,13 +225,14 @@ From `/Users/johnshutt/Code/oya-commitments`:
    - `agent/src/lib/message-publication-store.js` (new)
    - `agent/src/lib/message-publication-api.js` (new)
    - `agent/scripts/lib/message-publish-runtime.mjs` (new)
-   - `agent/scripts/start-message-publish-node.mjs` (new)
+   - `node/scripts/start-message-publish-node.mjs` (new primary path)
+   - `agent/scripts/start-message-publish-node.mjs` (compatibility wrapper)
    - `agent/scripts/test-message-publication-api.mjs` (new)
    - `agent/scripts/test-message-publication-store.mjs` (new)
 
    Commands:
 
-   - `node agent/scripts/start-message-publish-node.mjs --module=polymarket-staked-external-settlement --dry-run`
+   - `node node/scripts/start-message-publish-node.mjs --module=polymarket-staked-external-settlement --dry-run`
    - `node agent/scripts/test-message-publication-store.mjs`
    - `node agent/scripts/test-message-publication-api.mjs`
 
@@ -369,7 +372,8 @@ Useful current references inside the repo:
 - `agent-library/agents/polymarket-intent-trader/agent.js`
 - `agent/src/lib/proposal-publication-api.js`
 - `agent/src/lib/proposal-publication-store.js`
-- `agent/scripts/start-proposal-publish-node.mjs`
+- `node/scripts/start-proposal-publish-node.mjs` (primary)
+- `agent/scripts/start-proposal-publish-node.mjs` (compatibility wrapper)
 - `plans/polymarket-agent-hardening.md`
 - `plans/oya-node-publish-and-propose.md`
 

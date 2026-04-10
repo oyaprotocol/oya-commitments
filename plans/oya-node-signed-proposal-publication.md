@@ -98,7 +98,7 @@ The publication-only Oya node is implemented as a fully separate process from th
 - `agent/src/lib/proposal-publication-api.js` serves `GET /healthz` and `POST /v1/proposals/publish`
 - `agent/src/lib/proposal-publication-store.js` keeps a durable JSON ledger keyed by `(signer, chainId, requestId)`
 - `agent/src/lib/signed-proposal.js` defines the canonical proposal envelope, signed payload, artifact format, and verifier
-- `agent/scripts/start-proposal-publish-node.mjs` starts the standalone node from module config
+- `node/scripts/start-proposal-publish-node.mjs` is now the primary standalone node entrypoint from module config, with `agent/scripts/start-proposal-publish-node.mjs` retained as a compatibility wrapper
 - `agent/scripts/send-signed-proposal.mjs` signs and submits publication requests
 - `agent/scripts/verify-signed-proposal-artifact.mjs` verifies archived artifacts
 
@@ -254,7 +254,7 @@ Sixth, add documentation and a minimal smoke scenario. The docs should explain h
    Added:
 
    - `agent/scripts/lib/proposal-publish-runtime.mjs`
-   - `agent/scripts/start-proposal-publish-node.mjs`
+   - `node/scripts/start-proposal-publish-node.mjs`
    - `agent/scripts/send-signed-proposal.mjs`
    - `agent/scripts/verify-signed-proposal-artifact.mjs`
 
@@ -348,7 +348,7 @@ Validation commands actually run from repo root:
 - `node agent/scripts/test-message-api-signature-auth.mjs`
 - `node agent/scripts/test-message-api.mjs`
 - `node agent/scripts/validate-agent.mjs --module=signed-proposal-publish-smoke`
-- `node agent/scripts/start-proposal-publish-node.mjs --module=signed-proposal-publish-smoke --dry-run`
+- `node node/scripts/start-proposal-publish-node.mjs --module=signed-proposal-publish-smoke --dry-run`
 - `node agent/scripts/send-signed-proposal.mjs --module=signed-proposal-publish-smoke --private-key=0x1111111111111111111111111111111111111111111111111111111111111111 --safe=0x2222222222222222222222222222222222222222 --og-module=0x3333333333333333333333333333333333333333 --transactions-json='[{"to":"0x4444444444444444444444444444444444444444","value":"0","data":"0x1234","operation":0}]' --explanation='dry run publication' --dry-run`
 
 Notes:
@@ -460,7 +460,7 @@ Primary files changed:
 - `agent/src/lib/proposal-publication-api.js`
 - `agent/src/lib/proposal-publication-store.js`
 - `agent/scripts/lib/proposal-publish-runtime.mjs`
-- `agent/scripts/start-proposal-publish-node.mjs`
+- `node/scripts/start-proposal-publish-node.mjs`
 - `agent/scripts/send-signed-proposal.mjs`
 - `agent/scripts/verify-signed-proposal-artifact.mjs`
 - `agent/scripts/test-proposal-publication-api.mjs`
