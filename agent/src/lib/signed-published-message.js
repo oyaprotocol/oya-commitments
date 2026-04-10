@@ -307,6 +307,9 @@ async function verifySignedPublishedMessageArtifact(artifact) {
         })
     ).toLowerCase();
     const declaredSigner = normalizedSignedMessage.signer;
+    if (declaredSigner !== normalizedSignedMessage.envelope.address) {
+        throw new Error('artifact signer does not match the signed message envelope address.');
+    }
     if (recoveredSigner !== declaredSigner) {
         throw new Error('artifact signature does not recover to the archived signer.');
     }
@@ -342,6 +345,11 @@ async function verifySignedPublishedMessageArtifact(artifact) {
                 signature: normalizedNodeAttestation.signature,
             })
         ).toLowerCase();
+        if (normalizedNodeAttestation.signer !== normalizedNodeAttestation.envelope.address) {
+            throw new Error(
+                'artifact node attestation signer does not match the node attestation envelope address.'
+            );
+        }
         if (recoveredNodeSigner !== normalizedNodeAttestation.signer) {
             throw new Error('artifact node attestation signature does not recover to the archived node signer.');
         }

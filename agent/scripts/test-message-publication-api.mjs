@@ -402,11 +402,27 @@ async function main() {
             /signedAtMs must match envelope\.timestampMs\./
         );
 
+        const tamperedSignerEnvelopeArtifact = structuredClone(timestampIntegrityArtifact);
+        tamperedSignerEnvelopeArtifact.signedMessage.envelope.address =
+            otherAccount.address.toLowerCase();
+        await assert.rejects(
+            () => verifySignedPublishedMessageArtifact(tamperedSignerEnvelopeArtifact),
+            /message\.agentAddress must match the signing address\.|artifact signer does not match the signed message envelope address\./
+        );
+
         const tamperedNodeSignedAtArtifact = structuredClone(timestampIntegrityArtifact);
         tamperedNodeSignedAtArtifact.publication.nodeAttestation.signedAtMs += 1;
         await assert.rejects(
             () => verifySignedPublishedMessageArtifact(tamperedNodeSignedAtArtifact),
             /signedAtMs must match envelope\.timestampMs\./
+        );
+
+        const tamperedNodeEnvelopeArtifact = structuredClone(timestampIntegrityArtifact);
+        tamperedNodeEnvelopeArtifact.publication.nodeAttestation.envelope.address =
+            otherAccount.address.toLowerCase();
+        await assert.rejects(
+            () => verifySignedPublishedMessageArtifact(tamperedNodeEnvelopeArtifact),
+            /canonicalMessage does not match the normalized message publication node attestation envelope\.|artifact node attestation signer does not match the node attestation envelope address\./
         );
 
         assert.throws(
