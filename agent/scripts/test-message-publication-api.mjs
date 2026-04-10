@@ -7,6 +7,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { createMessagePublicationApiServer } from '../src/lib/message-publication-api.js';
 import { createMessagePublicationStore } from '../src/lib/message-publication-store.js';
 import {
+    buildMessagePublicationArtifact,
     buildSignedPublishedMessagePayload,
     verifySignedPublishedMessageArtifact,
 } from '../src/lib/signed-published-message.js';
@@ -205,6 +206,27 @@ async function main() {
     assert.match(logger.infos[0], /Message publish API listening on/);
     assert.match(logger.infos[0], new RegExp(nodeAccount.address.slice(2, 8), 'i'));
 
+    const bindFailStore = createMessagePublicationStore({
+        stateFile: path.join(tempDir, 'message-publications-bind-fail.json'),
+    });
+    const bindFailApi = createMessagePublicationApiServer({
+        config: buildServerConfig(account.address, {
+            messagePublishApiPort: address.port,
+        }),
+        store: bindFailStore,
+        logger: {
+            info() {},
+            warn() {},
+        },
+        nodeSigner: {
+            address: nodeAccount.address,
+            async signMessage(message) {
+                return nodeAccount.signMessage({ message });
+            },
+        },
+    });
+    await assert.rejects(() => bindFailApi.start(), /EADDRINUSE|listen/i);
+
     try {
         const health = await fetch(`${baseUrl}/healthz`);
         assert.equal(health.status, 200);
@@ -357,6 +379,52 @@ async function main() {
         assert.equal(recoveredPinRecord.cid, pinRetryFirst.json.cid);
         assert.equal(recoveredPinRecord.pinned, true);
         assert.equal(recoveredPinRecord.lastError, null);
+
+        const timestampIntegrityRequest = await buildSignedBody({
+            account,
+            requestId: 'timestamp-integrity',
+            timestampMs: Date.now(),
+        });
+        const timestampIntegrityAccepted = await postPublication(
+            baseUrl,
+            timestampIntegrityRequest.body
+        );
+        assert.equal(timestampIntegrityAccepted.status, 202);
+        const timestampIntegrityArtifact = artifactByCid.get(
+            timestampIntegrityAccepted.json.cid
+        );
+        assert.ok(timestampIntegrityArtifact);
+
+        const tamperedSignedAtArtifact = structuredClone(timestampIntegrityArtifact);
+        tamperedSignedAtArtifact.signedMessage.signedAtMs += 1;
+        await assert.rejects(
+            () => verifySignedPublishedMessageArtifact(tamperedSignedAtArtifact),
+            /signedAtMs must match envelope\.timestampMs\./
+        );
+
+        const tamperedNodeSignedAtArtifact = structuredClone(timestampIntegrityArtifact);
+        tamperedNodeSignedAtArtifact.publication.nodeAttestation.signedAtMs += 1;
+        await assert.rejects(
+            () => verifySignedPublishedMessageArtifact(tamperedNodeSignedAtArtifact),
+            /signedAtMs must match envelope\.timestampMs\./
+        );
+
+        assert.throws(
+            () =>
+                buildMessagePublicationArtifact({
+                    signer: account.address,
+                    signature: timestampIntegrityRequest.signature,
+                    signedAtMs: timestampIntegrityRequest.body.auth.timestampMs + 1,
+                    canonicalMessage: timestampIntegrityRequest.payload,
+                    envelope: JSON.parse(timestampIntegrityRequest.payload),
+                    receivedAtMs: Date.now(),
+                    publishedAtMs: Date.now(),
+                    signerAllowlistMode: 'explicit',
+                    nodeName: 'test-node',
+                    nodeAttestation: timestampIntegrityArtifact.publication.nodeAttestation,
+                }),
+            /signedAtMs must match envelope\.timestampMs\./
+        );
 
         const expiredFirstAttempt = await buildSignedBody({
             account,

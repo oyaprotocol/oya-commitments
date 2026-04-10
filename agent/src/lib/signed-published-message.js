@@ -123,12 +123,16 @@ function buildArchivedSignedMessageRecord({
     if (typeof signature !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(signature)) {
         throw new Error('signature must be a 65-byte hex string.');
     }
+    const normalizedSignedAtMs = parsePositiveInteger(signedAtMs, 'signedAtMs');
+    if (normalizedSignedAtMs !== normalizedEnvelope.timestampMs) {
+        throw new Error('signedAtMs must match envelope.timestampMs.');
+    }
 
     return canonicalizeJson({
         authType: 'eip191',
         signer: getAddress(signer).toLowerCase(),
         signature,
-        signedAtMs: parsePositiveInteger(signedAtMs, 'signedAtMs'),
+        signedAtMs: normalizedSignedAtMs,
         canonicalMessage: normalizedCanonicalMessage,
         envelope: normalizedEnvelope,
     });
@@ -173,12 +177,16 @@ function buildMessagePublicationNodeAttestationRecord({
     if (typeof signature !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(signature)) {
         throw new Error('signature must be a 65-byte hex string.');
     }
+    const normalizedSignedAtMs = parsePositiveInteger(signedAtMs, 'signedAtMs');
+    if (normalizedSignedAtMs !== normalizedEnvelope.timestampMs) {
+        throw new Error('signedAtMs must match envelope.timestampMs.');
+    }
 
     return canonicalizeJson({
         authType: 'eip191',
         signer: getAddress(signer).toLowerCase(),
         signature,
-        signedAtMs: parsePositiveInteger(signedAtMs, 'signedAtMs'),
+        signedAtMs: normalizedSignedAtMs,
         canonicalMessage: normalizedCanonicalMessage,
         envelope: normalizedEnvelope,
     });

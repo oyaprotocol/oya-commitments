@@ -530,11 +530,21 @@ function createMessagePublicationApiServer({
             });
         });
 
-        await new Promise((resolve) => {
+        await new Promise((resolve, reject) => {
+            function handleError(error) {
+                nextServer.off('listening', handleListening);
+                reject(error);
+            }
+            function handleListening() {
+                nextServer.off('error', handleError);
+                resolve();
+            }
+
+            nextServer.once('error', handleError);
+            nextServer.once('listening', handleListening);
             nextServer.listen(
                 config.messagePublishApiPort,
-                config.messagePublishApiHost,
-                resolve
+                config.messagePublishApiHost
             );
         });
         server = nextServer;
