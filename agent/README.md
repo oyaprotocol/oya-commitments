@@ -26,6 +26,8 @@ This is beta software provided “as is.” Use at your own risk. No guarantees 
    - Secret API/auth values only:
      - `OPENAI_API_KEY`
      - `MESSAGE_API_KEYS_JSON` for secret bearer tokens layered on signed Message API auth
+     - `MESSAGE_PUBLISH_API_KEYS_JSON` for secret bearer tokens layered on signed message publication auth
+     - `MESSAGE_PUBLISH_API_SIGNER_PRIVATE_KEY` when the message publication node should use a dedicated attestation key
      - `POLYMARKET_CLOB_API_KEY`, `POLYMARKET_CLOB_API_SECRET`, `POLYMARKET_CLOB_API_PASSPHRASE`
      - `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, `POLYMARKET_API_PASSPHRASE`
      - `POLYMARKET_BUILDER_API_KEY`, `POLYMARKET_BUILDER_SECRET`, `POLYMARKET_BUILDER_PASSPHRASE`
@@ -67,10 +69,13 @@ For interactions, swap the env var (e.g., `PROPOSER_PK`, `EXECUTOR_PK`). For sig
 - **Timelock triggers**: Parses plain language timelocks in rules (absolute dates or “X minutes after deposit”) and emits `timelock` signals when due.
 - **Price triggers**: If a module exports `getPriceTriggers({ commitmentText, config })`, the runner evaluates those parsed/inferred Uniswap V3 thresholds and emits `priceTrigger` signals.
 - **Optional message API**: When enabled, accepts authenticated user messages over HTTP and injects them as `userMessage` signals for the next decision cycle.
+- **Optional signed message publication node**: In a separate process, verifies signed agent-authored messages, publishes a canonical artifact to IPFS, pins the CID, and co-signs publication metadata so later reviewers can verify both the agent signature and the node attestation.
 - **Optional proposal publication / submission node**: In a separate process, verifies signed proposal requests from allowed signers, publishes a canonical JSON artifact to IPFS, pins the CID, and can also submit the proposal onchain with the node's signer.
 - **Optional IPFS publishing**: When enabled, agents can publish text/JSON artifacts to a Kubo-compatible IPFS API and pin the resulting CID.
 
 All other behavior is intentionally left out. Implement your own agent in `agent-library/agents/<name>/agent.js` to add commitment-specific logic and tool use.
+
+Primary standalone node startup docs now live in `node/README.md`. The protocol details below remain here because agent modules still configure and talk to those node surfaces.
 
 ### Price Trigger Config
 
@@ -202,6 +207,118 @@ If `--url` is omitted, the helper reads `messageApi.host` and `messageApi.port` 
 
 If bearer gating is configured, also pass `--bearer-token="<token>"` or set `MESSAGE_API_BEARER_TOKEN`.
 
+### Message Publication API (Optional)
+
+This is a separate process from the main agent loop. Use it when an agent needs an immutable offchain record for structured messages such as trade logs, settlement ledgers, or other commitment-specific notices. The endpoint is intentionally generic: the node does not interpret domain payloads beyond a few required routing fields inside the signed message.
+
+How the publication flow works:
+
+1. The agent module builds a JSON `message` object containing at minimum `chainId`, `requestId`, `commitmentAddresses`, and `agentAddress`, plus any domain-specific payload.
+2. The caller canonicalizes and signs that message with `buildSignedPublishedMessagePayload({ address, timestampMs, message })` from `agent/src/lib/signed-published-message.js`.
+3. The caller sends `POST /v1/messages/publish` with `{ message, auth }`, where `auth` carries the EIP-191 signature and signing metadata.
+4. The node rebuilds the canonical payload, verifies the signature, applies any configured signer allowlist and optional bearer gate, and checks that `message.agentAddress` matches the recovered signer.
+5. The node stores duplicate-safe state keyed by `(signer, chainId, requestId)`, builds an artifact containing the archived signed message plus publication metadata, signs a node attestation over that published record, uploads the artifact to IPFS, and pins it.
+6. Exact retries return the original CID and only finish any incomplete persistence or pinning work instead of creating a second publication.
+
+Configure non-secret message publication settings in the module `config.json` or `byChain.<chainId>`:
+
+```json
+{
+  "chainId": 11155111,
+  "ipfsEnabled": true,
+  "messagePublishApi": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 9892,
+    "requireSignerAllowlist": true,
+    "signerAllowlist": [
+      "0x1111111111111111111111111111111111111111"
+    ],
+    "signatureMaxAgeSeconds": 300,
+    "maxBodyBytes": 65536,
+    "stateFile": "agent/.state/message-publications/example.json",
+    "nodeName": "sepolia-message-publisher-1"
+  }
+}
+```
+
+Supported `messagePublishApi` fields:
+
+- `enabled`: Set to `true` to allow the standalone message publication node to start.
+- `host`: Bind host (default `127.0.0.1`).
+- `port`: Bind port (default `9892`).
+- `requireSignerAllowlist`: Require `signerAllowlist` membership for signed requests (`true`/`false`, default `true`).
+- `signerAllowlist`: Optional array of EVM addresses allowed to sign publication requests. Required when `requireSignerAllowlist=true`.
+- `signatureMaxAgeSeconds`: Max signature age in seconds (default `300`).
+- `maxBodyBytes`: Request body limit in bytes (default `65536`).
+- `stateFile`: Optional JSON state file path for the durable publication ledger. If omitted, the startup helper defaults to `agent/.state/message-publications/<agent>-chain-<chainId>.json`.
+- `nodeName`: Optional operator-facing label recorded in published artifacts.
+
+Keep bearer tokens in env via `MESSAGE_PUBLISH_API_KEYS_JSON`; `messagePublishApi.keys` is intentionally not supported in repo-tracked module config. Set `MESSAGE_PUBLISH_API_SIGNER_PRIVATE_KEY` when the node should use a dedicated attestation key. If that env var is absent, startup falls back to the shared `SIGNER_TYPE`-based signer configuration with `RPC_URL`.
+
+Start the node with:
+
+```bash
+node node/scripts/start-message-publish-node.mjs --module=<agent-name>
+```
+
+Use `--chain-id=<id>` to assert a specific chain when the module serves more than one chain, or `--dry-run` to print the resolved bind host, port, state file, and supported chain IDs without starting the server.
+
+Compatibility note: `agent/scripts/start-message-publish-node.mjs` still works as a thin wrapper during the migration, but `node/scripts/start-message-publish-node.mjs` is now the primary path.
+
+Current request shape:
+
+```json
+{
+  "message": {
+    "chainId": 11155111,
+    "requestId": "trade-log-0001",
+    "commitmentAddresses": [
+      "0x2222222222222222222222222222222222222222",
+      "0x3333333333333333333333333333333333333333"
+    ],
+    "agentAddress": "0x1111111111111111111111111111111111111111",
+    "kind": "polymarket_trade_log",
+    "payload": {
+      "marketId": "market-1",
+      "sequence": 1
+    }
+  },
+  "auth": {
+    "type": "eip191",
+    "address": "0x1111111111111111111111111111111111111111",
+    "timestampMs": 1774897200000,
+    "signature": "0x..."
+  }
+}
+```
+
+Accepted publication requests must include signed auth:
+
+- `auth.type` must be `eip191`
+- `message.chainId` must be a positive integer and must match the node's configured chain when the node is pinned to one chain
+- `message.requestId` is required
+- `message.commitmentAddresses` must be a non-empty address array
+- `message.agentAddress` must match both `auth.address` and the recovered signer
+- signature is verified against a canonical payload containing `address`, `timestampMs`, and the full normalized `message`
+- when `messagePublishApi.requireSignerAllowlist=true`, the recovered signer must also appear in `messagePublishApi.signerAllowlist`
+- when `MESSAGE_PUBLISH_API_KEYS_JSON` is configured, a valid `Authorization: Bearer ...` header is also required
+
+Response semantics:
+
+- fresh accepted publication: `202` with `status: "published"`
+- identical retry for the same signer, `chainId`, and `requestId`: `200` with `status: "duplicate"` and the original CID
+- same signer plus logical key but different signed contents: `409`
+- if IPFS add succeeds but local CID persistence fails, an exact retry reuses the first CID instead of publishing again
+- if IPFS add succeeds but pinning fails, retries reuse the stored CID and only retry pinning
+
+Published artifacts contain both the signer-authenticated payload and the node-authored publication record:
+
+- `publication`: `receivedAtMs`, `publishedAtMs`, `signerAllowlistMode`, optional `nodeName`, and `nodeAttestation`
+- `signedMessage`: `signer`, `signature`, `signedAtMs`, `canonicalMessage`, and the normalized signed `envelope`
+
+There is no dedicated `send-signed-published-message.mjs` helper yet. Agent modules or external callers should sign with `buildSignedPublishedMessagePayload(...)` and then POST the request directly.
+
 ### Proposal Publication API (Optional)
 
 This is a separate process from the main agent loop. The node supports two modes:
@@ -265,8 +382,10 @@ The signed-request signer and the node's proposer signer are different roles:
 Start the standalone node:
 
 ```bash
-node agent/scripts/start-proposal-publish-node.mjs --module=<agent-name>
+node node/scripts/start-proposal-publish-node.mjs --module=<agent-name>
 ```
+
+Compatibility note: `agent/scripts/start-proposal-publish-node.mjs` still works as a thin wrapper during the migration, but `node/scripts/start-proposal-publish-node.mjs` is now the primary path.
 
 Endpoints:
 

@@ -42,6 +42,21 @@ function formatBaseUrl({ scheme, host, port, pathname = '', search = '' }) {
     return `${scheme}://${authorityHost}:${port}${normalizedPath}${search}`;
 }
 
+function overrideBaseConfigChainId(baseConfig, chainId) {
+    return Object.create(
+        Object.getPrototypeOf(baseConfig),
+        {
+            ...Object.getOwnPropertyDescriptors(baseConfig),
+            chainId: {
+                value: chainId,
+                writable: true,
+                enumerable: true,
+                configurable: true,
+            },
+        }
+    );
+}
+
 async function resolveProposalPublishApiConfigForAgent({
     agentRef,
     chainId,
@@ -86,10 +101,7 @@ async function resolveProposalPublishApiConfigForAgent({
     });
 
     const runtimeConfig = resolveAgentRuntimeConfig({
-        baseConfig: {
-            ...baseConfig,
-            chainId: runtimeChainId,
-        },
+        baseConfig: overrideBaseConfigChainId(baseConfig, runtimeChainId),
         agentConfigFile: agentConfigStack,
         chainId: runtimeChainId,
         allowAmbiguousChainId,

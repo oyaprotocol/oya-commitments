@@ -24,6 +24,7 @@ Recommended workflow:
 5. Add `config.json` for non-secret commitment/runtime config:
    - `byChain.<chainId>.commitmentSafe` and `byChain.<chainId>.ogModule` for real deployments
    - `messageApi` when the commitment accepts signed user messages
+   - `messagePublishApi` when the agent or its companion node archives signed agent-authored messages to IPFS
    - `harness.deployment` and optional `harness.seedErc20Holders` for local/remote smoke flows
 6. Add `harness.mjs` when the module needs a custom one-command smoke scenario.
 7. Keep secrets in `agent/.env` only: signer keys, bearer/API tokens, `OPENAI_API_KEY`, authenticated `IPFS_HEADERS_JSON`, and similar credentials.

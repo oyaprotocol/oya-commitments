@@ -155,6 +155,16 @@ async function run() {
         proposalPublishApiMaxBodyBytes: 65536,
         proposalPublishApiStateFile: undefined,
         proposalPublishApiNodeName: undefined,
+        messagePublishApiEnabled: false,
+        messagePublishApiHost: '127.0.0.1',
+        messagePublishApiPort: 9892,
+        messagePublishApiKeys: { env: 'message-publish-token' },
+        messagePublishApiRequireSignerAllowlist: true,
+        messagePublishApiSignerAllowlist: [],
+        messagePublishApiSignatureMaxAgeSeconds: 300,
+        messagePublishApiMaxBodyBytes: 65536,
+        messagePublishApiStateFile: undefined,
+        messagePublishApiNodeName: undefined,
         chainId: undefined,
     };
 
@@ -252,6 +262,14 @@ async function run() {
                     signerAllowlist: [FILE_SIGNER],
                     nodeName: 'shared-node',
                 },
+                messagePublishApi: {
+                    enabled: true,
+                    host: 'publish.shared.example',
+                    port: 9892,
+                    requireSignerAllowlist: true,
+                    signerAllowlist: [FILE_SIGNER],
+                    nodeName: 'message-shared-node',
+                },
                 byChain: {
                     '11155111': {
                         rpcUrl: 'https://rpc.sepolia.example',
@@ -273,6 +291,10 @@ async function run() {
                         proposalPublishApi: {
                             mode: 'propose',
                             port: 9891,
+                            signerAllowlist: [CHAIN_SIGNER],
+                        },
+                        messagePublishApi: {
+                            port: 9893,
                             signerAllowlist: [CHAIN_SIGNER],
                         },
                         watchErc1155Assets: [
@@ -389,6 +411,16 @@ async function run() {
     assert.deepEqual(resolved.proposalPublishApiSignerAllowlist, [getAddress(CHAIN_SIGNER)]);
     assert.equal(resolved.proposalPublishApiNodeName, 'shared-node');
     assert.deepEqual(resolved.agentConfig.proposalPublishApi.signerAllowlist, [
+        getAddress(CHAIN_SIGNER),
+    ]);
+    assert.equal(resolved.messagePublishApiEnabled, true);
+    assert.equal(resolved.messagePublishApiHost, 'publish.shared.example');
+    assert.equal(resolved.messagePublishApiPort, 9893);
+    assert.deepEqual(resolved.messagePublishApiKeys, { env: 'message-publish-token' });
+    assert.equal(resolved.messagePublishApiRequireSignerAllowlist, true);
+    assert.deepEqual(resolved.messagePublishApiSignerAllowlist, [getAddress(CHAIN_SIGNER)]);
+    assert.equal(resolved.messagePublishApiNodeName, 'message-shared-node');
+    assert.deepEqual(resolved.agentConfig.messagePublishApi.signerAllowlist, [
         getAddress(CHAIN_SIGNER),
     ]);
 

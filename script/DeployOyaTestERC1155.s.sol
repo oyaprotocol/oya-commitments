@@ -10,7 +10,10 @@ contract DeployOyaTestERC1155 is Script {
     function run() external returns (OyaTestERC1155 deployedToken) {
         uint256 deployerPk = vm.envUint("DEPLOYER_PK");
         address deployer = vm.addr(deployerPk);
-        address owner = vm.envOr("TEST_ERC1155_OWNER", deployer);
+        address owner = deployer;
+        if (vm.envExists("TEST_ERC1155_OWNER")) {
+            owner = vm.envAddress("TEST_ERC1155_OWNER");
+        }
         string memory name = vm.envOr("TEST_ERC1155_NAME", string("Oya Test ERC1155"));
         string memory symbol = vm.envOr("TEST_ERC1155_SYMBOL", string("OYAT1155"));
         string memory metadataUri =

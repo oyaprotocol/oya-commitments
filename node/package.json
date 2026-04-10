@@ -1,0 +1,15 @@
+{
+  "name": "oya-node",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start:message-publish": "node ./scripts/start-message-publish-node.mjs",
+    "start:proposal-publish": "node ./scripts/start-proposal-publish-node.mjs",
+    "test:message-publish": "node ./scripts/test-message-publication-api.mjs",
+    "test:proposal-publish": "node ./scripts/test-proposal-publication-api.mjs"
+  },
+  "dependencies": {
+    "og-commitment-agent": "file:../agent"
+  }
+}
