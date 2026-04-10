@@ -18,6 +18,15 @@ import {
 } from './signed-published-message.js';
 import { buildMessagePublicationKey } from './message-publication-store.js';
 
+class PublicationPersistenceError extends Error {
+    constructor(message, { partialPublicationState = null, cause = undefined } = {}) {
+        super(message, cause ? { cause } : undefined);
+        this.name = 'PublicationPersistenceError';
+        this.code = 'publish_persist_failed';
+        this.partialPublicationState = partialPublicationState;
+    }
+}
+
 function parseEnvelopeFromCanonicalMessage(canonicalMessage) {
     if (typeof canonicalMessage !== 'string' || !canonicalMessage.trim()) {
         throw new Error('canonicalMessage must be a non-empty string.');
@@ -91,6 +100,27 @@ function buildLastErrorPayload(error) {
     };
 }
 
+function normalizeOptionalChainIdForSignedAuth(value) {
+    if (value === undefined || value === null) {
+        return value;
+    }
+
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed < 1) {
+        return value;
+    }
+    return parsed;
+}
+
+function canReuseVolatilePublicationState(record, publicationState) {
+    return Boolean(
+        record &&
+            publicationState &&
+            publicationState.signature === record.signature &&
+            publicationState.canonicalMessage === record.canonicalMessage
+    );
+}
+
 function createMessagePublicationApiServer({
     config,
     store,
@@ -134,6 +164,7 @@ function createMessagePublicationApiServer({
 
     let server;
     const publishOperationTails = new Map();
+    const volatilePublicationStates = new Map();
 
     function emitLog(level, message) {
         const method =
@@ -145,8 +176,52 @@ function createMessagePublicationApiServer({
         method(message);
     }
 
-    async function publishRecord(record, { signerAllowlistMode, nodeName }) {
-        let nextRecord = record;
+    async function persistPublishedRecord(record, publicationKey, publicationState) {
+        let persistError;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            try {
+                const nextRecord = await store.saveRecord({
+                    ...record,
+                    signature: publicationState.signature,
+                    canonicalMessage: publicationState.canonicalMessage,
+                    artifact: publicationState.artifact,
+                    publishedAtMs: publicationState.publishedAtMs,
+                    cid: publicationState.cid,
+                    uri: publicationState.uri,
+                    publishResult: publicationState.publishResult,
+                    lastError: null,
+                });
+                volatilePublicationStates.delete(publicationKey);
+                return nextRecord;
+            } catch (error) {
+                persistError = error;
+            }
+        }
+
+        throw new PublicationPersistenceError(
+            'Published signed message artifact could not be persisted to the node store.',
+            {
+                partialPublicationState: publicationState,
+                cause: persistError,
+            }
+        );
+    }
+
+    async function publishRecord(record, { signerAllowlistMode, nodeName, publicationKey }) {
+        let nextRecord = { ...record };
+        const volatilePublicationState = volatilePublicationStates.get(publicationKey);
+        if (!nextRecord.cid && volatilePublicationState) {
+            if (canReuseVolatilePublicationState(nextRecord, volatilePublicationState)) {
+                nextRecord = await persistPublishedRecord(
+                    nextRecord,
+                    publicationKey,
+                    volatilePublicationState
+                );
+            } else {
+                volatilePublicationStates.delete(publicationKey);
+            }
+        }
+
         if (!nextRecord.artifact || nextRecord.publishedAtMs === null) {
             const envelope = parseEnvelopeFromCanonicalMessage(nextRecord.canonicalMessage);
             const publishedAtMs = Date.now();
@@ -206,13 +281,21 @@ function createMessagePublicationApiServer({
                 }),
                 pin: false,
             });
-            nextRecord = await store.saveRecord({
-                ...nextRecord,
+            const publicationState = {
+                signature: nextRecord.signature,
+                canonicalMessage: nextRecord.canonicalMessage,
+                artifact: nextRecord.artifact,
+                publishedAtMs: nextRecord.publishedAtMs,
                 cid: publishResponse.cid,
                 uri: publishResponse.uri,
                 publishResult: publishResponse.publishResult,
-                lastError: null,
-            });
+            };
+            volatilePublicationStates.set(publicationKey, publicationState);
+            nextRecord = await persistPublishedRecord(
+                nextRecord,
+                publicationKey,
+                publicationState
+            );
         }
 
         if (!nextRecord.pinned) {
@@ -319,7 +402,7 @@ function createMessagePublicationApiServer({
 
             const signedAuth = await authenticateSignedRequest({
                 body: {
-                    chainId: body.message?.chainId,
+                    chainId: normalizeOptionalChainIdForSignedAuth(body.message?.chainId),
                     requestId: body.message?.requestId,
                     auth: body.auth,
                 },
@@ -476,10 +559,15 @@ function createMessagePublicationApiServer({
                         return publishRecord(latestRecord, {
                             signerAllowlistMode: requireSignerAllowlist ? 'explicit' : 'open',
                             nodeName: config.messagePublishApiNodeName,
+                            publicationKey,
                         });
                     }
                 );
             } catch (error) {
+                const partialPublicationState =
+                    error instanceof PublicationPersistenceError
+                        ? error.partialPublicationState
+                        : null;
                 try {
                     const latestRecord = await store.getRecord({
                         signer: signedAuth.sender.address,
@@ -489,28 +577,46 @@ function createMessagePublicationApiServer({
                     if (latestRecord) {
                         record = latestRecord;
                     }
+                    if (partialPublicationState) {
+                        record = {
+                            ...(record ?? {}),
+                            ...partialPublicationState,
+                        };
+                    }
                     if (record) {
                         record = await store.saveRecord({
                             ...record,
                             lastError: buildLastErrorPayload(error),
                         });
+                        if (partialPublicationState && record.cid) {
+                            volatilePublicationStates.delete(publicationKey);
+                        }
                     }
                 } catch (_saveError) {
-                    // Best-effort only.
+                    if (partialPublicationState) {
+                        record = {
+                            ...(record ?? {}),
+                            ...partialPublicationState,
+                            lastError: buildLastErrorPayload(error),
+                        };
+                    }
                 }
+                const errorCode = partialPublicationState
+                    ? 'publish_persist_failed'
+                    : 'publish_failed';
                 emitLog(
                     'warn',
                     `[oya-node] Message publish API failed request${formatRequestContext({
                         body,
                         signer: signedAuth.sender.address,
                         senderKeyId: signedAuth.senderKeyId,
-                        code: 'publish_failed',
+                        code: errorCode,
                         statusCode: 502,
                     })}: ${error?.message ?? error}`
                 );
                 sendJson(res, 502, {
                     error: error?.message ?? 'Unable to publish signed message artifact.',
-                    code: 'publish_failed',
+                    code: errorCode,
                     cid: record?.cid ?? null,
                     uri: record?.uri ?? null,
                 });

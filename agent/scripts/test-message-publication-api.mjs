@@ -142,6 +142,17 @@ async function main() {
     const artifactByCid = new Map();
     const requestIdByCid = new Map();
     const failPinOnce = new Set(['pin-retry']);
+    const failCidPersistenceAttempts = new Map();
+    const originalSaveRecord = store.saveRecord;
+
+    store.saveRecord = async (record) => {
+        const remainingFailures = failCidPersistenceAttempts.get(record?.requestId) ?? 0;
+        if (remainingFailures > 0 && record?.cid && !record?.pinned) {
+            failCidPersistenceAttempts.set(record.requestId, remainingFailures - 1);
+            throw new Error('temporary cid persistence failure');
+        }
+        return originalSaveRecord(record);
+    };
 
     globalThis.fetch = async (url, options = {}) => {
         const urlString = String(url);
@@ -336,6 +347,16 @@ async function main() {
         const rejectedOtherSigner = await postPublication(baseUrl, rejectedOtherSignerRequest.body);
         assert.equal(rejectedOtherSigner.status, 401);
 
+        const stringChainIdRequest = await buildSignedBody({
+            account,
+            requestId: 'string-chain-id',
+            chainId: String(TEST_CHAIN_ID),
+        });
+        const stringChainIdAccepted = await postPublication(baseUrl, stringChainIdRequest.body);
+        assert.equal(stringChainIdAccepted.status, 202);
+        assert.equal(stringChainIdAccepted.json.chainId, TEST_CHAIN_ID);
+        assert.equal(addAttemptsByRequestId.get('string-chain-id'), 1);
+
         const pinRetryRequest = await buildSignedBody({
             account,
             requestId: 'pin-retry',
@@ -379,6 +400,48 @@ async function main() {
         assert.equal(recoveredPinRecord.cid, pinRetryFirst.json.cid);
         assert.equal(recoveredPinRecord.pinned, true);
         assert.equal(recoveredPinRecord.lastError, null);
+
+        failCidPersistenceAttempts.set('cid-save-retry', 3);
+        const cidRetryRequest = await buildSignedBody({
+            account,
+            requestId: 'cid-save-retry',
+            messagePatch: {
+                payload: {
+                    marketId: 'market-1',
+                    action: 'initiated',
+                    price: '0.67',
+                },
+            },
+        });
+        const cidRetryFirst = await postPublication(baseUrl, cidRetryRequest.body);
+        assert.equal(cidRetryFirst.status, 502);
+        assert.equal(cidRetryFirst.json.code, 'publish_persist_failed');
+        assert.ok(cidRetryFirst.json.cid);
+        assert.equal(addAttemptsByRequestId.get('cid-save-retry'), 1);
+        assert.equal(pinAttemptsByRequestId.get('cid-save-retry') ?? 0, 0);
+
+        const cidPersistFailureRecord = await store.getRecord({
+            signer: account.address,
+            chainId: TEST_CHAIN_ID,
+            requestId: 'cid-save-retry',
+        });
+        assert.equal(cidPersistFailureRecord.cid, null);
+
+        const cidRetrySecond = await postPublication(baseUrl, cidRetryRequest.body);
+        assert.equal(cidRetrySecond.status, 200);
+        assert.equal(cidRetrySecond.json.status, 'duplicate');
+        assert.equal(cidRetrySecond.json.cid, cidRetryFirst.json.cid);
+        assert.equal(addAttemptsByRequestId.get('cid-save-retry'), 1);
+        assert.equal(pinAttemptsByRequestId.get('cid-save-retry'), 1);
+
+        const cidPersistRecoveredRecord = await store.getRecord({
+            signer: account.address,
+            chainId: TEST_CHAIN_ID,
+            requestId: 'cid-save-retry',
+        });
+        assert.equal(cidPersistRecoveredRecord.cid, cidRetryFirst.json.cid);
+        assert.equal(cidPersistRecoveredRecord.pinned, true);
+        assert.equal(cidPersistRecoveredRecord.lastError, null);
 
         const timestampIntegrityRequest = await buildSignedBody({
             account,
