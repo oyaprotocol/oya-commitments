@@ -3,12 +3,20 @@ import {
     isDirectScriptExecution,
     loadScriptEnv,
 } from './lib/cli-runtime.mjs';
-import { createProposalPublicationApiServer } from '../../agent/src/lib/proposal-publication-api.js';
-import { createProposalPublicationStore } from '../../agent/src/lib/proposal-publication-store.js';
+import { importAgentModule } from './lib/shared-agent-import.mjs';
 import {
     createProposalPublishSubmissionRuntimeResolver,
     resolveProposalPublishServerConfig,
 } from './lib/proposal-publish-runtime.mjs';
+
+const { createProposalPublicationApiServer } = await importAgentModule(
+    new URL('../../agent/src/lib/proposal-publication-api.js', import.meta.url).href,
+    'src/lib/proposal-publication-api.js'
+);
+const { createProposalPublicationStore } = await importAgentModule(
+    new URL('../../agent/src/lib/proposal-publication-store.js', import.meta.url).href,
+    'src/lib/proposal-publication-store.js'
+);
 
 loadScriptEnv();
 

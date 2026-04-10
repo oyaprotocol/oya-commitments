@@ -8,7 +8,7 @@ These daemons are separate from the commitment-serving agent loop in `agent/`:
 - the proposal publication node archives signed proposal bundles to IPFS
 - the proposal publication node can also run in `propose` mode and submit proposals onchain
 
-The underlying publication/auth/IPFS/config libraries are still shared from `agent/src/lib/` in this version. This workspace owns the process entrypoints, node-oriented runtime helpers, and node-focused tests.
+The underlying publication/auth/IPFS/config libraries are still shared from `agent/src/lib/` in this version. This workspace owns the process entrypoints, node-oriented runtime helpers, and node-focused tests. `node/package.json` depends on the shared agent package, and the node scripts prefer local repo imports while falling back to that installed package so the daemons can still boot when `node/` is installed from its own manifest.
 
 ## Commands
 

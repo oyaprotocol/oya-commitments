@@ -1,1 +1,6 @@
-import '../../agent/scripts/test-message-publish-runtime.mjs';
+import { importAgentModule } from './lib/shared-agent-import.mjs';
+
+await importAgentModule(
+    new URL('../../agent/scripts/test-message-publish-runtime.mjs', import.meta.url).href,
+    'scripts/test-message-publish-runtime.mjs'
+);

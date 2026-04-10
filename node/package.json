@@ -10,7 +10,6 @@
     "test:proposal-publish": "node ./scripts/test-proposal-publication-api.mjs"
   },
   "dependencies": {
-    "dotenv": "^16.4.5",
-    "viem": "^2.20.0"
+    "og-commitment-agent": "file:../agent"
   }
 }

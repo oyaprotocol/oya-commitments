@@ -3,12 +3,20 @@ import {
     isDirectScriptExecution,
     loadScriptEnv,
 } from './lib/cli-runtime.mjs';
-import { createMessagePublicationApiServer } from '../../agent/src/lib/message-publication-api.js';
-import { createMessagePublicationStore } from '../../agent/src/lib/message-publication-store.js';
+import { importAgentModule } from './lib/shared-agent-import.mjs';
 import {
     resolveMessagePublishNodeSigner,
     resolveMessagePublishServerConfig,
 } from './lib/message-publish-runtime.mjs';
+
+const { createMessagePublicationApiServer } = await importAgentModule(
+    new URL('../../agent/src/lib/message-publication-api.js', import.meta.url).href,
+    'src/lib/message-publication-api.js'
+);
+const { createMessagePublicationStore } = await importAgentModule(
+    new URL('../../agent/src/lib/message-publication-store.js', import.meta.url).href,
+    'src/lib/message-publication-store.js'
+);
 
 loadScriptEnv();
 

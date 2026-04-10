@@ -29,6 +29,7 @@ This plan is about directory ownership and process boundaries, not about changin
 - [x] 2026-04-10 02:03Z: Updated repo docs and living plans so `node/` is the documented primary home for standalone node daemons.
 - [x] 2026-04-10 02:09Z: Validated the new paths with direct `node/scripts` help/runtime/store/API checks plus compatibility-wrapper help checks under `agent/scripts`.
 - [x] 2026-04-10 02:12Z: Confirmed real proposal-node runtime resolution from both the new primary path and the old wrapper with `--module=signed-proposal-publish-smoke --dry-run`; both paths report the same resolved host, port, mode, chain, state file, and node name.
+- [x] 2026-04-10 02:21Z: Hardened the extracted `node/` package boundary so startup scripts and runtime/test wrappers now prefer local repo imports but can fall back to an installed `og-commitment-agent` package when `node/package.json` is installed on its own.
 
 ## Surprises & Discoveries
 
@@ -46,6 +47,9 @@ This plan is about directory ownership and process boundaries, not about changin
 
 - Observation: Moving the primary entrypoints into `node/` does not automatically make `node/` an independent dependency root, because the repo currently installs `dotenv` and `viem` under `agent/node_modules` rather than a root workspace.
   Evidence: the new `node/scripts/` entrypoints work by importing shared modules under `agent/`, which continue to resolve those dependencies from the existing `agent` package installation.
+
+- Observation: package-boundary hardening requires startup scripts themselves to avoid direct `../../agent/...` static imports, not just the runtime helper wrappers.
+  Evidence: `node/scripts/start-message-publish-node.mjs` and `node/scripts/start-proposal-publish-node.mjs` originally imported `agent/src/lib/*` directly at module load, which would fail before CLI processing if only the `node/` manifest had been installed.
 
 ## Decision Log
 
@@ -67,6 +71,10 @@ This plan is about directory ownership and process boundaries, not about changin
 
 - Decision: Implement the extraction as a compatibility-first first pass: `node/` now owns the primary startup and test entrypoints, while some runtime/test implementation still delegates into shared `agent/` modules.
   Rationale: This achieves the requested directory split immediately without forcing a larger dependency/workspace migration in the same change.
+  Date/Author: 2026-04-10 / Codex.
+
+- Decision: Make the `node/` startup/runtime/test entrypoints resolve shared agent modules through a local-path-first, package-fallback helper, and depend on `og-commitment-agent` from `node/package.json`.
+  Rationale: This keeps the extracted `node/` workspace usable from the repository checkout while also letting a node-specific install bootstrap from its own manifest without assuming `agent/node_modules` is already present.
   Date/Author: 2026-04-10 / Codex.
 
 ## Outcomes & Retrospective
@@ -93,6 +101,16 @@ Validation completed during this pass:
 - `node agent/scripts/start-message-publish-node.mjs --help`
 - `node agent/scripts/start-proposal-publish-node.mjs --help`
 - `node agent/scripts/start-proposal-publish-node.mjs --module=signed-proposal-publish-smoke --dry-run`
+
+Follow-up validation after package-boundary hardening:
+
+- `node node/scripts/start-message-publish-node.mjs --help`
+- `node node/scripts/start-proposal-publish-node.mjs --help`
+- `node node/scripts/test-message-publish-runtime.mjs`
+- `node node/scripts/test-message-publication-store.mjs`
+- `node node/scripts/test-message-publication-api.mjs`
+- `node node/scripts/test-proposal-publication-store.mjs`
+- `node node/scripts/test-proposal-publication-api.mjs`
 
 Residual follow-up that may still be worthwhile later:
 
