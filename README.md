@@ -51,7 +51,7 @@ The detailed workflow for module structure, `config.json`, and local/remote harn
 - Shared commitment rule templates: `agent-library/RULE_TEMPLATES.md`
 - Skill for new agent/commitment combos: `skills/add-agent-commitment/SKILL.md`
 - Agent module layout and new-commitment workflow: `agent-library/README.md`
-- Runner config, message API, and harness usage: `agent/README.md`
+- Runner config, message APIs, publication nodes, and harness usage: `agent/README.md`
 - Deployment and configuration: `docs/deployment.md`
 - Signer options and `with-signer` helper: `docs/signers.md`
 - Offchain agent usage: `docs/agent.md`
