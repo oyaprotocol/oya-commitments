@@ -1,5 +1,6 @@
 {
   "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+  "commitmentType": "freeform",
   "name": "Oya Timelock Withdraw Agent",
   "description": "Timelock agent that only withdraws funds to its own address after the commitment’s timelock conditions are satisfied.",
   "image": "https://raw.githubusercontent.com/oya-commitments/oya-commitments/main/agent-library/agents/timelock-withdraw/agent.png",

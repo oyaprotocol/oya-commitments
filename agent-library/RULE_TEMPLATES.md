@@ -2,6 +2,8 @@
 
 Use this file as the primary source when writing rules for a new agentic commitment. Before drafting fresh prose in `agent-library/agents/<agent-name>/commitment.txt`, review the templates below, select the ones that apply, and fill in the `[ ]` placeholders with commitment-specific values.
 
+If a commitment's rules are assembled primarily from this file, set `agent-library/agents/<agent-name>/agent.json` to `commitmentType: "standard"`. Use `commitmentType: "freeform"` only for legacy or intentionally custom rule sets. `standard` is strongly encouraged for new commitments, especially for production deployments.
+
 The usual workflow is:
 
 1. Copy `agent-library/agents/default/` to `agent-library/agents/<agent-name>/`.

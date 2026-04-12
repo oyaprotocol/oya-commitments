@@ -28,7 +28,7 @@ Collect these before editing:
 2. Applicable rule templates from `agent-library/RULE_TEMPLATES.md` and the filled values needed to use them
 3. Any commitment-specific rules that are not covered by the existing templates
 4. Behavior constraints (what the agent may and may not do)
-5. Metadata inputs needed for `agent.json` (name/description/network pointers)
+5. Metadata inputs needed for `agent.json` (name/description/network pointers and whether `commitmentType` should be `standard` or `freeform`)
 
 ## Workflow
 
@@ -37,7 +37,7 @@ Collect these before editing:
 3. Build `agent-library/agents/<agent-name>/commitment.txt` from those templates, filling placeholders and replacing the copied default rule text.
 4. If the commitment needs reusable rule language that is missing from `agent-library/RULE_TEMPLATES.md`, draft a suggested new template title plus body and include that suggestion in your summary or plan.
 5. Implement commitment-specific logic in `agent-library/agents/<agent-name>/agent.js`.
-6. Update `agent-library/agents/<agent-name>/agent.json`.
+6. Update `agent-library/agents/<agent-name>/agent.json`, keeping the top-level ERC-8004 `type` and setting `commitmentType` to `standard` for template-based commitments or `freeform` for legacy/custom rule sets. `standard` is strongly encouraged, especially for production.
 7. Add or update module-local test/simulation scripts in that same module folder.
 8. Validate with `node agent/scripts/validate-agent.mjs --module=<agent-name>` and module-specific tests/simulations under `agent-library/agents/<agent-name>/`.
 9. Summarize changed files, validation commands, and any suggested new shared rule templates.
@@ -48,6 +48,7 @@ When opening a PR for a new module:
 
 - State that agent-specific behavior is isolated to `agent-library/agents/<agent-name>/`.
 - State which rule templates from `agent-library/RULE_TEMPLATES.md` were used to draft `commitment.txt`, and mention any suggested new templates if reusable gaps were found.
+- State whether `agent.json` is marked `standard` or `freeform`, and explain any `freeform` choice for a new production-facing commitment.
 - If shared runner files were changed, explain why an agent-local implementation was insufficient and list impacted agents.
 - Include exact validation commands run.
 
