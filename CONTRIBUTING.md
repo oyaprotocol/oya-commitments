@@ -23,7 +23,7 @@ When instructions conflict:
 
 ## Required Contributor Workflow
 
-1. Read relevant local docs before editing (`AGENTS.md`, `README.md`). For new or revised commitment rules, start from `agent-library/RULE_TEMPLATES.md` before editing `agent-library/agents/<name>/commitment.txt`.
+1. Read relevant local docs before editing (`AGENTS.md`, `README.md`). For new or revised commitment rules, start from `agent-library/RULE_TEMPLATES.md` before editing `agent-library/agents/<name>/commitment.txt`. Keep the top-level `agent.json` `type` reserved for the ERC-8004 document type, and set `commitmentType` to `standard` for template-based rule sets or `freeform` for legacy/custom ones. `standard` is strongly encouraged, especially for production commitments.
 2. Keep changes scoped to the correct area.
 Agent-specific behavior belongs in `agent-library/agents/<name>/`.
 Shared runner changes in `agent/` require cross-agent justification.

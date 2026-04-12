@@ -32,10 +32,11 @@ The fastest path to a new commitment/agent combo is:
 1. Copy `agent-library/agents/default/` to `agent-library/agents/<agent-name>/`.
 2. Review `agent-library/RULE_TEMPLATES.md` and select the rule templates that apply to the new commitment.
 3. Assemble `agent-library/agents/<agent-name>/commitment.txt` from those templates, filling the placeholders and replacing the copied default rule text. If a reusable rule pattern is missing, suggest a new template for `agent-library/RULE_TEMPLATES.md`.
-4. Implement commitment-specific behavior in `agent-library/agents/<agent-name>/agent.js`.
-5. Put non-secret runtime settings in `agent-library/agents/<agent-name>/config.json`.
-6. Keep only secrets in `agent/.env`.
-7. Validate and smoke test locally:
+4. Set `agent-library/agents/<agent-name>/agent.json` `commitmentType` to `standard` for template-based commitments. Use `freeform` only for legacy or intentionally custom rule sets. Keep the existing top-level `type` field reserved for the ERC-8004 document type. `standard` is strongly encouraged, especially for production commitments.
+5. Implement commitment-specific behavior in `agent-library/agents/<agent-name>/agent.js`.
+6. Put non-secret runtime settings in `agent-library/agents/<agent-name>/config.json`.
+7. Keep only secrets in `agent/.env`.
+8. Validate and smoke test locally:
 
 ```bash
 node agent/scripts/validate-agent.mjs --module=<agent-name>

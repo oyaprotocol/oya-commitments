@@ -1,5 +1,6 @@
 {
   "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+  "commitmentType": "freeform",
   "name": "Oya Price Race Swap Agent",
   "description": "Agent that monitors ETH/USDC and UMA/USDC threshold triggers and executes one first-trigger-wins USDC swap branch on Uniswap.",
   "image": "https://raw.githubusercontent.com/oya-commitments/oya-commitments/main/agent-library/agents/price-race-swap/agent.png",
