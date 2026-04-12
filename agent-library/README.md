@@ -49,12 +49,12 @@ node agent/scripts/testnet-harness.mjs down --module=<agent-name> --profile=loca
 
 Use `signed-message-smoke` as the simplest reference module for a harness-ready agent with local message ingress.
 
-The default module's `commitment.txt` is a runnable legacy example copied by step 1, not the intended final rule set for new commitments. Replace it with the templates and values selected for the actual commitment you are creating.
+The default module's `commitment.txt` is a minimal standard starter example copied by step 1. It currently assembles the `Agent Proxy` and `Account Recovery and Rule Updates` templates with obvious placeholder values. Replace or extend that starter with the templates and values selected for the actual commitment you are creating.
 
-The copied default `agent.json` also starts with `commitmentType: "freeform"` because the existing default rules predate the shared templates. When you rebuild a new commitment from `agent-library/RULE_TEMPLATES.md`, change that field to `standard`.
+The copied default `agent.json` starts with `commitmentType: "standard"` because the default starter is template-based. Change that field to `freeform` only if you intentionally move away from the shared rule-template approach.
 
 Example agents:
-- `agent-library/agents/default/`: generic agent using the commitment text.
+- `agent-library/agents/default/`: generic standard starter using the commitment text, with `Agent Proxy` plus `Account Recovery and Rule Updates` as the initial scaffold.
 - `agent-library/agents/signed-message-smoke/`: deterministic smoke target for local message API and harness testing.
 - `agent-library/agents/timelock-withdraw/`: timelock withdrawal agent that only withdraws to its own address after the timelock.
 - `agent-library/agents/copy-trading/`: copy-trading agent for one configured source trader + market; it reacts to BUY trades only, submits a 99%-of-Safe collateral CLOB order from the configured trading wallet, waits for fill/token receipt, deposits YES/NO tokens to the Safe (direct onchain or via Polymarket relayer), then proposes reimbursement to that same trading wallet for the full Safe collateral snapshot captured at trigger time (1% implied agent fee via reduced copy size).

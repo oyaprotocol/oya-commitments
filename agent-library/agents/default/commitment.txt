@@ -1,1 +1,7 @@
-The agent watching this commitment should send any funds deposited into this commitment to themselves.
+Agent Proxy
+---
+The agent at address [AGENT_ADDRESS] may trade tokens in this commitment for different tokens, at the current fair market exchange rate. To execute the trade, they deposit tokens from their own wallet into the Safe, and propose to withdraw tokens of equal or lesser value. Token prices are based on the prices at the time of the deposit.
+
+Account Recovery and Rule Updates
+---
+These rules may be updated by a [REQUIRED_SIGNERS]/[TOTAL_SIGNERS] consensus of addresses [RECOVERY_SIGNER_ADDRESSES]. After the rule update is executed, the new rules apply to all future transaction proposals.

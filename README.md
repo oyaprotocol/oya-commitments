@@ -46,6 +46,8 @@ node agent/scripts/testnet-harness.mjs down --module=<agent-name> --profile=loca
 
 The detailed workflow for module structure, `config.json`, and local/remote harness profiles is in `agent/README.md` and `agent-library/README.md`.
 
+The copied `default` module now starts as a minimal standard scaffold using the `Agent Proxy` and `Account Recovery and Rule Updates` templates. Treat it as a starter to customize, not as the final rules for a new commitment.
+
 ## Documentation
 
 - Contribution workflow and policy: `CONTRIBUTING.md`
