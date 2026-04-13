@@ -24,6 +24,7 @@ const BASE_CONFIG = {
     agentConfig: {
         polymarketStakedExternalSettlement: {
             authorizedAgent: TEST_AGENT,
+            tradingWallet: TEST_TRADING_WALLET,
         },
     },
 };
@@ -55,6 +56,7 @@ function buildTradeLogMessage({
     previousCid = null,
     trades = [],
     marketId = 'market-1',
+    tradingWallet = TEST_TRADING_WALLET,
 } = {}) {
     return {
         chainId: TEST_CHAIN_ID,
@@ -68,7 +70,7 @@ function buildTradeLogMessage({
                 ogModule: TEST_OG_MODULE,
                 user: TEST_USER,
                 marketId,
-                tradingWallet: TEST_TRADING_WALLET,
+                tradingWallet,
             },
             sequence,
             previousCid,
@@ -148,6 +150,38 @@ async function run() {
         assert.equal(validation.classifications[0].classification, 'non_reimbursable_late');
         assert.match(validation.classifications[0].reason, /limit is 15 minute/);
         assert.equal(validation.summary.lateTradeCount, 1);
+    }
+
+    {
+        await assert.rejects(
+            () =>
+                validatePublishedMessage({
+                    config: BASE_CONFIG,
+                    publicClient: mockPublicClient,
+                    message: buildTradeLogMessage({
+                        requestId: 'trade-log-wallet-mismatch',
+                        trades: [
+                            buildTrade({
+                                tradeId: 'trade-wallet-mismatch',
+                                executedAtMs: firstSeenAtMs - 5 * 60_000,
+                            }),
+                        ],
+                        marketId: 'market-wallet-mismatch',
+                        tradingWallet: '0x5555555555555555555555555555555555555555',
+                    }),
+                    receivedAtMs: firstSeenAtMs,
+                    publishedAtMs: firstSeenAtMs + 1_000,
+                    listRecords: async () => [],
+                }).then(() => {
+                    throw new Error('expected wallet mismatch to fail');
+                }),
+            (error) => {
+                assert.ok(error instanceof MessagePublicationValidationError);
+                assert.equal(error.code, 'message_payload_invalid');
+                assert.match(error.message, /tradingWallet/);
+                return true;
+            }
+        );
     }
 
     {

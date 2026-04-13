@@ -157,10 +157,16 @@ function normalizeTradeLogMessage(message, { config = undefined } = {}) {
 
     const moduleConfig = resolveModuleConfig(config);
     const configuredAuthorizedAgent = normalizeAddressOrNull(moduleConfig.authorizedAgent);
+    const configuredTradingWallet = normalizeAddressOrNull(moduleConfig.tradingWallet);
     const normalizedAgentAddress = normalizeAddress(message.agentAddress, 'message.agentAddress');
     if (configuredAuthorizedAgent && normalizedAgentAddress !== configuredAuthorizedAgent) {
         throw new Error(
             'message.agentAddress does not match config.polymarketStakedExternalSettlement.authorizedAgent.'
+        );
+    }
+    if (configuredTradingWallet && stream.tradingWallet !== configuredTradingWallet) {
+        throw new Error(
+            'message.payload.stream.tradingWallet does not match config.polymarketStakedExternalSettlement.tradingWallet.'
         );
     }
 
