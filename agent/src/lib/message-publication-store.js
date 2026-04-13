@@ -308,9 +308,26 @@ function createMessagePublicationStore({ stateFile }) {
         });
     }
 
+    async function listRecords() {
+        return enqueueStoreOperation(queueKey, async () => {
+            const state = await readStoreState(resolvedStateFile);
+            return Object.values(state.records)
+                .sort((left, right) => {
+                    if (left.createdAtMs !== right.createdAtMs) {
+                        return left.createdAtMs - right.createdAtMs;
+                    }
+                    return buildMessagePublicationKey(left).localeCompare(
+                        buildMessagePublicationKey(right)
+                    );
+                })
+                .map((record) => cloneJson(record));
+        });
+    }
+
     return {
         stateFile: resolvedStateFile,
         getRecord,
+        listRecords,
         prepareRecord,
         saveRecord,
     };

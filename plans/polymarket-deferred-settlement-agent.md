@@ -36,6 +36,7 @@ This plan intentionally treats the result as an example module, not a general-pu
 - [x] 2026-04-10 02:03Z: Implemented the first extraction pass for standalone node process surfaces: new primary startup paths now live under `node/scripts/`, `node/README.md` documents the node workspace, and the old `agent/scripts/start-...node.mjs` files now delegate to the new paths as compatibility wrappers.
 - [x] 2026-04-13 14:52 PDT: Revised the plan after user clarification that trade logs must be published within the commitment-defined timeliness window to remain reimbursement-eligible, and that the node should enforce that window during publication.
 - [x] 2026-04-13 15:01 PDT: Revised the plan again so late trades stay visible in published cumulative snapshots, while the node separately attests which newly introduced trades are reimbursable versus non-reimbursable based on timeliness, sequence continuity, and internal consistency.
+- [x] 2026-04-13 15:11 PDT: Implemented the shared message-publication validator hook, attested `publication.validation` payloads, duplicate-safe persistence of validator output, runtime resolution of `validatePublishedMessage()` from agent modules, and focused store/API/runtime regressions.
 - [ ] Create the new deferred-settlement Polymarket agent module and its commitment text.
 - [ ] Add tests, smoke harness coverage, and documentation updates.
 
@@ -137,8 +138,9 @@ Milestone 1 status after the first implementation pass:
 - Completed: focused validation landed in `agent/scripts/test-message-publication-store.mjs`, `agent/scripts/test-message-publication-api.mjs`, and an extension to `agent/scripts/test-agent-config-file.mjs`.
 - Validated: `node agent/scripts/test-message-publication-store.mjs`, `node agent/scripts/test-message-publication-api.mjs`, and `node agent/scripts/test-agent-config-file.mjs`.
 - Completed follow-up: the artifact now also includes an explicit node `eip191` attestation over publication metadata plus the archived signed message, and the publish-node startup path resolves a signer from `MESSAGE_PUBLISH_API_SIGNER_PRIVATE_KEY` or the shared signer configuration.
+- Completed follow-up: the shared message publication node now supports an optional module-exported validator hook, signs normalized validator output into `publication.validation`, preserves that output across duplicate/pin-retry flows, and rejects only structural validator failures before publication.
 
-Remaining design work now explicitly includes node-side trade classification for Polymarket trade-log snapshots. The shared publication node already records trustworthy `receivedAtMs` and `publishedAtMs` values in the node attestation, so the remaining implementation task is to connect an optional module-specific validator that can compare those times against newly introduced trade entries, verify sequence and internal consistency, and record per-trade reimbursement eligibility in the published node attestation.
+Remaining design work now moves from shared infrastructure into the still-missing Polymarket module. The node-side hook and attested validation payload exist; what remains is a module-local validator that parses the stream payload, checks timeliness/sequence/internal consistency for newly introduced trade entries, and emits per-trade reimbursement classifications that later settlement logic can consume.
 
 ## Context and Orientation
 
@@ -243,7 +245,7 @@ Milestone 4 adds proof-quality validation. The module and node need tests for re
 
 ## Concrete Steps
 
-From `/Users/johnshutt/Code/oya-commitments`:
+From the repository root:
 
 1. Add the new shared node protocol and config surfaces.
 

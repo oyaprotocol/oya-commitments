@@ -130,6 +130,10 @@ async function main() {
         assert.equal(loaded.pinned, true);
         assert.equal(loaded.artifact.signedMessage.envelope.message.requestId, requestId);
         assert.equal(loaded.artifact.publication.nodeAttestation.signer, signer.toLowerCase());
+
+        const listed = await store.listRecords();
+        assert.equal(listed.length, 1);
+        assert.equal(listed[0].requestId, requestId);
     } finally {
         await rm(tempDir, { recursive: true, force: true });
     }

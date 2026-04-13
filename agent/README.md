@@ -262,9 +262,11 @@ Start the node with:
 node node/scripts/start-message-publish-node.mjs --module=<agent-name>
 ```
 
-Use `--chain-id=<id>` to assert a specific chain when the module serves more than one chain, or `--dry-run` to print the resolved bind host, port, state file, and supported chain IDs without starting the server.
+Use `--chain-id=<id>` to assert a specific chain when the module serves more than one chain, or `--dry-run` to print the resolved bind host, port, state file, supported chain IDs, and whether the module exports a message-publication validator hook without starting the server.
 
 Compatibility note: `agent/scripts/start-message-publish-node.mjs` still works as a thin wrapper during the migration, but `node/scripts/start-message-publish-node.mjs` is now the primary path.
+
+Agent modules may optionally export `validatePublishedMessage(args)` to attach domain-specific validation output to published artifacts. The shared node remains generic: the hook can reject structurally invalid messages by throwing, or it can return a validation object that the node signs into the publication attestation.
 
 Current request shape:
 
@@ -309,13 +311,21 @@ Response semantics:
 - fresh accepted publication: `202` with `status: "published"`
 - identical retry for the same signer, `chainId`, and `requestId`: `200` with `status: "duplicate"` and the original CID
 - same signer plus logical key but different signed contents: `409`
+- optional module validator failures before publication can return `422`
 - if IPFS add succeeds but local CID persistence fails, an exact retry reuses the first CID instead of publishing again
 - if IPFS add succeeds but pinning fails, retries reuse the stored CID and only retry pinning
 
 Published artifacts contain both the signer-authenticated payload and the node-authored publication record:
 
-- `publication`: `receivedAtMs`, `publishedAtMs`, `signerAllowlistMode`, optional `nodeName`, and `nodeAttestation`
+- `publication`: `receivedAtMs`, `publishedAtMs`, `signerAllowlistMode`, optional `nodeName`, optional `validation`, and `nodeAttestation`
 - `signedMessage`: `signer`, `signature`, `signedAtMs`, `canonicalMessage`, and the normalized signed `envelope`
+
+When a module validator returns output, the API response also includes `validation`, and the same value is signed into `publication.validation`. The current shared validation schema is:
+
+- `validatorId`: module-defined validator name
+- `status`: module-defined snapshot status such as `accepted`
+- `classifications`: optional list of per-entry results, each with `id`, `classification`, `firstSeenAtMs`, and optional `reason`
+- `summary`: optional validator-defined aggregate metadata
 
 There is no dedicated `send-signed-published-message.mjs` helper yet. Agent modules or external callers should sign with `buildSignedPublishedMessagePayload(...)` and then POST the request directly.
 

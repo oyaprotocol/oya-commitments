@@ -1,5 +1,6 @@
 import { getAddress, recoverMessageAddress } from 'viem';
 import { canonicalizeJson, isPlainObject, stringifyCanonicalJson } from './canonical-json.js';
+import { normalizeMessagePublicationValidation } from './message-publication-validation.js';
 
 const SIGNED_PUBLISHED_MESSAGE_VERSION = 'oya-signed-message-v1';
 const SIGNED_PUBLISHED_MESSAGE_KIND = 'generic_message_publication';
@@ -77,8 +78,9 @@ function normalizePublicationMetadata({
     publishedAtMs,
     signerAllowlistMode,
     nodeName,
+    validation,
 }) {
-    return canonicalizeJson({
+    const normalized = {
         receivedAtMs: parsePositiveInteger(receivedAtMs, 'receivedAtMs'),
         publishedAtMs: parsePositiveInteger(publishedAtMs, 'publishedAtMs'),
         signerAllowlistMode: normalizeNonEmptyString(
@@ -86,7 +88,15 @@ function normalizePublicationMetadata({
             'signerAllowlistMode'
         ),
         ...(nodeName ? { nodeName: normalizeNonEmptyString(nodeName, 'nodeName') } : {}),
-    });
+    };
+    const normalizedValidation = normalizeMessagePublicationValidation(
+        validation,
+        'validation'
+    );
+    if (normalizedValidation) {
+        normalized.validation = normalizedValidation;
+    }
+    return canonicalizeJson(normalized);
 }
 
 function normalizeSignedMessageReference({
@@ -217,6 +227,7 @@ function buildMessagePublicationArtifact({
     publishedAtMs,
     signerAllowlistMode,
     nodeName,
+    validation,
     nodeAttestation,
 }) {
     const normalizedPublication = normalizePublicationMetadata({
@@ -224,6 +235,7 @@ function buildMessagePublicationArtifact({
         publishedAtMs,
         signerAllowlistMode,
         nodeName,
+        validation,
     });
     const normalizedSignedMessage = buildArchivedSignedMessageRecord({
         signer,
@@ -290,6 +302,7 @@ async function verifySignedPublishedMessageArtifact(artifact) {
         publishedAtMs: artifact.publication.publishedAtMs,
         signerAllowlistMode: artifact.publication.signerAllowlistMode,
         nodeName: artifact.publication.nodeName,
+        validation: artifact.publication.validation,
     });
     const normalizedSignedMessage = buildArchivedSignedMessageRecord({
         signer: artifact.signedMessage.signer,

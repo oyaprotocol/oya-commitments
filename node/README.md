@@ -5,6 +5,7 @@
 These daemons are separate from the commitment-serving agent loop in `agent/`:
 
 - the message publication node archives signed agent-authored messages to IPFS
+- the message publication node can optionally run a module-exported validator and sign validator output into the published artifact
 - the proposal publication node archives signed proposal bundles to IPFS
 - the proposal publication node can also run in `propose` mode and submit proposals onchain
 - the proposal publication node now also exposes a verification API for supported proposal kinds

@@ -8,6 +8,7 @@ import {
 import {
     resolveMessagePublishNodeSigner,
     resolveMessagePublishServerConfig,
+    resolveMessagePublishValidator,
 } from './message-publish-runtime.mjs';
 
 loadScriptEnv();
@@ -48,6 +49,9 @@ async function main({ argv = process.argv } = {}) {
 
     const { agentRef, runtimeConfig, stateFile, supportedChainIds } =
         await resolveMessagePublishServerConfig({ argv });
+    const validateMessagePublication = await resolveMessagePublishValidator({
+        runtimeConfig,
+    });
     if (!runtimeConfig.messagePublishApiEnabled) {
         throw new Error(
             `Agent "${agentRef}" does not enable messagePublishApi. Enable messagePublishApi.enabled in the active config stack.`
@@ -71,6 +75,7 @@ async function main({ argv = process.argv } = {}) {
                     stateFile,
                     ipfsApiUrl: runtimeConfig.ipfsApiUrl,
                     nodeName: runtimeConfig.messagePublishApiNodeName ?? null,
+                    hasValidatorHook: Boolean(validateMessagePublication),
                 },
                 null,
                 2
@@ -87,6 +92,7 @@ async function main({ argv = process.argv } = {}) {
         config: runtimeConfig,
         store,
         nodeSigner,
+        validateMessagePublication,
     });
     await api.start();
 

@@ -16,6 +16,10 @@ import {
     buildSignedPublishedMessageEnvelope,
     buildSignedPublishedMessagePayload,
 } from './signed-published-message.js';
+import {
+    MessagePublicationValidationError,
+    normalizeMessagePublicationValidation,
+} from './message-publication-validation.js';
 import { buildMessagePublicationKey } from './message-publication-store.js';
 
 class PublicationPersistenceError extends Error {
@@ -94,10 +98,17 @@ function enqueuePublicationOperation(queueMap, queueKey, operation) {
 }
 
 function buildLastErrorPayload(error) {
-    return {
+    const payload = {
         message: error?.message ?? String(error),
         atMs: Date.now(),
     };
+    if (typeof error?.code === 'string' && error.code) {
+        payload.code = error.code;
+    }
+    if (error?.details !== undefined && error?.details !== null) {
+        payload.details = error.details;
+    }
+    return payload;
 }
 
 function normalizeOptionalChainIdForSignedAuth(value) {
@@ -126,6 +137,7 @@ function createMessagePublicationApiServer({
     store,
     logger = console,
     nodeSigner,
+    validateMessagePublication,
 } = {}) {
     if (!config) {
         throw new Error('createMessagePublicationApiServer requires config.');
@@ -144,6 +156,14 @@ function createMessagePublicationApiServer({
     }
     if (typeof nodeSigner.signMessage !== 'function') {
         throw new Error('Message publication API nodeSigner.signMessage(message) is required.');
+    }
+    if (
+        validateMessagePublication !== undefined &&
+        typeof validateMessagePublication !== 'function'
+    ) {
+        throw new Error(
+            'Message publication API validateMessagePublication must be a function when provided.'
+        );
     }
 
     const keyEntries = buildBearerKeyEntries(config.messagePublishApiKeys ?? {});
@@ -207,6 +227,34 @@ function createMessagePublicationApiServer({
         );
     }
 
+    async function resolvePublicationValidation({
+        record,
+        envelope,
+        publishedAtMs,
+        publicationKey,
+    }) {
+        if (typeof validateMessagePublication !== 'function') {
+            return null;
+        }
+        const validation = await validateMessagePublication({
+            config,
+            store,
+            currentPublicationKey: publicationKey,
+            currentRecord: record,
+            envelope,
+            message: envelope.message,
+            receivedAtMs: record.receivedAtMs,
+            publishedAtMs,
+            getRecord: ({ signer, chainId, requestId }) =>
+                store.getRecord({ signer, chainId, requestId }),
+            listRecords:
+                typeof store.listRecords === 'function'
+                    ? () => store.listRecords()
+                    : undefined,
+        });
+        return normalizeMessagePublicationValidation(validation, 'validation');
+    }
+
     async function publishRecord(record, { signerAllowlistMode, nodeName, publicationKey }) {
         let nextRecord = { ...record };
         const volatilePublicationState = volatilePublicationStates.get(publicationKey);
@@ -225,6 +273,12 @@ function createMessagePublicationApiServer({
         if (!nextRecord.artifact || nextRecord.publishedAtMs === null) {
             const envelope = parseEnvelopeFromCanonicalMessage(nextRecord.canonicalMessage);
             const publishedAtMs = Date.now();
+            const validation = await resolvePublicationValidation({
+                record: nextRecord,
+                envelope,
+                publishedAtMs,
+                publicationKey,
+            });
             const nodeAttestationEnvelope = buildMessagePublicationNodeAttestationEnvelope({
                 address: nodeSigner.address,
                 timestampMs: publishedAtMs,
@@ -233,6 +287,7 @@ function createMessagePublicationApiServer({
                     publishedAtMs,
                     signerAllowlistMode,
                     nodeName,
+                    validation,
                 },
                 signedMessage: {
                     signer: nextRecord.signer,
@@ -255,6 +310,7 @@ function createMessagePublicationApiServer({
                 publishedAtMs,
                 signerAllowlistMode,
                 nodeName,
+                validation,
                 nodeAttestation: {
                     signer: nodeSigner.address,
                     signature: nodeAttestationSignature,
@@ -610,10 +666,26 @@ function createMessagePublicationApiServer({
                         body,
                         signer: signedAuth.sender.address,
                         senderKeyId: signedAuth.senderKeyId,
-                        code: errorCode,
-                        statusCode: 502,
+                        code:
+                            error instanceof MessagePublicationValidationError
+                                ? error.code
+                                : errorCode,
+                        statusCode:
+                            error instanceof MessagePublicationValidationError
+                                ? error.statusCode
+                                : 502,
                     })}: ${error?.message ?? error}`
                 );
+                if (error instanceof MessagePublicationValidationError) {
+                    sendJson(res, error.statusCode, {
+                        error: error.message,
+                        code: error.code,
+                        details: error.details,
+                        cid: record?.cid ?? null,
+                        uri: record?.uri ?? null,
+                    });
+                    return;
+                }
                 sendJson(res, 502, {
                     error: error?.message ?? 'Unable to publish signed message artifact.',
                     code: errorCode,
@@ -631,6 +703,7 @@ function createMessagePublicationApiServer({
                 cid: record.cid,
                 uri: record.uri,
                 pinned: Boolean(record.pinned),
+                validation: record.artifact?.publication?.validation ?? null,
                 nodeSigner:
                     record.artifact?.publication?.nodeAttestation?.signer ?? null,
             });

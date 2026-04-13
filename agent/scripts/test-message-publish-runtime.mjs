@@ -2,12 +2,15 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
-import { resolveMessagePublishServerConfig } from './lib/message-publish-runtime.mjs';
+import {
+    resolveMessagePublishServerConfig,
+    resolveMessagePublishValidator,
+} from './lib/message-publish-runtime.mjs';
 
-async function createAgentModule(repoRootPath, name, config) {
+async function createAgentModule(repoRootPath, name, config, agentSource = 'export default {};\n') {
     const agentDir = path.join(repoRootPath, 'agent-library', 'agents', name);
     await mkdir(agentDir, { recursive: true });
-    await writeFile(path.join(agentDir, 'agent.js'), 'export default {};\n', 'utf8');
+    await writeFile(path.join(agentDir, 'agent.js'), agentSource, 'utf8');
     await writeFile(
         path.join(agentDir, 'config.json'),
         JSON.stringify(config, null, 2),
@@ -58,6 +61,67 @@ async function run() {
             'message-publish-single-chain-chain-11155111.json'
         )
     );
+
+    await createAgentModule(
+        repoRootPath,
+        'message-publish-validator-export',
+        {
+            chainId: 11155111,
+            ipfsEnabled: true,
+            messagePublishApi: {
+                enabled: true,
+                requireSignerAllowlist: false,
+            },
+        },
+        `export async function validatePublishedMessage({ message, config }) {
+  return {
+    validatorId: 'runtime-validator',
+    status: 'accepted',
+    classifications: [
+      {
+        id: String(message.requestId),
+        classification: 'reimbursable',
+        firstSeenAtMs: 1,
+      },
+    ],
+    summary: {
+      chainId: config.chainId,
+    },
+  };
+}
+`
+    );
+    const validatorConfig = await resolveMessagePublishServerConfig({
+        argv: [
+            'node',
+            'start-message-publish-node.mjs',
+            '--module=message-publish-validator-export',
+        ],
+        repoRootPath,
+    });
+    const validateMessagePublication = await resolveMessagePublishValidator({
+        runtimeConfig: validatorConfig.runtimeConfig,
+    });
+    assert.equal(typeof validateMessagePublication, 'function');
+    const validationResult = await validateMessagePublication({
+        message: {
+            requestId: 'runtime-test-trade',
+        },
+    });
+    assert.deepEqual(validationResult, {
+        validatorId: 'runtime-validator',
+        status: 'accepted',
+        classifications: [
+            {
+                id: 'runtime-test-trade',
+                classification: 'reimbursable',
+                firstSeenAtMs: 1,
+            },
+        ],
+        summary: {
+            chainId: 11155111,
+        },
+    });
 
     console.log('[test] message publish runtime OK');
 }

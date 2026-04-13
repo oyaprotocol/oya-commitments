@@ -6,6 +6,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { privateKeyToAccount } from 'viem/accounts';
 import { createMessagePublicationApiServer } from '../src/lib/message-publication-api.js';
 import { createMessagePublicationStore } from '../src/lib/message-publication-store.js';
+import { MessagePublicationValidationError } from '../src/lib/message-publication-validation.js';
 import {
     buildMessagePublicationArtifact,
     buildSignedPublishedMessagePayload,
@@ -208,6 +209,57 @@ async function main() {
                 return nodeAccount.signMessage({ message });
             },
         },
+        async validateMessagePublication({
+            message,
+            receivedAtMs,
+            publishedAtMs,
+            listRecords,
+        }) {
+            if (message.requestId === 'bad-sequence') {
+                throw new MessagePublicationValidationError('Sequence continuity failed.', {
+                    code: 'message_sequence_invalid',
+                    details: {
+                        validatorId: 'test-message-validator',
+                    },
+                });
+            }
+
+            if (message.requestId === 'publish-ok') {
+                const records = listRecords ? await listRecords() : [];
+                return {
+                    validatorId: 'test-message-validator',
+                    status: 'accepted',
+                    classifications: [
+                        {
+                            id: 'trade-1',
+                            classification: 'reimbursable',
+                            firstSeenAtMs: receivedAtMs,
+                        },
+                    ],
+                    summary: {
+                        seenRecordCount: records.length,
+                        publishedAtMs,
+                    },
+                };
+            }
+
+            if (message.requestId === 'publish-late') {
+                return {
+                    validatorId: 'test-message-validator',
+                    status: 'accepted',
+                    classifications: [
+                        {
+                            id: 'trade-late',
+                            classification: 'non_reimbursable_late',
+                            firstSeenAtMs: publishedAtMs,
+                            reason: 'published after logging window',
+                        },
+                    ],
+                };
+            }
+
+            return null;
+        },
     });
     const server = await api.start();
     const address = server.address();
@@ -295,6 +347,26 @@ async function main() {
         );
         assert.equal(verification.publishedAtMs >= verification.receivedAtMs, true);
         assert.ok(verification.nodeAttestation);
+        assert.deepEqual(accepted.json.validation, {
+            validatorId: 'test-message-validator',
+            status: 'accepted',
+            classifications: [
+                {
+                    id: 'trade-1',
+                    classification: 'reimbursable',
+                    firstSeenAtMs: verification.receivedAtMs,
+                },
+            ],
+            summary: {
+                seenRecordCount: 1,
+                publishedAtMs: verification.publishedAtMs,
+            },
+        });
+        assert.deepEqual(verification.publication.validation, accepted.json.validation);
+        assert.deepEqual(
+            verification.nodeAttestation.envelope.publication.validation,
+            accepted.json.validation
+        );
         assert.equal(
             verification.nodeAttestation.signer,
             nodeAccount.address.toLowerCase()
@@ -310,8 +382,32 @@ async function main() {
         assert.equal(duplicate.json.status, 'duplicate');
         assert.equal(duplicate.json.cid, accepted.json.cid);
         assert.equal(duplicate.json.nodeSigner, nodeAccount.address.toLowerCase());
+        assert.deepEqual(duplicate.json.validation, accepted.json.validation);
         assert.equal(addAttemptsByRequestId.get('publish-ok'), 1);
         assert.equal(pinAttemptsByRequestId.get('publish-ok'), 1);
+
+        const lateRequest = await buildSignedBody({
+            account,
+            requestId: 'publish-late',
+            messagePatch: {
+                payload: {
+                    marketId: 'market-1',
+                    action: 'initiated',
+                    tradeId: 'trade-late',
+                },
+            },
+        });
+        const lateAccepted = await postPublication(baseUrl, lateRequest.body);
+        assert.equal(lateAccepted.status, 202);
+        assert.equal(lateAccepted.json.validation.validatorId, 'test-message-validator');
+        assert.deepEqual(lateAccepted.json.validation.classifications, [
+            {
+                id: 'trade-late',
+                classification: 'non_reimbursable_late',
+                firstSeenAtMs: lateAccepted.json.validation.classifications[0].firstSeenAtMs,
+                reason: 'published after logging window',
+            },
+        ]);
 
         const conflicting = await buildSignedBody({
             account,
@@ -346,6 +442,29 @@ async function main() {
         });
         const rejectedOtherSigner = await postPublication(baseUrl, rejectedOtherSignerRequest.body);
         assert.equal(rejectedOtherSigner.status, 401);
+
+        const structuralFailureRequest = await buildSignedBody({
+            account,
+            requestId: 'bad-sequence',
+            messagePatch: {
+                payload: {
+                    marketId: 'market-1',
+                    action: 'continuation',
+                    previousCid: 'bafy-missing',
+                },
+            },
+        });
+        const structuralFailure = await postPublication(baseUrl, structuralFailureRequest.body);
+        assert.equal(structuralFailure.status, 422);
+        assert.equal(structuralFailure.json.code, 'message_sequence_invalid');
+        assert.equal(addAttemptsByRequestId.get('bad-sequence') ?? 0, 0);
+        const structuralFailureRecord = await store.getRecord({
+            signer: account.address,
+            chainId: TEST_CHAIN_ID,
+            requestId: 'bad-sequence',
+        });
+        assert.equal(structuralFailureRecord.cid, null);
+        assert.equal(structuralFailureRecord.lastError.code, 'message_sequence_invalid');
 
         const stringChainIdRequest = await buildSignedBody({
             account,
@@ -486,6 +605,14 @@ async function main() {
         await assert.rejects(
             () => verifySignedPublishedMessageArtifact(tamperedNodeEnvelopeArtifact),
             /canonicalMessage does not match the normalized message publication node attestation envelope\.|artifact node attestation signer does not match the node attestation envelope address\./
+        );
+
+        const tamperedValidationArtifact = structuredClone(publishedArtifact);
+        tamperedValidationArtifact.publication.validation.classifications[0].classification =
+            'non_reimbursable_late';
+        await assert.rejects(
+            () => verifySignedPublishedMessageArtifact(tamperedValidationArtifact),
+            /artifact node attestation does not match the normalized publication metadata\./
         );
 
         assert.throws(
