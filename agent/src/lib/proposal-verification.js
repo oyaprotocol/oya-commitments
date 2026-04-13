@@ -483,8 +483,46 @@ function parseEnvelopeFromRecord(record) {
     }
 }
 
+function hasSameCommitmentContext(recordEnvelope, { commitmentSafe, ogModule }) {
+    return Boolean(
+        recordEnvelope &&
+            recordEnvelope.commitmentSafe === commitmentSafe &&
+            recordEnvelope.ogModule === ogModule
+    );
+}
+
+function normalizeAddressOrNull(value) {
+    if (typeof value !== 'string' || !value.trim()) {
+        return null;
+    }
+    try {
+        return getAddress(value).toLowerCase();
+    } catch {
+        return null;
+    }
+}
+
+function inferAuthorizedAgentFromEnvelope(envelope) {
+    try {
+        const reimbursements = normalizeProposalReimbursementTransfers(envelope);
+        const recipients = Array.from(new Set(reimbursements.map((entry) => entry.recipient)));
+        return recipients.length === 1 ? recipients[0] : null;
+    } catch {
+        return null;
+    }
+}
+
+function resolveRecordAuthorizedAgent(record, envelope) {
+    const verifiedAgent = normalizeAddressOrNull(record?.verification?.derivedFacts?.authorizedAgent);
+    if (verifiedAgent) {
+        return verifiedAgent;
+    }
+    return inferAuthorizedAgentFromEnvelope(envelope);
+}
+
 async function resolveStoredProposalLifecycle({
     record,
+    envelope = undefined,
     publicClient,
     lifecycleCache,
 }) {
@@ -502,12 +540,12 @@ async function resolveStoredProposalLifecycle({
         return submission.transactionHash ? 'reserved' : 'unknown';
     }
 
-    const envelope = parseEnvelopeFromRecord(record);
-    if (!envelope) {
+    const resolvedEnvelope = envelope ?? parseEnvelopeFromRecord(record);
+    if (!resolvedEnvelope) {
         return 'unknown';
     }
 
-    const cacheKey = `${envelope.ogModule}:${submission.ogProposalHash}`;
+    const cacheKey = `${resolvedEnvelope.ogModule}:${submission.ogProposalHash}`;
     if (lifecycleCache.has(cacheKey)) {
         return lifecycleCache.get(cacheKey);
     }
@@ -516,7 +554,7 @@ async function resolveStoredProposalLifecycle({
     const [executedLogs, deletedLogs] = await Promise.all([
         getLogsChunked({
             publicClient,
-            address: envelope.ogModule,
+            address: resolvedEnvelope.ogModule,
             event: proposalExecutedEvent,
             args: {
                 proposalHash: submission.ogProposalHash,
@@ -526,7 +564,7 @@ async function resolveStoredProposalLifecycle({
         }),
         getLogsChunked({
             publicClient,
-            address: envelope.ogModule,
+            address: resolvedEnvelope.ogModule,
             event: proposalDeletedEvent,
             args: {
                 proposalHash: submission.ogProposalHash,
@@ -564,6 +602,10 @@ async function resolveReferencedDepositStatuses({
     chainId,
     currentPublicationKey,
     publicClient,
+    commitmentSafe,
+    ogModule,
+    authorizedAgent,
+    currentRulesHash,
 }) {
     const statuses = new Map(depositTxHashes.map((depositTxHash) => [depositTxHash, 'available']));
     const lifecycleCache = new Map();
@@ -578,6 +620,9 @@ async function resolveReferencedDepositStatuses({
         }
         const envelope = parseEnvelopeFromRecord(record);
         if (!envelope) {
+            continue;
+        }
+        if (!hasSameCommitmentContext(envelope, { commitmentSafe, ogModule })) {
             continue;
         }
 
@@ -597,9 +642,23 @@ async function resolveReferencedDepositStatuses({
         if (referenced.length === 0) {
             continue;
         }
+        const recordAuthorizedAgent = resolveRecordAuthorizedAgent(record, envelope);
+        if (recordAuthorizedAgent && recordAuthorizedAgent !== authorizedAgent) {
+            continue;
+        }
+        if (!recordAuthorizedAgent && recordVerification.rulesHash !== currentRulesHash) {
+            for (const depositTxHash of referenced) {
+                statuses.set(
+                    depositTxHash,
+                    mergeDepositStatus(statuses.get(depositTxHash), 'unknown')
+                );
+            }
+            continue;
+        }
 
         const lifecycle = await resolveStoredProposalLifecycle({
             record,
+            envelope,
             publicClient,
             lifecycleCache,
         });
@@ -821,6 +880,10 @@ async function verifyAgentProxyReimbursement({
         chainId: envelope.chainId,
         currentPublicationKey,
         publicClient,
+        commitmentSafe: envelope.commitmentSafe,
+        ogModule: envelope.ogModule,
+        authorizedAgent,
+        currentRulesHash: verificationMetadata.rulesHash,
     });
     const referencedDeposits = [];
     let hasUnavailableDeposit = false;

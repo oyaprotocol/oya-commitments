@@ -9,20 +9,23 @@ import { computeRulesHash, verifyProposal } from '../src/lib/proposal-verificati
 import { buildSignedProposalPayload } from '../src/lib/signed-proposal.js';
 
 const AGENT = '0x1111111111111111111111111111111111111111';
+const OTHER_AGENT = '0x1212121212121212121212121212121212121212';
 const SAFE = '0x2222222222222222222222222222222222222222';
 const DEPOSIT_TOKEN = '0x3333333333333333333333333333333333333333';
 const REIMBURSEMENT_TOKEN = '0x4444444444444444444444444444444444444444';
 const OG_MODULE = '0x5555555555555555555555555555555555555555';
+const OTHER_SAFE = '0x8888888888888888888888888888888888888888';
+const OTHER_OG_MODULE = '0x9999999999999999999999999999999999999999';
 const RECOVERY_A = '0x6666666666666666666666666666666666666666';
 const RECOVERY_B = '0x7777777777777777777777777777777777777777';
 const DEPOSIT_TX_HASH = `0x${'a'.repeat(64)}`;
 const PENDING_PROPOSAL_TX_HASH = `0x${'b'.repeat(64)}`;
 
-function buildRulesText() {
+function buildRulesText(agentAddress = AGENT) {
     return [
         'Agent Proxy',
         '---',
-        `The agent at address ${AGENT} may trade tokens in this commitment for different tokens, at the current fair market exchange rate. To execute the trade, they deposit tokens from their own wallet into the Safe, and propose to withdraw tokens of equal or lesser value. Token prices are based on the prices at the time of the deposit.`,
+        `The agent at address ${agentAddress} may trade tokens in this commitment for different tokens, at the current fair market exchange rate. To execute the trade, they deposit tokens from their own wallet into the Safe, and propose to withdraw tokens of equal or lesser value. Token prices are based on the prices at the time of the deposit.`,
         '',
         'Account Recovery and Rule Updates',
         '---',
@@ -48,15 +51,20 @@ function buildTransferLog({ token, from, to, amountWei }) {
 function buildEnvelope({
     requestId,
     depositTxHashes = [DEPOSIT_TX_HASH],
+    commitmentSafe = SAFE,
+    ogModule = OG_MODULE,
+    signerAddress = AGENT,
+    authorizedAgent = AGENT,
+    reimbursementRecipient = authorizedAgent,
+    rulesText = buildRulesText(authorizedAgent),
 }) {
-    const rulesText = buildRulesText();
     return {
-        address: AGENT,
+        address: signerAddress,
         chainId: 11155111,
         timestampMs: 1_760_000_000_000,
         requestId,
-        commitmentSafe: SAFE,
-        ogModule: OG_MODULE,
+        commitmentSafe,
+        ogModule,
         transactions: [
             {
                 to: REIMBURSEMENT_TOKEN,
@@ -64,7 +72,7 @@ function buildEnvelope({
                 data: encodeFunctionData({
                     abi: erc20Abi,
                     functionName: 'transfer',
-                    args: [AGENT, 1_000_000n],
+                    args: [reimbursementRecipient, 1_000_000n],
                 }),
                 operation: 0,
             },
@@ -210,6 +218,56 @@ async function main() {
     assert.equal(
         reservedResult.checks.find((check) => check.id === 'deposit_reuse')?.status,
         'fail'
+    );
+
+    const sameCommitmentDifferentAgentEnvelope = buildEnvelope({
+        requestId: 'same-commitment-different-agent',
+        signerAddress: OTHER_AGENT,
+        authorizedAgent: OTHER_AGENT,
+        reimbursementRecipient: OTHER_AGENT,
+        rulesText: buildRulesText(OTHER_AGENT),
+    });
+    const sameCommitmentDifferentAgentRecord = {
+        ...pendingStoreRecord,
+        signer: OTHER_AGENT.toLowerCase(),
+        requestId: 'same-commitment-different-agent',
+        canonicalMessage: buildSignedProposalPayload(sameCommitmentDifferentAgentEnvelope),
+    };
+    const sameCommitmentDifferentAgentResult = await verifyProposal({
+        envelope: buildEnvelope({ requestId: 'same-deposit-same-commitment-other-agent' }),
+        rulesText,
+        publicClient,
+        storeRecords: [sameCommitmentDifferentAgentRecord],
+        nowMs: 1_760_000_001_000,
+    });
+    assert.equal(sameCommitmentDifferentAgentResult.status, 'valid');
+    assert.equal(
+        sameCommitmentDifferentAgentResult.checks.find((check) => check.id === 'deposit_reuse')
+            ?.status,
+        'pass'
+    );
+
+    const foreignCommitmentEnvelope = buildEnvelope({
+        requestId: 'foreign-commitment',
+        commitmentSafe: OTHER_SAFE,
+        ogModule: OTHER_OG_MODULE,
+    });
+    const foreignCommitmentRecord = {
+        ...pendingStoreRecord,
+        requestId: 'foreign-commitment',
+        canonicalMessage: buildSignedProposalPayload(foreignCommitmentEnvelope),
+    };
+    const foreignCommitmentResult = await verifyProposal({
+        envelope: buildEnvelope({ requestId: 'same-deposit-other-commitment' }),
+        rulesText,
+        publicClient,
+        storeRecords: [foreignCommitmentRecord],
+        nowMs: 1_760_000_001_000,
+    });
+    assert.equal(foreignCommitmentResult.status, 'valid');
+    assert.equal(
+        foreignCommitmentResult.checks.find((check) => check.id === 'deposit_reuse')?.status,
+        'pass'
     );
 
     console.log('[test] proposal verification OK');
