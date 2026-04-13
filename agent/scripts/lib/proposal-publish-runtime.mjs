@@ -1,7 +1,10 @@
 import path from 'node:path';
 import { createPublicClient, http } from 'viem';
 import { buildConfig } from '../../src/lib/config.js';
-import { createValidatedReadWriteRuntime } from '../../src/lib/chain-runtime.js';
+import {
+    createValidatedReadOnlyRuntime,
+    createValidatedReadWriteRuntime,
+} from '../../src/lib/chain-runtime.js';
 import { resolveAgentRuntimeConfig, resolveConfiguredChainId } from '../../src/lib/agent-config.js';
 import { createSignerClient } from '../../src/lib/signer.js';
 import {
@@ -280,6 +283,101 @@ async function createProposalPublishSubmissionRuntimeResolver({
     };
 }
 
+async function createProposalPublishVerificationRuntimeResolver({
+    agentRef,
+    env = process.env,
+    repoRootPath = repoRoot,
+    argv = process.argv,
+    overlayPaths = undefined,
+    createPublicClientFn = createPublicClient,
+} = {}) {
+    const resolvedOverlayPaths =
+        overlayPaths === undefined ? resolveExplicitOverlayPaths({ argv }) : overlayPaths;
+    const explicitChainIdRaw = getArgValue('--chain-id=', argv);
+    const explicitChainId =
+        explicitChainIdRaw === null ? undefined : parseInteger(explicitChainIdRaw, 'chainId');
+    const cache = new Map();
+    const serverRuntimeConfig = await resolveProposalPublishApiConfigForAgent({
+        agentRef,
+        chainId: explicitChainId,
+        repoRootPath,
+        env,
+        overlayPaths: resolvedOverlayPaths,
+        argv,
+        allowAmbiguousChainId: explicitChainId === undefined,
+    });
+    const servedChainIds = listServedChainIds(
+        serverRuntimeConfig,
+        serverRuntimeConfig.agentConfigStack
+    );
+
+    return async function resolveProposalVerificationRuntime({ chainId }) {
+        const normalizedChainId = normalizeChainIdValue(chainId);
+        if (
+            servedChainIds.length > 0 &&
+            !servedChainIds.includes(normalizedChainId)
+        ) {
+            throw buildUnsupportedChainError(
+                `Agent "${agentRef}" does not support proposal verification for chainId ${normalizedChainId}. Supported chainIds: ${servedChainIds.join(', ')}.`
+            );
+        }
+        if (!cache.has(normalizedChainId)) {
+            cache.set(
+                normalizedChainId,
+                (async () => {
+                    let runtimeConfig;
+                    try {
+                        runtimeConfig = await resolveProposalPublishApiConfigForAgent({
+                            agentRef,
+                            chainId: normalizedChainId,
+                            repoRootPath,
+                            env,
+                            overlayPaths: resolvedOverlayPaths,
+                            argv,
+                        });
+                    } catch (error) {
+                        throw normalizeProposalRuntimeResolutionError(error, {
+                            agentRef,
+                            chainId: normalizedChainId,
+                        });
+                    }
+
+                    if (!runtimeConfig.proposalPublishApiEnabled) {
+                        throw buildUnsupportedChainError(
+                            `Agent "${agentRef}" does not enable proposalPublishApi for chainId ${normalizedChainId}.`
+                        );
+                    }
+                    if (!runtimeConfig.rpcUrl) {
+                        throw buildUnsupportedChainError(
+                            `Agent "${agentRef}" does not define rpcUrl for chainId ${normalizedChainId}.`
+                        );
+                    }
+
+                    const { publicClient } = await createValidatedReadOnlyRuntime({
+                        rpcUrl: runtimeConfig.rpcUrl,
+                        expectedChainId: normalizedChainId,
+                        buildError: buildUnsupportedChainError,
+                        createPublicClientFn,
+                        httpTransportFn: http,
+                    });
+
+                    return {
+                        runtimeConfig,
+                        publicClient,
+                    };
+                })()
+            );
+        }
+
+        try {
+            return await cache.get(normalizedChainId);
+        } catch (error) {
+            cache.delete(normalizedChainId);
+            throw error;
+        }
+    };
+}
+
 async function resolveProposalPublishApiTarget({
     argv = process.argv,
     env = process.env,
@@ -486,6 +584,7 @@ async function resolveProposalPublishServerConfig({
 export {
     buildProposalPublishBaseUrl,
     createProposalPublishSubmissionRuntimeResolver,
+    createProposalPublishVerificationRuntimeResolver,
     resolveProposalPublishApiConfigForAgent,
     resolveProposalPublishApiTarget,
     resolveProposalPublishServerConfig,

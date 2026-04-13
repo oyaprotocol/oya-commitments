@@ -485,6 +485,7 @@ function createDefaultRuntimeConfig({ env = process.env, rpcUrl } = {}) {
         openAiModel: 'gpt-4.1-mini',
         openAiBaseUrl: 'https://api.openai.com/v1',
         openAiRequestTimeoutMs: 60_000,
+        proposalVerificationMode: 'off',
         allowProposeOnSimulationFail: false,
         proposeGasLimit: 2_000_000n,
         executeRetryMs: 60_000,

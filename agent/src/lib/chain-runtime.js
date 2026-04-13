@@ -116,8 +116,45 @@ async function createValidatedReadWriteRuntime({
     };
 }
 
+async function createValidatedReadOnlyRuntime({
+    rpcUrl,
+    expectedChainId = undefined,
+    buildError = (message) => new Error(message),
+    publicClientLabel = 'Resolved rpcUrl',
+    createPublicClientFn = createPublicClient,
+    httpTransportFn = http,
+} = {}) {
+    if (typeof rpcUrl !== 'string' || !rpcUrl.trim()) {
+        throw new Error('rpcUrl must be a non-empty string.');
+    }
+
+    const publicClient = createPublicClientFn({
+        transport: httpTransportFn(rpcUrl),
+    });
+    const publicChainId = normalizeChainId(
+        await publicClient.getChainId(),
+        'public client chainId'
+    );
+    const normalizedExpectedChainId =
+        expectedChainId === undefined || expectedChainId === null
+            ? publicChainId
+            : normalizeChainId(expectedChainId, 'expected chainId');
+    if (publicChainId !== normalizedExpectedChainId) {
+        throw buildError(
+            `${publicClientLabel} for chainId ${normalizedExpectedChainId} is connected to chainId ${publicChainId}.`
+        );
+    }
+
+    return {
+        publicClient,
+        chainId: normalizedExpectedChainId,
+        publicChainId,
+    };
+}
+
 export {
     assertExpectedRuntimeChain,
+    createValidatedReadOnlyRuntime,
     createValidatedReadWriteRuntime,
     normalizeChainId,
     resolveWalletClientChainId,

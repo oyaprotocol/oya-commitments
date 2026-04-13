@@ -68,6 +68,16 @@ function normalizeOptionalHash(value, label) {
     return value.toLowerCase();
 }
 
+function normalizeOptionalObject(value, label) {
+    if (value === undefined || value === null) {
+        return null;
+    }
+    if (!isPlainObject(value)) {
+        throw new Error(`${label} must be an object when provided.`);
+    }
+    return cloneJson(value);
+}
+
 function createEmptySubmissionState() {
     return {
         status: 'not_started',
@@ -189,6 +199,7 @@ function normalizeStoredRecord(record, label = 'record') {
         publishResult: record.publishResult === undefined ? null : cloneJson(record.publishResult),
         pinResult: record.pinResult === undefined ? null : cloneJson(record.pinResult),
         lastError: record.lastError === undefined ? null : cloneJson(record.lastError),
+        verification: normalizeOptionalObject(record.verification, `${label}.verification`),
         submission: normalizeSubmissionState(record.submission, `${label}.submission`),
         createdAtMs: normalizeTimestamp(
             record.createdAtMs ?? record.receivedAtMs,
@@ -343,6 +354,7 @@ function createProposalPublicationStore({ stateFile }) {
                     publishResult: null,
                     pinResult: null,
                     lastError: null,
+                    verification: null,
                     submission: createEmptySubmissionState(),
                     createdAtMs: nowMs,
                     updatedAtMs: nowMs,
@@ -376,9 +388,17 @@ function createProposalPublicationStore({ stateFile }) {
         });
     }
 
+    async function listRecords() {
+        return enqueueStoreOperation(queueKey, async () => {
+            const state = await readStoreState(resolvedStateFile);
+            return Object.values(state.records).map((record) => cloneJson(record));
+        });
+    }
+
     return {
         stateFile: resolvedStateFile,
         getRecord,
+        listRecords,
         prepareRecord,
         saveRecord,
     };
