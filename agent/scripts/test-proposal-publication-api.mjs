@@ -113,10 +113,11 @@ async function buildSignedBody({
 function buildReimbursementVerificationMetadata({
     depositTxHashes = [SHARED_DEPOSIT_TX_HASH],
     rulesHash = `0x${'b'.repeat(64)}`,
+    proposalKind = 'agent_proxy_reimbursement',
 } = {}) {
     return {
         verification: {
-            proposalKind: 'agent_proxy_reimbursement',
+            proposalKind,
             rulesHash,
             depositTxHashes,
         },
@@ -1505,14 +1506,18 @@ async function main() {
                 chainId: 11155111,
                 requestId: 'deposit-race-first',
                 explanation: 'Deposit race first request.',
-                metadata: buildReimbursementVerificationMetadata(),
+                metadata: buildReimbursementVerificationMetadata({
+                    proposalKind: 'Agent_Proxy_Reimbursement',
+                }),
             });
             const depositRaceSecondRequest = await buildSignedBody({
                 account,
                 chainId: 11155111,
                 requestId: 'deposit-race-second',
                 explanation: 'Deposit race second request.',
-                metadata: buildReimbursementVerificationMetadata(),
+                metadata: buildReimbursementVerificationMetadata({
+                    proposalKind: 'Agent_Proxy_Reimbursement',
+                }),
             });
             const depositRaceFirstPromise = postPublication(
                 proposeBaseUrl,

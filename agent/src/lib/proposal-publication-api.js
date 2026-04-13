@@ -15,7 +15,11 @@ import {
     buildSignedProposalPayload,
 } from './signed-proposal.js';
 import { buildPublicationKey } from './proposal-publication-store.js';
-import { verifyProposal as verifyProposalCandidate } from './proposal-verification.js';
+import {
+    PROPOSAL_KIND_IDS,
+    normalizeProposalKind,
+    verifyProposal as verifyProposalCandidate,
+} from './proposal-verification.js';
 import { hasCommittedToolSideEffects } from './tool-execution-error.js';
 import { postBondAndPropose, resolveProposalHashFromReceipt } from './tx.js';
 
@@ -291,9 +295,17 @@ function buildDepositSubmissionLockKeys(envelope) {
     const verificationMetadata = envelope?.metadata?.verification;
     if (
         !isPlainObject(verificationMetadata) ||
-        verificationMetadata.proposalKind !== 'agent_proxy_reimbursement' ||
         !Array.isArray(verificationMetadata.depositTxHashes)
     ) {
+        return [];
+    }
+    let normalizedProposalKind;
+    try {
+        normalizedProposalKind = normalizeProposalKind(verificationMetadata.proposalKind);
+    } catch {
+        return [];
+    }
+    if (normalizedProposalKind.proposalKindId !== PROPOSAL_KIND_IDS.AGENT_PROXY_REIMBURSEMENT) {
         return [];
     }
 

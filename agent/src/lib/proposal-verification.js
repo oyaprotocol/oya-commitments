@@ -18,7 +18,19 @@ import { parseStructuredProposalExplanation } from './proposal-explanation.js';
 import { buildSignedProposalEnvelope } from './signed-proposal.js';
 import { normalizeHashOrNull, decodeErc20TransferCallData } from './utils.js';
 
-const SUPPORTED_PROPOSAL_KINDS = new Set(['agent_proxy_reimbursement']);
+const PROPOSAL_KIND_IDS = Object.freeze({
+    AGENT_PROXY_REIMBURSEMENT: 1,
+});
+const PROPOSAL_KIND_NAME_BY_ID = Object.freeze({
+    [PROPOSAL_KIND_IDS.AGENT_PROXY_REIMBURSEMENT]: 'agent_proxy_reimbursement',
+});
+const PROPOSAL_KIND_ID_BY_NAME = new Map(
+    Object.entries(PROPOSAL_KIND_NAME_BY_ID).map(([proposalKindId, proposalKind]) => [
+        proposalKind,
+        Number(proposalKindId),
+    ])
+);
+const SUPPORTED_PROPOSAL_KINDS = new Set(Object.values(PROPOSAL_KIND_NAME_BY_ID));
 const KNOWN_TEMPLATE_IDS_BY_TITLE = new Map(
     [
         ['Agent Proxy', 'agent_proxy'],
@@ -414,20 +426,29 @@ function normalizeReimbursementAllocations(value) {
     return allocations;
 }
 
+function normalizeProposalKind(value, label = 'metadata.verification.proposalKind') {
+    const normalizedProposalKind = String(value ?? '')
+        .trim()
+        .toLowerCase();
+    const proposalKindId = PROPOSAL_KIND_ID_BY_NAME.get(normalizedProposalKind) ?? null;
+    if (!proposalKindId) {
+        throw new Error(
+            `${label} must be one of: ${Array.from(SUPPORTED_PROPOSAL_KINDS).join(', ')}.`
+        );
+    }
+    return {
+        proposalKind: PROPOSAL_KIND_NAME_BY_ID[proposalKindId],
+        proposalKindId,
+    };
+}
+
 function normalizeVerificationMetadata(metadata) {
     if (!isPlainObject(metadata?.verification)) {
         throw new Error('metadata.verification must be an object.');
     }
-    const proposalKind = String(metadata.verification.proposalKind ?? '')
-        .trim()
-        .toLowerCase();
-    if (!SUPPORTED_PROPOSAL_KINDS.has(proposalKind)) {
-        throw new Error(
-            `metadata.verification.proposalKind must be one of: ${Array.from(
-                SUPPORTED_PROPOSAL_KINDS
-            ).join(', ')}.`
-        );
-    }
+    const { proposalKind, proposalKindId } = normalizeProposalKind(
+        metadata.verification.proposalKind
+    );
     const rulesHash = normalizeHashOrNull(metadata.verification.rulesHash);
     if (!rulesHash) {
         throw new Error('metadata.verification.rulesHash must be a 32-byte hex string.');
@@ -455,6 +476,7 @@ function normalizeVerificationMetadata(metadata) {
 
     return {
         proposalKind,
+        proposalKindId,
         rulesHash,
         depositTxHashes,
         depositPriceSnapshots,
@@ -692,7 +714,7 @@ async function resolveReferencedDepositStatuses({
         } catch {
             continue;
         }
-        if (recordVerification.proposalKind !== 'agent_proxy_reimbursement') {
+        if (recordVerification.proposalKindId !== PROPOSAL_KIND_IDS.AGENT_PROXY_REIMBURSEMENT) {
             continue;
         }
 
@@ -1476,7 +1498,7 @@ async function verifyProposal({
         };
     }
 
-    if (verificationMetadata.proposalKind === 'agent_proxy_reimbursement' && rules) {
+    if (verificationMetadata.proposalKindId === PROPOSAL_KIND_IDS.AGENT_PROXY_REIMBURSEMENT && rules) {
         try {
             await verifyAgentProxyReimbursement({
                 envelope: normalizedEnvelope,
@@ -1517,7 +1539,9 @@ async function verifyProposal({
 }
 
 export {
+    PROPOSAL_KIND_IDS,
     computeRulesHash,
+    normalizeProposalKind,
     parseStandardCommitmentRules,
     verifyProposal,
 };
