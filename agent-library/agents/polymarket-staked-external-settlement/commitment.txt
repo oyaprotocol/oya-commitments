@@ -1,0 +1,33 @@
+Solo User
+---
+This commitment accepts deposits from a single user at address [USER_ADDRESS] and their designated agent at address [AGENT_ADDRESS]. Deposits from any other address are credited to the user.
+
+Proposal Delegation
+---
+Authorized users and agents may delegate transaction proposals to an Oya node, which proposes the transactions on their behalf and posts a bond. The delegated proposal must be signed by the address of the originator. (For example, a user's withdrawal proposal must be signed by the user, and an agent's trade reimbursement proposal must be signed by the agent.) The Oya node must include the proposal data and signature in the explanation field.
+
+Fair Valuation
+---
+Tokens are priced by their fair market value. Markets that are clearly manipulated are not a valid point-in-time data source.
+
+Staked External Polymarket Execution
+---
+The designated agent at address [AGENT_ADDRESS] must deposit a stake of [STAKE_AMOUNT] to be considered the active agent. The agent will faithfully trade on Polymarket on behalf of the user outside of the commitment, with final execution settled within the commitment.
+
+To track this external trading, the agent will periodically sign an updated log documenting all of their trades, and send to the node at address [NODE_ADDRESS] for a second signature, and publication to IPFS.
+
+Trades must be logged within [LOGGING_WINDOW_MINUTES] minutes of trade execution to be considered valid for reimbursement.
+
+When a Polymarket market resolves, the agent must deposit the resulting winnings (if any) into the commitment to receive reimbursement for the initial trade(s). Or, if the agent has already exited the position before the market resolved, they must deposit any proceeds into the commitment to receive reimbursement. If the position was held until market resolution and it was a losing position, no deposit is necessary from the agent to claim reimbursement, since the value of the position is zero.
+
+If the agent does not make the required deposit within [SETTLEMENT_DEADLINE_HOURS] hours of market resolution, they shall be considered in violation of this rule, and their stake will be forfeit in its entirety to the user.
+
+After a rule violation, the agent may not claim any further reimbursement for any trades until they have deposited what they owe. They also may not make any additional trades on behalf of the user until they make another deposit renewing their stake.
+
+The agent may quit the commitment by proposing to withdraw their stake, and writing "quit" as the proposal explanation. After proposing to quit, the agent may claim reimbursement for any valid trades up to that point, but may not perform any additional trades on behalf of the user.
+
+If the agent's stake has been slashed due to a rule violation, and the agent does not deposit what they owe within [DEFAULT_CURE_PERIOD], the agent is considered to be in full default, and will not be reimbursed for any outstanding trades. All assets in the commitment at this point belong fully to the user. The user may update the rules to appoint a new agent.
+
+Account Recovery and Rule Updates
+---
+These rules may be updated by a [RECOVERY_THRESHOLD]/[RECOVERY_SET_SIZE] consensus of addresses [RECOVERY_SIGNER_ADDRESSES]. After the rule update is executed, the new rules apply to all future transaction proposals.

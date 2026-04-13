@@ -37,7 +37,8 @@ This plan intentionally treats the result as an example module, not a general-pu
 - [x] 2026-04-13 14:52 PDT: Revised the plan after user clarification that trade logs must be published within the commitment-defined timeliness window to remain reimbursement-eligible, and that the node should enforce that window during publication.
 - [x] 2026-04-13 15:01 PDT: Revised the plan again so late trades stay visible in published cumulative snapshots, while the node separately attests which newly introduced trades are reimbursable versus non-reimbursable based on timeliness, sequence continuity, and internal consistency.
 - [x] 2026-04-13 15:11 PDT: Implemented the shared message-publication validator hook, attested `publication.validation` payloads, duplicate-safe persistence of validator output, runtime resolution of `validatePublishedMessage()` from agent modules, and focused store/API/runtime regressions.
-- [ ] Create the new deferred-settlement Polymarket agent module and its commitment text.
+- [x] 2026-04-13 16:10 PDT: Added the first module-local Polymarket trade-log validator under `agent-library/agents/polymarket-staked-external-settlement/`. The new module now exists as a minimal scaffold with its own `agent.js`, `commitment.txt`, `agent.json`, `config.json`, and validator test. The validator reads `ogModule.rules()` onchain, parses the deployed logging-delay minutes from the `Staked External Polymarket Execution` clause, validates cumulative snapshot continuity against previously published records, and classifies newly introduced trades as `reimbursable` or `non_reimbursable_late`.
+- [ ] Expand the deferred-settlement Polymarket agent module beyond the current scaffold and commitment draft.
 - [ ] Add tests, smoke harness coverage, and documentation updates.
 
 ## Surprises & Discoveries
@@ -140,7 +141,7 @@ Milestone 1 status after the first implementation pass:
 - Completed follow-up: the artifact now also includes an explicit node `eip191` attestation over publication metadata plus the archived signed message, and the publish-node startup path resolves a signer from `MESSAGE_PUBLISH_API_SIGNER_PRIVATE_KEY` or the shared signer configuration.
 - Completed follow-up: the shared message publication node now supports an optional module-exported validator hook, signs normalized validator output into `publication.validation`, preserves that output across duplicate/pin-retry flows, and rejects only structural validator failures before publication.
 
-Remaining design work now moves from shared infrastructure into the still-missing Polymarket module. The node-side hook and attested validation payload exist; what remains is a module-local validator that parses the stream payload, checks timeliness/sequence/internal consistency for newly introduced trade entries, and emits per-trade reimbursement classifications that later settlement logic can consume.
+Remaining design work now moves from validator scaffolding into the full deferred-settlement agent implementation. The node-side hook and attested validation payload exist, and `agent-library/agents/polymarket-staked-external-settlement/` now owns the first local validator implementation plus a minimal module scaffold. What remains is to flesh out that module's actual trade-log publisher, settlement ledger, reimbursement logic, and smoke harness.
 
 ## Context and Orientation
 

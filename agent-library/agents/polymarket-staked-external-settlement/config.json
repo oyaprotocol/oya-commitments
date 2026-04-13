@@ -1,0 +1,27 @@
+{
+  "chainId": 137,
+  "ipfsEnabled": true,
+  "messagePublishApi": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 9892,
+    "requireSignerAllowlist": true,
+    "signerAllowlist": [
+      "0x2967C076182F0303037072670e744e26Ed4A830f"
+    ]
+  },
+  "byChain": {
+    "137": {
+      "commitmentSafe": "0x1111111111111111111111111111111111111111",
+      "ogModule": "0x2222222222222222222222222222222222222222",
+      "watchAssets": [
+        "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+      ]
+    }
+  },
+  "polymarketStakedExternalSettlement": {
+    "authorizedAgent": "0x2967C076182F0303037072670e744e26Ed4A830f",
+    "tradingWallet": "0x4444444444444444444444444444444444444444",
+    "marketsById": {}
+  }
+}
