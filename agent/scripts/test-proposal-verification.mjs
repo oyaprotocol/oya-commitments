@@ -181,6 +181,62 @@ async function main() {
         'pass'
     );
 
+    const receiptRuntimeFailureClient = {
+        ...buildPublicClient(),
+        async getTransactionReceipt() {
+            throw new Error('rpc unavailable');
+        },
+    };
+    const receiptRuntimeFailureResult = await verifyProposal({
+        envelope: buildEnvelope({ requestId: 'receipt-runtime-failure' }),
+        publicClient: receiptRuntimeFailureClient,
+        storeRecords: [],
+        nowMs: 1_760_000_001_000,
+    });
+    assert.equal(receiptRuntimeFailureResult.status, 'unknown');
+    assert.equal(
+        receiptRuntimeFailureResult.checks.find(
+            (check) => check.id === 'agent_proxy_reimbursement'
+        )?.status,
+        'unknown'
+    );
+    assert.match(
+        receiptRuntimeFailureResult.checks.find(
+            (check) => check.id === 'agent_proxy_reimbursement'
+        )?.message ?? '',
+        /rpc unavailable/
+    );
+
+    const contradictoryDepositEvidenceClient = {
+        ...buildPublicClient(),
+        async getTransactionReceipt() {
+            return {
+                status: 'success',
+                blockNumber: 123n,
+                logs: [],
+            };
+        },
+    };
+    const contradictoryDepositEvidenceResult = await verifyProposal({
+        envelope: buildEnvelope({ requestId: 'contradictory-deposit-evidence' }),
+        publicClient: contradictoryDepositEvidenceClient,
+        storeRecords: [],
+        nowMs: 1_760_000_001_000,
+    });
+    assert.equal(contradictoryDepositEvidenceResult.status, 'invalid');
+    assert.equal(
+        contradictoryDepositEvidenceResult.checks.find(
+            (check) => check.id === 'agent_proxy_reimbursement'
+        )?.status,
+        'fail'
+    );
+    assert.match(
+        contradictoryDepositEvidenceResult.checks.find(
+            (check) => check.id === 'agent_proxy_reimbursement'
+        )?.message ?? '',
+        /does not include an ERC20 transfer/
+    );
+
     const existingPendingEnvelope = buildEnvelope({ requestId: 'existing-pending' });
     const pendingStoreRecord = {
         signer: AGENT.toLowerCase(),

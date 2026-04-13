@@ -65,6 +65,21 @@ const DEPOSIT_STATUS_RANK = Object.freeze({
     unknown: 3,
 });
 
+class VerificationUnknownError extends Error {
+    constructor(message, { code = 'verification_runtime_unavailable' } = {}) {
+        super(message);
+        this.name = 'VerificationUnknownError';
+        this.code = code;
+    }
+}
+
+function wrapVerificationUnknownError(error, prefix) {
+    if (error instanceof VerificationUnknownError) {
+        return error;
+    }
+    return new VerificationUnknownError(`${prefix}: ${error?.message ?? String(error)}`);
+}
+
 function normalizeRulesText(rulesText) {
     if (typeof rulesText !== 'string' || !rulesText.trim()) {
         throw new Error('rulesText must be a non-empty string.');
@@ -446,13 +461,20 @@ async function loadTokenDecimals({ publicClient, token, cache }) {
     if (cache.has(token)) {
         return cache.get(token);
     }
-    const decimals = Number(
-        await publicClient.readContract({
+    let rawDecimals;
+    try {
+        rawDecimals = await publicClient.readContract({
             address: token,
             abi: erc20Abi,
             functionName: 'decimals',
-        })
-    );
+        });
+    } catch (error) {
+        throw wrapVerificationUnknownError(
+            error,
+            `Token decimals for ${token} could not be loaded from chain`
+        );
+    }
+    const decimals = Number(rawDecimals);
     if (!Number.isInteger(decimals) || decimals < 0) {
         throw new Error(`Token ${token} returned an invalid decimals value.`);
     }
@@ -550,29 +572,36 @@ async function resolveStoredProposalLifecycle({
         return lifecycleCache.get(cacheKey);
     }
 
-    const latestBlock = await publicClient.getBlockNumber();
-    const [executedLogs, deletedLogs] = await Promise.all([
-        getLogsChunked({
-            publicClient,
-            address: resolvedEnvelope.ogModule,
-            event: proposalExecutedEvent,
-            args: {
-                proposalHash: submission.ogProposalHash,
-            },
-            fromBlock: 0n,
-            toBlock: latestBlock,
-        }),
-        getLogsChunked({
-            publicClient,
-            address: resolvedEnvelope.ogModule,
-            event: proposalDeletedEvent,
-            args: {
-                proposalHash: submission.ogProposalHash,
-            },
-            fromBlock: 0n,
-            toBlock: latestBlock,
-        }),
-    ]);
+    let latestBlock;
+    let executedLogs;
+    let deletedLogs;
+    try {
+        latestBlock = await publicClient.getBlockNumber();
+        [executedLogs, deletedLogs] = await Promise.all([
+            getLogsChunked({
+                publicClient,
+                address: resolvedEnvelope.ogModule,
+                event: proposalExecutedEvent,
+                args: {
+                    proposalHash: submission.ogProposalHash,
+                },
+                fromBlock: 0n,
+                toBlock: latestBlock,
+            }),
+            getLogsChunked({
+                publicClient,
+                address: resolvedEnvelope.ogModule,
+                event: proposalDeletedEvent,
+                args: {
+                    proposalHash: submission.ogProposalHash,
+                },
+                fromBlock: 0n,
+                toBlock: latestBlock,
+            }),
+        ]);
+    } catch {
+        return 'unknown';
+    }
 
     let lifecycle = 'reserved';
     if (executedLogs.length > 0 && deletedLogs.length > 0) {
@@ -707,7 +736,15 @@ async function resolveDepositReceiptEvidence({
     agentAddress,
     commitmentSafe,
 }) {
-    const receipt = await publicClient.getTransactionReceipt({ hash: depositTxHash });
+    let receipt;
+    try {
+        receipt = await publicClient.getTransactionReceipt({ hash: depositTxHash });
+    } catch (error) {
+        throw wrapVerificationUnknownError(
+            error,
+            `Deposit transaction ${depositTxHash} receipt could not be loaded from chain`
+        );
+    }
     if (receipt.status === 'reverted') {
         throw new Error(`Deposit transaction ${depositTxHash} reverted.`);
     }
@@ -1220,7 +1257,7 @@ async function verifyProposal({
             checks.push(
                 buildCheck(
                     'agent_proxy_reimbursement',
-                    'fail',
+                    error instanceof VerificationUnknownError ? 'unknown' : 'fail',
                     error?.message ?? String(error)
                 )
             );
