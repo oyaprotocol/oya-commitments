@@ -733,10 +733,9 @@ async function main() {
                 info() {},
                 warn() {},
             },
-            verifyProposal: async ({ envelope, rulesText }) => {
+            verifyProposal: async ({ envelope }) => {
                 observedVerifyCalls.push({
                     requestId: envelope.requestId,
-                    rulesText,
                 });
                 return {
                     status: 'valid',
@@ -775,18 +774,13 @@ async function main() {
                 requestId: 'verify-ok',
                 explanation: 'Verify only request.',
             });
-            const verifyResponse = await postVerification(verifyBaseUrl, {
-                ...verifyRequest.body,
-                rulesText: 'Agent Proxy\n---\nThe agent at address 0x1111111111111111111111111111111111111111 may trade tokens in this commitment for different tokens, at the current fair market exchange rate. To execute the trade, they deposit tokens from their own wallet into the Safe, and propose to withdraw tokens of equal or lesser value. Token prices are based on the prices at the time of the deposit.',
-            });
+            const verifyResponse = await postVerification(verifyBaseUrl, verifyRequest.body);
             assert.equal(verifyResponse.status, 200);
             assert.equal(verifyResponse.json.status, 'valid');
             assert.equal(verifyResponse.json.derivedFacts.requestId, 'verify-ok');
             assert.deepEqual(observedVerifyCalls, [
                 {
                     requestId: 'verify-ok',
-                    rulesText:
-                        'Agent Proxy\n---\nThe agent at address 0x1111111111111111111111111111111111111111 may trade tokens in this commitment for different tokens, at the current fair market exchange rate. To execute the trade, they deposit tokens from their own wallet into the Safe, and propose to withdraw tokens of equal or lesser value. Token prices are based on the prices at the time of the deposit.',
                 },
             ]);
             const verifyRecord = await verifyStore.getRecord({
@@ -795,6 +789,17 @@ async function main() {
                 requestId: 'verify-ok',
             });
             assert.equal(verifyRecord, null);
+
+            const verifyUnsupportedRulesText = await postVerification(verifyBaseUrl, {
+                ...verifyRequest.body,
+                rulesText:
+                    'Agent Proxy\n---\nThe agent at address 0x1111111111111111111111111111111111111111 may trade tokens in this commitment for different tokens.',
+            });
+            assert.equal(verifyUnsupportedRulesText.status, 400);
+            assert.match(
+                verifyUnsupportedRulesText.json.error,
+                /Unsupported field: rulesText/
+            );
         } finally {
             await verifyApi.stop();
         }
@@ -924,8 +929,6 @@ async function main() {
         try {
             const verifyExistingResponse = await postVerification(verifyExistingBaseUrl, {
                 ...verifyExistingRequest.body,
-                rulesText:
-                    'Agent Proxy\n---\nThe agent at address 0x1111111111111111111111111111111111111111 may trade tokens in this commitment for different tokens, at the current fair market exchange rate. To execute the trade, they deposit tokens from their own wallet into the Safe, and propose to withdraw tokens of equal or lesser value. Token prices are based on the prices at the time of the deposit.',
             });
             assert.equal(verifyExistingResponse.status, 200);
             assert.equal(verifyExistingResponse.json.status, 'valid');

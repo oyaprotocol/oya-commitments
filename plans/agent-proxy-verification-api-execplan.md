@@ -55,8 +55,8 @@ Observable user value:
   Rationale: The existing node already owns signed request auth, archival, proposal submission, and duplicate handling. A separate daemon would duplicate auth, storage, and runtime resolution, while the real need is to gate the existing propose path.
   Date/Author: 2026-04-12 / Codex.
 
-- Decision: Accept exact `rulesText` as a verification input, but treat it as a compatibility layer that is parsed into a canonical machine-readable template match result before any verifier runs.
-  Rationale: The user explicitly wants exact rules text as input. Deterministic parsing against `agent-library/RULE_TEMPLATES.md` is safer than freeform NLP and creates a stable bridge to a future structured rules manifest.
+- Decision: Use the current onchain `ogModule.rules()` text as the only rules source for proposal verification and proposal-time gating.
+  Rationale: The node should verify proposals against the commitment rules that are actually live onchain at the time of verification or submission. That removes ambiguity from caller-supplied rule text and keeps `metadata.verification.rulesHash` bound to the same onchain source the node actually evaluates.
   Date/Author: 2026-04-12 / Codex.
 
 - Decision: Bias to `unknown` instead of permissive acceptance whenever the rules text, evidence, or template coverage is incomplete.
@@ -134,7 +134,7 @@ Current limitations that motivate this work:
 Functional requirements for v1:
 
 - Provide `POST /v1/proposals/verify` on the proposal publication node.
-- Accept the exact commitment rules text as part of verification input.
+- Load the current commitment rules text from `ogModule.rules()` onchain during verification.
 - Deterministically parse the rules text against supported standard templates and extract placeholder values.
 - Return a machine-readable verification result with one of three top-level verdicts: `valid`, `invalid`, or `unknown`.
 - Report matched template IDs, extracted parameters, and coverage status so operators can see which parts of the commitment were actually evaluated.
@@ -174,7 +174,6 @@ Proposed v1 request shape:
     Authorization: Bearer <optional existing node token if configured>
 
     {
-      "rulesText": "<exact commitment.txt contents>",
       "chainId": 11155111,
       "requestId": "proposal-123",
       "commitmentSafe": "0x...",
@@ -305,7 +304,7 @@ Status semantics:
 
 Implement the feature in four layers so the design stays recoverable and testable.
 
-First, add a deterministic standard-template parser under shared node/agent infrastructure, probably under `agent/src/lib/proposal-verification/` or a similarly named shared directory. This parser should consume exact `rulesText`, split it into titled sections, match those sections against canonical template bodies from `agent-library/RULE_TEMPLATES.md`, and extract placeholder values with stable parameter names. This parser must not use fuzzy matching beyond carefully chosen whitespace normalization and placeholder capture rules.
+First, add a deterministic standard-template parser under shared node/agent infrastructure, probably under `agent/src/lib/proposal-verification/` or a similarly named shared directory. This parser should consume the exact current onchain `rules()` text, split it into titled sections, match those sections against canonical template bodies from `agent-library/RULE_TEMPLATES.md`, and extract placeholder values with stable parameter names. This parser must not use fuzzy matching beyond carefully chosen whitespace normalization and placeholder capture rules.
 
 Second, add a shared verification engine that accepts parsed rules, a signed proposal candidate, and verifier-specific evidence. The engine should classify templates into coverage buckets, dispatch to the requested verifier profile, and produce the `valid` / `invalid` / `unknown` result with a full check list. Persist this result in the proposal publication store so the node can reuse it across duplicates and retries.
 
@@ -322,9 +321,9 @@ Fourth, implement the initial `Agent Proxy` verifier. Use `first-proxy` as a ref
    - optional shared helpers for price snapshots and deposit evidence normalization.
 
 2. Extend the signed proposal flow so verifier inputs are signature-bound. Preferred approach:
-   - keep `rulesText` outside the signed payload to avoid large signatures;
+   - keep full rules text out of the signed payload to avoid large signatures;
    - add `metadata.verification.rulesHash`, `metadata.verification.proposalKind`, and any verifier evidence identifiers such as `depositTxHashes` to the signed payload;
-   - compute the hash of `rulesText` in the verification API and require it to match the signed `rulesHash`.
+   - compute the hash of the current onchain `ogModule.rules()` text in the verification API and require it to match the signed `rulesHash`.
 
 3. Extend `agent/src/lib/proposal-publication-store.js` to record a `verification` subdocument, including:
    - verifier version;
@@ -410,7 +409,7 @@ Recommended targeted test cases:
 
 - Exact match for default `Agent Proxy` scaffold plus `Account Recovery and Rule Updates`.
 - Rules text with custom freeform additions that should downgrade the result to `unknown`.
-- Signed request whose `metadata.verification.rulesHash` does not match supplied `rulesText`.
+- Signed request whose `metadata.verification.rulesHash` does not match the current onchain `ogModule.rules()` text.
 - `Agent Proxy` reimbursement where recipient is not the authorized agent.
 - `Agent Proxy` reimbursement where reimbursed value exceeds the aggregate value from the referenced deposit batch.
 - `Agent Proxy` reimbursement where one deposit in the batch is valid but another is missing, unconfirmed, or belongs to the wrong sender.
@@ -424,7 +423,7 @@ Recommended targeted test cases:
 
 Safe retry requirements:
 
-- Verify requests with identical signed proposal contents and identical `rulesText` should be idempotent and should reuse stored verification results when possible.
+- Verify requests with identical signed proposal contents should be idempotent and should reuse stored verification results when possible.
 - Publish requests in `propose` mode must not resubmit a proposal if an identical request already reached `submitted`, `resolved`, or `uncertain`; the current duplicate-handling rules in `proposal-publication-api.js` already provide a foundation and must be preserved.
 - If verification persistence fails after a result is computed, the API should surface a clear error and avoid claiming success until the store reflects the final state.
 - Deposit status transitions (`available` -> `reserved` -> `consumed`) must be updated atomically enough that a retry cannot silently reuse the same deposit twice. If exact atomic persistence cannot be guaranteed in v1, the API must fall back to `unknown` or an explicit conflict state rather than guessing.

@@ -1045,7 +1045,6 @@ async function verifyAgentProxyReimbursement({
 
 async function verifyProposal({
     envelope,
-    rulesText = undefined,
     publicClient = undefined,
     storeRecords = [],
     currentPublicationKey = null,
@@ -1083,8 +1082,9 @@ async function verifyProposal({
         };
     }
 
-    let effectiveRulesText = rulesText;
-    if (!effectiveRulesText && publicClient) {
+    let effectiveRulesText = null;
+    let didReportRulesTextUnavailable = false;
+    if (publicClient) {
         try {
             effectiveRulesText = await publicClient.readContract({
                 address: normalizedEnvelope.ogModule,
@@ -1099,11 +1099,21 @@ async function verifyProposal({
                     `Rules text could not be loaded from the OG module: ${error?.message ?? error}`
                 )
             );
+            didReportRulesTextUnavailable = true;
         }
+    } else {
+        checks.push(
+            buildCheck(
+                'rules_text',
+                'unknown',
+                'Rules text could not be loaded from the OG module because no verification runtime was available.'
+            )
+        );
+        didReportRulesTextUnavailable = true;
     }
 
     let rules = null;
-    if (effectiveRulesText) {
+    if (effectiveRulesText !== null) {
         try {
             const computedRulesHash = computeRulesHash(effectiveRulesText);
             if (computedRulesHash !== verificationMetadata.rulesHash) {
@@ -1111,7 +1121,7 @@ async function verifyProposal({
                     buildCheck(
                         'rules_hash',
                         'fail',
-                        'Signed metadata.rulesHash does not match the supplied rules text.'
+                        'Signed metadata.rulesHash does not match the current onchain rules text.'
                     )
                 );
             } else {
@@ -1119,7 +1129,7 @@ async function verifyProposal({
                     buildCheck(
                         'rules_hash',
                         'pass',
-                        'Signed metadata.rulesHash matches the rules text.'
+                        'Signed metadata.rulesHash matches the current onchain rules text.'
                     )
                 );
             }
@@ -1138,12 +1148,12 @@ async function verifyProposal({
                 )
             );
         }
-    } else {
+    } else if (!didReportRulesTextUnavailable) {
         checks.push(
             buildCheck(
                 'rules_text',
                 'unknown',
-                'Rules text was not supplied and could not be loaded from the OG module.'
+                'Rules text could not be loaded from the OG module.'
             )
         );
     }

@@ -450,11 +450,10 @@ Accepted requests must include signed auth:
 - when `proposalPublishApi.requireSignerAllowlist=true`, the recovered signer must also appear in `proposalPublishApi.signerAllowlist`
 - when `PROPOSAL_PUBLISH_API_KEYS_JSON` is configured, a valid `Authorization: Bearer ...` header is also required
 
-`POST /v1/proposals/verify` uses the same signed request shape, plus optional `rulesText`:
+`POST /v1/proposals/verify` uses the same signed request shape:
 
 ```json
 {
-  "rulesText": "Agent Proxy\n---\nThe agent at address 0x... may trade tokens in this commitment ...",
   "chainId": 11155111,
   "requestId": "proposal-2026-03-30-001",
   "commitmentSafe": "0x2222222222222222222222222222222222222222",
@@ -507,11 +506,12 @@ Accepted requests must include signed auth:
 }
 ```
 
-Notes on `rulesText`:
+Notes on rules verification:
 
-- if supplied, `metadata.verification.rulesHash` must match it exactly
-- if omitted, the node attempts to read `rules()` from the OG module onchain
-- any mismatch or missing rules source yields `invalid` or `unknown`, not `valid`
+- the node always reads `rules()` from the OG module onchain
+- `metadata.verification.rulesHash` must match the current onchain rules text exactly
+- caller-supplied `rulesText` is not accepted by the node API
+- any mismatch or missing onchain rules source yields `invalid` or `unknown`, not `valid`
 
 Notes on `metadata.verification` for `agent_proxy_reimbursement`:
 
@@ -545,7 +545,7 @@ Verification result shape:
 Current `agent_proxy_reimbursement` checks:
 
 - signed metadata is present and well-formed
-- `rulesHash` matches the supplied or onchain rules text
+- `rulesHash` matches the current onchain rules text
 - the rules include a parseable `Agent Proxy` section
 - proposal reimbursement transfers decode as direct ERC20 `transfer(...)` calls
 - those transfers all target the authorized agent

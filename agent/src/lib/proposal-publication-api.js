@@ -80,7 +80,7 @@ function canRefreshPendingRecord({ existingRecord, envelope }) {
     }
 }
 
-function validateProposalRequestBody(body, { allowRulesText = false } = {}) {
+function validateProposalRequestBody(body) {
     if (!isPlainObject(body)) {
         return { ok: false, message: 'Request body must be a JSON object.' };
     }
@@ -95,7 +95,6 @@ function validateProposalRequestBody(body, { allowRulesText = false } = {}) {
         'metadata',
         'deadline',
         'auth',
-        ...(allowRulesText ? ['rulesText'] : []),
     ]);
     for (const field of Object.keys(body)) {
         if (!allowedFields.has(field)) {
@@ -132,9 +131,6 @@ function validateProposalRequestBody(body, { allowRulesText = false } = {}) {
     }
     if (body.auth !== undefined && !isPlainObject(body.auth)) {
         return { ok: false, message: 'auth must be an object when provided.' };
-    }
-    if (allowRulesText && body.rulesText !== undefined && typeof body.rulesText !== 'string') {
-        return { ok: false, message: 'rulesText must be a string when provided.' };
     }
 
     return { ok: true };
@@ -524,7 +520,6 @@ function createProposalPublicationApiServer({
     async function runVerification({
         record = null,
         envelope,
-        rulesText = undefined,
         proposalRuntime = undefined,
     }) {
         const verificationRuntime = await resolveVerificationRuntimeForChain(
@@ -540,7 +535,6 @@ function createProposalPublicationApiServer({
             typeof store.listRecords === 'function' ? await store.listRecords() : [];
         const verification = await verifyProposal({
             envelope,
-            rulesText,
             publicClient: verificationRuntime?.publicClient,
             storeRecords,
             currentPublicationKey: publicationKey,
@@ -906,9 +900,7 @@ function createProposalPublicationApiServer({
                 return;
             }
 
-            const validation = validateProposalRequestBody(body, {
-                allowRulesText: isVerifyRoute,
-            });
+            const validation = validateProposalRequestBody(body);
             if (!validation.ok) {
                 emitLog(
                     'warn',
@@ -1072,7 +1064,6 @@ function createProposalPublicationApiServer({
                     ({ verification } = await runVerification({
                         record: exactExistingMatch ? existingRecord : null,
                         envelope,
-                        rulesText: body.rulesText,
                     }));
                 } catch (error) {
                     const statusCode = error?.statusCode ?? 502;

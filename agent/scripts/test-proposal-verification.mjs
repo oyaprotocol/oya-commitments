@@ -113,7 +113,7 @@ function buildEnvelope({
     };
 }
 
-function buildPublicClient() {
+function buildPublicClient({ rulesText = buildRulesText() } = {}) {
     const receipts = new Map([
         [
             DEPOSIT_TX_HASH,
@@ -141,6 +141,10 @@ function buildPublicClient() {
             return receipt;
         },
         async readContract({ address, functionName }) {
+            if (functionName === 'rules') {
+                const normalized = address.toLowerCase();
+                if (normalized === OG_MODULE.toLowerCase()) return rulesText;
+            }
             if (functionName === 'decimals') {
                 const normalized = address.toLowerCase();
                 if (normalized === DEPOSIT_TOKEN.toLowerCase()) return 6;
@@ -163,7 +167,6 @@ async function main() {
 
     const validResult = await verifyProposal({
         envelope: buildEnvelope({ requestId: 'valid' }),
-        rulesText,
         publicClient,
         storeRecords: [],
         nowMs: 1_760_000_001_000,
@@ -209,7 +212,6 @@ async function main() {
     };
     const reservedResult = await verifyProposal({
         envelope: buildEnvelope({ requestId: 'reserved-deposit' }),
-        rulesText,
         publicClient,
         storeRecords: [pendingStoreRecord],
         nowMs: 1_760_000_001_000,
@@ -235,7 +237,6 @@ async function main() {
     };
     const sameCommitmentDifferentAgentResult = await verifyProposal({
         envelope: buildEnvelope({ requestId: 'same-deposit-same-commitment-other-agent' }),
-        rulesText,
         publicClient,
         storeRecords: [sameCommitmentDifferentAgentRecord],
         nowMs: 1_760_000_001_000,
@@ -259,7 +260,6 @@ async function main() {
     };
     const foreignCommitmentResult = await verifyProposal({
         envelope: buildEnvelope({ requestId: 'same-deposit-other-commitment' }),
-        rulesText,
         publicClient,
         storeRecords: [foreignCommitmentRecord],
         nowMs: 1_760_000_001_000,

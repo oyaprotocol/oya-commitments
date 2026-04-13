@@ -42,7 +42,7 @@ Configure `proposalVerificationMode` in the active module config:
 For `agent_proxy_reimbursement`, signed `metadata.verification` currently needs:
 
 - `proposalKind`: must be `agent_proxy_reimbursement`
-- `rulesHash`: keccak256 hash of the exact rules text being verified
+- `rulesHash`: keccak256 hash of the current onchain `rules()` text being verified
 - `depositTxHashes`: referenced deposit transaction hashes
 - `depositPriceSnapshots`: one entry per referenced deposit, including the deposit-time price of the deposited asset and deposit-time prices of reimbursement assets
 - `reimbursementAllocations`: one entry per referenced deposit, mapping proposal withdrawal amounts back to that deposit
@@ -59,7 +59,7 @@ The whole-deposit batch model is enforced:
 What the verifier currently proves:
 
 - the signed request metadata is well-formed
-- `rulesHash` matches the supplied or onchain rules text
+- `rulesHash` matches the current onchain rules text
 - the rules text parses as supported standard templates
 - reimbursement transfers target the authorized `Agent Proxy` address
 - referenced deposits are confirmed ERC20 transfers from the agent into the commitment Safe
