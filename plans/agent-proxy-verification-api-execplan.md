@@ -332,7 +332,7 @@ Fourth, implement the initial `Agent Proxy` verifier. Use `first-proxy` as a ref
 
 Exact commands to use while implementing:
 
-- Working directory: repo root `/Users/johnshutt/Code/oya-commitments`
+- Working directory: repository root (the directory that contains `AGENTS.md`, `PLANS.md`, `README.md`, `foundry.toml`, `agent/`, `agent-library/`, `node/`, and `plans/`)
 - Parser/API regression:
       node node/scripts/test-proposal-verification-api.mjs
 - Existing publish regressions:
