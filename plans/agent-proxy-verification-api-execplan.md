@@ -26,8 +26,8 @@ Observable user value:
 - [x] 2026-04-12 19:03 PDT: Implemented the first shared proposal verification library with explicit `valid`, `invalid`, and `unknown` outcomes, signed metadata parsing, deposit-state checks, receipt-backed deposit evidence checks, and deterministic reimbursement-value arithmetic for `agent_proxy_reimbursement`.
 - [x] 2026-04-12 19:03 PDT: Added `POST /v1/proposals/verify`, verification result persistence on published proposal records, and an `off | advisory | enforce` `proposalVerificationMode` gate for propose mode.
 - [x] 2026-04-12 19:03 PDT: Added regression coverage for the verifier module, verify endpoint behavior, propose-mode enforcement, store persistence, and signed proposal smoke compatibility.
+- [x] 2026-04-12 19:03 PDT: Documented the shipped verification surface in `node/README.md` and `agent/README.md`, including endpoint behavior, signed metadata requirements, config gating, and current verifier limits.
 - [ ] Expand verifier coverage so `first-proxy` commitments with extra templates such as `Trade Restrictions` and `Trading Limits` can reach `valid` instead of `unknown`.
-- [ ] Update `node/README.md` and any relevant operator docs with request shape, config flags, and safe rollout guidance.
 
 ## Surprises & Discoveries
 

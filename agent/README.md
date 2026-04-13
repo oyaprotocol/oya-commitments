@@ -332,7 +332,15 @@ In both modes:
 - it can enforce a node-local signer allowlist and bearer token gate
 - it trusts any allowlisted signer for any signed `commitmentSafe` / `ogModule` pair in this version
 
-It still does not judge proposal correctness, aggregate approvals, or collect fees in this stage.
+Proposal correctness verification is now partially available:
+
+- `POST /v1/proposals/verify` returns `valid`, `invalid`, or `unknown` for supported proposal kinds
+- `POST /v1/proposals/publish` can also run the same verifier before onchain submission
+- current supported proposal kind: `agent_proxy_reimbursement`
+- current supported standard-template parsing: `Agent Proxy`, `Solo User`, `Fair Valuation`, and `Account Recovery and Rule Updates`
+- extra relevant templates such as `Trade Restrictions`, `Trading Limits`, or pause rules currently push the result to `unknown`, not `valid`
+
+It still does not provide full general commitment correctness checking, aggregate approval tracking, or fee collection in this stage.
 
 Configure non-secret proposal publication settings in the module `config.json` or `byChain.<chainId>`:
 
@@ -372,7 +380,17 @@ Supported `proposalPublishApi` fields:
 
 Keep bearer tokens in env via `PROPOSAL_PUBLISH_API_KEYS_JSON`; `proposalPublishApi.keys` is intentionally not supported in repo-tracked module config. Use `byChain.<chainId>.proposalPublishApi` for chain-specific overrides.
 
+Verification gating is configured separately from `proposalPublishApi` as the shared runtime field `proposalVerificationMode`:
+
+- `off`: default, no verification runs during `POST /v1/proposals/publish`
+- `advisory`: verification runs and is stored on the record, but does not block submission
+- `enforce`: verification runs before submission and requires a `valid` result
+
+Like other shared runtime settings, `proposalVerificationMode` can be set at the module root or overridden in `byChain.<chainId>`.
+
 `propose` mode is multi-chain-capable. The node resolves proposer runtime per signed `chainId`, so configure each served chain with a usable `byChain.<chainId>.rpcUrl` and `proposeEnabled=true`. Requests for unsupported chains are rejected before publication or submission side effects begin.
+
+Verification also needs chain access for deposit receipts, token decimals, and proposal lifecycle checks. `/v1/proposals/verify` therefore requires a resolvable `rpcUrl` for the served `chainId`, even when the node is not running in `propose` mode.
 
 The signed-request signer and the node's proposer signer are different roles:
 
@@ -391,6 +409,7 @@ Endpoints:
 
 - `GET /healthz`: health probe.
 - `POST /v1/proposals/publish`: verify, archive, and pin a signed proposal publication request.
+- `POST /v1/proposals/verify`: verify a signed proposal request without publishing or submitting it.
 - In `propose` mode, the same endpoint also submits the proposal onchain after successful publication.
 
 `POST /v1/proposals/publish` body:
@@ -431,19 +450,121 @@ Accepted requests must include signed auth:
 - when `proposalPublishApi.requireSignerAllowlist=true`, the recovered signer must also appear in `proposalPublishApi.signerAllowlist`
 - when `PROPOSAL_PUBLISH_API_KEYS_JSON` is configured, a valid `Authorization: Bearer ...` header is also required
 
+`POST /v1/proposals/verify` uses the same signed request shape, plus optional `rulesText`:
+
+```json
+{
+  "rulesText": "Agent Proxy\n---\nThe agent at address 0x... may trade tokens in this commitment ...",
+  "chainId": 11155111,
+  "requestId": "proposal-2026-03-30-001",
+  "commitmentSafe": "0x2222222222222222222222222222222222222222",
+  "ogModule": "0x3333333333333333333333333333333333333333",
+  "transactions": [
+    {
+      "to": "0x4444444444444444444444444444444444444444",
+      "value": "0",
+      "data": "0x1234",
+      "operation": 0
+    }
+  ],
+  "explanation": "Reimburse the agent for executed deposits.",
+  "metadata": {
+    "verification": {
+      "proposalKind": "agent_proxy_reimbursement",
+      "rulesHash": "0x...",
+      "depositTxHashes": [
+        "0x...",
+        "0x..."
+      ],
+      "depositPriceSnapshots": [
+        {
+          "depositTxHash": "0x...",
+          "depositAssetPriceUsdMicros": "1500000",
+          "reimbursementAssetPricesUsdMicros": {
+            "0x4444444444444444444444444444444444444444": "1000000"
+          }
+        }
+      ],
+      "reimbursementAllocations": [
+        {
+          "depositTxHash": "0x...",
+          "reimbursements": [
+            {
+              "token": "0x4444444444444444444444444444444444444444",
+              "amountWei": "1000000"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "auth": {
+    "type": "eip191",
+    "address": "0x1111111111111111111111111111111111111111",
+    "timestampMs": 1774897200000,
+    "signature": "0x..."
+  }
+}
+```
+
+Notes on `rulesText`:
+
+- if supplied, `metadata.verification.rulesHash` must match it exactly
+- if omitted, the node attempts to read `rules()` from the OG module onchain
+- any mismatch or missing rules source yields `invalid` or `unknown`, not `valid`
+
+Notes on `metadata.verification` for `agent_proxy_reimbursement`:
+
+- `depositTxHashes` defines the whole-deposit batch referenced by the proposal
+- `depositPriceSnapshots` is one signed snapshot per referenced deposit, keyed by `depositTxHash`
+- `reimbursementAllocations` is one signed mapping per referenced deposit, keyed by `depositTxHash`
+- the verifier checks those allocations against the actual proposal transactions; it does not infer deposit-to-withdrawal mapping on its own
+- if a referenced deposit is already reserved by a live proposal or consumed by an executed proposal, verification fails
+- if a prior proposal referencing the same deposit was deleted or disputed out, that deposit becomes available again
+
 Response semantics:
 
 - fresh accepted publication: `202` with `status: "published"`
 - identical retry for the same signer and `requestId`: `200` with `status: "duplicate"` and the original CID
 - same signer and `requestId` but different signed contents: `409`
 - if IPFS add succeeds but pinning fails, retries reuse the stored CID and only retry pinning
+- `POST /v1/proposals/verify` returns `200` with a top-level verification `status` of `valid`, `invalid`, or `unknown`
 - in `propose` mode, responses also include a nested `submission` object with submission status, transaction hash, and resolved OG proposal hash when available
+- when verification runs during publication, responses also include a nested `verification` object
 - in `propose` mode, retries never resubmit when the node already has a stored proposal transaction hash for that `(signer, chainId, requestId)`
+
+Verification result shape:
+
+- `status`: `valid`, `invalid`, or `unknown`
+- `verifiedAtMs`: verification timestamp
+- `proposalKind`: currently `agent_proxy_reimbursement`
+- `rules`: parsed template matches, extracted params, coverage, and any unparsed sections
+- `checks`: deterministic pass/fail/unknown checks with concrete reasons
+- `derivedFacts`: machine-checked facts such as authorized agent, referenced deposits, aggregate deposit-time value, reimbursement value, and rounding shortfall
+
+Current `agent_proxy_reimbursement` checks:
+
+- signed metadata is present and well-formed
+- `rulesHash` matches the supplied or onchain rules text
+- the rules include a parseable `Agent Proxy` section
+- proposal reimbursement transfers decode as direct ERC20 `transfer(...)` calls
+- those transfers all target the authorized agent
+- each referenced deposit is a confirmed ERC20 transfer from the agent into the commitment Safe
+- no referenced deposit is already reserved or consumed
+- signed reimbursement allocations sum exactly to the proposal transactions
+- each deposit allocation stays within that deposit's deposit-time value ceiling
+
+Current limits:
+
+- the verifier is deterministic but intentionally conservative
+- unsupported or extra relevant rule templates yield `unknown`
+- this is not yet a complete verifier for `first-proxy`, fee withdrawals, rule updates, pause flows, or arbitrary freeform commitments
 
 Artifacts published by the node include both node-authored metadata and the signer-authenticated payload. The top-level structure is:
 
 - `publication`: `receivedAtMs`, `publishedAtMs`, `signerAllowlistMode`, optional `nodeName`
 - `signedProposal`: `signer`, `signature`, `signedAtMs`, `canonicalMessage`, and the normalized proposal `envelope`
+- stored publication records also now persist a `verification` object when verification has run
 
 Signed send helper:
 
@@ -463,6 +584,7 @@ Example `propose`-mode config serving Sepolia and Polygon from one node:
 
 ```json
 {
+  "proposalVerificationMode": "enforce",
   "proposalPublishApi": {
     "enabled": true,
     "mode": "propose",
