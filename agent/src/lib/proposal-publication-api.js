@@ -517,6 +517,40 @@ function createProposalPublicationApiServer({
         return resolveVerificationRuntime({ chainId });
     }
 
+    async function listStoreRecordsForVerification() {
+        if (typeof store.listRecords !== 'function') {
+            throw new ApiResponseError(
+                'Proposal verification requires a store implementation that supports listRecords().',
+                {
+                    statusCode: 503,
+                    code: 'verification_history_unavailable',
+                }
+            );
+        }
+        let records;
+        try {
+            records = await store.listRecords();
+        } catch (error) {
+            throw new ApiResponseError(
+                `Proposal verification could not enumerate prior proposals: ${error?.message ?? error}`,
+                {
+                    statusCode: 503,
+                    code: 'verification_history_unavailable',
+                }
+            );
+        }
+        if (!Array.isArray(records)) {
+            throw new ApiResponseError(
+                'Proposal verification store returned an invalid record list.',
+                {
+                    statusCode: 503,
+                    code: 'verification_history_unavailable',
+                }
+            );
+        }
+        return records;
+    }
+
     async function runVerification({
         record = null,
         envelope,
@@ -531,8 +565,7 @@ function createProposalPublicationApiServer({
             chainId: envelope.chainId,
             requestId: envelope.requestId,
         });
-        const storeRecords =
-            typeof store.listRecords === 'function' ? await store.listRecords() : [];
+        const storeRecords = await listStoreRecordsForVerification();
         const verification = await verifyProposal({
             envelope,
             publicClient: verificationRuntime?.publicClient,

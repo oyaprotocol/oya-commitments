@@ -804,6 +804,75 @@ async function main() {
             await verifyApi.stop();
         }
 
+        const verifyNoHistoryStateFile = path.join(
+            tempDir,
+            'proposal-publications-verify-no-history.json'
+        );
+        const verifyNoHistoryStoreBase = createProposalPublicationStore({
+            stateFile: verifyNoHistoryStateFile,
+        });
+        const verifyNoHistoryStore = {
+            async getRecord(args) {
+                return verifyNoHistoryStoreBase.getRecord(args);
+            },
+        };
+        let verifyNoHistoryCalls = 0;
+        const verifyNoHistoryApi = createProposalPublicationApiServer({
+            config: buildServerConfig(account.address),
+            store: verifyNoHistoryStore,
+            logger: {
+                info() {},
+                warn() {},
+            },
+            verifyProposal: async () => {
+                verifyNoHistoryCalls += 1;
+                return {
+                    status: 'valid',
+                    verifiedAtMs: BASE_TIME_MS + 1,
+                    proposalKind: 'agent_proxy_reimbursement',
+                    rules: {
+                        rulesHash: `0x${'f'.repeat(64)}`,
+                        matchedTemplates: [],
+                        unparsedSections: [],
+                    },
+                    checks: [],
+                    derivedFacts: {},
+                };
+            },
+        });
+        const verifyNoHistoryServer = await verifyNoHistoryApi.start();
+        const verifyNoHistoryAddress = verifyNoHistoryServer.address();
+        assert.ok(
+            verifyNoHistoryAddress &&
+                typeof verifyNoHistoryAddress === 'object' &&
+                typeof verifyNoHistoryAddress.port === 'number'
+        );
+        const verifyNoHistoryBaseUrl = `http://127.0.0.1:${verifyNoHistoryAddress.port}`;
+
+        try {
+            const verifyNoHistoryRequest = await buildSignedBody({
+                account,
+                requestId: 'verify-no-history',
+                explanation: 'Verify should fail closed without record enumeration.',
+            });
+            const verifyNoHistoryResponse = await postVerification(
+                verifyNoHistoryBaseUrl,
+                verifyNoHistoryRequest.body
+            );
+            assert.equal(verifyNoHistoryResponse.status, 503);
+            assert.equal(
+                verifyNoHistoryResponse.json.code,
+                'verification_history_unavailable'
+            );
+            assert.match(
+                verifyNoHistoryResponse.json.error,
+                /supports listRecords\(\)/
+            );
+            assert.equal(verifyNoHistoryCalls, 0);
+        } finally {
+            await verifyNoHistoryApi.stop();
+        }
+
         const verifyExistingStateFile = path.join(
             tempDir,
             'proposal-publications-verify-existing.json'
@@ -861,6 +930,9 @@ async function main() {
             },
             async saveRecord(record) {
                 return verifyExistingStoreBase.saveRecord(record);
+            },
+            async listRecords() {
+                return verifyExistingStoreBase.listRecords();
             },
             async updateRecord(recordOrKey, updater) {
                 if (!injectedVerifyExistingUpdate) {
@@ -1352,6 +1424,114 @@ async function main() {
             assert.equal(addAttemptsByRequestId.get('unsupported-chain') ?? 0, 0);
         } finally {
             await proposeApi.stop();
+        }
+
+        const proposeNoHistoryStateFile = path.join(
+            tempDir,
+            'proposal-publications-propose-no-history.json'
+        );
+        const proposeNoHistoryStoreBase = createProposalPublicationStore({
+            stateFile: proposeNoHistoryStateFile,
+        });
+        const proposeNoHistoryStore = {
+            async getRecord(args) {
+                return proposeNoHistoryStoreBase.getRecord(args);
+            },
+            async prepareRecord(args) {
+                return proposeNoHistoryStoreBase.prepareRecord(args);
+            },
+            async saveRecord(record) {
+                return proposeNoHistoryStoreBase.saveRecord(record);
+            },
+            async updateRecord(recordOrKey, updater) {
+                return proposeNoHistoryStoreBase.updateRecord(recordOrKey, updater);
+            },
+        };
+        let proposeNoHistorySubmitCalls = 0;
+        let proposeNoHistoryVerifyCalls = 0;
+        const proposeNoHistoryApi = createProposalPublicationApiServer({
+            config: buildServerConfig(account.address, {
+                chainId: undefined,
+                proposalPublishApiMode: 'propose',
+                proposalVerificationMode: 'enforce',
+            }),
+            store: proposeNoHistoryStore,
+            logger: {
+                info() {},
+                warn() {},
+            },
+            resolveProposalRuntime: async ({ chainId }) => ({
+                runtimeConfig: {
+                    chainId,
+                    proposeEnabled: true,
+                    bondSpender: 'og',
+                    proposalHashResolveTimeoutMs: 1,
+                    proposalHashResolvePollIntervalMs: 1,
+                },
+                publicClient: {
+                    async getChainId() {
+                        return chainId;
+                    },
+                },
+                walletClient: {},
+                account: { address: account.address },
+            }),
+            verifyProposal: async () => {
+                proposeNoHistoryVerifyCalls += 1;
+                return {
+                    status: 'valid',
+                    verifiedAtMs: BASE_TIME_MS + 4,
+                    proposalKind: 'agent_proxy_reimbursement',
+                    rules: {
+                        rulesHash: `0x${'b'.repeat(64)}`,
+                        matchedTemplates: [],
+                        unparsedSections: [],
+                    },
+                    checks: [],
+                    derivedFacts: {},
+                };
+            },
+            submitProposal: async () => {
+                proposeNoHistorySubmitCalls += 1;
+                return {
+                    transactionHash: `0x${'c'.repeat(64)}`,
+                    proposalHash: `0x${'d'.repeat(64)}`,
+                    ogProposalHash: `0x${'d'.repeat(64)}`,
+                    sideEffectsLikelyCommitted: true,
+                };
+            },
+        });
+        const proposeNoHistoryServer = await proposeNoHistoryApi.start();
+        const proposeNoHistoryAddress = proposeNoHistoryServer.address();
+        assert.ok(
+            proposeNoHistoryAddress &&
+                typeof proposeNoHistoryAddress === 'object' &&
+                typeof proposeNoHistoryAddress.port === 'number'
+        );
+        const proposeNoHistoryBaseUrl = `http://127.0.0.1:${proposeNoHistoryAddress.port}`;
+
+        try {
+            const proposeNoHistoryRequest = await buildSignedBody({
+                account,
+                chainId: 11155111,
+                requestId: 'propose-no-history',
+                explanation: 'Enforce mode should fail closed without record enumeration.',
+            });
+            const proposeNoHistoryResponse = await postPublication(
+                proposeNoHistoryBaseUrl,
+                proposeNoHistoryRequest.body
+            );
+            assert.equal(proposeNoHistoryResponse.status, 503);
+            assert.equal(
+                proposeNoHistoryResponse.json.code,
+                'verification_history_unavailable'
+            );
+            assert.equal(proposeNoHistoryResponse.json.submission.status, 'not_started');
+            assert.equal(proposeNoHistoryResponse.json.verification, null);
+            assert.equal(proposeNoHistoryVerifyCalls, 0);
+            assert.equal(proposeNoHistorySubmitCalls, 0);
+        } finally {
+            await proposeNoHistoryApi.stop();
         }
 
         const advisoryStateFile = path.join(tempDir, 'proposal-publications-propose-advisory.json');
