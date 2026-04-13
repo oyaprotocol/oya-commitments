@@ -5,6 +5,7 @@ import {
     optimisticGovernorAbi,
     proposalDeletedEvent,
     proposalExecutedEvent,
+    transactionsProposedEvent,
 } from './og.js';
 import { buildSignedProposalEnvelope } from './signed-proposal.js';
 import { normalizeHashOrNull, decodeErc20TransferCallData } from './utils.js';
@@ -558,16 +559,38 @@ async function resolveStoredProposalLifecycle({
     if (!publicClient) {
         return 'unknown';
     }
-    if (!submission.ogProposalHash) {
-        return submission.transactionHash ? 'reserved' : 'unknown';
-    }
 
     const resolvedEnvelope = envelope ?? parseEnvelopeFromRecord(record);
     if (!resolvedEnvelope) {
         return 'unknown';
     }
 
-    const cacheKey = `${resolvedEnvelope.ogModule}:${submission.ogProposalHash}`;
+    let proposalHash = submission.ogProposalHash;
+    if (!proposalHash) {
+        if (!submission.transactionHash) {
+            return 'unknown';
+        }
+        let receipt;
+        try {
+            receipt = await publicClient.getTransactionReceipt({
+                hash: submission.transactionHash,
+            });
+        } catch {
+            return 'unknown';
+        }
+        if (receipt?.status === 'reverted') {
+            return 'available';
+        }
+        proposalHash = extractProposalHashFromReceipt({
+            receipt,
+            ogModule: resolvedEnvelope.ogModule,
+        });
+        if (!proposalHash) {
+            return 'available';
+        }
+    }
+
+    const cacheKey = `${resolvedEnvelope.ogModule}:${proposalHash}`;
     if (lifecycleCache.has(cacheKey)) {
         return lifecycleCache.get(cacheKey);
     }
@@ -583,7 +606,7 @@ async function resolveStoredProposalLifecycle({
                 address: resolvedEnvelope.ogModule,
                 event: proposalExecutedEvent,
                 args: {
-                    proposalHash: submission.ogProposalHash,
+                    proposalHash,
                 },
                 fromBlock: 0n,
                 toBlock: latestBlock,
@@ -593,7 +616,7 @@ async function resolveStoredProposalLifecycle({
                 address: resolvedEnvelope.ogModule,
                 event: proposalDeletedEvent,
                 args: {
-                    proposalHash: submission.ogProposalHash,
+                    proposalHash,
                 },
                 fromBlock: 0n,
                 toBlock: latestBlock,
@@ -728,6 +751,43 @@ function decodeTransferLog(log) {
     } catch {
         return null;
     }
+}
+
+function extractProposalHashFromReceipt({ receipt, ogModule }) {
+    if (!receipt?.logs || !Array.isArray(receipt.logs)) {
+        return null;
+    }
+
+    for (const log of receipt.logs) {
+        let logAddress;
+        try {
+            logAddress = getAddress(log.address).toLowerCase();
+        } catch {
+            continue;
+        }
+        if (logAddress !== ogModule) {
+            continue;
+        }
+
+        try {
+            const decoded = decodeEventLog({
+                abi: [transactionsProposedEvent],
+                data: log.data,
+                topics: log.topics,
+            });
+            if (decoded.eventName !== 'TransactionsProposed') {
+                continue;
+            }
+            const proposalHash = normalizeHashOrNull(decoded.args?.proposalHash);
+            if (proposalHash) {
+                return proposalHash;
+            }
+        } catch {
+            // Ignore non-matching logs.
+        }
+    }
+
+    return null;
 }
 
 async function resolveDepositReceiptEvidence({

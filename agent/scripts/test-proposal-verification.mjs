@@ -113,7 +113,7 @@ function buildEnvelope({
     };
 }
 
-function buildPublicClient({ rulesText = buildRulesText() } = {}) {
+function buildPublicClient({ rulesText = buildRulesText(), extraReceipts = [] } = {}) {
     const receipts = new Map([
         [
             DEPOSIT_TX_HASH,
@@ -131,6 +131,9 @@ function buildPublicClient({ rulesText = buildRulesText() } = {}) {
             },
         ],
     ]);
+    for (const [hash, receipt] of extraReceipts) {
+        receipts.set(hash, receipt);
+    }
 
     return {
         async getTransactionReceipt({ hash }) {
@@ -266,10 +269,55 @@ async function main() {
         createdAtMs: 1_760_000_000_000,
         updatedAtMs: 1_760_000_000_600,
     };
+    const unresolvedSubmittedResult = await verifyProposal({
+        envelope: buildEnvelope({ requestId: 'unresolved-submitted-deposit' }),
+        publicClient,
+        storeRecords: [pendingStoreRecord],
+        nowMs: 1_760_000_001_000,
+    });
+    assert.equal(unresolvedSubmittedResult.status, 'unknown');
+    assert.equal(
+        unresolvedSubmittedResult.checks.find((check) => check.id === 'deposit_reuse')?.status,
+        'unknown'
+    );
+
+    const successfulNoProposalReceiptClient = buildPublicClient({
+        extraReceipts: [
+            [
+                PENDING_PROPOSAL_TX_HASH,
+                {
+                    status: 'success',
+                    blockNumber: 456n,
+                    logs: [],
+                },
+            ],
+        ],
+    });
+    const successfulNoProposalReceiptResult = await verifyProposal({
+        envelope: buildEnvelope({ requestId: 'submitted-tx-without-proposal' }),
+        publicClient: successfulNoProposalReceiptClient,
+        storeRecords: [pendingStoreRecord],
+        nowMs: 1_760_000_001_000,
+    });
+    assert.equal(successfulNoProposalReceiptResult.status, 'valid');
+    assert.equal(
+        successfulNoProposalReceiptResult.checks.find((check) => check.id === 'deposit_reuse')
+            ?.status,
+        'pass'
+    );
+
+    const reservedStoreRecord = {
+        ...pendingStoreRecord,
+        requestId: 'existing-pending-proven-reserved',
+        submission: {
+            ...pendingStoreRecord.submission,
+            ogProposalHash: `0x${'c'.repeat(64)}`,
+        },
+    };
     const reservedResult = await verifyProposal({
         envelope: buildEnvelope({ requestId: 'reserved-deposit' }),
         publicClient,
-        storeRecords: [pendingStoreRecord],
+        storeRecords: [reservedStoreRecord],
         nowMs: 1_760_000_001_000,
     });
     assert.equal(reservedResult.status, 'invalid');
