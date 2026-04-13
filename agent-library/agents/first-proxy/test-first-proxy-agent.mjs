@@ -517,10 +517,14 @@ async function testWinnerSelectionAndSplitReimbursement() {
         assert.equal(buildArgs.actions[1].to.toLowerCase(), ADDRESSES.agent.toLowerCase());
 
         const postArgs = parseToolArgs(proposalCalls[1]);
-        assert.ok(postArgs.explanation.includes('strategy=first-proxy-momentum'));
-        assert.ok(postArgs.explanation.includes('epoch=0'));
-        assert.ok(postArgs.explanation.includes('winner=WETH'));
-        assert.ok(postArgs.explanation.includes('funding=cbBTC,USDC'));
+        const structuredExplanation = JSON.parse(postArgs.explanation);
+        assert.equal(structuredExplanation.kind, 'agent_proxy_reimbursement');
+        assert.equal(structuredExplanation.depositTxHashes.length, 1);
+        assert.equal(structuredExplanation.depositTxHashes[0], depositTxHash.toLowerCase());
+        assert.ok(structuredExplanation.description.includes('strategy=first-proxy-momentum'));
+        assert.ok(structuredExplanation.description.includes('epoch=0'));
+        assert.ok(structuredExplanation.description.includes('winner=WETH'));
+        assert.ok(structuredExplanation.description.includes('funding=cbBTC,USDC'));
 
         const validated = await validateToolCalls({
             toolCalls: proposalCalls.map((call) => ({

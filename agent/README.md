@@ -466,7 +466,7 @@ Accepted requests must include signed auth:
       "operation": 0
     }
   ],
-  "explanation": "Reimburse the agent for executed deposits.",
+  "explanation": "{\"description\":\"Reimburse the agent for executed deposits.\",\"depositTxHashes\":[\"0x...\",\"0x...\"],\"kind\":\"agent_proxy_reimbursement\"}",
   "metadata": {
     "verification": {
       "proposalKind": "agent_proxy_reimbursement",
@@ -515,12 +515,17 @@ Notes on rules verification:
 
 Notes on `metadata.verification` for `agent_proxy_reimbursement`:
 
+- `explanation` must be a canonical JSON string with `kind`, `description`, and `depositTxHashes`
+- `explanation.kind` must be `agent_proxy_reimbursement`
+- `explanation.depositTxHashes` must match `metadata.verification.depositTxHashes` exactly
+- the human-readable reimbursement summary belongs in `explanation.description`
 - `depositTxHashes` defines the whole-deposit batch referenced by the proposal
 - `depositPriceSnapshots` is one signed snapshot per referenced deposit, keyed by `depositTxHash`
 - `reimbursementAllocations` is one signed mapping per referenced deposit, keyed by `depositTxHash`
 - the verifier checks those allocations against the actual proposal transactions; it does not infer deposit-to-withdrawal mapping on its own
 - if a referenced deposit is already reserved by a live proposal or consumed by an executed proposal, verification fails
 - if a prior proposal referencing the same deposit was deleted or disputed out, that deposit becomes available again
+- the verifier also scans prior `TransactionsProposed` events for the same OG module and decodes structured reimbursement explanations so non-local proposal history can reserve or consume deposits
 
 Response semantics:
 
@@ -546,6 +551,7 @@ Current `agent_proxy_reimbursement` checks:
 
 - signed metadata is present and well-formed
 - `rulesHash` matches the current onchain rules text
+- `explanation` encodes structured deposit references that match the signed metadata
 - the rules include a parseable `Agent Proxy` section
 - proposal reimbursement transfers decode as direct ERC20 `transfer(...)` calls
 - those transfers all target the authorized agent

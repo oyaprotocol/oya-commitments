@@ -6,7 +6,7 @@ This ExecPlan is a living document and must be maintained according to `PLANS.md
 
 Add a proposal verification capability to the existing Oya proposal publication node so the node can determine whether a signed proposal is correct before it submits the proposal onchain. The first supported verifier should target the standard-template `Agent Proxy` rule because that rule is the first major product surface and already maps to existing deposit-then-reimbursement behavior in this repository. The verifier must support reimbursement proposals that cover a batch of agent deposits, not just a single deposit, so one proposal can reimburse multiple valid deposits at once. In v1, each referenced deposit is reimbursable at most once: after a covering proposal executes, that deposit cannot be used again even if the reimbursed amount was slightly less than the full deposit-time value due to deterministic rounding.
 
-After this work, an operator should be able to send a signed proposal candidate plus the exact commitment rules text to the proposal node and receive a deterministic verification result: `valid`, `invalid`, or `unknown`. In `propose` mode, the same verifier should be reusable as a pre-submit gate so the node can refuse to post bond and propose when the proposal cannot be proven correct under supported standard-template rules.
+After this work, an operator should be able to send a signed proposal candidate to the proposal node and receive a deterministic verification result: `valid`, `invalid`, or `unknown`, with the node reading the live commitment rules from `ogModule.rules()` and using structured onchain-readable reimbursement explanations to recover deposit history. In `propose` mode, the same verifier should be reusable as a pre-submit gate so the node can refuse to post bond and propose when the proposal cannot be proven correct under supported standard-template rules.
 
 Observable user value:
 
@@ -27,6 +27,7 @@ Observable user value:
 - [x] 2026-04-12 19:03 PDT: Added `POST /v1/proposals/verify`, verification result persistence on published proposal records, and an `off | advisory | enforce` `proposalVerificationMode` gate for propose mode.
 - [x] 2026-04-12 19:03 PDT: Added regression coverage for the verifier module, verify endpoint behavior, propose-mode enforcement, store persistence, and signed proposal smoke compatibility.
 - [x] 2026-04-12 19:03 PDT: Documented the shipped verification surface in `node/README.md` and `agent/README.md`, including endpoint behavior, signed metadata requirements, config gating, and current verifier limits.
+- [x] 2026-04-13 14:34 PDT: Added canonical structured reimbursement explanations with `kind`, `description`, and `depositTxHashes`; the verifier now cross-checks explanation references against signed metadata and scans onchain `TransactionsProposed` history for the same OG module to derive non-local deposit reservation and consumption state.
 - [ ] Expand verifier coverage so `first-proxy` commitments with extra templates such as `Trade Restrictions` and `Trading Limits` can reach `valid` instead of `unknown`.
 
 ## Surprises & Discoveries
@@ -48,6 +49,9 @@ Observable user value:
 
 - Observation: Batch reimbursement valuation across multiple deposit timestamps needs an explicit mapping from proposal withdrawals back to deposits; aggregate transaction totals alone are not enough to prove correctness when prices differ between deposits.
   Evidence: During implementation, a whole-deposit batch still required per-deposit value ceilings. The shipped v1 verifier therefore requires signed `depositPriceSnapshots` and `reimbursementAllocations` in `metadata.verification` instead of inferring batch allocation from the proposal transactions alone.
+
+- Observation: Local proposal store history is not enough to prevent cross-operator double reimbursement. Deposit reuse checks needed a chain-visible encoding of deposit references so the verifier could inspect all prior `TransactionsProposed` events for the same OG module.
+  Evidence: The local store only knows proposals this node has seen, while the OG event stream already exposes proposal lifecycle and the signed `explanation` bytes for all operators.
 
 ## Decision Log
 
@@ -91,13 +95,17 @@ Observable user value:
   Rationale: `/v1/proposals/verify` still needs chain access for deposit receipts, token decimals, and proposal lifecycle checks. Requiring a signer-capable propose runtime for read-only verification would unnecessarily limit the endpoint.
   Date/Author: 2026-04-12 / Codex.
 
+- Decision: Encode reimbursement deposit references inside the signed `explanation` as canonical JSON with `kind`, `description`, and `depositTxHashes`, and treat that explanation block as the onchain-readable source for non-local proposal history.
+  Rationale: `TransactionsProposed` logs expose the signed explanation bytes onchain, so any node can reconstruct prior reimbursement claims without trusting another node’s local store. Keeping the human-readable summary in `description` preserves operator context without sacrificing machine readability.
+  Date/Author: 2026-04-13 / Codex.
+
 ## Outcomes & Retrospective
 
 First implementation slice shipped. Current outcome:
 
 - The proposal publication node now exposes `/v1/proposals/verify` and can persist verification results on proposal records.
 - The node can run verification in `propose` mode behind `proposalVerificationMode = off | advisory | enforce`.
-- The shared verifier can parse standard-template sections, verify signed `agent_proxy_reimbursement` metadata, inspect referenced deposit receipts, prevent reuse of reserved/consumed deposits, and enforce signed reimbursement allocations against deposit-time value ceilings.
+- The shared verifier can parse standard-template sections, verify signed `agent_proxy_reimbursement` metadata, require structured `explanation` deposit references, inspect referenced deposit receipts, prevent reuse of reserved/consumed deposits from both local records and onchain OG proposal history, and enforce signed reimbursement allocations against deposit-time value ceilings.
 - The main remaining product gap is coverage breadth: commitments with additional relevant templates such as `Trade Restrictions`, `Trading Limits`, or pause semantics still resolve to `unknown` instead of `valid`.
 
 ## Context and Orientation
@@ -127,6 +135,7 @@ Current limitations that motivate this work:
 
 - The proposal node can authenticate who signed a proposal, but not whether the proposal satisfies the commitment.
 - The signed proposal envelope is generic and does not yet define a machine-readable proposal kind or verifier inputs.
+- Non-local proposal history is only reconstructable for reimbursement proposals that encode deposit references in the signed `explanation`. Older explanations without that structure remain opaque to global reuse checks.
 - The first-proxy agent validates its own deterministic outputs locally, which is useful but not sufficient for a general proposal node that accepts externally supplied signed proposals.
 
 ## Requirements Sketch
@@ -140,13 +149,15 @@ Functional requirements for v1:
 - Report matched template IDs, extracted parameters, and coverage status so operators can see which parts of the commitment were actually evaluated.
 - Support one initial proposal kind: `agent_proxy_reimbursement`.
 - For `agent_proxy_reimbursement`, verify that:
+  - the signed `explanation` is a canonical JSON string with `kind`, `description`, and `depositTxHashes`;
+  - `explanation.kind` and `explanation.depositTxHashes` match the signed metadata exactly;
   - the rules text includes an `Agent Proxy` rule with an authorized agent address;
   - the proposal transfers assets only to the authorized agent for the reimbursement portion;
   - the reimbursement proposal is backed by one or more confirmed agent deposits into the commitment Safe;
   - the verifier can accept a batch of deposit references and compute the aggregate deposit-time reimbursable value across that batch using deposit-time fair valuation snapshots;
   - the reimbursed value is less than or equal to the aggregate deposit-time value from the referenced deposits;
   - if the reimbursed value is slightly less than that aggregate value due to deterministic rounding down, the executed proposal still counts as the only allowable reimbursement for every referenced deposit;
-  - repeated or replayed proposals cannot reuse any deposit that is already reserved by a pending proposal or consumed by an executed proposal;
+  - repeated or replayed proposals cannot reuse any deposit that is already reserved by a pending proposal or consumed by an executed proposal, including proposals discovered only from onchain `TransactionsProposed` history for the same OG module;
   - any mandatory explanation or signed metadata fields required for deterministic verification are present and internally consistent.
 - Reuse the same verification library inside `POST /v1/proposals/publish` when the node runs in `propose` mode.
 - Add a config gate so operators can choose whether verification is disabled, advisory, or enforced before onchain submission.
@@ -186,7 +197,7 @@ Proposed v1 request shape:
           "operation": 0
         }
       ],
-      "explanation": "human-readable proposal explanation",
+      "explanation": "{\"description\":\"human-readable proposal explanation\",\"depositTxHashes\":[\"0x...\",\"0x...\"],\"kind\":\"agent_proxy_reimbursement\"}",
       "metadata": {
         "verification": {
           "proposalKind": "agent_proxy_reimbursement",
@@ -323,6 +334,7 @@ Fourth, implement the initial `Agent Proxy` verifier. Use `first-proxy` as a ref
 2. Extend the signed proposal flow so verifier inputs are signature-bound. Preferred approach:
    - keep full rules text out of the signed payload to avoid large signatures;
    - add `metadata.verification.rulesHash`, `metadata.verification.proposalKind`, and any verifier evidence identifiers such as `depositTxHashes` to the signed payload;
+   - require the signed `explanation` to carry the same `depositTxHashes` inside canonical JSON so onchain proposal history is self-describing;
    - compute the hash of the current onchain `ogModule.rules()` text in the verification API and require it to match the signed `rulesHash`.
 
 3. Extend `agent/src/lib/proposal-publication-store.js` to record a `verification` subdocument, including:
@@ -468,7 +480,8 @@ Notes on batched deposit accounting:
 - The verifier should model each referenced deposit as a whole-deposit entry with at least `depositTxHash`, signer, deposit-time valuation, and a simple status lifecycle such as `available`, `reserved`, or `consumed`.
 - The consumption model should allow one reimbursement proposal to span multiple deposits, but it should not allow partial reuse of any deposit after an executed covering proposal.
 - A proposal may reimburse slightly less than the aggregate deposit-time batch value because of deterministic rounding down; that shortfall is tolerated, but the referenced deposits still become fully consumed after execution.
-- The verifier should not assume the proposal explanation alone is the source of truth for which deposits are referenced. It may be a consistency check, but deposit membership should be derived from signed evidence and persisted node state.
+- For the current signed proposal, `explanation.depositTxHashes` and `metadata.verification.depositTxHashes` must match exactly.
+- For non-local proposal history, the verifier should derive deposit membership from onchain structured explanations in `TransactionsProposed` logs, then reconcile lifecycle with executed/deleted events and local store state.
 
 Potential follow-on verifiers after v1:
 

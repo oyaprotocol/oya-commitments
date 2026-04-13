@@ -1,4 +1,11 @@
-import { decodeEventLog, erc20Abi, getAddress, keccak256, stringToHex } from 'viem';
+import {
+    decodeEventLog,
+    erc20Abi,
+    getAddress,
+    hexToString,
+    keccak256,
+    stringToHex,
+} from 'viem';
 import { isPlainObject } from './canonical-json.js';
 import { getLogsChunked } from './chain-history.js';
 import {
@@ -7,6 +14,7 @@ import {
     proposalExecutedEvent,
     transactionsProposedEvent,
 } from './og.js';
+import { parseStructuredProposalExplanation } from './proposal-explanation.js';
 import { buildSignedProposalEnvelope } from './signed-proposal.js';
 import { normalizeHashOrNull, decodeErc20TransferCallData } from './utils.js';
 
@@ -723,6 +731,23 @@ async function resolveReferencedDepositStatuses({
         }
     }
 
+    if (publicClient) {
+        const onchainStatuses = await resolveOnchainProposalDepositStatuses({
+            depositTxHashes,
+            publicClient,
+            ogModule,
+        });
+        for (const depositTxHash of depositTxHashes) {
+            statuses.set(
+                depositTxHash,
+                mergeDepositStatus(
+                    statuses.get(depositTxHash),
+                    onchainStatuses.get(depositTxHash) ?? 'available'
+                )
+            );
+        }
+    }
+
     return statuses;
 }
 
@@ -788,6 +813,117 @@ function extractProposalHashFromReceipt({ receipt, ogModule }) {
     }
 
     return null;
+}
+
+function decodeProposalExplanationText(explanationValue) {
+    if (typeof explanationValue !== 'string' || !explanationValue) {
+        return null;
+    }
+    if (!explanationValue.startsWith('0x')) {
+        return explanationValue;
+    }
+    try {
+        return hexToString(explanationValue);
+    } catch {
+        return null;
+    }
+}
+
+async function resolveOnchainProposalDepositStatuses({
+    depositTxHashes,
+    publicClient,
+    ogModule,
+}) {
+    const statuses = new Map(depositTxHashes.map((depositTxHash) => [depositTxHash, 'available']));
+
+    let latestBlock;
+    let proposedLogs;
+    let executedLogs;
+    let deletedLogs;
+    try {
+        latestBlock = await publicClient.getBlockNumber();
+        [proposedLogs, executedLogs, deletedLogs] = await Promise.all([
+            getLogsChunked({
+                publicClient,
+                address: ogModule,
+                event: transactionsProposedEvent,
+                fromBlock: 0n,
+                toBlock: latestBlock,
+            }),
+            getLogsChunked({
+                publicClient,
+                address: ogModule,
+                event: proposalExecutedEvent,
+                fromBlock: 0n,
+                toBlock: latestBlock,
+            }),
+            getLogsChunked({
+                publicClient,
+                address: ogModule,
+                event: proposalDeletedEvent,
+                fromBlock: 0n,
+                toBlock: latestBlock,
+            }),
+        ]);
+    } catch {
+        for (const depositTxHash of depositTxHashes) {
+            statuses.set(depositTxHash, 'unknown');
+        }
+        return statuses;
+    }
+
+    const executedHashes = new Set(
+        executedLogs
+            .map((log) => normalizeHashOrNull(log?.args?.proposalHash))
+            .filter(Boolean)
+    );
+    const deletedHashes = new Set(
+        deletedLogs
+            .map((log) => normalizeHashOrNull(log?.args?.proposalHash))
+            .filter(Boolean)
+    );
+
+    for (const log of proposedLogs) {
+        const proposalHash = normalizeHashOrNull(log?.args?.proposalHash);
+        if (!proposalHash) {
+            continue;
+        }
+        const explanation = parseStructuredProposalExplanation(
+            decodeProposalExplanationText(log?.args?.explanation),
+            { requireDepositTxHashes: false }
+        );
+        if (
+            !explanation ||
+            explanation.kind !== 'agent_proxy_reimbursement' ||
+            explanation.depositTxHashes.length === 0
+        ) {
+            continue;
+        }
+        const referenced = explanation.depositTxHashes.filter((depositTxHash) =>
+            statuses.has(depositTxHash)
+        );
+        if (referenced.length === 0) {
+            continue;
+        }
+
+        let lifecycle = 'reserved';
+        if (executedHashes.has(proposalHash) && deletedHashes.has(proposalHash)) {
+            lifecycle = 'unknown';
+        } else if (executedHashes.has(proposalHash)) {
+            lifecycle = 'consumed';
+        } else if (deletedHashes.has(proposalHash)) {
+            lifecycle = 'available';
+        }
+
+        for (const depositTxHash of referenced) {
+            statuses.set(
+                depositTxHash,
+                mergeDepositStatus(statuses.get(depositTxHash), lifecycle)
+            );
+        }
+    }
+
+    return statuses;
 }
 
 async function resolveDepositReceiptEvidence({
@@ -957,6 +1093,45 @@ async function verifyAgentProxyReimbursement({
             'authorized_agent_recipient',
             'pass',
             'All reimbursement transfers target the authorized agent.'
+        )
+    );
+
+    const explanation = parseStructuredProposalExplanation(envelope.explanation, {
+        requireDepositTxHashes: true,
+    });
+    if (!explanation || explanation.kind !== verificationMetadata.proposalKind) {
+        checks.push(
+            buildCheck(
+                'explanation_references',
+                'fail',
+                'Proposal explanation must be a structured JSON object with kind, description, and depositTxHashes for agent_proxy_reimbursement.'
+            )
+        );
+        return;
+    }
+    const explanationDepositTxHashes = explanation.depositTxHashes;
+    const metadataDepositTxHashes = verificationMetadata.depositTxHashes;
+    const explanationMatchesMetadata =
+        explanationDepositTxHashes.length === metadataDepositTxHashes.length &&
+        explanationDepositTxHashes.every(
+            (depositTxHash, index) => depositTxHash === metadataDepositTxHashes[index]
+        );
+    if (!explanationMatchesMetadata) {
+        checks.push(
+            buildCheck(
+                'explanation_references',
+                'fail',
+                'Proposal explanation depositTxHashes do not match signed metadata.verification.depositTxHashes.'
+            )
+        );
+        return;
+    }
+    derivedFacts.explanationDescription = explanation.description;
+    checks.push(
+        buildCheck(
+            'explanation_references',
+            'pass',
+            'Proposal explanation includes structured deposit references that match the signed verification metadata.'
         )
     );
 

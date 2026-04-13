@@ -46,6 +46,7 @@ For `agent_proxy_reimbursement`, signed `metadata.verification` currently needs:
 - `depositTxHashes`: referenced deposit transaction hashes
 - `depositPriceSnapshots`: one entry per referenced deposit, including the deposit-time price of the deposited asset and deposit-time prices of reimbursement assets
 - `reimbursementAllocations`: one entry per referenced deposit, mapping proposal withdrawal amounts back to that deposit
+- `explanation`: a canonical JSON string whose `kind` is `agent_proxy_reimbursement`, whose `description` is the human-readable summary, and whose `depositTxHashes` exactly match the signed metadata
 
 The whole-deposit batch model is enforced:
 
@@ -60,6 +61,7 @@ What the verifier currently proves:
 
 - the signed request metadata is well-formed
 - `rulesHash` matches the current onchain rules text
+- `explanation.depositTxHashes` matches the signed metadata and can be decoded from onchain `TransactionsProposed` events
 - the rules text parses as supported standard templates
 - reimbursement transfers target the authorized `Agent Proxy` address
 - referenced deposits are confirmed ERC20 transfers from the agent into the commitment Safe

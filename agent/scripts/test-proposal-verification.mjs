@@ -5,6 +5,12 @@ import {
     encodeFunctionData,
     erc20Abi,
 } from 'viem';
+import { buildStructuredProposalExplanation } from '../src/lib/proposal-explanation.js';
+import {
+    proposalDeletedEvent,
+    proposalExecutedEvent,
+    transactionsProposedEvent,
+} from '../src/lib/og.js';
 import { computeRulesHash, verifyProposal } from '../src/lib/proposal-verification.js';
 import { buildSignedProposalPayload } from '../src/lib/signed-proposal.js';
 
@@ -48,6 +54,17 @@ function buildTransferLog({ token, from, to, amountWei }) {
     };
 }
 
+function buildReimbursementExplanation({
+    depositTxHashes = [DEPOSIT_TX_HASH],
+    description = 'Agent reimbursement proposal.',
+} = {}) {
+    return buildStructuredProposalExplanation({
+        kind: 'agent_proxy_reimbursement',
+        description,
+        depositTxHashes,
+    });
+}
+
 function buildEnvelope({
     requestId,
     depositTxHashes = [DEPOSIT_TX_HASH],
@@ -57,6 +74,7 @@ function buildEnvelope({
     authorizedAgent = AGENT,
     reimbursementRecipient = authorizedAgent,
     rulesText = buildRulesText(authorizedAgent),
+    explanation = buildReimbursementExplanation({ depositTxHashes }),
 }) {
     return {
         address: signerAddress,
@@ -77,7 +95,7 @@ function buildEnvelope({
                 operation: 0,
             },
         ],
-        explanation: 'Agent reimbursement proposal.',
+        explanation,
         metadata: {
             verification: {
                 proposalKind: 'agent_proxy_reimbursement',
@@ -113,7 +131,13 @@ function buildEnvelope({
     };
 }
 
-function buildPublicClient({ rulesText = buildRulesText(), extraReceipts = [] } = {}) {
+function buildPublicClient({
+    rulesText = buildRulesText(),
+    extraReceipts = [],
+    proposedLogs = [],
+    executedLogs = [],
+    deletedLogs = [],
+} = {}) {
     const receipts = new Map([
         [
             DEPOSIT_TX_HASH,
@@ -158,7 +182,16 @@ function buildPublicClient({ rulesText = buildRulesText(), extraReceipts = [] } 
         async getBlockNumber() {
             return 999n;
         },
-        async getLogs() {
+        async getLogs({ event }) {
+            if (event === transactionsProposedEvent) {
+                return proposedLogs;
+            }
+            if (event === proposalExecutedEvent) {
+                return executedLogs;
+            }
+            if (event === proposalDeletedEvent) {
+                return deletedLogs;
+            }
             return [];
         },
     };
@@ -238,6 +271,24 @@ async function main() {
             (check) => check.id === 'agent_proxy_reimbursement'
         )?.message ?? '',
         /does not include an ERC20 transfer/
+    );
+
+    const explanationMismatchResult = await verifyProposal({
+        envelope: buildEnvelope({
+            requestId: 'explanation-mismatch',
+            explanation: buildReimbursementExplanation({
+                depositTxHashes: [`0x${'c'.repeat(64)}`],
+            }),
+        }),
+        publicClient,
+        storeRecords: [],
+        nowMs: 1_760_000_001_000,
+    });
+    assert.equal(explanationMismatchResult.status, 'invalid');
+    assert.equal(
+        explanationMismatchResult.checks.find((check) => check.id === 'explanation_references')
+            ?.status,
+        'fail'
     );
 
     const existingPendingEnvelope = buildEnvelope({ requestId: 'existing-pending' });
@@ -371,6 +422,64 @@ async function main() {
     assert.equal(foreignCommitmentResult.status, 'valid');
     assert.equal(
         foreignCommitmentResult.checks.find((check) => check.id === 'deposit_reuse')?.status,
+        'pass'
+    );
+
+    const nonLocalConsumedClient = buildPublicClient({
+        proposedLogs: [
+            {
+                args: {
+                    proposalHash: `0x${'d'.repeat(64)}`,
+                    explanation: buildReimbursementExplanation(),
+                },
+            },
+        ],
+        executedLogs: [
+            {
+                args: {
+                    proposalHash: `0x${'d'.repeat(64)}`,
+                },
+            },
+        ],
+    });
+    const nonLocalConsumedResult = await verifyProposal({
+        envelope: buildEnvelope({ requestId: 'non-local-consumed' }),
+        publicClient: nonLocalConsumedClient,
+        storeRecords: [],
+        nowMs: 1_760_000_001_000,
+    });
+    assert.equal(nonLocalConsumedResult.status, 'invalid');
+    assert.equal(
+        nonLocalConsumedResult.checks.find((check) => check.id === 'deposit_reuse')?.status,
+        'fail'
+    );
+
+    const nonLocalDeletedClient = buildPublicClient({
+        proposedLogs: [
+            {
+                args: {
+                    proposalHash: `0x${'e'.repeat(64)}`,
+                    explanation: buildReimbursementExplanation(),
+                },
+            },
+        ],
+        deletedLogs: [
+            {
+                args: {
+                    proposalHash: `0x${'e'.repeat(64)}`,
+                },
+            },
+        ],
+    });
+    const nonLocalDeletedResult = await verifyProposal({
+        envelope: buildEnvelope({ requestId: 'non-local-deleted' }),
+        publicClient: nonLocalDeletedClient,
+        storeRecords: [],
+        nowMs: 1_760_000_001_000,
+    });
+    assert.equal(nonLocalDeletedResult.status, 'valid');
+    assert.equal(
+        nonLocalDeletedResult.checks.find((check) => check.id === 'deposit_reuse')?.status,
         'pass'
     );
 

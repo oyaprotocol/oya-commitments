@@ -12,6 +12,10 @@ import {
     proposalExecutedEvent,
     transactionsProposedEvent,
 } from '../../../agent/src/lib/og.js';
+import {
+    buildStructuredProposalExplanation,
+    parseStructuredProposalExplanation,
+} from '../../../agent/src/lib/proposal-explanation.js';
 import { getAlwaysEmitBalanceSnapshotPollingOptions } from '../../../agent/src/lib/polling.js';
 import { buildOgTransactions } from '../../../agent/src/lib/tx.js';
 import {
@@ -853,7 +857,11 @@ function computeTokenAmountForUsdMicros({ usdMicros, decimals, priceMicros }) {
 
 function parseExplanationFields(explanation) {
     const fields = {};
-    for (const part of String(explanation ?? '').split('|')) {
+    const normalizedExplanation =
+        parseStructuredProposalExplanation(explanation, {
+            requireDepositTxHashes: false,
+        })?.description ?? String(explanation ?? '');
+    for (const part of normalizedExplanation.split('|')) {
         if (!part) continue;
         const separatorIndex = part.indexOf('=');
         if (separatorIndex <= 0) continue;
@@ -1304,6 +1312,7 @@ function allocateReimbursementLegs({
 function buildExplanation({
     epochIndex,
     winnerSymbol,
+    depositTxHashes,
     reimbursementLegs,
     windowStartSeconds,
     windowEndSeconds,
@@ -1313,7 +1322,7 @@ function buildExplanation({
     reimbursedUsdMicros,
 }) {
     const fundingSymbols = reimbursementLegs.map((leg) => displaySymbol(leg.tokenSymbol)).join(',');
-    return [
+    const description = [
         `strategy=${STRATEGY_TAG}`,
         `epoch=${epochIndex}`,
         `winner=${displaySymbol(winnerSymbol)}`,
@@ -1328,6 +1337,11 @@ function buildExplanation({
         `depositUsdMicros=${depositUsdMicros.toString()}`,
         `reimbursementUsdMicros=${reimbursedUsdMicros.toString()}`,
     ].join('|');
+    return buildStructuredProposalExplanation({
+        kind: 'agent_proxy_reimbursement',
+        description,
+        depositTxHashes,
+    });
 }
 
 function buildProposalPlan({
@@ -1514,6 +1528,7 @@ async function buildMomentumPlan({
             const explanation = buildExplanation({
                 epochIndex: pendingDeposit.epochIndex,
                 winnerSymbol: pendingDeposit.winnerSymbol,
+                depositTxHashes: [pendingDeposit.depositTxHash],
                 reimbursementLegs,
                 windowStartSeconds: epochStartSeconds,
                 windowEndSeconds: epochEndSeconds,
@@ -1876,6 +1891,14 @@ async function validateToolCalls({
     }
 
     const normalizedExplanation = postArgs.explanation.trim();
+    const structuredExplanation = parseStructuredProposalExplanation(normalizedExplanation, {
+        requireDepositTxHashes: true,
+    });
+    if (!structuredExplanation || structuredExplanation.kind !== 'agent_proxy_reimbursement') {
+        throw new Error(
+            'first-proxy proposal explanation must be structured JSON with kind, description, and depositTxHashes.'
+        );
+    }
     const explanationFields = parseExplanationFields(normalizedExplanation);
     const epochIndex = parseStrategyEpochFromExplanation(normalizedExplanation);
     if (epochIndex === null) {
@@ -1949,6 +1972,14 @@ async function validateToolCalls({
               : null;
     if (!planSource) {
         throw new Error('Proposal/replay runs require a matching pending deposit or replay plan.');
+    }
+    if (
+        strategyState.pendingDeposit?.epochIndex === epochIndex &&
+        !structuredExplanation.depositTxHashes.includes(strategyState.pendingDeposit.depositTxHash)
+    ) {
+        throw new Error(
+            'Proposal explanation depositTxHashes must include the current pending deposit tx hash.'
+        );
     }
     const depositAsset = normalizeAddress(planSource.depositAsset);
     const depositAmountWei = BigInt(String(planSource.depositAmountWei));
