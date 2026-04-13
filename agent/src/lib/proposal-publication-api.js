@@ -202,6 +202,30 @@ function buildVerificationResponse(verification) {
     return verification && isPlainObject(verification) ? verification : null;
 }
 
+function buildAdvisoryVerificationFallback({ envelope, error, atMs = Date.now() }) {
+    const message = error?.message ?? String(error);
+    const proposalKind =
+        typeof envelope?.metadata?.verification?.proposalKind === 'string' &&
+        envelope.metadata.verification.proposalKind.trim()
+            ? envelope.metadata.verification.proposalKind.trim()
+            : null;
+    return {
+        status: 'unknown',
+        verifiedAtMs: atMs,
+        proposalKind,
+        rules: null,
+        checks: [
+            {
+                id: 'verification_runtime',
+                status: 'unknown',
+                message: `Proposal verification could not complete in advisory mode: ${message}`,
+                ...(error?.code ? { code: error.code } : {}),
+            },
+        ],
+        derivedFacts: {},
+    };
+}
+
 function canBypassProposalRuntimeForDuplicate(record, exactExistingMatch) {
     if (!exactExistingMatch || !record) {
         return false;
@@ -1272,11 +1296,36 @@ function createProposalPublicationApiServer({
                                 proposalVerificationMode !== 'off' &&
                                 shouldVerifyBeforeSubmissionAttempt(latestRecord)
                             ) {
-                                ({ record: latestRecord } = await runVerification({
-                                    record: latestRecord,
-                                    envelope,
-                                    proposalRuntime: runtime,
-                                }));
+                                try {
+                                    ({ record: latestRecord } = await runVerification({
+                                        record: latestRecord,
+                                        envelope,
+                                        proposalRuntime: runtime,
+                                    }));
+                                } catch (error) {
+                                    if (proposalVerificationMode !== 'advisory') {
+                                        throw error;
+                                    }
+                                    const statusCode = error?.statusCode ?? 502;
+                                    const code = error?.code ?? 'verification_failed';
+                                    emitLog(
+                                        'warn',
+                                        `[oya-node] Proposal verification degraded to advisory unknown${formatRequestContext({
+                                            body,
+                                            signer: signedAuth.sender.address,
+                                            senderKeyId: signedAuth.senderKeyId,
+                                            code,
+                                            statusCode,
+                                        })}: ${error?.message ?? error}`
+                                    );
+                                    latestRecord = await saveVerification(
+                                        latestRecord,
+                                        buildAdvisoryVerificationFallback({
+                                            envelope,
+                                            error,
+                                        })
+                                    );
+                                }
                                 const verification = buildVerificationResponse(
                                     latestRecord.verification
                                 );

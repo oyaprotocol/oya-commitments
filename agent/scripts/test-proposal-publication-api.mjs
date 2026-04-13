@@ -1159,6 +1159,110 @@ async function main() {
             await proposeApi.stop();
         }
 
+        const advisoryStateFile = path.join(tempDir, 'proposal-publications-propose-advisory.json');
+        const advisoryStore = createProposalPublicationStore({ stateFile: advisoryStateFile });
+        const advisorySubmitAttemptsByExplanation = new Map();
+        const advisoryApi = createProposalPublicationApiServer({
+            config: buildServerConfig(account.address, {
+                chainId: undefined,
+                proposalPublishApiMode: 'propose',
+                proposalVerificationMode: 'advisory',
+            }),
+            store: advisoryStore,
+            logger: {
+                info() {},
+                warn() {},
+            },
+            resolveProposalRuntime: async ({ chainId }) => {
+                assert.equal(chainId, 11155111);
+                return {
+                    runtimeConfig: {
+                        chainId,
+                        proposeEnabled: true,
+                        bondSpender: 'og',
+                        proposalHashResolveTimeoutMs: 1,
+                        proposalHashResolvePollIntervalMs: 1,
+                    },
+                    publicClient: {
+                        async getChainId() {
+                            return chainId;
+                        },
+                    },
+                    walletClient: {},
+                    account: { address: account.address },
+                };
+            },
+            submitProposal: async ({ explanation }) => {
+                advisorySubmitAttemptsByExplanation.set(
+                    explanation,
+                    (advisorySubmitAttemptsByExplanation.get(explanation) ?? 0) + 1
+                );
+                return {
+                    transactionHash: `0x${'e'.repeat(64)}`,
+                    proposalHash: `0x${'f'.repeat(64)}`,
+                    ogProposalHash: `0x${'f'.repeat(64)}`,
+                    sideEffectsLikelyCommitted: true,
+                };
+            },
+            verifyProposal: async () => {
+                const error = new Error(
+                    'Verification runtime unavailable for chainId 11155111.'
+                );
+                error.code = 'verification_runtime_unavailable';
+                error.statusCode = 502;
+                throw error;
+            },
+        });
+        const advisoryServer = await advisoryApi.start();
+        const advisoryAddress = advisoryServer.address();
+        assert.ok(
+            advisoryAddress &&
+                typeof advisoryAddress === 'object' &&
+                typeof advisoryAddress.port === 'number'
+        );
+        const advisoryBaseUrl = `http://127.0.0.1:${advisoryAddress.port}`;
+
+        try {
+            const advisoryRequest = await buildSignedBody({
+                account,
+                chainId: 11155111,
+                requestId: 'advisory-runtime-outage',
+                explanation: 'Advisory submit despite verification outage.',
+            });
+            const advisoryResponse = await postPublication(advisoryBaseUrl, advisoryRequest.body);
+            assert.equal(advisoryResponse.status, 202);
+            assert.equal(advisoryResponse.json.status, 'published');
+            assert.equal(advisoryResponse.json.submission.status, 'resolved');
+            assert.equal(advisoryResponse.json.verification.status, 'unknown');
+            assert.equal(advisoryResponse.json.verification.checks[0]?.id, 'verification_runtime');
+            assert.equal(
+                advisoryResponse.json.verification.checks[0]?.code,
+                'verification_runtime_unavailable'
+            );
+            assert.match(
+                advisoryResponse.json.verification.checks[0]?.message ?? '',
+                /advisory mode/i
+            );
+            assert.equal(
+                advisorySubmitAttemptsByExplanation.get(
+                    'Advisory submit despite verification outage.'
+                ),
+                1
+            );
+            const advisoryRecord = await advisoryStore.getRecord({
+                signer: account.address,
+                chainId: 11155111,
+                requestId: 'advisory-runtime-outage',
+            });
+            assert.equal(advisoryRecord?.verification?.status, 'unknown');
+            assert.equal(
+                advisoryRecord?.verification?.checks?.[0]?.id,
+                'verification_runtime'
+            );
+        } finally {
+            await advisoryApi.stop();
+        }
+
         const uncertainPersistStateFile = path.join(
             tempDir,
             'proposal-publications-propose-uncertain.json'
