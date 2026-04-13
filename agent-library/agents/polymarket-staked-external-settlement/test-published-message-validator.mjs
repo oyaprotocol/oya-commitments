@@ -185,6 +185,37 @@ async function run() {
     }
 
     {
+        await assert.rejects(
+            () =>
+                validatePublishedMessage({
+                    config: BASE_CONFIG,
+                    publicClient: mockPublicClient,
+                    envelope: {
+                        address: '0x5555555555555555555555555555555555555555',
+                    },
+                    message: buildTradeLogMessage({
+                        requestId: 'trade-log-signer-mismatch',
+                        trades: [
+                            buildTrade({
+                                tradeId: 'trade-signer-mismatch',
+                                executedAtMs: firstSeenAtMs - 5 * 60_000,
+                            }),
+                        ],
+                    }),
+                    receivedAtMs: firstSeenAtMs,
+                    publishedAtMs: firstSeenAtMs + 1_000,
+                    listRecords: async () => [],
+                }),
+            (error) => {
+                assert.ok(error instanceof MessagePublicationValidationError);
+                assert.equal(error.code, 'message_payload_invalid');
+                assert.match(error.message, /authenticated signing address/);
+                return true;
+            }
+        );
+    }
+
+    {
         const priorMessage = buildTradeLogMessage({
             requestId: 'trade-log-prior',
             sequence: 1,

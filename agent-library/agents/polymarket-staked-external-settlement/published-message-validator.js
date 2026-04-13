@@ -96,7 +96,7 @@ function normalizeTradeEntry(entry, label) {
     });
 }
 
-function normalizeTradeLogMessage(message, { config = undefined } = {}) {
+function normalizeTradeLogMessage(message, { config = undefined, envelope = undefined } = {}) {
     if (!isPlainObject(message)) {
         throw new Error('message must be a JSON object.');
     }
@@ -159,6 +159,13 @@ function normalizeTradeLogMessage(message, { config = undefined } = {}) {
     const configuredAuthorizedAgent = normalizeAddressOrNull(moduleConfig.authorizedAgent);
     const configuredTradingWallet = normalizeAddressOrNull(moduleConfig.tradingWallet);
     const normalizedAgentAddress = normalizeAddress(message.agentAddress, 'message.agentAddress');
+    const authenticatedSignerAddress =
+        isPlainObject(envelope) && envelope.address !== undefined
+            ? normalizeAddress(envelope.address, 'envelope.address')
+            : null;
+    if (authenticatedSignerAddress && normalizedAgentAddress !== authenticatedSignerAddress) {
+        throw new Error('message.agentAddress must match the authenticated signing address.');
+    }
     if (configuredAuthorizedAgent && normalizedAgentAddress !== configuredAuthorizedAgent) {
         throw new Error(
             'message.agentAddress does not match config.polymarketStakedExternalSettlement.authorizedAgent.'
@@ -415,6 +422,7 @@ async function loadLoggingWindowMinutes({ config, publicClient, ogModule, expect
 
 async function validatePublishedMessage({
     config,
+    envelope,
     message,
     receivedAtMs,
     publishedAtMs,
@@ -427,7 +435,7 @@ async function validatePublishedMessage({
 
     let currentMessage;
     try {
-        currentMessage = normalizeTradeLogMessage(message, { config });
+        currentMessage = normalizeTradeLogMessage(message, { config, envelope });
     } catch (error) {
         throw buildValidationError(error?.message ?? String(error), {
             code: 'message_payload_invalid',
