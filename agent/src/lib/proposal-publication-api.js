@@ -166,6 +166,35 @@ function enqueuePublicationOperation(queueMap, queueKey, operation) {
     });
 }
 
+function enqueueMultiKeyOperation(queueMap, queueKeys, operation) {
+    const normalizedQueueKeys = Array.from(
+        new Set(
+            (Array.isArray(queueKeys) ? queueKeys : [])
+                .filter((queueKey) => typeof queueKey === 'string' && queueKey.trim())
+                .map((queueKey) => queueKey.trim())
+        )
+    ).sort();
+    if (normalizedQueueKeys.length === 0) {
+        return operation();
+    }
+
+    const prior = Promise.all(
+        normalizedQueueKeys.map((queueKey) => queueMap.get(queueKey) ?? Promise.resolve())
+    );
+    const run = prior.then(operation, operation);
+    const tail = run.catch(() => {});
+    for (const queueKey of normalizedQueueKeys) {
+        queueMap.set(queueKey, tail);
+    }
+    return run.finally(() => {
+        for (const queueKey of normalizedQueueKeys) {
+            if (queueMap.get(queueKey) === tail) {
+                queueMap.delete(queueKey);
+            }
+        }
+    });
+}
+
 function buildSubmissionErrorPayload({
     code,
     message,
@@ -252,6 +281,44 @@ function shouldVerifyBeforeSubmissionAttempt(record) {
     return true;
 }
 
+function normalizePotentialDepositTxHash(value) {
+    return typeof value === 'string' && /^0x[0-9a-fA-F]{64}$/.test(value)
+        ? value.toLowerCase()
+        : null;
+}
+
+function buildDepositSubmissionLockKeys(envelope) {
+    const verificationMetadata = envelope?.metadata?.verification;
+    if (
+        !isPlainObject(verificationMetadata) ||
+        verificationMetadata.proposalKind !== 'agent_proxy_reimbursement' ||
+        !Array.isArray(verificationMetadata.depositTxHashes)
+    ) {
+        return [];
+    }
+
+    let commitmentSafe;
+    let ogModule;
+    try {
+        commitmentSafe = getAddress(envelope.commitmentSafe).toLowerCase();
+        ogModule = getAddress(envelope.ogModule).toLowerCase();
+    } catch {
+        return [];
+    }
+
+    return Array.from(
+        new Set(
+            verificationMetadata.depositTxHashes
+                .map((depositTxHash) => normalizePotentialDepositTxHash(depositTxHash))
+                .filter(Boolean)
+                .map(
+                    (depositTxHash) =>
+                        `${Number(envelope.chainId)}:${commitmentSafe}:${ogModule}:${depositTxHash}`
+                )
+        )
+    ).sort();
+}
+
 function canReuseVolatilePublicationState(record, publicationState) {
     return Boolean(
         record &&
@@ -324,6 +391,7 @@ function createProposalPublicationApiServer({
     let server;
     const publishOperationTails = new Map();
     const submissionOperationTails = new Map();
+    const depositSubmissionOperationTails = new Map();
     const volatilePublicationStates = new Map();
 
     function emitLog(level, message) {
@@ -1355,102 +1423,133 @@ function createProposalPublicationApiServer({
                         chainId: body.chainId,
                         requestId: body.requestId,
                     });
+                    const depositSubmissionLockKeys = buildDepositSubmissionLockKeys(envelope);
                     ({ record, submissionAttempted } = await enqueuePublicationOperation(
                         submissionOperationTails,
                         publicationKey,
                         async () => {
-                            let latestRecord = await store.getRecord({
-                                signer: signedAuth.sender.address,
-                                chainId: body.chainId,
-                                requestId: body.requestId,
-                            });
-                            if (!latestRecord) {
-                                throw new Error(
-                                    'Publication record disappeared before proposal submission.'
-                                );
-                            }
-                            let runtime = proposalRuntime;
-                            if (
-                                !runtime &&
-                                latestRecord.submission?.status === 'submitted' &&
-                                latestRecord.submission?.transactionHash
-                            ) {
-                                try {
-                                    runtime = await resolveProposalRuntime({
-                                        chainId: body.chainId,
-                                    });
-                                } catch (error) {
-                                    runtime = undefined;
+                            const loadLatestRecord = async () => {
+                                const latestRecord = await store.getRecord({
+                                    signer: signedAuth.sender.address,
+                                    chainId: body.chainId,
+                                    requestId: body.requestId,
+                                });
+                                if (!latestRecord) {
+                                    throw new Error(
+                                        'Publication record disappeared before proposal submission.'
+                                    );
                                 }
-                            }
+                                return latestRecord;
+                            };
+
+                            let latestRecord = await loadLatestRecord();
+                            let runtime = proposalRuntime;
+
+                            const resolveRuntimeForLatestRecord = async () => {
+                                if (
+                                    !runtime &&
+                                    latestRecord.submission?.status === 'submitted' &&
+                                    latestRecord.submission?.transactionHash
+                                ) {
+                                    try {
+                                        runtime = await resolveProposalRuntime({
+                                            chainId: body.chainId,
+                                        });
+                                    } catch (error) {
+                                        runtime = undefined;
+                                    }
+                                }
+                            };
+
+                            const attemptSubmission = async () => {
+                                if (
+                                    proposalVerificationMode !== 'off' &&
+                                    shouldVerifyBeforeSubmissionAttempt(latestRecord)
+                                ) {
+                                    try {
+                                        ({ record: latestRecord } = await runVerification({
+                                            record: latestRecord,
+                                            envelope,
+                                            proposalRuntime: runtime,
+                                        }));
+                                    } catch (error) {
+                                        if (proposalVerificationMode !== 'advisory') {
+                                            throw error;
+                                        }
+                                        const statusCode = error?.statusCode ?? 502;
+                                        const code = error?.code ?? 'verification_failed';
+                                        emitLog(
+                                            'warn',
+                                            `[oya-node] Proposal verification degraded to advisory unknown${formatRequestContext({
+                                                body,
+                                                signer: signedAuth.sender.address,
+                                                senderKeyId: signedAuth.senderKeyId,
+                                                code,
+                                                statusCode,
+                                            })}: ${error?.message ?? error}`
+                                        );
+                                        latestRecord = await saveVerification(
+                                            latestRecord,
+                                            buildAdvisoryVerificationFallback({
+                                                envelope,
+                                                error,
+                                            })
+                                        );
+                                    }
+                                    const verification = buildVerificationResponse(
+                                        latestRecord.verification
+                                    );
+                                    if (
+                                        proposalVerificationMode === 'enforce' &&
+                                        verification?.status !== 'valid'
+                                    ) {
+                                        const code =
+                                            verification?.status === 'invalid'
+                                                ? 'verification_invalid'
+                                                : 'verification_unknown';
+                                        throw new ApiResponseError(
+                                            verification?.status === 'invalid'
+                                                ? 'Proposal verification failed. The node refused to submit this proposal onchain.'
+                                                : 'Proposal verification was inconclusive. The node refused to submit this proposal onchain.',
+                                            {
+                                                statusCode: 409,
+                                                code,
+                                                body: {
+                                                    error:
+                                                        verification?.status === 'invalid'
+                                                            ? 'Proposal verification failed. The node refused to submit this proposal onchain.'
+                                                            : 'Proposal verification was inconclusive. The node refused to submit this proposal onchain.',
+                                                    code,
+                                                    verification,
+                                                },
+                                            }
+                                        );
+                                    }
+                                }
+                                return submitPublishedRecord(latestRecord, {
+                                    runtime,
+                                    envelope,
+                                });
+                            };
+
+                            await resolveRuntimeForLatestRecord();
                             if (
                                 proposalVerificationMode !== 'off' &&
+                                depositSubmissionLockKeys.length > 0 &&
                                 shouldVerifyBeforeSubmissionAttempt(latestRecord)
                             ) {
-                                try {
-                                    ({ record: latestRecord } = await runVerification({
-                                        record: latestRecord,
-                                        envelope,
-                                        proposalRuntime: runtime,
-                                    }));
-                                } catch (error) {
-                                    if (proposalVerificationMode !== 'advisory') {
-                                        throw error;
+                                return enqueueMultiKeyOperation(
+                                    depositSubmissionOperationTails,
+                                    depositSubmissionLockKeys,
+                                    async () => {
+                                        latestRecord = await loadLatestRecord();
+                                        await resolveRuntimeForLatestRecord();
+                                        return attemptSubmission();
                                     }
-                                    const statusCode = error?.statusCode ?? 502;
-                                    const code = error?.code ?? 'verification_failed';
-                                    emitLog(
-                                        'warn',
-                                        `[oya-node] Proposal verification degraded to advisory unknown${formatRequestContext({
-                                            body,
-                                            signer: signedAuth.sender.address,
-                                            senderKeyId: signedAuth.senderKeyId,
-                                            code,
-                                            statusCode,
-                                        })}: ${error?.message ?? error}`
-                                    );
-                                    latestRecord = await saveVerification(
-                                        latestRecord,
-                                        buildAdvisoryVerificationFallback({
-                                            envelope,
-                                            error,
-                                        })
-                                    );
-                                }
-                                const verification = buildVerificationResponse(
-                                    latestRecord.verification
                                 );
-                                if (
-                                    proposalVerificationMode === 'enforce' &&
-                                    verification?.status !== 'valid'
-                                ) {
-                                    const code =
-                                        verification?.status === 'invalid'
-                                            ? 'verification_invalid'
-                                            : 'verification_unknown';
-                                    throw new ApiResponseError(
-                                        verification?.status === 'invalid'
-                                            ? 'Proposal verification failed. The node refused to submit this proposal onchain.'
-                                            : 'Proposal verification was inconclusive. The node refused to submit this proposal onchain.',
-                                        {
-                                            statusCode: 409,
-                                            code,
-                                            body: {
-                                                error:
-                                                    verification?.status === 'invalid'
-                                                        ? 'Proposal verification failed. The node refused to submit this proposal onchain.'
-                                                        : 'Proposal verification was inconclusive. The node refused to submit this proposal onchain.',
-                                                code,
-                                                verification,
-                                            },
-                                        }
-                                    );
-                                }
                             }
-                            return submitPublishedRecord(latestRecord, {
-                                runtime,
-                                envelope,
-                            });
+
+                            return attemptSubmission();
                         }
                     ));
                 } catch (error) {

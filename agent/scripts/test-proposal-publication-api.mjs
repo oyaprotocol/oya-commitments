@@ -15,6 +15,7 @@ const TEST_CHAIN_ID = 11155111;
 const TEST_SAFE = '0x2222222222222222222222222222222222222222';
 const TEST_OG_MODULE = '0x3333333333333333333333333333333333333333';
 const BASE_TIME_MS = 1_774_900_000_000;
+const SHARED_DEPOSIT_TX_HASH = `0x${'a'.repeat(64)}`;
 const TEST_TRANSACTIONS = [
     {
         to: '0x4444444444444444444444444444444444444444',
@@ -107,6 +108,36 @@ async function buildSignedBody({
             },
         },
     };
+}
+
+function buildReimbursementVerificationMetadata({
+    depositTxHashes = [SHARED_DEPOSIT_TX_HASH],
+    rulesHash = `0x${'b'.repeat(64)}`,
+} = {}) {
+    return {
+        verification: {
+            proposalKind: 'agent_proxy_reimbursement',
+            rulesHash,
+            depositTxHashes,
+        },
+    };
+}
+
+function extractVerificationDepositTxHashes(record) {
+    if (typeof record?.canonicalMessage !== 'string' || !record.canonicalMessage) {
+        return [];
+    }
+    try {
+        const parsed = JSON.parse(record.canonicalMessage);
+        const depositTxHashes = parsed?.metadata?.verification?.depositTxHashes;
+        return Array.isArray(depositTxHashes)
+            ? depositTxHashes
+                  .filter((depositTxHash) => typeof depositTxHash === 'string')
+                  .map((depositTxHash) => depositTxHash.toLowerCase())
+            : [];
+    } catch {
+        return [];
+    }
 }
 
 async function postPublication(baseUrl, body, { bearerToken = 'k_test_ops_secret' } = {}) {
@@ -1029,6 +1060,14 @@ async function main() {
         const proposeStore = createProposalPublicationStore({ stateFile: proposeStateFile });
         const submitAttemptsByExplanation = new Map();
         const verifyAttemptsByExplanation = new Map();
+        let releaseDepositRaceFirstSubmit;
+        const depositRaceFirstSubmitBlocked = new Promise((resolve) => {
+            releaseDepositRaceFirstSubmit = resolve;
+        });
+        let depositRaceFirstSubmitObservedResolve;
+        const depositRaceFirstSubmitObserved = new Promise((resolve) => {
+            depositRaceFirstSubmitObservedResolve = resolve;
+        });
         const resolvedProposalHashes = new Map([
             [`0x${'3'.repeat(64)}`, `0x${'4'.repeat(64)}`],
         ]);
@@ -1104,6 +1143,24 @@ async function main() {
                     explanation,
                     (submitAttemptsByExplanation.get(explanation) ?? 0) + 1
                 );
+                if (explanation === 'Deposit race first request.') {
+                    depositRaceFirstSubmitObservedResolve();
+                    await depositRaceFirstSubmitBlocked;
+                    return {
+                        transactionHash: `0x${'1'.repeat(64)}`,
+                        proposalHash: `0x${'2'.repeat(64)}`,
+                        ogProposalHash: `0x${'2'.repeat(64)}`,
+                        sideEffectsLikelyCommitted: true,
+                    };
+                }
+                if (explanation === 'Deposit race second request.') {
+                    return {
+                        transactionHash: `0x${'b'.repeat(64)}`,
+                        proposalHash: `0x${'c'.repeat(64)}`,
+                        ogProposalHash: `0x${'c'.repeat(64)}`,
+                        sideEffectsLikelyCommitted: true,
+                    };
+                }
                 if (explanation === 'Retry after submission failure.') {
                     if (submitAttemptsByExplanation.get(explanation) === 1) {
                         throw new Error('submit unavailable');
@@ -1152,11 +1209,59 @@ async function main() {
                 resolveProposalHashCalls.push(proposalTxHash);
                 return resolvedProposalHashes.get(proposalTxHash) ?? null;
             },
-            verifyProposal: async ({ envelope }) => {
+            verifyProposal: async ({ envelope, storeRecords }) => {
                 verifyAttemptsByExplanation.set(
                     envelope.explanation,
                     (verifyAttemptsByExplanation.get(envelope.explanation) ?? 0) + 1
                 );
+                if (
+                    envelope.explanation === 'Deposit race first request.' ||
+                    envelope.explanation === 'Deposit race second request.'
+                ) {
+                    const requestedDepositTxHashes = Array.isArray(
+                        envelope.metadata?.verification?.depositTxHashes
+                    )
+                        ? envelope.metadata.verification.depositTxHashes.map((depositTxHash) =>
+                              String(depositTxHash).toLowerCase()
+                          )
+                        : [];
+                    const existingDepositConsumer = storeRecords.find((record) => {
+                        if (
+                            !record ||
+                            Number(record.chainId) !== Number(envelope.chainId) ||
+                            record.requestId === envelope.requestId
+                        ) {
+                            return false;
+                        }
+                        if (!['submitted', 'resolved'].includes(record.submission?.status)) {
+                            return false;
+                        }
+                        const referencedDeposits = extractVerificationDepositTxHashes(record);
+                        return referencedDeposits.some((depositTxHash) =>
+                            requestedDepositTxHashes.includes(depositTxHash)
+                        );
+                    });
+                    if (existingDepositConsumer) {
+                        return {
+                            status: 'invalid',
+                            verifiedAtMs: 1_760_000_000_666,
+                            proposalKind: 'agent_proxy_reimbursement',
+                            rules: {
+                                rulesHash: `0x${'d'.repeat(64)}`,
+                                matchedTemplates: [],
+                                unparsedSections: [],
+                            },
+                            checks: [
+                                {
+                                    id: 'deposit_reuse',
+                                    status: 'fail',
+                                    message: `Deposit ${SHARED_DEPOSIT_TX_HASH} is already reserved or consumed by another proposal.`,
+                                },
+                            ],
+                            derivedFacts: {},
+                        };
+                    }
+                }
                 if (
                     envelope.explanation === 'Resolve proposal hash on duplicate retry.' &&
                     verifyAttemptsByExplanation.get(envelope.explanation) > 1
@@ -1392,6 +1497,53 @@ async function main() {
             assert.equal(blockedByVerification.json.verification.status, 'invalid');
             assert.equal(
                 submitAttemptsByExplanation.get('Block submit via verification.') ?? 0,
+                0
+            );
+
+            const depositRaceFirstRequest = await buildSignedBody({
+                account,
+                chainId: 11155111,
+                requestId: 'deposit-race-first',
+                explanation: 'Deposit race first request.',
+                metadata: buildReimbursementVerificationMetadata(),
+            });
+            const depositRaceSecondRequest = await buildSignedBody({
+                account,
+                chainId: 11155111,
+                requestId: 'deposit-race-second',
+                explanation: 'Deposit race second request.',
+                metadata: buildReimbursementVerificationMetadata(),
+            });
+            const depositRaceFirstPromise = postPublication(
+                proposeBaseUrl,
+                depositRaceFirstRequest.body
+            );
+            await depositRaceFirstSubmitObserved;
+            const depositRaceSecondPromise = postPublication(
+                proposeBaseUrl,
+                depositRaceSecondRequest.body
+            );
+            releaseDepositRaceFirstSubmit();
+            const [depositRaceFirstResponse, depositRaceSecondResponse] = await Promise.all([
+                depositRaceFirstPromise,
+                depositRaceSecondPromise,
+            ]);
+            assert.equal(depositRaceFirstResponse.status, 202);
+            assert.equal(depositRaceFirstResponse.json.submission.status, 'resolved');
+            assert.equal(
+                depositRaceFirstResponse.json.submission.transactionHash,
+                `0x${'1'.repeat(64)}`
+            );
+            assert.equal(depositRaceSecondResponse.status, 409);
+            assert.equal(depositRaceSecondResponse.json.code, 'verification_invalid');
+            assert.equal(depositRaceSecondResponse.json.verification?.status, 'invalid');
+            assert.equal(
+                depositRaceSecondResponse.json.verification?.checks?.[0]?.id,
+                'deposit_reuse'
+            );
+            assert.equal(submitAttemptsByExplanation.get('Deposit race first request.'), 1);
+            assert.equal(
+                submitAttemptsByExplanation.get('Deposit race second request.') ?? 0,
                 0
             );
 

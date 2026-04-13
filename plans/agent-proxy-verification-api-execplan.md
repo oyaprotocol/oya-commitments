@@ -28,6 +28,7 @@ Observable user value:
 - [x] 2026-04-12 19:03 PDT: Added regression coverage for the verifier module, verify endpoint behavior, propose-mode enforcement, store persistence, and signed proposal smoke compatibility.
 - [x] 2026-04-12 19:03 PDT: Documented the shipped verification surface in `node/README.md` and `agent/README.md`, including endpoint behavior, signed metadata requirements, config gating, and current verifier limits.
 - [x] 2026-04-13 14:34 PDT: Added canonical structured reimbursement explanations with `kind`, `description`, and `depositTxHashes`; the verifier now cross-checks explanation references against signed metadata and scans onchain `TransactionsProposed` history for the same OG module to derive non-local deposit reservation and consumption state.
+- [x] 2026-04-13 16:05 PDT: Added deposit-scoped submission serialization in propose mode so concurrent requests with different `requestId`s but overlapping `depositTxHashes` cannot both verify and submit before local reservation state is durable.
 - [ ] Expand verifier coverage so `first-proxy` commitments with extra templates such as `Trade Restrictions` and `Trading Limits` can reach `valid` instead of `unknown`.
 
 ## Surprises & Discoveries
@@ -52,6 +53,9 @@ Observable user value:
 
 - Observation: Local proposal store history is not enough to prevent cross-operator double reimbursement. Deposit reuse checks needed a chain-visible encoding of deposit references so the verifier could inspect all prior `TransactionsProposed` events for the same OG module.
   Evidence: The local store only knows proposals this node has seen, while the OG event stream already exposes proposal lifecycle and the signed `explanation` bytes for all operators.
+
+- Observation: Global onchain proposal history does not remove the need for same-node deposit-scoped locking. Two different signed requests can otherwise verify against the same locally available deposits concurrently before either submission records a reserved or resolved state.
+  Evidence: Propose-mode submission queueing originally serialized only by `(signer, chainId, requestId)`, while deposit reuse enforcement is keyed by `depositTxHashes` and depends on persisted proposal state becoming visible before the next verification pass.
 
 ## Decision Log
 
