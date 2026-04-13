@@ -344,17 +344,30 @@ function createProposalPublicationApiServer({
         let persistError;
         for (let attempt = 0; attempt < 2; attempt += 1) {
             try {
-                const nextRecord = await store.saveRecord({
-                    ...record,
-                    signature: publicationState.signature,
-                    canonicalMessage: publicationState.canonicalMessage,
-                    artifact: publicationState.artifact,
-                    publishedAtMs: publicationState.publishedAtMs,
-                    cid: publicationState.cid,
-                    uri: publicationState.uri,
-                    publishResult: publicationState.publishResult,
-                    lastError: null,
-                });
+                const nextRecord =
+                    typeof store.updateRecord === 'function'
+                        ? await store.updateRecord(record, (current) => ({
+                              ...current,
+                              signature: publicationState.signature,
+                              canonicalMessage: publicationState.canonicalMessage,
+                              artifact: publicationState.artifact,
+                              publishedAtMs: publicationState.publishedAtMs,
+                              cid: publicationState.cid,
+                              uri: publicationState.uri,
+                              publishResult: publicationState.publishResult,
+                              lastError: null,
+                          }))
+                        : await store.saveRecord({
+                              ...record,
+                              signature: publicationState.signature,
+                              canonicalMessage: publicationState.canonicalMessage,
+                              artifact: publicationState.artifact,
+                              publishedAtMs: publicationState.publishedAtMs,
+                              cid: publicationState.cid,
+                              uri: publicationState.uri,
+                              publishResult: publicationState.publishResult,
+                              lastError: null,
+                          });
                 volatilePublicationStates.delete(publicationKey);
                 return nextRecord;
             } catch (error) {
@@ -401,12 +414,20 @@ function createProposalPublicationApiServer({
                     signerAllowlistMode,
                     nodeName,
                 });
-                nextRecord = await store.saveRecord({
-                    ...nextRecord,
-                    artifact,
-                    publishedAtMs,
-                    lastError: null,
-                });
+                nextRecord =
+                    typeof store.updateRecord === 'function'
+                        ? await store.updateRecord(nextRecord, (current) => ({
+                              ...current,
+                              artifact,
+                              publishedAtMs,
+                              lastError: null,
+                          }))
+                        : await store.saveRecord({
+                              ...nextRecord,
+                              artifact,
+                              publishedAtMs,
+                              lastError: null,
+                          });
             }
             const publishResponse = await publishIpfsContent({
                 config,
@@ -439,18 +460,35 @@ function createProposalPublicationApiServer({
                 config,
                 cid: nextRecord.cid,
             });
-            nextRecord = await store.saveRecord({
-                ...nextRecord,
-                pinned: true,
-                pinResult,
-                lastError: null,
-            });
+            nextRecord =
+                typeof store.updateRecord === 'function'
+                    ? await store.updateRecord(nextRecord, (current) => ({
+                          ...current,
+                          pinned: true,
+                          pinResult,
+                          lastError: null,
+                      }))
+                    : await store.saveRecord({
+                          ...nextRecord,
+                          pinned: true,
+                          pinResult,
+                          lastError: null,
+                      });
         }
 
         return nextRecord;
     }
 
     async function saveSubmission(record, patch) {
+        if (typeof store.updateRecord === 'function') {
+            return store.updateRecord(record, (current) => ({
+                ...current,
+                submission: {
+                    ...(current.submission ?? {}),
+                    ...patch,
+                },
+            }));
+        }
         return store.saveRecord({
             ...record,
             submission: {
@@ -461,6 +499,12 @@ function createProposalPublicationApiServer({
     }
 
     async function saveVerification(record, verification) {
+        if (typeof store.updateRecord === 'function') {
+            return store.updateRecord(record, (current) => ({
+                ...current,
+                verification,
+            }));
+        }
         return store.saveRecord({
             ...record,
             verification,
@@ -1202,23 +1246,46 @@ function createProposalPublicationApiServer({
                     const shouldClearDurablePendingPublication =
                         code === 'publish_failed' && record.cid === null;
                     try {
-                        record = await store.saveRecord({
-                            ...record,
-                            ...(shouldClearDurablePendingPublication
-                                ? {
-                                      artifact: null,
-                                      publishedAtMs: null,
-                                  }
-                                : {}),
-                            lastError: {
-                                code,
-                                message: error?.message ?? String(error),
-                                atMs: Date.now(),
-                            },
-                        });
-                        if (partialPublicationState && record.cid) {
+                        const persistedRecord =
+                            typeof store.updateRecord === 'function'
+                                ? await store.updateRecord(record, (current) => ({
+                                      ...current,
+                                      ...(shouldClearDurablePendingPublication
+                                          ? {
+                                                artifact: null,
+                                                publishedAtMs: null,
+                                            }
+                                          : {}),
+                                      lastError: {
+                                          code,
+                                          message: error?.message ?? String(error),
+                                          atMs: Date.now(),
+                                      },
+                                  }))
+                                : await store.saveRecord({
+                                      ...record,
+                                      ...(shouldClearDurablePendingPublication
+                                          ? {
+                                                artifact: null,
+                                                publishedAtMs: null,
+                                            }
+                                          : {}),
+                                      lastError: {
+                                          code,
+                                          message: error?.message ?? String(error),
+                                          atMs: Date.now(),
+                                      },
+                                  });
+                        if (partialPublicationState && persistedRecord.cid) {
                             volatilePublicationStates.delete(publicationKey);
                         }
+                        record =
+                            partialPublicationState && !persistedRecord.cid
+                                ? {
+                                      ...persistedRecord,
+                                      ...partialPublicationState,
+                                  }
+                                : persistedRecord;
                     } catch (_persistError) {
                         record = {
                             ...record,

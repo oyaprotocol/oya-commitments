@@ -388,6 +388,40 @@ function createProposalPublicationStore({ stateFile }) {
         });
     }
 
+    async function updateRecord(recordOrKey, updater) {
+        return enqueueStoreOperation(queueKey, async () => {
+            if (typeof updater !== 'function') {
+                throw new Error('updateRecord requires an updater function.');
+            }
+            const key = buildPublicationKey({
+                signer: recordOrKey?.signer,
+                chainId: recordOrKey?.chainId,
+                requestId: recordOrKey?.requestId,
+            });
+            const state = await readStoreState(resolvedStateFile);
+            const existing = state.records[key];
+            if (!existing) {
+                throw new Error(`Record not found for update: ${key}`);
+            }
+            const nextRecord = await updater(cloneJson(existing));
+            const normalized = normalizeStoredRecord(nextRecord, 'record');
+            const nextKey = buildPublicationKey({
+                signer: normalized.signer,
+                chainId: normalized.chainId,
+                requestId: normalized.requestId,
+            });
+            if (nextKey !== key) {
+                throw new Error('updateRecord must not change signer, chainId, or requestId.');
+            }
+            state.records[key] = {
+                ...normalized,
+                updatedAtMs: Date.now(),
+            };
+            await writeStoreState(resolvedStateFile, state);
+            return cloneJson(state.records[key]);
+        });
+    }
+
     async function listRecords() {
         return enqueueStoreOperation(queueKey, async () => {
             const state = await readStoreState(resolvedStateFile);
@@ -401,6 +435,7 @@ function createProposalPublicationStore({ stateFile }) {
         listRecords,
         prepareRecord,
         saveRecord,
+        updateRecord,
     };
 }
 

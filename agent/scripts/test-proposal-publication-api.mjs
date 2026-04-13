@@ -14,6 +14,7 @@ import {
 const TEST_CHAIN_ID = 11155111;
 const TEST_SAFE = '0x2222222222222222222222222222222222222222';
 const TEST_OG_MODULE = '0x3333333333333333333333333333333333333333';
+const BASE_TIME_MS = 1_774_900_000_000;
 const TEST_TRANSACTIONS = [
     {
         to: '0x4444444444444444444444444444444444444444',
@@ -400,8 +401,28 @@ async function main() {
             async prepareRecord(args) {
                 return publishPersistStoreBase.prepareRecord(args);
             },
+            async updateRecord(recordOrKey, updater) {
+                return publishPersistStoreBase.updateRecord(recordOrKey, async (current) => {
+                    const nextRecord = await updater(current);
+                    if (
+                        nextRecord.cid &&
+                        !nextRecord.pinned &&
+                        nextRecord.lastError === null &&
+                        publishPersistFailures < 3
+                    ) {
+                        publishPersistFailures += 1;
+                        throw new Error('simulated publish persistence failure');
+                    }
+                    return nextRecord;
+                });
+            },
             async saveRecord(record) {
-                if (record.cid && !record.pinned && publishPersistFailures < 3) {
+                if (
+                    record.cid &&
+                    !record.pinned &&
+                    record.lastError === null &&
+                    publishPersistFailures < 3
+                ) {
                     publishPersistFailures += 1;
                     throw new Error('simulated publish persistence failure');
                 }
@@ -495,8 +516,28 @@ async function main() {
             async prepareRecord(args) {
                 return publishPersistRestartStoreBase.prepareRecord(args);
             },
+            async updateRecord(recordOrKey, updater) {
+                return publishPersistRestartStoreBase.updateRecord(recordOrKey, async (current) => {
+                    const nextRecord = await updater(current);
+                    if (
+                        nextRecord.cid &&
+                        !nextRecord.pinned &&
+                        nextRecord.lastError === null &&
+                        publishPersistRestartFailures < 3
+                    ) {
+                        publishPersistRestartFailures += 1;
+                        throw new Error('simulated publish persistence failure across restart');
+                    }
+                    return nextRecord;
+                });
+            },
             async saveRecord(record) {
-                if (record.cid && !record.pinned && publishPersistRestartFailures < 3) {
+                if (
+                    record.cid &&
+                    !record.pinned &&
+                    record.lastError === null &&
+                    publishPersistRestartFailures < 3
+                ) {
                     publishPersistRestartFailures += 1;
                     throw new Error('simulated publish persistence failure across restart');
                 }
@@ -756,6 +797,157 @@ async function main() {
             assert.equal(verifyRecord, null);
         } finally {
             await verifyApi.stop();
+        }
+
+        const verifyExistingStateFile = path.join(
+            tempDir,
+            'proposal-publications-verify-existing.json'
+        );
+        const verifyExistingStoreBase = createProposalPublicationStore({
+            stateFile: verifyExistingStateFile,
+        });
+        const verifyExistingRequest = await buildSignedBody({
+            account,
+            requestId: 'verify-existing',
+            explanation: 'Verify existing exact-match request.',
+        });
+        await verifyExistingStoreBase.saveRecord({
+            signer: account.address,
+            chainId: TEST_CHAIN_ID,
+            requestId: 'verify-existing',
+            signature: verifyExistingRequest.signature,
+            canonicalMessage: verifyExistingRequest.payload,
+            receivedAtMs: BASE_TIME_MS,
+            publishedAtMs: BASE_TIME_MS + 1,
+            artifact: {
+                version: 'test-artifact-v1',
+                requestId: 'verify-existing',
+            },
+            cid: 'bafy-verify-existing-old',
+            uri: 'ipfs://bafy-verify-existing-old',
+            pinned: true,
+            publishResult: {
+                cid: 'bafy-verify-existing-old',
+            },
+            pinResult: {
+                Pins: ['bafy-verify-existing-old'],
+            },
+            lastError: null,
+            verification: null,
+            submission: {
+                status: 'not_started',
+                submittedAtMs: null,
+                transactionHash: null,
+                ogProposalHash: null,
+                result: null,
+                error: null,
+                sideEffectsLikelyCommitted: false,
+            },
+            createdAtMs: BASE_TIME_MS,
+            updatedAtMs: BASE_TIME_MS,
+        });
+        let injectedVerifyExistingUpdate = false;
+        const verifyExistingStore = {
+            async getRecord(args) {
+                return verifyExistingStoreBase.getRecord(args);
+            },
+            async prepareRecord(args) {
+                return verifyExistingStoreBase.prepareRecord(args);
+            },
+            async saveRecord(record) {
+                return verifyExistingStoreBase.saveRecord(record);
+            },
+            async updateRecord(recordOrKey, updater) {
+                if (!injectedVerifyExistingUpdate) {
+                    injectedVerifyExistingUpdate = true;
+                    const current = await verifyExistingStoreBase.getRecord(recordOrKey);
+                    await verifyExistingStoreBase.saveRecord({
+                        ...current,
+                        cid: 'bafy-verify-existing-new',
+                        uri: 'ipfs://bafy-verify-existing-new',
+                        publishResult: {
+                            cid: 'bafy-verify-existing-new',
+                        },
+                        submission: {
+                            status: 'resolved',
+                            submittedAtMs: BASE_TIME_MS + 2,
+                            transactionHash: `0x${'d'.repeat(64)}`,
+                            ogProposalHash: `0x${'e'.repeat(64)}`,
+                            result: {
+                                transactionHash: `0x${'d'.repeat(64)}`,
+                            },
+                            error: null,
+                            sideEffectsLikelyCommitted: true,
+                        },
+                    });
+                }
+                return verifyExistingStoreBase.updateRecord(recordOrKey, updater);
+            },
+        };
+        const verifyExistingApi = createProposalPublicationApiServer({
+            config: buildServerConfig(account.address),
+            store: verifyExistingStore,
+            logger: {
+                info() {},
+                warn() {},
+            },
+            verifyProposal: async ({ envelope }) => ({
+                status: 'valid',
+                verifiedAtMs: BASE_TIME_MS + 3,
+                proposalKind: 'agent_proxy_reimbursement',
+                rules: {
+                    rulesHash: `0x${'b'.repeat(64)}`,
+                    matchedTemplates: [],
+                    unparsedSections: [],
+                },
+                checks: [
+                    {
+                        id: 'stubbed_verifier',
+                        status: 'pass',
+                        message: `Stub verifier accepted ${envelope.requestId}.`,
+                    },
+                ],
+                derivedFacts: {
+                    requestId: envelope.requestId,
+                },
+            }),
+        });
+        const verifyExistingServer = await verifyExistingApi.start();
+        const verifyExistingAddress = verifyExistingServer.address();
+        assert.ok(
+            verifyExistingAddress &&
+                typeof verifyExistingAddress === 'object' &&
+                typeof verifyExistingAddress.port === 'number'
+        );
+        const verifyExistingBaseUrl = `http://127.0.0.1:${verifyExistingAddress.port}`;
+
+        try {
+            const verifyExistingResponse = await postVerification(verifyExistingBaseUrl, {
+                ...verifyExistingRequest.body,
+                rulesText:
+                    'Agent Proxy\n---\nThe agent at address 0x1111111111111111111111111111111111111111 may trade tokens in this commitment for different tokens, at the current fair market exchange rate. To execute the trade, they deposit tokens from their own wallet into the Safe, and propose to withdraw tokens of equal or lesser value. Token prices are based on the prices at the time of the deposit.',
+            });
+            assert.equal(verifyExistingResponse.status, 200);
+            assert.equal(verifyExistingResponse.json.status, 'valid');
+            const verifyExistingRecord = await verifyExistingStoreBase.getRecord({
+                signer: account.address,
+                chainId: TEST_CHAIN_ID,
+                requestId: 'verify-existing',
+            });
+            assert.equal(verifyExistingRecord.cid, 'bafy-verify-existing-new');
+            assert.equal(verifyExistingRecord.uri, 'ipfs://bafy-verify-existing-new');
+            assert.equal(verifyExistingRecord.submission.status, 'resolved');
+            assert.equal(
+                verifyExistingRecord.submission.transactionHash,
+                `0x${'d'.repeat(64)}`
+            );
+            assert.equal(verifyExistingRecord.verification.status, 'valid');
+            assert.equal(
+                verifyExistingRecord.verification.derivedFacts.requestId,
+                'verify-existing'
+            );
+        } finally {
+            await verifyExistingApi.stop();
         }
 
         const proposeStateFile = path.join(tempDir, 'proposal-publications-propose.json');
@@ -1279,6 +1471,19 @@ async function main() {
             },
             async prepareRecord(args) {
                 return uncertainPersistStoreBase.prepareRecord(args);
+            },
+            async updateRecord(recordOrKey, updater) {
+                return uncertainPersistStoreBase.updateRecord(recordOrKey, async (current) => {
+                    const nextRecord = await updater(current);
+                    if (
+                        nextRecord.submission?.transactionHash === observedTxHash &&
+                        observedTxPersistFailures === 0
+                    ) {
+                        observedTxPersistFailures += 1;
+                        throw new Error('simulated submission store write failure');
+                    }
+                    return nextRecord;
+                });
             },
             async saveRecord(record) {
                 if (
