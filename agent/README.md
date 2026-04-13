@@ -787,11 +787,13 @@ The merged result is exposed to agent modules as `config.agentConfig`, while the
 
 Recommended workflow for a new module:
 1. Copy `agent-library/agents/default/` to `agent-library/agents/<agent-name>/`.
-2. Write the plain-language rules in `commitment.txt`.
-3. Implement commitment-specific logic in `agent.js`.
-4. Add `config.json` for non-secret behavior and chain-specific deployment details.
-5. Add `harness.mjs` when the module needs a custom smoke flow beyond generic deploy/start/message/deposit steps.
-6. Keep secrets in `agent/.env` only: signer keys, `OPENAI_API_KEY`, `MESSAGE_API_KEYS_JSON`, authenticated `IPFS_HEADERS_JSON`, Polymarket API credentials, and similar bearer tokens.
+2. Review `agent-library/RULE_TEMPLATES.md` and select the templates that apply to the commitment.
+3. Update `commitment.txt` from those templates. The copied default starts as a minimal standard scaffold using `Agent Proxy` and `Account Recovery and Rule Updates`, so replace or extend it with the actual rules and values for the new commitment.
+4. Keep `agent.json` `commitmentType` as `standard` for template-based commitments. Change it to `freeform` only for intentionally custom rule sets.
+5. Implement commitment-specific logic in `agent.js`.
+6. Add `config.json` for non-secret behavior and chain-specific deployment details.
+7. Add `harness.mjs` when the module needs a custom smoke flow beyond generic deploy/start/message/deposit steps.
+8. Keep secrets in `agent/.env` only: signer keys, `OPENAI_API_KEY`, `MESSAGE_API_KEYS_JSON`, authenticated `IPFS_HEADERS_JSON`, Polymarket API credentials, and similar bearer tokens.
 
 Recommended minimal module config shape:
 

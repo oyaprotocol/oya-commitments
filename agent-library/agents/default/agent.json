@@ -1,8 +1,8 @@
 {
   "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
-  "commitmentType": "freeform",
+  "commitmentType": "standard",
   "name": "Oya Default Agent",
-  "description": "Default Oya commitment agent that monitors deposits and proposals, and can propose or dispute actions based on the commitment rules.",
+  "description": "Default Oya standard commitment scaffold with agent proxy permissions and rule-update recovery.",
   "image": "https://raw.githubusercontent.com/oya-commitments/oya-commitments/main/agent-library/agents/default/agent.png",
   "endpoints": [
     {
