@@ -7,6 +7,7 @@ import {
 } from './cli-runtime.mjs';
 import {
     createProposalPublishSubmissionRuntimeResolver,
+    createProposalPublishVerificationRuntimeResolver,
     resolveProposalPublishServerConfig,
 } from './proposal-publish-runtime.mjs';
 
@@ -90,10 +91,15 @@ async function main({ argv = process.argv } = {}) {
                   argv,
               })
             : undefined;
+    const resolveVerificationRuntime = await createProposalPublishVerificationRuntimeResolver({
+        agentRef,
+        argv,
+    });
     const api = createProposalPublicationApiServer({
         config: runtimeConfig,
         store,
         resolveProposalRuntime,
+        resolveVerificationRuntime,
     });
     await api.start();
 

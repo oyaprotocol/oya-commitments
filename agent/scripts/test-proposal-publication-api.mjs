@@ -45,6 +45,7 @@ function buildServerConfig(signerAddress, overrides = {}) {
         proposalPublishApiSignatureMaxAgeSeconds: 300,
         proposalPublishApiMaxBodyBytes: 65_536,
         proposalPublishApiNodeName: 'test-node',
+        proposalVerificationMode: 'off',
         ...overrides,
     };
 }
@@ -109,6 +110,29 @@ async function buildSignedBody({
 
 async function postPublication(baseUrl, body, { bearerToken = 'k_test_ops_secret' } = {}) {
     const response = await fetch(`${baseUrl}/v1/proposals/publish`, {
+        method: 'POST',
+        headers: {
+            ...(bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {}),
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+    });
+    const raw = await response.text();
+    let parsed;
+    try {
+        parsed = raw ? JSON.parse(raw) : {};
+    } catch (error) {
+        parsed = { raw };
+    }
+    return {
+        status: response.status,
+        ok: response.ok,
+        json: parsed,
+    };
+}
+
+async function postVerification(baseUrl, body, { bearerToken = 'k_test_ops_secret' } = {}) {
+    const response = await fetch(`${baseUrl}/v1/proposals/verify`, {
         method: 'POST',
         headers: {
             ...(bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {}),
@@ -658,6 +682,82 @@ async function main() {
         assert.ok(resignedRecord.publishedAtMs >= retryBaseNowMs + 801_000);
         assert.equal(addAttemptsByRequestId.get('publish-retry-resigned'), 2);
 
+        const verifyStateFile = path.join(tempDir, 'proposal-publications-verify.json');
+        const verifyStore = createProposalPublicationStore({ stateFile: verifyStateFile });
+        const observedVerifyCalls = [];
+        const verifyApi = createProposalPublicationApiServer({
+            config: buildServerConfig(account.address),
+            store: verifyStore,
+            logger: {
+                info() {},
+                warn() {},
+            },
+            verifyProposal: async ({ envelope, rulesText }) => {
+                observedVerifyCalls.push({
+                    requestId: envelope.requestId,
+                    rulesText,
+                });
+                return {
+                    status: 'valid',
+                    verifiedAtMs: 1_760_000_000_123,
+                    proposalKind: 'agent_proxy_reimbursement',
+                    rules: {
+                        rulesHash: `0x${'a'.repeat(64)}`,
+                        matchedTemplates: [],
+                        unparsedSections: [],
+                    },
+                    checks: [
+                        {
+                            id: 'stubbed_verifier',
+                            status: 'pass',
+                            message: 'Stub verifier accepted the request.',
+                        },
+                    ],
+                    derivedFacts: {
+                        requestId: envelope.requestId,
+                    },
+                };
+            },
+        });
+        const verifyServer = await verifyApi.start();
+        const verifyAddress = verifyServer.address();
+        assert.ok(
+            verifyAddress &&
+                typeof verifyAddress === 'object' &&
+                typeof verifyAddress.port === 'number'
+        );
+        const verifyBaseUrl = `http://127.0.0.1:${verifyAddress.port}`;
+
+        try {
+            const verifyRequest = await buildSignedBody({
+                account,
+                requestId: 'verify-ok',
+                explanation: 'Verify only request.',
+            });
+            const verifyResponse = await postVerification(verifyBaseUrl, {
+                ...verifyRequest.body,
+                rulesText: 'Agent Proxy\n---\nThe agent at address 0x1111111111111111111111111111111111111111 may trade tokens in this commitment for different tokens, at the current fair market exchange rate. To execute the trade, they deposit tokens from their own wallet into the Safe, and propose to withdraw tokens of equal or lesser value. Token prices are based on the prices at the time of the deposit.',
+            });
+            assert.equal(verifyResponse.status, 200);
+            assert.equal(verifyResponse.json.status, 'valid');
+            assert.equal(verifyResponse.json.derivedFacts.requestId, 'verify-ok');
+            assert.deepEqual(observedVerifyCalls, [
+                {
+                    requestId: 'verify-ok',
+                    rulesText:
+                        'Agent Proxy\n---\nThe agent at address 0x1111111111111111111111111111111111111111 may trade tokens in this commitment for different tokens, at the current fair market exchange rate. To execute the trade, they deposit tokens from their own wallet into the Safe, and propose to withdraw tokens of equal or lesser value. Token prices are based on the prices at the time of the deposit.',
+                },
+            ]);
+            const verifyRecord = await verifyStore.getRecord({
+                signer: account.address,
+                chainId: TEST_CHAIN_ID,
+                requestId: 'verify-ok',
+            });
+            assert.equal(verifyRecord, null);
+        } finally {
+            await verifyApi.stop();
+        }
+
         const proposeStateFile = path.join(tempDir, 'proposal-publications-propose.json');
         const proposeStore = createProposalPublicationStore({ stateFile: proposeStateFile });
         const submitAttemptsByExplanation = new Map();
@@ -673,6 +773,7 @@ async function main() {
             config: buildServerConfig(account.address, {
                 chainId: undefined,
                 proposalPublishApiMode: 'propose',
+                proposalVerificationMode: 'enforce',
             }),
             store: proposeStore,
             logger: {
@@ -761,6 +862,46 @@ async function main() {
             resolveProposalHash: async ({ proposalTxHash }) => {
                 resolveProposalHashCalls.push(proposalTxHash);
                 return resolvedProposalHashes.get(proposalTxHash) ?? null;
+            },
+            verifyProposal: async ({ envelope }) => {
+                if (envelope.explanation === 'Block submit via verification.') {
+                    return {
+                        status: 'invalid',
+                        verifiedAtMs: 1_760_000_000_555,
+                        proposalKind: 'agent_proxy_reimbursement',
+                        rules: {
+                            rulesHash: `0x${'c'.repeat(64)}`,
+                            matchedTemplates: [],
+                            unparsedSections: [],
+                        },
+                        checks: [
+                            {
+                                id: 'stubbed_verifier',
+                                status: 'fail',
+                                message: 'Stub verifier blocked the proposal.',
+                            },
+                        ],
+                        derivedFacts: {},
+                    };
+                }
+                return {
+                    status: 'valid',
+                    verifiedAtMs: 1_760_000_000_444,
+                    proposalKind: 'agent_proxy_reimbursement',
+                    rules: {
+                        rulesHash: `0x${'d'.repeat(64)}`,
+                        matchedTemplates: [],
+                        unparsedSections: [],
+                    },
+                    checks: [
+                        {
+                            id: 'stubbed_verifier',
+                            status: 'pass',
+                            message: 'Stub verifier accepted the proposal.',
+                        },
+                    ],
+                    derivedFacts: {},
+                };
             },
         });
         const proposeServer = await proposeApi.start();
@@ -922,6 +1063,24 @@ async function main() {
             assert.equal(conflictingWhileRuntimeDown.status, 409);
             assert.equal(conflictingWhileRuntimeDown.json.code, 'request_conflict');
             proposalRuntimeAvailableByChain.set(11155111, true);
+
+            const blockedByVerificationRequest = await buildSignedBody({
+                account,
+                chainId: 11155111,
+                requestId: 'blocked-by-verification',
+                explanation: 'Block submit via verification.',
+            });
+            const blockedByVerification = await postPublication(
+                proposeBaseUrl,
+                blockedByVerificationRequest.body
+            );
+            assert.equal(blockedByVerification.status, 409);
+            assert.equal(blockedByVerification.json.code, 'verification_invalid');
+            assert.equal(blockedByVerification.json.verification.status, 'invalid');
+            assert.equal(
+                submitAttemptsByExplanation.get('Block submit via verification.') ?? 0,
+                0
+            );
 
             const polygonRequest = await buildSignedBody({
                 account,
@@ -1159,6 +1318,6 @@ async function main() {
 }
 
 main().catch((error) => {
-    console.error('[test] proposal publication API failed:', error?.message ?? error);
+    console.error('[test] proposal publication API failed:', error?.stack ?? error?.message ?? error);
     process.exit(1);
 });

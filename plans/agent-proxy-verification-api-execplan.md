@@ -22,12 +22,11 @@ Observable user value:
 - [x] 2026-04-12 17:43 PDT: Wrote this initial ExecPlan with a v1 requirements sketch, architecture decisions, milestones, and validation strategy.
 - [x] 2026-04-12 18:19 PDT: Updated the v1 requirements to allow a single reimbursement proposal to consume value from a batch of confirmed deposits, with explicit anti-double-count accounting.
 - [x] 2026-04-12 18:25 PDT: Simplified the batch model so each referenced deposit is reimbursable only once; no numeric remaining-balance tracking is required in v1.
-- [ ] Implement a deterministic standard-template parser that turns `rulesText` into canonical template matches and extracted parameters.
-- [ ] Implement a shared proposal verification library with explicit `valid`, `invalid`, and `unknown` outcomes plus template coverage reporting.
-- [ ] Add `POST /v1/proposals/verify` to the proposal publication node and persist verification results with proposal records.
-- [ ] Integrate verification into `proposalPublishApi.mode = "propose"` behind a config gate so submission can require `valid` verification results.
-- [ ] Implement the first shared verifier for `Agent Proxy` reimbursement proposals.
-- [ ] Add regression coverage for parser behavior, verify endpoint behavior, propose-mode enforcement, and `first-proxy` compatibility.
+- [x] 2026-04-12 19:03 PDT: Implemented a first shared parser in `agent/src/lib/proposal-verification.js` that recognizes standard-template sections, extracts key `Agent Proxy`, `Solo User`, `Fair Valuation`, and `Account Recovery and Rule Updates` parameters, and reports template coverage plus unparsed sections.
+- [x] 2026-04-12 19:03 PDT: Implemented the first shared proposal verification library with explicit `valid`, `invalid`, and `unknown` outcomes, signed metadata parsing, deposit-state checks, receipt-backed deposit evidence checks, and deterministic reimbursement-value arithmetic for `agent_proxy_reimbursement`.
+- [x] 2026-04-12 19:03 PDT: Added `POST /v1/proposals/verify`, verification result persistence on published proposal records, and an `off | advisory | enforce` `proposalVerificationMode` gate for propose mode.
+- [x] 2026-04-12 19:03 PDT: Added regression coverage for the verifier module, verify endpoint behavior, propose-mode enforcement, store persistence, and signed proposal smoke compatibility.
+- [ ] Expand verifier coverage so `first-proxy` commitments with extra templates such as `Trade Restrictions` and `Trading Limits` can reach `valid` instead of `unknown`.
 - [ ] Update `node/README.md` and any relevant operator docs with request shape, config flags, and safe rollout guidance.
 
 ## Surprises & Discoveries
@@ -46,6 +45,9 @@ Observable user value:
 
 - Observation: `first-proxy` already performs several machine-checkable validations that are close to the desired `Agent Proxy` verifier, but those checks are mixed with momentum-strategy specifics and should not be moved wholesale into shared infrastructure.
   Evidence: `agent-library/agents/first-proxy/agent.js` validates reimbursement recipient, token allowlists, explanation fields, price-derived USD values, and deposit linkage around lines 1847-1966, while the same file also includes epoch, winner-token, and momentum-return logic around lines 1414-1533.
+
+- Observation: Batch reimbursement valuation across multiple deposit timestamps needs an explicit mapping from proposal withdrawals back to deposits; aggregate transaction totals alone are not enough to prove correctness when prices differ between deposits.
+  Evidence: During implementation, a whole-deposit batch still required per-deposit value ceilings. The shipped v1 verifier therefore requires signed `depositPriceSnapshots` and `reimbursementAllocations` in `metadata.verification` instead of inferring batch allocation from the proposal transactions alone.
 
 ## Decision Log
 
@@ -81,15 +83,22 @@ Observable user value:
   Rationale: The node should verify the proposal that the originator actually signed, not a modified verification request assembled later by an intermediary.
   Date/Author: 2026-04-12 / Codex.
 
+- Decision: Require signed per-deposit price snapshots and signed reimbursement allocations for `agent_proxy_reimbursement` v1, rather than trying to infer a valid batch allocation from proposal transactions alone.
+  Rationale: Whole-deposit batch consumption avoids persistent remaining-balance accounting, but it does not eliminate per-deposit valuation ambiguity when deposits occurred at different timestamps. Explicit signed allocation data keeps the verifier deterministic and auditable.
+  Date/Author: 2026-04-12 / Codex.
+
+- Decision: Provide a read-only verification runtime resolver even when the node is not in `propose` mode.
+  Rationale: `/v1/proposals/verify` still needs chain access for deposit receipts, token decimals, and proposal lifecycle checks. Requiring a signer-capable propose runtime for read-only verification would unnecessarily limit the endpoint.
+  Date/Author: 2026-04-12 / Codex.
+
 ## Outcomes & Retrospective
 
-Planning stage only so far. No implementation changes have been made yet. The current outcome is a concrete design direction:
+First implementation slice shipped. Current outcome:
 
-- Extend the existing proposal publication node with a verification endpoint and pre-submit verification gate.
-- Parse exact rules text against standard templates instead of attempting freeform semantic interpretation.
-- Start with an `Agent Proxy` reimbursement verifier that is strict enough to return `unknown` when supporting data or template coverage is missing, and that can verify one reimbursement proposal against a batch of whole deposits.
-
-When implementation milestones complete, record what shipped, what needed to change from the original design, and which follow-on verifiers became obvious next steps.
+- The proposal publication node now exposes `/v1/proposals/verify` and can persist verification results on proposal records.
+- The node can run verification in `propose` mode behind `proposalVerificationMode = off | advisory | enforce`.
+- The shared verifier can parse standard-template sections, verify signed `agent_proxy_reimbursement` metadata, inspect referenced deposit receipts, prevent reuse of reserved/consumed deposits, and enforce signed reimbursement allocations against deposit-time value ceilings.
+- The main remaining product gap is coverage breadth: commitments with additional relevant templates such as `Trade Restrictions`, `Trading Limits`, or pause semantics still resolve to `unknown` instead of `valid`.
 
 ## Context and Orientation
 
@@ -186,6 +195,26 @@ Proposed v1 request shape:
           "depositTxHashes": [
             "0x...",
             "0x..."
+          ],
+          "depositPriceSnapshots": [
+            {
+              "depositTxHash": "0x...",
+              "depositAssetPriceUsdMicros": "1500000",
+              "reimbursementAssetPricesUsdMicros": {
+                "0x...": "1000000"
+              }
+            }
+          ],
+          "reimbursementAllocations": [
+            {
+              "depositTxHash": "0x...",
+              "reimbursements": [
+                {
+                  "token": "0x...",
+                  "amountWei": "1000000"
+                }
+              ]
+            }
           ]
         }
       },
@@ -247,12 +276,14 @@ Proposed v1 response shape:
           {
             "depositTxHash": "0x...",
             "depositValueUsdMicros": "15000000",
+            "allocatedUsdMicros": "10000000",
             "statusBeforeVerification": "available",
             "statusAfterExecution": "consumed"
           },
           {
             "depositTxHash": "0x...",
             "depositValueUsdMicros": "20000000",
+            "allocatedUsdMicros": "20000000",
             "statusBeforeVerification": "available",
             "statusAfterExecution": "consumed"
           }

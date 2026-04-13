@@ -77,7 +77,10 @@ async function run() {
         });
         assert.equal(savedA.submission.status, 'not_started');
         assert.equal(savedA.submission.transactionHash, null);
+        assert.equal(savedA.verification, null);
         assert.equal(savedB.submission.status, 'not_started');
+        const listedRecords = await saveStore.listRecords();
+        assert.equal(listedRecords.length, 2);
         assert.equal(await readRecordCount(saveStateFile), 2);
 
         const prepareStateFile = path.join(tempDir, 'prepare-state.json');
@@ -207,10 +210,16 @@ async function run() {
                 error: null,
                 sideEffectsLikelyCommitted: true,
             },
+            verification: {
+                status: 'valid',
+                proposalKind: 'agent_proxy_reimbursement',
+                verifiedAtMs: BASE_TIME_MS + 1,
+            },
         });
         assert.equal(submissionRecord.submission.status, 'resolved');
         assert.equal(submissionRecord.submission.result.bondAmount, '123');
         assert.equal(submissionRecord.submission.transactionHash, `0x${'a'.repeat(64)}`);
+        assert.equal(submissionRecord.verification.status, 'valid');
 
         console.log('[test] proposal publication store OK');
     } finally {

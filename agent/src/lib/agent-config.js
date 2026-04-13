@@ -73,6 +73,14 @@ function parseProposalPublishModeValue(value, label) {
     return normalized;
 }
 
+function parseProposalVerificationModeValue(value, label) {
+    const normalized = parseStringValue(value, label).toLowerCase();
+    if (normalized !== 'off' && normalized !== 'advisory' && normalized !== 'enforce') {
+        throw new Error(`${label} must be one of: off, advisory, enforce`);
+    }
+    return normalized;
+}
+
 function parseIntegerValue(value, label, { min = undefined, max = undefined } = {}) {
     const parsed = Number(value);
     if (!Number.isInteger(parsed)) {
@@ -229,6 +237,7 @@ const SHARED_RUNTIME_FIELD_DEFINITIONS = Object.freeze([
     { key: 'openAiModel', parser: parseStringValue },
     { key: 'openAiBaseUrl', parser: parseHostValue },
     { key: 'openAiRequestTimeoutMs', parser: (value, label) => parseIntegerValue(value, label, { min: 1 }) },
+    { key: 'proposalVerificationMode', parser: parseProposalVerificationModeValue },
     { key: 'allowProposeOnSimulationFail', parser: parseBooleanValue },
     { key: 'proposeGasLimit', parser: (value, label) => parseBigIntValue(value, label, { min: 1n }) },
     { key: 'executeRetryMs', parser: (value, label) => parseIntegerValue(value, label, { min: 1 }) },
