@@ -215,6 +215,23 @@ function canBypassProposalRuntimeForDuplicate(record, exactExistingMatch) {
     );
 }
 
+function shouldVerifyBeforeSubmissionAttempt(record) {
+    const submission = record?.submission ?? { status: 'not_started' };
+    if (submission.status === 'resolved') {
+        return false;
+    }
+    if (submission.status === 'submitted' && Boolean(submission.transactionHash)) {
+        return false;
+    }
+    if (
+        submission.status === 'uncertain' ||
+        (submission.sideEffectsLikelyCommitted && !submission.transactionHash)
+    ) {
+        return false;
+    }
+    return true;
+}
+
 function canReuseVolatilePublicationState(record, publicationState) {
     return Boolean(
         record &&
@@ -1251,7 +1268,10 @@ function createProposalPublicationApiServer({
                                     runtime = undefined;
                                 }
                             }
-                            if (proposalVerificationMode !== 'off') {
+                            if (
+                                proposalVerificationMode !== 'off' &&
+                                shouldVerifyBeforeSubmissionAttempt(latestRecord)
+                            ) {
                                 ({ record: latestRecord } = await runVerification({
                                     record: latestRecord,
                                     envelope,

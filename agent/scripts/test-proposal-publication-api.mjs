@@ -761,11 +761,16 @@ async function main() {
         const proposeStateFile = path.join(tempDir, 'proposal-publications-propose.json');
         const proposeStore = createProposalPublicationStore({ stateFile: proposeStateFile });
         const submitAttemptsByExplanation = new Map();
+        const verifyAttemptsByExplanation = new Map();
         const resolvedProposalHashes = new Map([
             [`0x${'3'.repeat(64)}`, `0x${'4'.repeat(64)}`],
         ]);
         const resolveProposalHashCalls = [];
         const proposalRuntimeAvailableByChain = new Map([
+            [11155111, true],
+            [137, true],
+        ]);
+        const verificationRuntimeAvailableByChain = new Map([
             [11155111, true],
             [137, true],
         ]);
@@ -808,6 +813,23 @@ async function main() {
                     },
                     walletClient: {},
                     account: { address: account.address },
+                };
+            },
+            resolveVerificationRuntime: async ({ chainId }) => {
+                if (verificationRuntimeAvailableByChain.get(chainId) === false) {
+                    const error = new Error(
+                        `Verification runtime unavailable for chainId ${chainId}.`
+                    );
+                    error.code = 'verification_runtime_unavailable';
+                    error.statusCode = 502;
+                    throw error;
+                }
+                return {
+                    publicClient: {
+                        async getChainId() {
+                            return chainId;
+                        },
+                    },
                 };
             },
             submitProposal: async ({ config, explanation }) => {
@@ -864,6 +886,18 @@ async function main() {
                 return resolvedProposalHashes.get(proposalTxHash) ?? null;
             },
             verifyProposal: async ({ envelope }) => {
+                verifyAttemptsByExplanation.set(
+                    envelope.explanation,
+                    (verifyAttemptsByExplanation.get(envelope.explanation) ?? 0) + 1
+                );
+                if (
+                    envelope.explanation === 'Resolve proposal hash on duplicate retry.' &&
+                    verifyAttemptsByExplanation.get(envelope.explanation) > 1
+                ) {
+                    throw new Error(
+                        'Verification should not rerun for duplicate requests with an existing submission tx hash.'
+                    );
+                }
                 if (envelope.explanation === 'Block submit via verification.') {
                     return {
                         status: 'invalid',
@@ -933,7 +967,9 @@ async function main() {
                 `0x${'1'.repeat(64)}`
             );
             assert.equal(submitAttemptsByExplanation.get('Propose success on sepolia.'), 1);
+            assert.equal(verifyAttemptsByExplanation.get('Propose success on sepolia.'), 1);
 
+            verificationRuntimeAvailableByChain.set(11155111, false);
             const proposeDuplicate = await postPublication(
                 proposeBaseUrl,
                 proposeAcceptedRequest.body
@@ -942,6 +978,8 @@ async function main() {
             assert.equal(proposeDuplicate.json.status, 'duplicate');
             assert.equal(proposeDuplicate.json.submission.status, 'resolved');
             assert.equal(submitAttemptsByExplanation.get('Propose success on sepolia.'), 1);
+            assert.equal(verifyAttemptsByExplanation.get('Propose success on sepolia.'), 1);
+            verificationRuntimeAvailableByChain.set(11155111, true);
 
             const retryFailureRequest = await buildSignedBody({
                 account,
@@ -1006,6 +1044,10 @@ async function main() {
                 submitAttemptsByExplanation.get('Resolve proposal hash on duplicate retry.'),
                 1
             );
+            assert.equal(
+                verifyAttemptsByExplanation.get('Resolve proposal hash on duplicate retry.'),
+                1
+            );
             assert.deepEqual(resolveProposalHashCalls, [`0x${'3'.repeat(64)}`]);
 
             const runtimeOutageDuplicateRequest = await buildSignedBody({
@@ -1030,6 +1072,10 @@ async function main() {
             assert.equal(runtimeOutageDuplicate.json.submission.status, 'submitted');
             assert.equal(
                 submitAttemptsByExplanation.get('Duplicate while runtime unavailable.'),
+                1
+            );
+            assert.equal(
+                verifyAttemptsByExplanation.get('Duplicate while runtime unavailable.'),
                 1
             );
 
