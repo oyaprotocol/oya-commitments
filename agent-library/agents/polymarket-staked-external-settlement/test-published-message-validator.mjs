@@ -216,6 +216,46 @@ async function run() {
     }
 
     {
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = async () => {
+            throw new Error('rpc offline');
+        };
+        try {
+            await assert.rejects(
+                () =>
+                    validatePublishedMessage({
+                        config: {
+                            ...BASE_CONFIG,
+                            rpcUrl: 'http://rpc.test.local',
+                        },
+                        message: buildTradeLogMessage({
+                            requestId: 'trade-log-runtime-init-failure',
+                            trades: [
+                                buildTrade({
+                                    tradeId: 'trade-runtime-init-failure',
+                                    executedAtMs: firstSeenAtMs - 5 * 60_000,
+                                }),
+                            ],
+                        }),
+                        receivedAtMs: firstSeenAtMs,
+                        publishedAtMs: firstSeenAtMs + 1_000,
+                        listRecords: async () => [],
+                    }),
+                (error) => {
+                    assert.ok(error instanceof MessagePublicationValidationError);
+                    assert.equal(error.code, 'message_validation_unavailable');
+                    assert.equal(error.statusCode, 503);
+                    assert.match(error.message, /read-only runtime/i);
+                    assert.match(error.message, /rpc offline/i);
+                    return true;
+                }
+            );
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    }
+
+    {
         const priorMessage = buildTradeLogMessage({
             requestId: 'trade-log-prior',
             sequence: 1,

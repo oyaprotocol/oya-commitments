@@ -389,10 +389,20 @@ async function loadLoggingWindowMinutes({ config, publicClient, ogModule, expect
                 }
             );
         }
-        ({ publicClient: effectivePublicClient } = await createValidatedReadOnlyRuntime({
-            rpcUrl,
-            expectedChainId,
-        }));
+        try {
+            ({ publicClient: effectivePublicClient } = await createValidatedReadOnlyRuntime({
+                rpcUrl,
+                expectedChainId,
+            }));
+        } catch (error) {
+            throw buildValidationError(
+                `Unable to initialize read-only runtime for Polymarket trade-log validation: ${error?.message ?? error}`,
+                {
+                    code: 'message_validation_unavailable',
+                    statusCode: 503,
+                }
+            );
+        }
     }
 
     let rulesText;
