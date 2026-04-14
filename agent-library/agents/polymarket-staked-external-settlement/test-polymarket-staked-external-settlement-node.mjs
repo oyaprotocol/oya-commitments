@@ -46,6 +46,10 @@ function buildBaseConfig(overrides = {}) {
         ipfsEnabled: true,
         proposeEnabled: true,
         disputeEnabled: true,
+        proposalPublishApiEnabled: true,
+        proposalPublishApiHost: '127.0.0.1',
+        proposalPublishApiPort: 9890,
+        proposalPublishApiMode: 'propose',
         watchAssets: [TEST_USDC],
         agentConfig: {
             polymarketStakedExternalSettlement: {
@@ -366,21 +370,43 @@ async function run() {
             onchainPendingProposal: false,
         });
         assert.equal(toolCalls.length, 1);
-        assert.equal(toolCalls[0].name, 'post_bond_and_propose');
+        assert.equal(toolCalls[0].name, 'publish_signed_proposal');
         const reimbursementArgs = JSON.parse(toolCalls[0].arguments);
-        assert.equal(reimbursementArgs.transactions.length, 1);
-        const decodedTransfer = decodeErc20TransferCallData(reimbursementArgs.transactions[0].data);
+        assert.equal(reimbursementArgs.timeoutMs, 10000);
+        assert.equal(
+            reimbursementArgs.proposal.requestId,
+            `polymarket-staked-external-settlement:market-1:proposal:${reimbursementRequestPublication.cid}`
+        );
+        assert.equal(reimbursementArgs.proposal.chainId, TEST_CHAIN_ID);
+        assert.equal(reimbursementArgs.proposal.commitmentSafe, TEST_COMMITMENT_SAFE);
+        assert.equal(reimbursementArgs.proposal.ogModule, TEST_OG_MODULE);
+        assert.equal(reimbursementArgs.proposal.transactions.length, 1);
+        const decodedTransfer = decodeErc20TransferCallData(
+            reimbursementArgs.proposal.transactions[0].data
+        );
         assert.equal(decodedTransfer?.amount?.toString(), '1000000');
         assert.equal(decodedTransfer?.to, TEST_AGENT.address.toLowerCase());
-        assert.match(reimbursementArgs.explanation, /requestCid=/);
+        assert.equal(
+            reimbursementArgs.proposal.metadata.reimbursementRequestCid,
+            reimbursementRequestPublication.cid
+        );
+        assert.equal(
+            reimbursementArgs.proposal.metadata.publishedTradeLogCid,
+            postDepositPublication.cid
+        );
+        assert.match(reimbursementArgs.proposal.explanation, /requestCid=/);
 
         await onNodeToolOutput({
             callId: toolCalls[0].callId,
             name: toolCalls[0].name,
             parsedOutput: {
-                status: 'submitted',
-                transactionHash: `0x${'e'.repeat(64)}`,
-                ogProposalHash: `0x${'f'.repeat(64)}`,
+                status: 'published',
+                mode: 'propose',
+                submission: {
+                    status: 'resolved',
+                    transactionHash: `0x${'e'.repeat(64)}`,
+                    ogProposalHash: `0x${'f'.repeat(64)}`,
+                },
             },
             config,
             commitmentSafe: TEST_COMMITMENT_SAFE,

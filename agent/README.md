@@ -650,6 +650,10 @@ Tool:
 - `ipfs_publish`: Publish either raw string content or structured JSON content to IPFS. For tool calls, JSON content is passed as JSON text and canonicalized before upload. It pins the returned CID by default and returns `cid`, `uri`, `pinned`, `publishResult`, and `pinResult`.
 - `publish_signed_message`: Sign a structured agent-authored message with the runtime signer and submit it to the standalone message publication node configured by `messagePublishApi.host` / `messagePublishApi.port`. It returns the node response, including `status`, `cid`, `uri`, and any module validator output such as `validation.classifications`.
 
+Standalone-node bridge:
+
+- `executeToolCalls()` also supports `publish_signed_proposal` for deterministic module/control-hook code that needs to sign a proposal-publication request with the runtime signer and submit it to the standalone proposal-publication node configured by `proposalPublishApi.host` / `proposalPublishApi.port`. This bridge is currently used by the `polymarket-staked-external-settlement` control node rather than by the main LLM tool schema.
+
 ### ERC1155 Tracking (Optional)
 
 The shared runner can monitor configured ERC1155 token IDs in addition to ERC20/native monitoring.

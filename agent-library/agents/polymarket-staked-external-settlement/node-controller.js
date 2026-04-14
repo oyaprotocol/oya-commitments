@@ -30,6 +30,8 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DEFAULT_NODE_STATE_FILE = path.join(__dirname, '.settlement-node-state.json');
+const MODULE_NAME = 'polymarket-staked-external-settlement';
+const REIMBURSEMENT_PROPOSAL_KIND = 'polymarket_staked_external_settlement_reimbursement';
 
 let runtimeNodeState = createEmptyNodeState();
 let runtimeNodeStateHydrated = false;
@@ -427,6 +429,48 @@ function buildDisputeToolCall(assertionId, blockingMarketIds) {
     };
 }
 
+function buildNodeReimbursementProposalCallId({ marketId, requestCid }) {
+    return `node-reimbursement-proposal:${encodeURIComponent(marketId)}:${requestCid ?? 'missing'}`;
+}
+
+function extractNodeReimbursementProposalMarketId(callId) {
+    if (typeof callId !== 'string' || !callId.startsWith('node-reimbursement-proposal:')) {
+        return null;
+    }
+    const remainder = callId.slice('node-reimbursement-proposal:'.length);
+    const separatorIndex = remainder.indexOf(':');
+    const encodedMarketId = separatorIndex === -1 ? remainder : remainder.slice(0, separatorIndex);
+    if (!encodedMarketId) {
+        return null;
+    }
+    try {
+        return decodeURIComponent(encodedMarketId);
+    } catch {
+        return encodedMarketId;
+    }
+}
+
+function buildReimbursementProposalPublicationRequestId(market) {
+    const requestCid =
+        market.reimbursementRequest?.requestCid ??
+        market.lastPublishedCid ??
+        market.stream.marketId;
+    return `${MODULE_NAME}:${market.stream.marketId}:proposal:${requestCid}`;
+}
+
+function assertProposalPublicationReady(config) {
+    if (!config?.proposalPublishApiEnabled) {
+        throw new Error(
+            `${MODULE_NAME} control-node reimbursement proposals require proposalPublishApi.enabled=true.`
+        );
+    }
+    if (String(config.proposalPublishApiMode ?? '').trim().toLowerCase() !== 'propose') {
+        throw new Error(
+            `${MODULE_NAME} control-node reimbursement proposals require proposalPublishApi.mode=\"propose\".`
+        );
+    }
+}
+
 function buildReimbursementProposalToolCall({ market, policy, config }) {
     const reimbursementAmountWei = computeReimbursementEligibleWei(market);
     const transactions = buildOgTransactions(
@@ -441,20 +485,41 @@ function buildReimbursementProposalToolCall({ market, policy, config }) {
         ],
         { config }
     );
+    const requestCid = market.reimbursementRequest?.requestCid ?? null;
+    const requestSnapshotCid = market.reimbursementRequest?.snapshotCid ?? null;
     return {
-        callId: `node-reimbursement-proposal-${market.stream.marketId}-${market.lastPublishedCid}`,
-        name: 'post_bond_and_propose',
+        callId: buildNodeReimbursementProposalCallId({
+            marketId: market.stream.marketId,
+            requestCid,
+        }),
+        name: 'publish_signed_proposal',
         arguments: JSON.stringify({
-            transactions,
-            explanation: buildReimbursementExplanation({
-                market: {
-                    ...market,
-                    reimbursement: {
-                        requestCid: market.reimbursementRequest?.requestCid ?? null,
+            proposal: {
+                chainId: Number(config.chainId),
+                requestId: buildReimbursementProposalPublicationRequestId(market),
+                commitmentSafe: config.commitmentSafe,
+                ogModule: config.ogModule,
+                transactions,
+                explanation: buildReimbursementExplanation({
+                    market: {
+                        ...market,
+                        reimbursement: {
+                            requestCid,
+                        },
+                        lastPublishedCid: market.lastPublishedCid,
                     },
-                    lastPublishedCid: market.lastPublishedCid,
+                }),
+                metadata: {
+                    module: MODULE_NAME,
+                    proposalKind: REIMBURSEMENT_PROPOSAL_KIND,
+                    marketId: market.stream.marketId,
+                    publishedTradeLogCid: market.lastPublishedCid ?? null,
+                    reimbursementRequestCid: requestCid,
+                    reimbursementRequestId: market.reimbursementRequest?.requestId ?? null,
+                    reimbursementRequestSnapshotCid: requestSnapshotCid,
                 },
-            }),
+            },
+            timeoutMs: policy.publishTimeoutMs,
         }),
     };
 }
@@ -640,6 +705,7 @@ async function getNodeDeterministicToolCalls({
         if (!depositReady) {
             continue;
         }
+        assertProposalPublicationReady(config);
 
         nodeMarket.reimbursement.requestId = market.reimbursementRequest.requestId;
         nodeMarket.reimbursement.requestCid = market.reimbursementRequest.requestCid;
@@ -675,27 +741,33 @@ async function onNodeToolOutput({ callId, name, parsedOutput, config, commitment
             runtimeNodeState.pendingDispute = null;
             changed = true;
         }
-    } else if (name === 'post_bond_and_propose') {
-        const marketId = String(callId ?? '')
-            .replace(/^node-reimbursement-proposal-/, '')
-            .split('-bafy')[0];
+    } else if (name === 'publish_signed_proposal') {
+        const marketId = extractNodeReimbursementProposalMarketId(callId);
         const nodeMarket = runtimeNodeState.markets?.[marketId];
         if (nodeMarket) {
             nodeMarket.reimbursement.dispatchAtMs = null;
-            const status = String(parsedOutput?.status ?? '').trim().toLowerCase();
-            if (status === 'submitted' || status === 'confirmed' || status === 'pending') {
+            const publicationStatus = String(parsedOutput?.status ?? '').trim().toLowerCase();
+            const submission = parsedOutput?.submission;
+            const submissionStatus = String(submission?.status ?? '').trim().toLowerCase();
+            if (
+                submissionStatus === 'submitted' ||
+                submissionStatus === 'resolved' ||
+                submissionStatus === 'uncertain'
+            ) {
                 nodeMarket.reimbursement.submissionTxHash =
-                    normalizeHashOrNull(parsedOutput?.transactionHash) ??
+                    normalizeHashOrNull(submission?.transactionHash) ??
                     nodeMarket.reimbursement.submissionTxHash;
                 nodeMarket.reimbursement.proposalHash =
-                    normalizeHashOrNull(parsedOutput?.ogProposalHash) ??
-                    normalizeHashOrNull(parsedOutput?.proposalHash) ??
+                    normalizeHashOrNull(submission?.ogProposalHash) ??
                     nodeMarket.reimbursement.proposalHash;
                 nodeMarket.reimbursement.submittedAtMs = Date.now();
                 nodeMarket.reimbursement.lastError = null;
             } else {
                 nodeMarket.reimbursement.lastError =
-                    parsedOutput?.message ?? 'Reimbursement proposal submission failed.';
+                    parsedOutput?.message ??
+                    (publicationStatus
+                        ? `Reimbursement proposal publication returned unexpected status "${publicationStatus}".`
+                        : 'Reimbursement proposal publication failed.');
             }
             changed = true;
         }

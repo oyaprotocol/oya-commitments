@@ -17,6 +17,7 @@ import {
     signClobOrder,
 } from './polymarket.js';
 import { publishSignedMessage } from './message-publication-client.js';
+import { publishSignedProposal } from './proposal-publication-client.js';
 import { parseToolArguments } from './utils.js';
 import { annotateToolExecutionError, hasCommittedToolSideEffects } from './tool-execution-error.js';
 
@@ -63,6 +64,14 @@ function parseRetryableHttpStatus(status) {
     const normalized = Number(status);
     if (!Number.isInteger(normalized)) return false;
     return normalized === 408 || normalized === 429 || normalized >= 500;
+}
+
+function extractProposalPublicationSideEffects(result) {
+    const submission = result?.response?.submission;
+    return Boolean(
+        submission?.sideEffectsLikelyCommitted ||
+            (typeof submission?.transactionHash === 'string' && submission.transactionHash)
+    );
 }
 
 function isReceiptWaitTimeoutError(error) {
@@ -984,6 +993,82 @@ async function executeToolCalls({
                             endpoint: result.endpoint,
                             requestId: message.requestId ?? null,
                             message,
+                            ...result.response,
+                        }),
+                    });
+                } catch (error) {
+                    await emitOutput({
+                        callId: call.callId,
+                        name: call.name,
+                        output: safeStringify({
+                            status: 'error',
+                            message: error?.message ?? String(error),
+                            retryable: isRetryableToolError(error),
+                            sideEffectsLikelyCommitted: false,
+                        }),
+                    });
+                }
+                continue;
+            }
+
+            if (call.name === 'publish_signed_proposal') {
+                try {
+                    const proposal = normalizeOptionalPlainObject(args.proposal, 'proposal');
+                    if (!proposal) {
+                        throw new Error('proposal is required.');
+                    }
+                    const result = await publishSignedProposal({
+                        walletClient,
+                        account,
+                        config,
+                        proposal,
+                        baseUrl: typeof args.baseUrl === 'string' ? args.baseUrl : undefined,
+                        bearerToken:
+                            typeof args.bearerToken === 'string' ? args.bearerToken : undefined,
+                        timeoutMs: args.timeoutMs,
+                    });
+                    const sideEffectsLikelyCommittedForCall =
+                        extractProposalPublicationSideEffects(result);
+                    if (sideEffectsLikelyCommittedForCall) {
+                        sideEffectsLikelyCommitted = true;
+                    }
+                    if (!result.ok) {
+                        const retryable = parseRetryableHttpStatus(result.status);
+                        await emitOutput({
+                            callId: call.callId,
+                            name: call.name,
+                            output: safeStringify({
+                                status: 'error',
+                                message:
+                                    result.response?.error ??
+                                    result.response?.message ??
+                                    `Proposal publication request failed with status ${result.status}.`,
+                                code: result.response?.code ?? 'proposal_publication_failed',
+                                retryable: !sideEffectsLikelyCommittedForCall && retryable,
+                                sideEffectsLikelyCommitted: sideEffectsLikelyCommittedForCall,
+                                httpStatus: result.status,
+                                endpoint: result.endpoint,
+                                requestId: proposal.requestId ?? null,
+                                response: result.response,
+                                ...(result.response?.submission
+                                    ? { submission: result.response.submission }
+                                    : {}),
+                            }),
+                        });
+                        continue;
+                    }
+                    await emitOutput({
+                        callId: call.callId,
+                        name: call.name,
+                        output: safeStringify({
+                            status:
+                                typeof result.response?.status === 'string' &&
+                                result.response.status.trim()
+                                    ? result.response.status.trim().toLowerCase()
+                                    : 'published',
+                            endpoint: result.endpoint,
+                            requestId: proposal.requestId ?? null,
+                            proposal,
                             ...result.response,
                         }),
                     });

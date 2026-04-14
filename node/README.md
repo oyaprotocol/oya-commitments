@@ -42,9 +42,14 @@ For `polymarket-staked-external-settlement`, the split is now:
 
 - the agent loop trades, publishes cumulative trade logs, makes the final settlement deposit, and publishes a signed reimbursement request
 - the control node disputes invalid user withdrawals from published node state
-- the control node submits the reimbursement proposal after the published settlement state and reimbursement request are both present
+- the control node submits the reimbursement proposal after the published settlement state and reimbursement request are both present, by sending a signed request to `POST /v1/proposals/publish`
 
-Current limit: this module's control loop submits disputes and reimbursement proposals directly with the node signer through the shared onchain tool path. It does not yet route Polymarket reimbursement proposals through `POST /v1/proposals/publish`, because the standalone proposal verifier still only understands `agent_proxy_reimbursement`.
+For this module, operators should run:
+
+- the message publication node so cumulative trade logs and reimbursement-request messages are archived to IPFS and written to the durable message ledger
+- the proposal publication node in `propose` mode so the control node can archive reimbursement proposals to IPFS and submit them onchain
+
+Current limit: the Polymarket reimbursement path now uses the proposal-publication node, but it does not yet have a dedicated verifier like `agent_proxy_reimbursement`. Keep `proposalVerificationMode=off` unless you intentionally want advisory-only recording for this module.
 
 ### Verification Mode
 

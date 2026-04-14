@@ -39,6 +39,7 @@ Options:
   --help                               Show this help
 
 The control node requires a module export getNodeDeterministicToolCalls() and a configured messagePublishApi state file.
+Modules that submit reimbursement proposals through the standalone proposal node also require proposalPublishApi.enabled=true and proposalPublishApi.mode="propose".
 `);
 }
 
@@ -100,6 +101,10 @@ async function main({ argv = process.argv } = {}) {
                     modulePath: runtimeConfig.modulePath,
                     proposeEnabled: runtimeConfig.proposeEnabled,
                     disputeEnabled: runtimeConfig.disputeEnabled,
+                    proposalPublishApiEnabled: runtimeConfig.proposalPublishApiEnabled,
+                    proposalPublishApiHost: runtimeConfig.proposalPublishApiHost ?? null,
+                    proposalPublishApiPort: runtimeConfig.proposalPublishApiPort ?? null,
+                    proposalPublishApiMode: runtimeConfig.proposalPublishApiMode ?? null,
                 },
                 null,
                 2
