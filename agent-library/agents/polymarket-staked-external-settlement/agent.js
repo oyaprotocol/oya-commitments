@@ -1,15 +1,9 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildOgTransactions } from '../../../agent/src/lib/tx.js';
 import { getAlwaysEmitBalanceSnapshotPollingOptions } from '../../../agent/src/lib/polling.js';
-import { normalizeHashOrNull } from '../../../agent/src/lib/utils.js';
 import {
     applyDepositToolOutput,
-    applyDisputeToolOutput,
-    applyProposalLifecycleEvents,
     applyPublicationToolOutput,
-    applyReimbursementToolOutput,
-    refreshPendingReimbursements,
     refreshPendingSettlementDeposits,
 } from './settlement-reconciliation.js';
 import {
@@ -22,22 +16,28 @@ import {
 } from './state-store.js';
 import {
     buildPublicationRequestId,
-    buildReimbursementExplanation,
+    buildReimbursementRequestId,
+    buildReimbursementRequestMessage,
     buildStateScope,
     buildTradeLogMessage,
     clearStaleDispatches,
     computeOutstandingSettlementWei,
     computeReimbursementEligibleWei,
-    findWithdrawalViolationSignals,
     ingestCommand,
     interpretSignedAgentCommandSignal,
-    isMarketBlockingWithdrawals,
     resolvePolicy,
 } from './trade-ledger.js';
 import {
     derivePublishedMessageLockKeys,
     validatePublishedMessage,
 } from './published-message-validator.js';
+import {
+    getNodeDeterministicToolCalls,
+    getNodeState,
+    onNodeProposalEvents,
+    onNodeToolOutput,
+    resetNodeStateForTest,
+} from './node-controller.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -47,7 +47,6 @@ let runtimeState = createEmptyState();
 let runtimeStateHydrated = false;
 let runtimeStatePath = null;
 let runtimeScopeKey = null;
-const queuedProposalEventUpdates = [];
 
 function getStatePath(policy) {
     if (policy?.stateFile) {
@@ -99,7 +98,7 @@ async function hydrateState({ config, policy, commitmentSafe, ogModule }) {
     }
     if (persisted.version !== STATE_VERSION) {
         throw new Error(
-            `Unsupported persisted ${STATE_VERSION ? 'state version' : 'state'} in ${statePath}: ${persisted.version}`
+            `Unsupported persisted state version in ${statePath}: ${persisted.version}`
         );
     }
     if (serializeScope(persisted.scope) !== serializeScope(scope)) {
@@ -132,28 +131,19 @@ async function resetModuleStateForTest({ config } = {}) {
     });
     runtimeState = createEmptyState(runtimeState.scope ?? null);
     runtimeStateHydrated = true;
-    queuedProposalEventUpdates.length = 0;
     if (runtimeStatePath) {
         await deletePersistedState(runtimeStatePath);
     }
 }
 
-function getSystemPrompt({ proposeEnabled, disputeEnabled, commitmentText }) {
-    const mode = proposeEnabled && disputeEnabled
-        ? 'You may propose reimbursements and dispute invalid withdrawals.'
-        : proposeEnabled
-            ? 'You may propose reimbursements but you may not dispute.'
-            : disputeEnabled
-                ? 'You may dispute invalid withdrawals but you may not propose reimbursements.'
-                : 'You may not propose or dispute; provide state only.';
-
+function getSystemPrompt({ commitmentText }) {
     return [
         'You are a deterministic Polymarket external-settlement agent.',
         'Accept only signed agent-authored trade and settlement commands.',
-        'Publish every material market-state change through the companion Oya message-publication node before settlement or reimbursement steps advance.',
+        'Publish every material market-state change through the companion Oya message-publication node before reimbursement requests advance.',
         'Treat node-attested trade classifications as the only source of reimbursement eligibility.',
-        'Prefer no-op when publication, settlement, or proposal state is incomplete.',
-        mode,
+        'This agent loop is responsible for trade logging and settlement deposits, while the standalone node owns withdrawal disputes and reimbursement proposal submission.',
+        'Prefer no-op when publication or settlement state is incomplete.',
         commitmentText ? `Commitment text:\n${commitmentText}` : '',
     ]
         .filter(Boolean)
@@ -164,29 +154,18 @@ function getPollingOptions() {
     return getAlwaysEmitBalanceSnapshotPollingOptions();
 }
 
-function extractProposalHashes(entries) {
-    return (Array.isArray(entries) ? entries : [])
-        .map((entry) =>
-            typeof entry === 'string'
-                ? normalizeHashOrNull(entry)
-                : normalizeHashOrNull(entry?.proposalHash)
-        )
-        .filter(Boolean);
-}
-
 function selectSortedMarkets() {
     return Object.values(runtimeState.markets ?? {}).sort((left, right) =>
         left.stream.marketId.localeCompare(right.stream.marketId)
     );
 }
 
-function buildPublishToolCall(market, policy) {
-    const pending = market.pendingPublication;
+function buildPublishToolCall({ message, callId }, policy) {
     return {
-        callId: `publish-trade-log-${market.stream.marketId}-${pending.sequence}`,
+        callId,
         name: 'publish_signed_message',
         arguments: JSON.stringify({
-            message: pending.message,
+            message,
             baseUrl: null,
             bearerToken: null,
             timeoutMs: policy.publishTimeoutMs,
@@ -205,41 +184,6 @@ function buildSettlementDepositToolCall(market, policy) {
     };
 }
 
-function buildReimbursementToolCall({ market, policy, config }) {
-    const reimbursementAmountWei = computeReimbursementEligibleWei(market);
-    const transactions = buildOgTransactions(
-        [
-            {
-                kind: 'erc20_transfer',
-                token: policy.collateralToken,
-                to: policy.authorizedAgent,
-                amountWei: reimbursementAmountWei,
-                operation: 0,
-            },
-        ],
-        { config }
-    );
-    return {
-        callId: `reimbursement-proposal-${market.stream.marketId}-${market.revision}`,
-        name: 'post_bond_and_propose',
-        arguments: JSON.stringify({
-            transactions,
-            explanation: buildReimbursementExplanation({ market }),
-        }),
-    };
-}
-
-function buildDisputeToolCall(assertionId, blockingMarketIds) {
-    return {
-        callId: `dispute-withdrawal-${assertionId}`,
-        name: 'dispute_assertion',
-        arguments: JSON.stringify({
-            assertionId,
-            explanation: `Dispute withdrawal while unsettled Polymarket markets remain: ${blockingMarketIds.join(', ')}`,
-        }),
-    };
-}
-
 function ingestSignals(signals, { policy, config }) {
     let changed = false;
     for (const signal of Array.isArray(signals) ? signals : []) {
@@ -252,7 +196,7 @@ function ingestSignals(signals, { policy, config }) {
     return changed;
 }
 
-function findOrCreatePendingPublication({ policy, config, agentAddress }) {
+function findOrCreatePendingTradeLogPublication({ policy, config, agentAddress }) {
     for (const market of selectSortedMarkets()) {
         if (!market.pendingPublication && Number(market.revision) > Number(market.publishedRevision)) {
             const message = buildTradeLogMessage({
@@ -268,10 +212,28 @@ function findOrCreatePendingPublication({ policy, config, agentAddress }) {
                 dispatchAtMs: Date.now(),
                 message,
             };
-            return { market, changed: true };
+            return {
+                changed: true,
+                toolCall: buildPublishToolCall(
+                    {
+                        message,
+                        callId: `publish-trade-log-${market.stream.marketId}-${market.pendingPublication.sequence}`,
+                    },
+                    policy
+                ),
+            };
         }
         if (market.pendingPublication) {
-            return { market, changed: false };
+            return {
+                changed: false,
+                toolCall: buildPublishToolCall(
+                    {
+                        message: market.pendingPublication.message,
+                        callId: `publish-trade-log-${market.stream.marketId}-${market.pendingPublication.sequence}`,
+                    },
+                    policy
+                ),
+            };
         }
     }
     return null;
@@ -298,10 +260,7 @@ function selectSettlementDepositCandidate() {
     return null;
 }
 
-function selectReimbursementCandidate({ config, onchainPendingProposal }) {
-    if (onchainPendingProposal || !config?.proposeEnabled) {
-        return null;
-    }
+function findOrCreatePendingReimbursementRequest({ policy, config, agentAddress }) {
     for (const market of selectSortedMarkets()) {
         if (!market.trades.length || !market.settlement?.settledAtMs) {
             continue;
@@ -312,19 +271,42 @@ function selectReimbursementCandidate({ config, onchainPendingProposal }) {
         if (BigInt(computeOutstandingSettlementWei(market)) > 0n) {
             continue;
         }
-        if (
-            market.reimbursement.dispatchAtMs ||
-            market.reimbursement.submissionTxHash ||
-            market.reimbursement.proposalHash ||
-            market.reimbursement.reimbursedAtMs
-        ) {
-            continue;
-        }
         if (BigInt(computeReimbursementEligibleWei(market)) <= 0n) {
             continue;
         }
-        market.reimbursement.dispatchAtMs = Date.now();
-        return market;
+        if (market.reimbursement.requestDispatchAtMs) {
+            return {
+                changed: false,
+                toolCall: buildPublishToolCall(
+                    {
+                        message: market.reimbursement.pendingMessage,
+                        callId: `publish-reimbursement-request-${market.stream.marketId}-${market.revision}`,
+                    },
+                    policy
+                ),
+            };
+        }
+        if (market.reimbursement.requestedRevision === Number(market.revision)) {
+            continue;
+        }
+
+        market.reimbursement.requestId = buildReimbursementRequestId(market);
+        market.reimbursement.pendingMessage = buildReimbursementRequestMessage({
+            market,
+            config,
+            agentAddress,
+        });
+        market.reimbursement.requestDispatchAtMs = Date.now();
+        return {
+            changed: true,
+            toolCall: buildPublishToolCall(
+                {
+                    message: market.reimbursement.pendingMessage,
+                    callId: `publish-reimbursement-request-${market.stream.marketId}-${market.revision}`,
+                },
+                policy
+            ),
+        };
     }
     return null;
 }
@@ -335,7 +317,6 @@ async function getDeterministicToolCalls({
     agentAddress,
     publicClient,
     config,
-    onchainPendingProposal = false,
 }) {
     const policy = resolvePolicy(config);
     if (!policy.ready) {
@@ -355,63 +336,23 @@ async function getDeterministicToolCalls({
     });
 
     let changed = clearStaleDispatches(runtimeState, policy.dispatchGraceMs);
-    while (queuedProposalEventUpdates.length > 0) {
-        changed =
-            applyProposalLifecycleEvents(runtimeState, queuedProposalEventUpdates.shift()) || changed;
-    }
-    changed =
-        (await refreshPendingSettlementDeposits(runtimeState, { publicClient })) || changed;
-    changed =
-        (await refreshPendingReimbursements(runtimeState, {
-            publicClient,
-            ogModule: config.ogModule,
-        })) || changed;
+    changed = (await refreshPendingSettlementDeposits(runtimeState, { publicClient })) || changed;
     changed = ingestSignals(signals, { policy, config }) || changed;
 
     if (changed) {
         await persistState();
     }
 
-    if (config?.disputeEnabled && runtimeState.pendingDispute?.assertionId) {
-        return [
-            buildDisputeToolCall(
-                runtimeState.pendingDispute.assertionId,
-                runtimeState.pendingDispute.blockingMarketIds ?? []
-            ),
-        ];
-    }
-
-    if (config?.disputeEnabled) {
-        const violations = findWithdrawalViolationSignals({
-            signals,
-            state: runtimeState,
-            policy,
-        });
-        if (violations.length > 0) {
-            runtimeState.pendingDispute = {
-                ...violations[0],
-                dispatchAtMs: Date.now(),
-            };
-            await persistState();
-            return [
-                buildDisputeToolCall(
-                    runtimeState.pendingDispute.assertionId,
-                    runtimeState.pendingDispute.blockingMarketIds
-                ),
-            ];
-        }
-    }
-
-    const pendingPublication = findOrCreatePendingPublication({
+    const pendingPublication = findOrCreatePendingTradeLogPublication({
         policy,
         config,
         agentAddress: policy.authorizedAgent,
     });
-    if (pendingPublication?.changed) {
-        await persistState();
-    }
-    if (pendingPublication?.market) {
-        return [buildPublishToolCall(pendingPublication.market, policy)];
+    if (pendingPublication) {
+        if (pendingPublication.changed) {
+            await persistState();
+        }
+        return [pendingPublication.toolCall];
     }
 
     const settlementDepositMarket = selectSettlementDepositCandidate();
@@ -420,13 +361,16 @@ async function getDeterministicToolCalls({
         return [buildSettlementDepositToolCall(settlementDepositMarket, policy)];
     }
 
-    const reimbursementMarket = selectReimbursementCandidate({
+    const reimbursementRequest = findOrCreatePendingReimbursementRequest({
+        policy,
         config,
-        onchainPendingProposal,
+        agentAddress: policy.authorizedAgent,
     });
-    if (reimbursementMarket) {
-        await persistState();
-        return [buildReimbursementToolCall({ market: reimbursementMarket, policy, config })];
+    if (reimbursementRequest) {
+        if (reimbursementRequest.changed) {
+            await persistState();
+        }
+        return [reimbursementRequest.toolCall];
     }
 
     return [];
@@ -449,10 +393,6 @@ async function onToolOutput({ name, parsedOutput, config, commitmentSafe }) {
         changed = applyPublicationToolOutput(runtimeState, parsedOutput) || changed;
     } else if (name === 'make_deposit') {
         changed = applyDepositToolOutput(runtimeState, parsedOutput) || changed;
-    } else if (name === 'post_bond_and_propose' || name === 'auto_post_bond_and_propose') {
-        changed = applyReimbursementToolOutput(runtimeState, parsedOutput) || changed;
-    } else if (name === 'dispute_assertion') {
-        changed = applyDisputeToolOutput(runtimeState, parsedOutput) || changed;
     }
 
     if (changed) {
@@ -460,21 +400,21 @@ async function onToolOutput({ name, parsedOutput, config, commitmentSafe }) {
     }
 }
 
-function onProposalEvents({ executedProposals = [], deletedProposals = [] } = {}) {
-    queuedProposalEventUpdates.push({
-        executedProposals: extractProposalHashes(executedProposals),
-        deletedProposals: extractProposalHashes(deletedProposals),
-    });
-}
+function onProposalEvents() {}
 
 export {
     derivePublishedMessageLockKeys,
     getDeterministicToolCalls,
     getModuleState,
+    getNodeDeterministicToolCalls,
+    getNodeState,
     getPollingOptions,
     getSystemPrompt,
+    onNodeProposalEvents,
+    onNodeToolOutput,
     onProposalEvents,
     onToolOutput,
     resetModuleStateForTest,
+    resetNodeStateForTest,
     validatePublishedMessage,
 };

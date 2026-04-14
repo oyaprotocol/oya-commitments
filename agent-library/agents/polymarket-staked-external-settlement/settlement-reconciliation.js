@@ -20,20 +20,17 @@ function findMarketByPendingPublication(state, requestId) {
     );
 }
 
+function findMarketByPendingReimbursementRequest(state, requestId) {
+    return Object.values(state.markets ?? {}).find(
+        (market) => market.reimbursement?.requestId === requestId
+    );
+}
+
 function findMarketByPendingDeposit(state) {
     return Object.values(state.markets ?? {}).find(
         (market) =>
             Number.isInteger(market.settlement?.depositDispatchAtMs) &&
             !market.settlement?.depositTxHash
-    );
-}
-
-function findMarketByPendingReimbursement(state) {
-    return Object.values(state.markets ?? {}).find(
-        (market) =>
-            Number.isInteger(market.reimbursement?.dispatchAtMs) &&
-            !market.reimbursement?.submissionTxHash &&
-            !market.reimbursement?.proposalHash
     );
 }
 
@@ -72,28 +69,46 @@ function applyPublicationToolOutput(state, parsedOutput) {
         return false;
     }
     const market = findMarketByPendingPublication(state, requestId.trim());
-    if (!market) {
-        return false;
-    }
+    if (market) {
+        const successish = isSuccessishToolStatus(parsedOutput);
+        if (!successish) {
+            market.pendingPublication = null;
+            market.latestValidation = null;
+            return true;
+        }
 
-    const successish = isSuccessishToolStatus(parsedOutput);
-    if (!successish) {
+        const pending = market.pendingPublication;
+        market.lastPublishedCid = parsedOutput?.cid ?? market.lastPublishedCid;
+        market.lastPublishedSequence = Number(pending.sequence ?? market.lastPublishedSequence);
+        market.publishedRevision = Number(pending.revision ?? market.publishedRevision);
+        market.latestValidation = parsedOutput?.validation ?? null;
+        mergeTradeClassifications(
+            market,
+            parsedOutput?.validation?.classifications,
+            parsedOutput?.cid ?? null
+        );
         market.pendingPublication = null;
-        market.latestValidation = null;
         return true;
     }
 
-    const pending = market.pendingPublication;
-    market.lastPublishedCid = parsedOutput?.cid ?? market.lastPublishedCid;
-    market.lastPublishedSequence = Number(pending.sequence ?? market.lastPublishedSequence);
-    market.publishedRevision = Number(pending.revision ?? market.publishedRevision);
-    market.latestValidation = parsedOutput?.validation ?? null;
-    mergeTradeClassifications(
-        market,
-        parsedOutput?.validation?.classifications,
-        parsedOutput?.cid ?? null
+    const reimbursementRequestMarket = findMarketByPendingReimbursementRequest(state, requestId.trim());
+    if (!reimbursementRequestMarket) {
+        return false;
+    }
+    reimbursementRequestMarket.reimbursement.requestDispatchAtMs = null;
+    if (!isSuccessishToolStatus(parsedOutput)) {
+        reimbursementRequestMarket.reimbursement.lastError =
+            parsedOutput?.message ?? 'Reimbursement request publication failed.';
+        return true;
+    }
+    reimbursementRequestMarket.reimbursement.requestCid =
+        parsedOutput?.cid ?? reimbursementRequestMarket.reimbursement.requestCid;
+    reimbursementRequestMarket.reimbursement.requestedAtMs = Date.now();
+    reimbursementRequestMarket.reimbursement.requestedRevision = Number(
+        reimbursementRequestMarket.revision ?? reimbursementRequestMarket.reimbursement.requestedRevision
     );
-    market.pendingPublication = null;
+    reimbursementRequestMarket.reimbursement.pendingMessage = null;
+    reimbursementRequestMarket.reimbursement.lastError = null;
     return true;
 }
 
@@ -117,46 +132,6 @@ function applyDepositToolOutput(state, parsedOutput) {
         market.settlement.depositConfirmedAtMs = Date.now();
     }
     markMarketDirty(market);
-    return true;
-}
-
-function applyReimbursementToolOutput(state, parsedOutput) {
-    const market = findMarketByPendingReimbursement(state);
-    if (!market) {
-        return false;
-    }
-    market.reimbursement.dispatchAtMs = null;
-
-    if (!isSuccessishToolStatus(parsedOutput)) {
-        market.reimbursement.lastError =
-            parsedOutput?.message ?? 'Reimbursement proposal submission failed.';
-        markMarketDirty(market);
-        return true;
-    }
-
-    market.reimbursement.lastError = null;
-    market.reimbursement.submissionTxHash =
-        normalizeHashOrNull(parsedOutput?.transactionHash) ?? market.reimbursement.submissionTxHash;
-    market.reimbursement.proposalHash =
-        normalizeHashOrNull(parsedOutput?.ogProposalHash) ??
-        normalizeHashOrNull(parsedOutput?.proposalHash) ??
-        market.reimbursement.proposalHash;
-    market.reimbursement.submittedAtMs = Date.now();
-    markMarketDirty(market);
-    return true;
-}
-
-function applyDisputeToolOutput(state, parsedOutput) {
-    if (!state.pendingDispute?.assertionId) {
-        return false;
-    }
-    if (!isSuccessishToolStatus(parsedOutput)) {
-        return false;
-    }
-    if (!state.disputedAssertionIds.includes(state.pendingDispute.assertionId)) {
-        state.disputedAssertionIds.push(state.pendingDispute.assertionId);
-    }
-    state.pendingDispute = null;
     return true;
 }
 
@@ -191,80 +166,9 @@ async function refreshPendingSettlementDeposits(state, { publicClient }) {
     return changed;
 }
 
-async function refreshPendingReimbursements(state, { publicClient, ogModule }) {
-    if (!publicClient || typeof publicClient.getTransactionReceipt !== 'function') {
-        return false;
-    }
-    let changed = false;
-    for (const market of Object.values(state.markets ?? {})) {
-        if (market.reimbursement.proposalHash || market.reimbursement.reimbursedAtMs) {
-            continue;
-        }
-        const txHash = normalizeHashOrNull(market.reimbursement.submissionTxHash);
-        if (!txHash) {
-            continue;
-        }
-        try {
-            const receipt = await publicClient.getTransactionReceipt({ hash: txHash });
-            if (receipt?.status === 0n || receipt?.status === 0 || receipt?.status === 'reverted') {
-                market.reimbursement.submissionTxHash = null;
-                market.reimbursement.submittedAtMs = null;
-                market.reimbursement.lastError = 'Reimbursement proposal transaction reverted.';
-                markMarketDirty(market);
-                changed = true;
-                continue;
-            }
-            const proposalHash = extractProposalHashFromReceipt(receipt, ogModule);
-            if (proposalHash) {
-                market.reimbursement.proposalHash = proposalHash;
-                market.reimbursement.lastError = null;
-                markMarketDirty(market);
-                changed = true;
-            }
-        } catch {
-            continue;
-        }
-    }
-    return changed;
-}
-
-function applyProposalLifecycleEvents(state, { executedProposals = [], deletedProposals = [] }) {
-    const executed = new Set((executedProposals ?? []).map((value) => normalizeHashOrNull(value)).filter(Boolean));
-    const deleted = new Set((deletedProposals ?? []).map((value) => normalizeHashOrNull(value)).filter(Boolean));
-    let changed = false;
-
-    for (const market of Object.values(state.markets ?? {})) {
-        const proposalHash = normalizeHashOrNull(market.reimbursement?.proposalHash);
-        if (!proposalHash) {
-            continue;
-        }
-        if (executed.has(proposalHash)) {
-            market.reimbursement.reimbursedAtMs = Date.now();
-            markMarketDirty(market);
-            changed = true;
-            continue;
-        }
-        if (deleted.has(proposalHash)) {
-            market.reimbursement.proposalHash = null;
-            market.reimbursement.submissionTxHash = null;
-            market.reimbursement.submittedAtMs = null;
-            market.reimbursement.reimbursedAtMs = null;
-            market.reimbursement.lastError = null;
-            markMarketDirty(market);
-            changed = true;
-        }
-    }
-
-    return changed;
-}
-
 export {
     applyDepositToolOutput,
-    applyDisputeToolOutput,
-    applyProposalLifecycleEvents,
     applyPublicationToolOutput,
-    applyReimbursementToolOutput,
     extractProposalHashFromReceipt,
-    refreshPendingReimbursements,
     refreshPendingSettlementDeposits,
 };

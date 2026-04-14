@@ -6,6 +6,7 @@ These daemons are separate from the commitment-serving agent loop in `agent/`:
 
 - the message publication node archives signed agent-authored messages to IPFS
 - the message publication node can optionally run a module-exported validator and sign validator output into the published artifact
+- the control node polls the commitment and the module's published-message history, then lets module-local node hooks decide whether to dispute withdrawals or submit other node-owned onchain actions
 - the proposal publication node archives signed proposal bundles to IPFS
 - the proposal publication node can also run in `propose` mode and submit proposals onchain
 - the proposal publication node now also exposes a verification API for supported proposal kinds
@@ -27,6 +28,23 @@ Current verifier coverage is intentionally narrow:
 - current outcome for extra relevant templates such as `Trade Restrictions`, `Trading Limits`, or pause rules: `unknown`
 
 The verifier is deterministic only. It does not use an LLM and it does not attempt freeform semantic interpretation of arbitrary commitment text.
+
+## Control Node
+
+`node/scripts/start-control-node.mjs` runs a standalone polling loop for modules that export `getNodeDeterministicToolCalls()`. The control loop:
+
+- uses the module's normal runtime config and signer
+- reads the durable message-publication ledger for that module
+- polls the Optimistic Governor for new, executed, and deleted proposals
+- delegates actual node-owned decisions to module-local hooks such as `getNodeDeterministicToolCalls()`, `onNodeToolOutput()`, and `onNodeProposalEvents()`
+
+For `polymarket-staked-external-settlement`, the split is now:
+
+- the agent loop trades, publishes cumulative trade logs, makes the final settlement deposit, and publishes a signed reimbursement request
+- the control node disputes invalid user withdrawals from published node state
+- the control node submits the reimbursement proposal after the published settlement state and reimbursement request are both present
+
+Current limit: this module's control loop submits disputes and reimbursement proposals directly with the node signer through the shared onchain tool path. It does not yet route Polymarket reimbursement proposals through `POST /v1/proposals/publish`, because the standalone proposal verifier still only understands `agent_proxy_reimbursement`.
 
 ### Verification Mode
 
@@ -82,6 +100,7 @@ From the repository root:
 
 ```bash
 node node/scripts/start-message-publish-node.mjs --module=<agent-name>
+node node/scripts/start-control-node.mjs --module=<agent-name>
 node node/scripts/start-proposal-publish-node.mjs --module=<agent-name>
 ```
 
@@ -89,6 +108,7 @@ For dry-run config resolution:
 
 ```bash
 node node/scripts/start-message-publish-node.mjs --module=<agent-name> --dry-run
+node node/scripts/start-control-node.mjs --module=<agent-name> --dry-run
 node node/scripts/start-proposal-publish-node.mjs --module=<agent-name> --dry-run
 ```
 

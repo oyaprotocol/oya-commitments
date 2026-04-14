@@ -16,13 +16,15 @@ The designated agent at address [AGENT_ADDRESS] must deposit a stake of [STAKE_A
 
 To track this external trading, the agent will periodically sign an updated log documenting all of their trades, and send to the node at address [NODE_ADDRESS] for a second signature, and publication to IPFS.
 
+When the agent wants reimbursement after completing the required settlement deposit, they must send a signed reimbursement request to the node. The node should use the published cumulative trade log plus that reimbursement request when deciding whether to submit the reimbursement proposal onchain.
+
 Trades must be logged within [LOGGING_WINDOW_MINUTES] minutes of trade execution to be considered valid for reimbursement.
 
 The node should publish full cumulative trade-log snapshots whenever the stream sequence and internal consistency are valid. If a newly introduced trade entry reaches the node too late to remain reimbursement-eligible, the node should still publish it in the cumulative log, but mark that entry non-reimbursable.
 
 When a Polymarket market resolves, the agent must deposit the resulting winnings (if any) into the commitment to receive reimbursement for the initial trade(s). Or, if the agent has already exited the position before the market resolved, they must deposit any proceeds into the commitment to receive reimbursement. If the position was held until market resolution and it was a losing position, no deposit is necessary from the agent to claim reimbursement, since the value of the position is zero.
 
-Until a market's required final settlement deposit has been made, any user withdrawal proposal that would transfer value out of the commitment should be considered invalid and may be disputed by the agent or node.
+Until a market's required final settlement deposit has been made, any user withdrawal proposal that would transfer value out of the commitment should be considered invalid and may be disputed by the node.
 
 If the agent does not make the required deposit within [SETTLEMENT_DEADLINE_HOURS] hours of market resolution, they shall be considered in violation of this rule, and their stake will be forfeit in its entirety to the user.
 

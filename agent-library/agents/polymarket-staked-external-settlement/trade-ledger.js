@@ -8,6 +8,7 @@ import {
 import { cloneJson } from './state-store.js';
 
 const MODULE_NAME = 'polymarket-staked-external-settlement';
+const POLYMARKET_REIMBURSEMENT_REQUEST_KIND = 'polymarketReimbursementRequest';
 const TRADE_ENTRY_KINDS = new Set(['initiated', 'continuation']);
 const TRADE_COMMANDS = new Set(['polymarket_trade', 'polymarket_log_trade']);
 const SETTLEMENT_COMMANDS = new Set(['polymarket_settlement', 'polymarket_settle_market']);
@@ -141,6 +142,7 @@ function resolvePolicy(config = {}) {
         userAddress,
         collateralToken,
         stateFile: normalizeOptionalString(moduleConfig.stateFile),
+        nodeStateFile: normalizeOptionalString(moduleConfig.nodeStateFile),
         dispatchGraceMs: parsePositiveInteger(
             moduleConfig.dispatchGraceMs ?? DEFAULT_DISPATCH_GRACE_MS,
             'polymarketStakedExternalSettlement.dispatchGraceMs'
@@ -208,11 +210,12 @@ function createEmptyMarketState({ policy, config, marketId }) {
             depositError: null,
         },
         reimbursement: {
-            dispatchAtMs: null,
-            submissionTxHash: null,
-            proposalHash: null,
-            submittedAtMs: null,
-            reimbursedAtMs: null,
+            requestDispatchAtMs: null,
+            requestId: null,
+            requestCid: null,
+            requestedAtMs: null,
+            requestedRevision: null,
+            pendingMessage: null,
             lastError: null,
         },
     };
@@ -467,9 +470,8 @@ function buildMarketSummary(market) {
         settledAtMs: market.settlement.settledAtMs ?? null,
         settlementDepositTxHash: market.settlement.depositTxHash ?? null,
         settlementDepositConfirmedAtMs: market.settlement.depositConfirmedAtMs ?? null,
-        reimbursementProposalHash: market.reimbursement.proposalHash ?? null,
-        reimbursementSubmittedAtMs: market.reimbursement.submittedAtMs ?? null,
-        reimbursedAtMs: market.reimbursement.reimbursedAtMs ?? null,
+        reimbursementRequestCid: market.reimbursement.requestCid ?? null,
+        reimbursementRequestedAtMs: market.reimbursement.requestedAtMs ?? null,
     };
 }
 
@@ -505,6 +507,10 @@ function buildPublicationRequestId(market) {
     return `${MODULE_NAME}:${market.stream.marketId}:seq:${Number(market.lastPublishedSequence) + 1}`;
 }
 
+function buildReimbursementRequestId(market) {
+    return `${MODULE_NAME}:${market.stream.marketId}:reimbursement:${Number(market.revision)}`;
+}
+
 function buildTradeLogMessage({ market, config, agentAddress, revision }) {
     return {
         chainId: Number(config.chainId),
@@ -527,8 +533,22 @@ function buildTradeLogMessage({ market, config, agentAddress, revision }) {
 function buildReimbursementExplanation({ market }) {
     return buildStructuredProposalExplanation({
         kind: 'polymarket_staked_external_settlement_reimbursement',
-        description: `Reimburse the agent for published Polymarket market ${market.stream.marketId}. snapshotCid=${market.lastPublishedCid ?? 'missing'}`,
+        description: `Reimburse the agent for published Polymarket market ${market.stream.marketId}. snapshotCid=${market.lastPublishedCid ?? 'missing'} requestCid=${market.reimbursement.requestCid ?? 'missing'}`,
     });
+}
+
+function buildReimbursementRequestMessage({ market, config, agentAddress }) {
+    return {
+        chainId: Number(config.chainId),
+        requestId: buildReimbursementRequestId(market),
+        commitmentAddresses: [market.stream.commitmentSafe, market.stream.ogModule],
+        agentAddress,
+        kind: POLYMARKET_REIMBURSEMENT_REQUEST_KIND,
+        payload: {
+            stream: cloneJson(market.stream),
+            snapshotCid: market.lastPublishedCid,
+        },
+    };
 }
 
 function extractUserTransferFromTransaction(transaction, userAddress) {
@@ -597,6 +617,15 @@ function clearStaleDispatches(state, dispatchGraceMs, nowMs = Date.now()) {
             market.pendingPublication = null;
             changed = true;
         }
+        const reimbursementRequestAge = Number.isInteger(
+            market.reimbursement?.requestDispatchAtMs
+        )
+            ? nowMs - market.reimbursement.requestDispatchAtMs
+            : null;
+        if (reimbursementRequestAge !== null && reimbursementRequestAge > dispatchGraceMs) {
+            market.reimbursement.requestDispatchAtMs = null;
+            changed = true;
+        }
     }
     return changed;
 }
@@ -607,7 +636,9 @@ export {
     ZERO_ADDRESS,
     buildMarketSummary,
     buildPublicationRequestId,
+    buildReimbursementRequestId,
     buildReimbursementExplanation,
+    buildReimbursementRequestMessage,
     buildStateScope,
     buildTradeLogMessage,
     clearStaleDispatches,
@@ -621,6 +652,7 @@ export {
     isMarketBlockingWithdrawals,
     markMarketDirty,
     mergeTradeClassifications,
+    POLYMARKET_REIMBURSEMENT_REQUEST_KIND,
     resolvePolicy,
     resolveModuleConfig,
 };

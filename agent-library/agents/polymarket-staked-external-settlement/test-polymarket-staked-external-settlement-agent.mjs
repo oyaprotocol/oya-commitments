@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 import { encodeFunctionData, erc20Abi } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { executeToolCalls } from '../../../agent/src/lib/tools.js';
-import { decodeErc20TransferCallData } from '../../../agent/src/lib/utils.js';
 import {
     getDeterministicToolCalls,
     getModuleState,
@@ -11,6 +10,9 @@ import {
     resetModuleStateForTest,
     validatePublishedMessage,
 } from './agent.js';
+import {
+    POLYMARKET_REIMBURSEMENT_REQUEST_KIND,
+} from './trade-ledger.js';
 
 const TEST_AGENT = privateKeyToAccount(`0x${'1'.repeat(64)}`);
 const TEST_CHAIN_ID = 137;
@@ -396,13 +398,31 @@ async function run() {
             publicClient,
             config,
         });
-        assert.equal(toolCalls[0].name, 'post_bond_and_propose');
-        const reimbursementArgs = JSON.parse(toolCalls[0].arguments);
-        assert.equal(reimbursementArgs.transactions.length, 1);
-        const decodedTransfer = decodeErc20TransferCallData(reimbursementArgs.transactions[0].data);
-        assert.equal(decodedTransfer?.amount?.toString(), '1000000');
-        assert.equal(decodedTransfer?.to, TEST_AGENT.address.toLowerCase());
-        assert.match(reimbursementArgs.explanation, /market-1/);
+        assert.equal(toolCalls[0].name, 'publish_signed_message');
+        const reimbursementRequestArgs = JSON.parse(toolCalls[0].arguments);
+        assert.equal(
+            reimbursementRequestArgs.message.kind,
+            POLYMARKET_REIMBURSEMENT_REQUEST_KIND
+        );
+        assert.equal(
+            reimbursementRequestArgs.message.payload.snapshotCid,
+            postDepositPublication.cid
+        );
+        const reimbursementRequestPublication = await runPublishCall({
+            toolCall: toolCalls[0],
+            publicClient,
+            config,
+        });
+        assert.equal(
+            reimbursementRequestPublication.validation.validatorId,
+            'polymarket_reimbursement_request'
+        );
+        await onToolOutput({
+            name: 'publish_signed_message',
+            parsedOutput: reimbursementRequestPublication,
+            config,
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+        });
 
         const state = getModuleState();
         assert.equal(state.markets['market-1'].tradeClassifications['trade-1'].classification, 'reimbursable');
@@ -410,14 +430,29 @@ async function run() {
             state.markets['market-1'].tradeClassifications['trade-2'].classification,
             'non_reimbursable_late'
         );
+        assert.equal(
+            state.markets['market-1'].reimbursement.requestCid,
+            reimbursementRequestPublication.cid
+        );
 
         await resetModuleStateForTest({ config });
-        await getDeterministicToolCalls({
+        const replayToolCalls = await getDeterministicToolCalls({
             signals: [timelyTradeSignal],
             commitmentSafe: TEST_COMMITMENT_SAFE,
             agentAddress: TEST_AGENT.address,
             publicClient,
             config,
+        });
+        const replayPublication = await runPublishCall({
+            toolCall: replayToolCalls[0],
+            publicClient,
+            config,
+        });
+        await onToolOutput({
+            name: 'publish_signed_message',
+            parsedOutput: replayPublication,
+            config,
+            commitmentSafe: TEST_COMMITMENT_SAFE,
         });
 
         const withdrawalProposalSignal = {
@@ -448,11 +483,7 @@ async function run() {
             config,
             onchainPendingProposal: true,
         });
-        assert.equal(toolCalls.length, 1);
-        assert.equal(toolCalls[0].name, 'dispute_assertion');
-        const disputeArgs = JSON.parse(toolCalls[0].arguments);
-        assert.equal(disputeArgs.assertionId, withdrawalProposalSignal.assertionId);
-        assert.match(disputeArgs.explanation, /market-1/);
+        assert.equal(toolCalls.length, 0);
     } finally {
         mockNode.stop();
         await resetModuleStateForTest({ config });

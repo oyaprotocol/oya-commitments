@@ -268,6 +268,8 @@ Compatibility note: `agent/scripts/start-message-publish-node.mjs` still works a
 
 Agent modules may optionally export `validatePublishedMessage(args)` to attach domain-specific validation output to published artifacts. The shared node remains generic: the hook can reject structurally invalid messages by throwing, or it can return a validation object that the node signs into the publication attestation.
 
+Modules may also export node-side control hooks such as `getNodeDeterministicToolCalls(args)`, `onNodeToolOutput(args)`, and `onNodeProposalEvents(args)`. Those hooks are served by the standalone control loop at `node/scripts/start-control-node.mjs`, which lets a module move commitment-enforcement actions such as disputes or reimbursement proposals out of the trading agent loop and into the node.
+
 Current request shape:
 
 ```json

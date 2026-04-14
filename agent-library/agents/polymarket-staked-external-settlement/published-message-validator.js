@@ -7,7 +7,10 @@ import { createValidatedReadOnlyRuntime } from '../../../agent/src/lib/chain-run
 import { normalizeAddressOrNull } from '../../../agent/src/lib/utils.js';
 
 const POLYMARKET_TRADE_LOG_KIND = 'polymarketTradeLog';
+const POLYMARKET_REIMBURSEMENT_REQUEST_KIND = 'polymarketReimbursementRequest';
 const POLYMARKET_TRADE_LOG_VALIDATOR_ID = 'polymarket_trade_log_timeliness';
+const POLYMARKET_REIMBURSEMENT_REQUEST_VALIDATOR_ID =
+    'polymarket_reimbursement_request';
 const TRADE_ENTRY_KINDS = new Set(['initiated', 'continuation']);
 const optimisticGovernorRulesAbi = parseAbi(['function rules() view returns (string)']);
 const loggingWindowPattern =
@@ -96,12 +99,15 @@ function normalizeTradeEntry(entry, label) {
     });
 }
 
-function normalizeTradeLogMessage(message, { config = undefined, envelope = undefined } = {}) {
+function normalizeBasePolymarketMessage(
+    message,
+    { config = undefined, envelope = undefined, expectedKind } = {}
+) {
     if (!isPlainObject(message)) {
         throw new Error('message must be a JSON object.');
     }
-    if (message.kind !== POLYMARKET_TRADE_LOG_KIND) {
-        throw new Error(`message.kind must be "${POLYMARKET_TRADE_LOG_KIND}".`);
+    if (message.kind !== expectedKind) {
+        throw new Error(`message.kind must be "${expectedKind}".`);
     }
     if (!isPlainObject(message.payload)) {
         throw new Error('message.payload must be a JSON object.');
@@ -177,7 +183,27 @@ function normalizeTradeLogMessage(message, { config = undefined, envelope = unde
         );
     }
 
-    const trades = Array.isArray(message.payload.trades)
+    return {
+        chainId: parsePositiveInteger(message.chainId, 'message.chainId'),
+        requestId: normalizeNonEmptyString(message.requestId, 'message.requestId'),
+        commitmentAddresses,
+        agentAddress: normalizedAgentAddress,
+        kind: expectedKind,
+        payload: {
+            ...canonicalizeJson(message.payload),
+            stream,
+        },
+    };
+}
+
+function normalizeTradeLogMessage(message, { config = undefined, envelope = undefined } = {}) {
+    const normalizedBase = normalizeBasePolymarketMessage(message, {
+        config,
+        envelope,
+        expectedKind: POLYMARKET_TRADE_LOG_KIND,
+    });
+
+    const trades = Array.isArray(normalizedBase.payload.trades)
         ? message.payload.trades.map((entry, index) =>
               normalizeTradeEntry(entry, `message.payload.trades[${index}]`)
           )
@@ -194,19 +220,48 @@ function normalizeTradeLogMessage(message, { config = undefined, envelope = unde
     }
 
     return canonicalizeJson({
-        chainId: parsePositiveInteger(message.chainId, 'message.chainId'),
-        requestId: normalizeNonEmptyString(message.requestId, 'message.requestId'),
-        commitmentAddresses,
-        agentAddress: normalizedAgentAddress,
+        chainId: normalizedBase.chainId,
+        requestId: normalizedBase.requestId,
+        commitmentAddresses: normalizedBase.commitmentAddresses,
+        agentAddress: normalizedBase.agentAddress,
         kind: POLYMARKET_TRADE_LOG_KIND,
         payload: {
-            stream,
-            sequence: parsePositiveInteger(message.payload.sequence, 'message.payload.sequence'),
+            stream: normalizedBase.payload.stream,
+            sequence: parsePositiveInteger(
+                normalizedBase.payload.sequence,
+                'message.payload.sequence'
+            ),
             previousCid: normalizeOptionalCid(
-                message.payload.previousCid,
+                normalizedBase.payload.previousCid,
                 'message.payload.previousCid'
             ),
             trades,
+        },
+    });
+}
+
+function normalizeReimbursementRequestMessage(
+    message,
+    { config = undefined, envelope = undefined } = {}
+) {
+    const normalizedBase = normalizeBasePolymarketMessage(message, {
+        config,
+        envelope,
+        expectedKind: POLYMARKET_REIMBURSEMENT_REQUEST_KIND,
+    });
+
+    return canonicalizeJson({
+        chainId: normalizedBase.chainId,
+        requestId: normalizedBase.requestId,
+        commitmentAddresses: normalizedBase.commitmentAddresses,
+        agentAddress: normalizedBase.agentAddress,
+        kind: POLYMARKET_REIMBURSEMENT_REQUEST_KIND,
+        payload: {
+            stream: normalizedBase.payload.stream,
+            snapshotCid: normalizeNonEmptyString(
+                normalizedBase.payload.snapshotCid,
+                'message.payload.snapshotCid'
+            ),
         },
     });
 }
@@ -229,11 +284,19 @@ function derivePublishedMessageLockKeys({
     envelope,
     message,
 } = {}) {
-    if (!isPlainObject(message) || message.kind !== POLYMARKET_TRADE_LOG_KIND) {
+    if (!isPlainObject(message)) {
         return [];
     }
     try {
-        const normalizedMessage = normalizeTradeLogMessage(message, { config, envelope });
+        const normalizedMessage =
+            message.kind === POLYMARKET_TRADE_LOG_KIND
+                ? normalizeTradeLogMessage(message, { config, envelope })
+                : message.kind === POLYMARKET_REIMBURSEMENT_REQUEST_KIND
+                    ? normalizeReimbursementRequestMessage(message, { config, envelope })
+                    : null;
+        if (!normalizedMessage) {
+            return [];
+        }
         return [`polymarket_stream:${buildStreamKey(normalizedMessage)}`];
     } catch {
         return [];
@@ -260,6 +323,38 @@ function extractPublishedTradeLogRecord(record) {
     } catch (error) {
         throw buildValidationError(
             `Published Polymarket trade-log history contains an unreadable snapshot: ${error?.message ?? error}`,
+            {
+                code: 'message_validation_unavailable',
+                statusCode: 503,
+                details: {
+                    cid: record.cid,
+                    requestId: record.requestId ?? null,
+                },
+            }
+        );
+    }
+}
+
+function extractPublishedReimbursementRequestRecord(record) {
+    if (!record?.cid || !record?.artifact?.signedMessage?.envelope?.message) {
+        return null;
+    }
+
+    const rawMessage = record.artifact.signedMessage.envelope.message;
+    if (!isPlainObject(rawMessage) || rawMessage.kind !== POLYMARKET_REIMBURSEMENT_REQUEST_KIND) {
+        return null;
+    }
+
+    try {
+        const message = normalizeReimbursementRequestMessage(rawMessage);
+        return {
+            record,
+            message,
+            streamKey: buildStreamKey(message),
+        };
+    } catch (error) {
+        throw buildValidationError(
+            `Published Polymarket reimbursement-request history contains an unreadable message: ${error?.message ?? error}`,
             {
                 code: 'message_validation_unavailable',
                 statusCode: 503,
@@ -455,7 +550,75 @@ async function validatePublishedMessage({
     listRecords,
     publicClient,
 } = {}) {
-    if (!isPlainObject(message) || message.kind !== POLYMARKET_TRADE_LOG_KIND) {
+    if (!isPlainObject(message)) {
+        return null;
+    }
+
+    if (message.kind === POLYMARKET_REIMBURSEMENT_REQUEST_KIND) {
+        let normalizedMessage;
+        try {
+            normalizedMessage = normalizeReimbursementRequestMessage(message, { config, envelope });
+        } catch (error) {
+            throw buildValidationError(error?.message ?? String(error), {
+                code: 'message_payload_invalid',
+            });
+        }
+
+        if (typeof listRecords !== 'function') {
+            throw buildValidationError(
+                'Polymarket reimbursement-request validation requires listRecords() history access.',
+                {
+                    code: 'message_validation_unavailable',
+                    statusCode: 503,
+                }
+            );
+        }
+        const records = await listRecords();
+        if (!Array.isArray(records)) {
+            throw buildValidationError(
+                'Polymarket reimbursement-request validation requires listRecords() to return an array.',
+                {
+                    code: 'message_validation_unavailable',
+                    statusCode: 503,
+                }
+            );
+        }
+        const latestPublishedSnapshot = selectLatestPublishedSnapshot(
+            records,
+            buildStreamKey(normalizedMessage)
+        );
+        if (!latestPublishedSnapshot) {
+            throw buildValidationError(
+                'Polymarket reimbursement requests require at least one published trade-log snapshot for the same stream.',
+                {
+                    code: 'message_sequence_invalid',
+                }
+            );
+        }
+        if (normalizedMessage.payload.snapshotCid !== latestPublishedSnapshot.record.cid) {
+            throw buildValidationError(
+                'Polymarket reimbursement requests must reference the latest accepted trade-log snapshot CID for the stream.',
+                {
+                    code: 'message_sequence_invalid',
+                    details: {
+                        expectedSnapshotCid: latestPublishedSnapshot.record.cid,
+                        snapshotCid: normalizedMessage.payload.snapshotCid,
+                    },
+                }
+            );
+        }
+        return {
+            validatorId: POLYMARKET_REIMBURSEMENT_REQUEST_VALIDATOR_ID,
+            status: 'accepted',
+            summary: {
+                stream: normalizedMessage.payload.stream,
+                snapshotCid: normalizedMessage.payload.snapshotCid,
+                previousPublishedCid: latestPublishedSnapshot.record.cid,
+            },
+        };
+    }
+
+    if (message.kind !== POLYMARKET_TRADE_LOG_KIND) {
         return null;
     }
 
@@ -557,7 +720,14 @@ async function validatePublishedMessage({
 
 export {
     derivePublishedMessageLockKeys,
+    extractPublishedReimbursementRequestRecord,
+    extractPublishedTradeLogRecord,
     POLYMARKET_TRADE_LOG_KIND,
     POLYMARKET_TRADE_LOG_VALIDATOR_ID,
+    POLYMARKET_REIMBURSEMENT_REQUEST_KIND,
+    POLYMARKET_REIMBURSEMENT_REQUEST_VALIDATOR_ID,
+    normalizeReimbursementRequestMessage,
+    normalizeTradeLogMessage,
+    buildStreamKey,
     validatePublishedMessage,
 };
