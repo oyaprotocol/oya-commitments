@@ -77,7 +77,10 @@ async function run() {
         });
         assert.equal(savedA.submission.status, 'not_started');
         assert.equal(savedA.submission.transactionHash, null);
+        assert.equal(savedA.verification, null);
         assert.equal(savedB.submission.status, 'not_started');
+        const listedRecords = await saveStore.listRecords();
+        assert.equal(listedRecords.length, 2);
         assert.equal(await readRecordCount(saveStateFile), 2);
 
         const prepareStateFile = path.join(tempDir, 'prepare-state.json');
@@ -207,10 +210,76 @@ async function run() {
                 error: null,
                 sideEffectsLikelyCommitted: true,
             },
+            verification: {
+                status: 'valid',
+                proposalKind: 'agent_proxy_reimbursement',
+                verifiedAtMs: BASE_TIME_MS + 1,
+            },
         });
         assert.equal(submissionRecord.submission.status, 'resolved');
         assert.equal(submissionRecord.submission.result.bondAmount, '123');
         assert.equal(submissionRecord.submission.transactionHash, `0x${'a'.repeat(64)}`);
+        assert.equal(submissionRecord.verification.status, 'valid');
+
+        const updateStateFile = path.join(tempDir, 'update-state.json');
+        const updateStore = createProposalPublicationStore({ stateFile: updateStateFile });
+        const originalRecord = await updateStore.saveRecord(
+            buildStoredRecord({
+                signer: '0x8888888888888888888888888888888888888888',
+                chainId: 11155111,
+                requestId: 'update-record',
+                signatureChar: '8',
+            })
+        );
+        const staleSnapshot = await updateStore.getRecord({
+            signer: originalRecord.signer,
+            chainId: originalRecord.chainId,
+            requestId: originalRecord.requestId,
+        });
+        await updateStore.saveRecord({
+            ...staleSnapshot,
+            cid: 'bafy-update-record',
+            uri: 'ipfs://bafy-update-record',
+            pinned: true,
+            publishResult: {
+                cid: 'bafy-update-record',
+            },
+            pinResult: {
+                Pins: ['bafy-update-record'],
+            },
+            submission: {
+                status: 'submitted',
+                submittedAtMs: BASE_TIME_MS + 3,
+                transactionHash: `0x${'c'.repeat(64)}`,
+                ogProposalHash: null,
+                result: {
+                    transactionHash: `0x${'c'.repeat(64)}`,
+                },
+                error: null,
+                sideEffectsLikelyCommitted: true,
+            },
+        });
+        const updatedRecord = await updateStore.updateRecord(staleSnapshot, (current) => ({
+            ...current,
+            verification: {
+                status: 'unknown',
+                proposalKind: 'agent_proxy_reimbursement',
+                verifiedAtMs: BASE_TIME_MS + 4,
+                checks: [
+                    {
+                        id: 'verification_runtime',
+                        status: 'unknown',
+                        message: 'Store merged verification into the latest record state.',
+                    },
+                ],
+            },
+        }));
+        assert.equal(updatedRecord.cid, 'bafy-update-record');
+        assert.equal(updatedRecord.uri, 'ipfs://bafy-update-record');
+        assert.equal(updatedRecord.pinned, true);
+        assert.equal(updatedRecord.submission.status, 'submitted');
+        assert.equal(updatedRecord.submission.transactionHash, `0x${'c'.repeat(64)}`);
+        assert.equal(updatedRecord.verification.status, 'unknown');
 
         console.log('[test] proposal publication store OK');
     } finally {

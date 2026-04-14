@@ -4,7 +4,7 @@ This ExecPlan is a living document and must be maintained according to `PLANS.md
 
 ## Purpose / Big Picture
 
-Build a new example agent that trades on Polymarket with the agent's own wallet and funds, keeps the user's capital parked in the commitment Safe, and settles each market stream only when that market stream is over. In this design, the agent can change positions quickly outside of the Safe, but every material trade state change is recorded in a signed trade log that an Oya node archives to IPFS and co-signs. When a market resolves, the agent deposits whatever settlement amount is owed to the user under the logged trade history for that market and then claims reimbursement for the initially fronted principal defined by the commitment rules.
+Build a new example agent that trades on Polymarket with the agent's own wallet and funds, keeps the user's capital parked in the commitment Safe, and settles each market stream only when that market stream is over. In this design, the agent can change positions quickly outside of the Safe, but every material trade state change is recorded in a signed trade log that an Oya node archives to IPFS and co-signs. The node should publish the full cumulative snapshot whenever sequence and internal-consistency checks pass, even if some newly introduced trade entries miss the reimbursement window. For those newly introduced trades, the node must add its own attested classification such as `reimbursable` or `non_reimbursable_late` based on the rule-defined time window after execution, so the agent cannot wait to see whether a trade pays off before deciding whether to attribute it to the user. When a market resolves, the agent deposits whatever settlement amount is owed to the user under the logged trade history for that market and then claims reimbursement only for the initially fronted principal tied to node-attested reimbursable initiated trades.
 
 After this work, a reviewer or operator should be able to:
 
@@ -34,7 +34,13 @@ This plan intentionally treats the result as an example module, not a general-pu
 - [x] 2026-04-10 01:16Z: Added operator-facing documentation for the signed message publication flow in `agent/README.md`, including config fields, request and artifact shapes, startup instructions, and retry semantics, with supporting doc signposts in the repo root and `agent-library/README.md`.
 - [x] 2026-04-10 01:45Z: Spun out the requested directory-refactor work into `plans/node-directory-extraction.md`. Any later implementation of this plan's node startup paths should follow that extraction plan so the primary entrypoints move from `agent/` to a dedicated `node/` workspace instead of growing more node-owned code under `agent/scripts/`.
 - [x] 2026-04-10 02:03Z: Implemented the first extraction pass for standalone node process surfaces: new primary startup paths now live under `node/scripts/`, `node/README.md` documents the node workspace, and the old `agent/scripts/start-...node.mjs` files now delegate to the new paths as compatibility wrappers.
-- [ ] Create the new deferred-settlement Polymarket agent module and its commitment text.
+- [x] 2026-04-13 14:52 PDT: Revised the plan after user clarification that trade logs must be published within the commitment-defined timeliness window to remain reimbursement-eligible, and that the node should enforce that window during publication.
+- [x] 2026-04-13 15:01 PDT: Revised the plan again so late trades stay visible in published cumulative snapshots, while the node separately attests which newly introduced trades are reimbursable versus non-reimbursable based on timeliness, sequence continuity, and internal consistency.
+- [x] 2026-04-13 15:11 PDT: Implemented the shared message-publication validator hook, attested `publication.validation` payloads, duplicate-safe persistence of validator output, runtime resolution of `validatePublishedMessage()` from agent modules, and focused store/API/runtime regressions.
+- [x] 2026-04-13 16:10 PDT: Added the first module-local Polymarket trade-log validator under `agent-library/agents/polymarket-staked-external-settlement/`. The new module now exists as a minimal scaffold with its own `agent.js`, `commitment.txt`, `agent.json`, `config.json`, and validator test. The validator reads `ogModule.rules()` onchain, parses the deployed logging-delay minutes from the `Staked External Polymarket Execution` clause, validates cumulative snapshot continuity against previously published records, and classifies newly introduced trades as `reimbursable` or `non_reimbursable_late`.
+- [x] 2026-04-13 17:02 PDT: Added validator-provided message publication lock keys and stream-scoped serialization in the shared node so concurrent requests for the same Polymarket stream but different `requestId`s cannot both validate against stale history. The staked external settlement module now exports per-stream lock keys derived from the same normalized stream identity as the validator.
+- [x] 2026-04-13 17:45 PDT: Hardened the module-local validator so read-only runtime initialization failures are re-wrapped as `message_validation_unavailable` instead of leaking as generic publish failures. This preserves validator-specific API semantics during RPC outages or chain mismatch.
+- [ ] Expand the deferred-settlement Polymarket agent module beyond the current scaffold and commitment draft.
 - [ ] Add tests, smoke harness coverage, and documentation updates.
 
 ## Surprises & Discoveries
@@ -56,6 +62,15 @@ This plan intentionally treats the result as an example module, not a general-pu
 
 - Observation: The user accepts public IPFS publication of executed trades because the underlying Polymarket trades are already public.
   Evidence: The user explicitly stated that the logs do not leak anything beyond already-public executed trades.
+
+- Observation: Cumulative trade-log snapshots require timeliness checks only for newly introduced trade entries, not for the entire historical snapshot.
+  Evidence: This plan intentionally uses hash-chained cumulative snapshots. Rechecking every historical entry against the current time would make retries and later updates fail after the original logging window passed, even if those older entries had already been accepted on time.
+
+- Observation: Rejecting an entire cumulative snapshot because one newly introduced trade is late would hide audit-relevant trade history and create incentives to omit losing trades from the publication stream.
+  Evidence: The user clarified that the preferred path is to publish all trades, but separately track which ones remain reimbursement-eligible.
+
+- Observation: Per-request duplicate handling is not enough for cumulative trade-log streams. Two different `requestId`s for the same stream can otherwise both validate against the same stale latest snapshot and produce permanently conflicting sequence history.
+  Evidence: The shared message publisher originally serialized only by `(signer, chainId, requestId)`, while the Polymarket validator enforces sequence monotonicity by stream identity.
 
 ## Decision Log
 
@@ -83,9 +98,17 @@ This plan intentionally treats the result as an example module, not a general-pu
   Rationale: This matches Polymarket mechanics and the existing rule template better than a vague close-based deadline, while still avoiding proposals on every trade or flip.
   Date/Author: 2026-04-09 / Codex.
 
-- Decision: In v1, the node is explicitly notary-only and does not need to verify trade truth before publication.
-  Rationale: The user wants false logs handled at settlement time by rejecting reimbursement and slashing stake, not by moving verification into the node.
+- Decision: In v1, the node does not verify trade truth before publication.
+  Rationale: The user wants false logs handled at settlement time by rejecting reimbursement and slashing stake, not by moving trade-truth verification into the node.
   Date/Author: 2026-04-09 / Codex.
+
+- Decision: For Polymarket reimbursement logs, the node must publish the full cumulative snapshot when sequence and internal-consistency checks pass, but attach its own per-trade reimbursement classification for newly introduced entries based on the `Staked External Polymarket Execution` timeliness window.
+  Rationale: Agent-controlled timestamps can be backdated, but the node's `receivedAtMs` / `publishedAtMs` values are trustworthy. Publishing the full snapshot preserves auditability, while node-side classifications prevent late trades from creating reimbursement rights.
+  Date/Author: 2026-04-13 / Codex.
+
+- Decision: In v1, the node should verify only timeliness, sequence continuity, and internal consistency. Trade-truth verification and entry-price verification are explicit future work.
+  Rationale: The shared node surface should stay generic across trade domains. Whether a trade actually happened, and at what price, is use-case-specific and can be layered on in later validators without redesigning the publication protocol.
+  Date/Author: 2026-04-13 / Codex.
 
 - Decision: Reimbursement accounting in v1 is "initial principal reimbursement plus separate final settlement deposit," not netted reimbursement across flips.
   Rationale: The user clarified that later trading affects how much the agent must deposit into the commitment at settlement, but reimbursement is for the amount initially spent to open the user's market exposure.
@@ -121,6 +144,9 @@ Milestone 1 status after the first implementation pass:
 - Completed: focused validation landed in `agent/scripts/test-message-publication-store.mjs`, `agent/scripts/test-message-publication-api.mjs`, and an extension to `agent/scripts/test-agent-config-file.mjs`.
 - Validated: `node agent/scripts/test-message-publication-store.mjs`, `node agent/scripts/test-message-publication-api.mjs`, and `node agent/scripts/test-agent-config-file.mjs`.
 - Completed follow-up: the artifact now also includes an explicit node `eip191` attestation over publication metadata plus the archived signed message, and the publish-node startup path resolves a signer from `MESSAGE_PUBLISH_API_SIGNER_PRIVATE_KEY` or the shared signer configuration.
+- Completed follow-up: the shared message publication node now supports an optional module-exported validator hook, signs normalized validator output into `publication.validation`, preserves that output across duplicate/pin-retry flows, and rejects only structural validator failures before publication.
+
+Remaining design work now moves from validator scaffolding into the full deferred-settlement agent implementation. The node-side hook and attested validation payload exist, and `agent-library/agents/polymarket-staked-external-settlement/` now owns the first local validator implementation plus a minimal module scaffold. What remains is to flesh out that module's actual trade-log publisher, settlement ledger, reimbursement logic, and smoke harness.
 
 ## Context and Orientation
 
@@ -145,14 +171,21 @@ The relevant current code paths are:
 - `agent/src/lib/proposal-publication-store.js`
   - crash-safe durable JSON store pattern that can be mirrored for generalized signed-message publication
 
+- `agent/src/lib/signed-published-message.js`
+  - current message-publication artifacts already include node-authored `receivedAtMs`, `publishedAtMs`, and attestation metadata, which can anchor trade-log timeliness checks without trusting agent-supplied clocks and can be extended with validator-produced classifications
+
 - `agent/src/lib/polymarket.js` and `agent/src/lib/polymarket-relayer.js`
   - shared Polymarket execution helpers
   - currently focused on CLOB orders, trades, and relayer wallet resolution, not on market-resolution or generalized message-publication flows
+
+- `agent-library/RULE_TEMPLATES.md`
+  - the `Staked External Polymarket Execution` template now includes `Trades must be logged within [ ] minutes of trade execution to be considered valid for reimbursement.`
 
 The commitment side remains rule-driven rather than contract-driven. This means no new Solidity code should be assumed unless implementation proves a contract gap. The expected enforcement model is:
 
 - the agent deposits stake into the commitment
 - the agent publishes signed messages to the Oya node for each active market, with Polymarket-specific trade details embedded in those messages
+- the node co-signs and publishes full trade-log snapshots when sequence and internal-consistency checks pass, and adds node-attested per-trade reimbursement classifications for newly introduced trades
 - the agent deposits the final settlement amount owed to the user for a given market into the Safe before claiming reimbursement for that market
 - the agent disputes user withdrawals that violate the commitment's withdrawal rule while any market settlement is still outstanding
 - the user or another watcher can slash the agent's stake if the published log and market outcome show non-settlement or misreporting for any market
@@ -164,8 +197,10 @@ This plan assumes v1 remains an offchain-enforced commitment served by the curre
 Milestone 0 freezes the accounting model before code spreads. The first task is to define the data model the module and node both agree on. The agent should maintain a portfolio index keyed by `marketId`, where each market owns its own independent stream and settlement state. The core per-market values are:
 
 - `marketId`: Polymarket market identifier for this stream
+- `tradeId`: stable identifier for one trade entry inside the cumulative stream
 - `tradeEntryKind`: `initiated` or `continuation`
 - `tradeGroupId`: stable identifier tying continuation trades back to the reimbursable trade path they continue
+- `executedAtMs`: the claimed execution time for a trade entry, which the node compares against attested receipt/publication time when the entry first appears
 - `initiatedPrincipalContributionWei`: reimbursable principal contributed by a single initiated trade; always zero for continuation trades
 - `initiatedPrincipalWei`: cumulative reimbursable principal across all initiated trades in this market stream
 - `grossBuyCostWei`: total USDC the agent spent opening or adding to positions
@@ -175,9 +210,10 @@ Milestone 0 freezes the accounting model before code spreads. The first task is 
 - `finalSettlementValueWei`: the amount the agent must deposit into the Safe at flat exit or resolution based on the cumulative logged trading result
 - `reimbursementEligibleWei`: the amount the agent may claim back after making that final settlement deposit; for v1 this is the sum of reimbursable initiated-trade principal
 - `fixedStakeWei`: the active slashable stake deposited under the commitment rules
+- `nodeTradeClassificationById` or equivalent durable mapping: the first node-attested record for each `tradeId`, including `firstSeenAtMs`, `classification`, `reason`, and the attested CID
 - `withdrawalLimitState`: the values needed to decide whether a user withdrawal violates the commitment during an unsettled stream
 
-The critical accounting separation is: all trades affect `finalSettlementValueWei`, but only trades marked `initiated` affect `reimbursementEligibleWei`. If a later trade uses fresh agent capital and should be reimbursable, it must be logged as a new initiated trade. If it continues an earlier trade path after that path was closed out with a sale, it must be logged as a continuation trade with zero new reimbursement principal.
+The critical accounting separation is: all trades affect `finalSettlementValueWei`, but only trades marked `initiated` affect `reimbursementEligibleWei`. If a later trade uses fresh agent capital and should be reimbursable, it must be logged as a new initiated trade. If it continues an earlier trade path after that path was closed out with a sale, it must be logged as a continuation trade with zero new reimbursement principal. A trade only contributes to `reimbursementEligibleWei` if the node has attested it as `reimbursable` when it first appears in a published snapshot. Late trades remain in the published history and can still matter for audit and settlement reasoning, but they must be attested `non_reimbursable_late` and must not create reimbursement rights.
 
 Milestone 0 must also define the portfolio-level rollups derived from those per-market ledgers, because the withdrawal rule is commitment-wide rather than market-local. At minimum the module needs deterministic sums for:
 
@@ -188,7 +224,7 @@ Milestone 0 must also define the portfolio-level rollups derived from those per-
 
 Milestone 0 must also define the module config shape for multi-market support. The plan should replace any single-market policy assumptions with a per-market policy map keyed by `marketId` so new markets can be added without changing the core ledger model.
 
-Milestone 1 adds a generalized signed-message publication protocol to the Oya node. This should parallel the proposal-publication node but not replace it. Add a new config block such as `messagePublishApi`, a canonical signed payload builder, a durable store, and a standalone startup helper. The node endpoint should accept an arbitrary signed message, verify the submitted `auth` envelope against that message, publish the final artifact to IPFS, pin it, and store duplicate-safe state keyed by the signed message identity. The signed message itself must carry `chainId`, `requestId`, `commitmentAddresses`, `agentAddress`, and any domain-specific payload. In v1 the node is a notary and archivist, not an independent message verifier. If we still want explicit node-side co-signing after review, that should be added as a follow-up to the minimal publication artifact now in place. The Polymarket example should use this generalized publication surface by embedding the market-specific trade details inside the signed message payload.
+Milestone 1 adds a generalized signed-message publication protocol to the Oya node. This should parallel the proposal-publication node but not replace it. Add a new config block such as `messagePublishApi`, a canonical signed payload builder, a durable store, and a standalone startup helper. The node endpoint should accept an arbitrary signed message, verify the submitted `auth` envelope against that message, publish the final artifact to IPFS, pin it, and store duplicate-safe state keyed by the signed message identity. The signed message itself must carry `chainId`, `requestId`, `commitmentAddresses`, `agentAddress`, and any domain-specific payload. The shared endpoint should stay domain-agnostic, but it now needs an optional module-supplied validation hook. For this Polymarket module, that validator must resolve the current onchain `Staked External Polymarket Execution` rules, extract the allowed logging-delay minutes, compare node receipt/publication time against each newly introduced trade entry's `executedAtMs`, and verify sequence continuity plus internal consistency of the cumulative snapshot. If sequence or internal-consistency checks fail, the node should reject the snapshot before publication. If those checks pass, the node should publish the full snapshot and attach per-trade classifications for newly introduced entries, including `reimbursable` and `non_reimbursable_late`. The node still does not verify trade truth or entry price; it only enforces deterministic message-shape, sequence, timeliness, and internal-consistency requirements that are directly spelled out by the commitment or validator contract.
 
 Milestone 2 creates the new agent module under `agent-library/agents/polymarket-staked-external-settlement/`. The module should own all agent-specific behavior. It should:
 
@@ -196,6 +232,7 @@ Milestone 2 creates the new agent module under `agent-library/agents/polymarket-
 - execute external Polymarket trades from the agent wallet across any number of supported markets
 - update and persist per-market ledgers plus portfolio-level unsettled-state rollups locally
 - publish a signed message to the Oya node after every material state change in the affected market
+- persist which trade entries the node first classified as `reimbursable` versus `non_reimbursable_late`, and exclude any trade without a reimbursable node classification from reimbursement eligibility
 - watch market status for every active market until that market is flat or resolved
 - deposit the final settlement amount owed to the user for a resolved market before requesting reimbursement for that market
 - refuse new trades when the fixed stake is not active or policy constraints are violated
@@ -204,16 +241,17 @@ Milestone 2 creates the new agent module under `agent-library/agents/polymarket-
 Milestone 3 completes the commitment semantics. Draft `commitment.txt` from `Solo User`, `Proposal Delegation`, `Fair Valuation`, `Trade Restrictions`, `Transfer Address Restrictions`, and `Staked External Polymarket Execution`, then add commitment-local language for:
 
 - initiated-trade reimbursement plus final-settlement deposit semantics
+- log-timeliness semantics so late trades remain publishable but are marked non-reimbursable by node attestation
 - withdrawal restrictions while unsettled external liabilities exist
 - slashability for false trade logging or misreporting through the node
 
 Do not change `agent-library/RULE_TEMPLATES.md` during implementation unless the user explicitly approves a minimal shared-template update first.
 
-Milestone 4 adds proof-quality validation. The module and node need tests for restart recovery, duplicate publication, broken sequence chains, invalid prior-CID links, missing settlement, false-log handling, incorrect reimbursement attempts, and concurrent multi-market activity. A local smoke flow should run with mocked Polymarket responses and mock IPFS, because a safe non-production path is required and live Polygon/Polymarket credentials are not guaranteed in every environment.
+Milestone 4 adds proof-quality validation. The module and node need tests for restart recovery, duplicate publication, broken sequence chains, invalid prior-CID links, late-trade classification at the time-window boundary, missing settlement, false-log handling, incorrect reimbursement attempts, and concurrent multi-market activity. A local smoke flow should run with mocked Polymarket responses and mock IPFS, because a safe non-production path is required and live Polygon/Polymarket credentials are not guaranteed in every environment.
 
 ## Concrete Steps
 
-From `/Users/johnshutt/Code/oya-commitments`:
+From the repository root:
 
 1. Add the new shared node protocol and config surfaces.
 
@@ -241,7 +279,11 @@ From `/Users/johnshutt/Code/oya-commitments`:
    - dry-run prints resolved host, port, chain, state file, and node name
    - exact duplicate publication retries return the existing CID and archived artifact metadata
    - the API accepts arbitrary signed messages without needing any domain-specific top-level fields
+   - the shared publish path exposes an optional module-level validator hook before CID publication and node attestation
    - duplicate detection and indexing are derived from fields inside the signed message rather than parallel top-level copies
+   - for the Polymarket module, snapshots with late newly introduced trades still publish, but the node attestation marks those trades `non_reimbursable_late`
+   - for the Polymarket module, snapshots with broken sequence continuity or internal-consistency failures are rejected before publication
+   - retries of an already accepted cumulative snapshot remain valid even after the logging window has passed, because only newly introduced trade entries are re-evaluated
    - the Polymarket example can still reject malformed per-market sequence histories inside its own message payload processing
 
 2. Extend shared Polymarket helpers only where the functionality is clearly cross-agent.
@@ -286,8 +328,10 @@ From `/Users/johnshutt/Code/oya-commitments`:
    - the module refuses to trade when fixed stake is inactive or policy gating fails
    - every accepted trade state change yields one signed publication request for the affected `marketId`
    - every logged trade is classified as `initiated` or `continuation`
+   - every logged trade entry includes an execution timestamp that the node can compare against the current logging window
    - the module can keep multiple market ledgers active at once without merging their sequence histories
    - the module config can describe multiple supported markets without code changes in shared infrastructure
+   - reimbursement eligibility is derived only from initiated trades whose first node classification is `reimbursable`
    - reimbursement proposals are only built after the required final settlement deposit is recorded for the corresponding market
 
 4. Add reusable rule text and docs.
@@ -335,14 +379,16 @@ Acceptance requires all of the following:
 
 - the new module stays local to `agent-library/agents/polymarket-staked-external-settlement/`, except for clearly shared node or Polymarket infrastructure
 - the Oya node can archive, pin, and dedupe arbitrary signed messages
+- the Oya node publishes full Polymarket trade-log snapshots when sequence and internal-consistency checks pass, and records per-trade node classifications for newly introduced trades
 - the node and module both support arbitrarily many concurrent `marketId` streams for the same commitment and user
 - the trade ledger preserves the separation between reimbursable initiated-trade principal and final settlement owed to the user for each market
 - continuation trades do not add reimbursement principal, but they do affect final settlement accounting
+- reimbursement proposals only count initiated trades that the node first classified as `reimbursable`
 - portfolio-level withdrawal/dispute logic is derived from the aggregate state of all unsettled markets, not only one market
 - the module enforces active fixed-stake and withdrawal-policy assumptions before approving reimbursement
 - the module deposits the final settlement amount before proposing reimbursement
 - the commitment text and docs describe the exact trust model, especially the public-log assumption and the difference between market close and resolution
-- the docs explicitly state that the node is a notary/archive surface, not a trade verifier
+- the docs explicitly state that the node is not a trade-truth verifier, but it does enforce message timeliness, sequence continuity, and internal consistency for reimbursement-eligible trade logs
 
 ## Idempotence and Recovery
 
@@ -352,8 +398,11 @@ Specific recovery rules:
 
 - exact re-publication of the same signed snapshot should return the stored publication record
 - sequence gaps or mismatched `previousCid` values should stop the stream and require manual reconciliation
+- timeliness checks must be applied only to trade entries that are new relative to the previously accepted snapshot for that stream, so retries and later cumulative updates do not "age out" older already-accepted entries
+- once the node has first classified a trade as `non_reimbursable_late`, later cumulative snapshots must not upgrade that trade to `reimbursable`
 - if the node publishes to IPFS but fails before durable store write, it must preserve enough volatile or staged state to reuse the first CID on retry
 - if the agent loses local state, it should be able to reconstruct the latest set of market streams from persisted snapshots and observed onchain deposits/proposals before resuming settlement work
+- if the node restarts, it must still be able to recover the latest accepted snapshot for each stream plus prior per-trade node classifications so future timeliness checks compare against the right `previousCid` and only the newly introduced trades
 - no automatic retry should create a second reimbursement proposal for the same settled stream
 
 If interrupted, resume by reading this file first, then inspect:
@@ -382,7 +431,7 @@ External behavior summarized from current official Polymarket docs and embedded 
 - positions can be sold before resolution, so a market stream can settle before oracle resolution if the agent is flat
 - redemption into USDC only becomes available after resolution
 - market close and resolution are separate lifecycle stages
-- the node in this plan is intentionally not a trade verifier, so public market APIs are relevant mainly for market-status and resolution tracking, not for pre-publication attestation
+- the node in this plan is intentionally not a trade-truth verifier, so public market APIs are relevant mainly for market-status and resolution tracking, not for proving trade correctness before publication
 
 Primary source links used for the above summary:
 
@@ -413,13 +462,32 @@ For endpoint purposes, `message` is opaque and domain-agnostic. Any details need
 
 For the Polymarket example, that message should also include at least:
 
-- stream identity (`commitmentSafe`, `user`, `marketId`, `tradingWallet`)
-- cumulative trade entries with timestamps, external identifiers, and `tradeEntryKind`
+- stream identity (`commitmentSafe`, `ogModule`, `user`, `marketId`, `tradingWallet`)
+- cumulative trade entries with stable IDs, execution timestamps, external identifiers, and `tradeEntryKind`
+- sequence metadata (`sequence`, `previousCid`) so the node can detect which trade entries are newly introduced in the current snapshot
 - derived ledger fields (`initiatedPrincipalWei`, `finalSettlementValueWei`, `reimbursementEligibleWei`, `fixedStakeWei`)
 - current position summary
 - settlement status summary
 
 The protocol stays generalized on the wire but per-market in the Polymarket payload design. Supporting many markets means publishing many independent messages and message histories in parallel, not removing `marketId` from the Polymarket message contents.
+
+New shared/runtime interface to add:
+
+- an optional message-publication validation hook resolved from module/runtime config before the shared `/v1/messages/publish` path builds and publishes the artifact
+- for the Polymarket module, that hook must:
+  - load the current onchain rules from the stream's `ogModule`
+  - parse the `Staked External Polymarket Execution` logging-delay minutes
+  - compare `receivedAtMs` or `publishedAtMs` against each newly introduced trade entry's `executedAtMs`
+  - verify sequence continuity and internal consistency for the cumulative snapshot
+  - reject the snapshot only when structural checks fail
+  - otherwise return per-trade classifications for newly introduced entries such as `reimbursable` and `non_reimbursable_late`
+
+The published node attestation should be extended to carry validator output separately from the agent-signed message, so the node can remain agnostic to the trade domain while later consumers can read:
+
+- snapshot validation status and any structural failure reason
+- per-trade classifications keyed by `tradeId`
+- `firstSeenAtMs` for each newly introduced trade
+- the reason attached to each non-reimbursable trade classification
 
 New config dependency to add in module config:
 

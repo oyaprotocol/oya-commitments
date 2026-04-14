@@ -16,6 +16,10 @@ import {
     buildSignedPublishedMessageEnvelope,
     buildSignedPublishedMessagePayload,
 } from './signed-published-message.js';
+import {
+    MessagePublicationValidationError,
+    normalizeMessagePublicationValidation,
+} from './message-publication-validation.js';
 import { buildMessagePublicationKey } from './message-publication-store.js';
 
 class PublicationPersistenceError extends Error {
@@ -93,11 +97,63 @@ function enqueuePublicationOperation(queueMap, queueKey, operation) {
     });
 }
 
+function enqueueMultiKeyOperation(queueMap, queueKeys, operation) {
+    const normalizedQueueKeys = Array.from(
+        new Set(
+            (Array.isArray(queueKeys) ? queueKeys : [])
+                .filter((queueKey) => typeof queueKey === 'string' && queueKey.trim())
+                .map((queueKey) => queueKey.trim())
+        )
+    ).sort();
+    if (normalizedQueueKeys.length === 0) {
+        return operation();
+    }
+
+    const prior = Promise.all(
+        normalizedQueueKeys.map((queueKey) => queueMap.get(queueKey) ?? Promise.resolve())
+    );
+    const run = prior.then(operation, operation);
+    const tail = run.catch(() => {});
+    for (const queueKey of normalizedQueueKeys) {
+        queueMap.set(queueKey, tail);
+    }
+    return run.finally(() => {
+        for (const queueKey of normalizedQueueKeys) {
+            if (queueMap.get(queueKey) === tail) {
+                queueMap.delete(queueKey);
+            }
+        }
+    });
+}
+
+function normalizeMessagePublicationLockKeys(value) {
+    if (value === undefined || value === null) {
+        return [];
+    }
+    if (!Array.isArray(value)) {
+        throw new Error('Message publication lock key hook must return an array when provided.');
+    }
+    return Array.from(
+        new Set(
+            value
+                .filter((item) => typeof item === 'string' && item.trim())
+                .map((item) => item.trim())
+        )
+    ).sort();
+}
+
 function buildLastErrorPayload(error) {
-    return {
+    const payload = {
         message: error?.message ?? String(error),
         atMs: Date.now(),
     };
+    if (typeof error?.code === 'string' && error.code) {
+        payload.code = error.code;
+    }
+    if (error?.details !== undefined && error?.details !== null) {
+        payload.details = error.details;
+    }
+    return payload;
 }
 
 function normalizeOptionalChainIdForSignedAuth(value) {
@@ -126,6 +182,8 @@ function createMessagePublicationApiServer({
     store,
     logger = console,
     nodeSigner,
+    validateMessagePublication,
+    deriveMessagePublicationLockKeys,
 } = {}) {
     if (!config) {
         throw new Error('createMessagePublicationApiServer requires config.');
@@ -144,6 +202,22 @@ function createMessagePublicationApiServer({
     }
     if (typeof nodeSigner.signMessage !== 'function') {
         throw new Error('Message publication API nodeSigner.signMessage(message) is required.');
+    }
+    if (
+        validateMessagePublication !== undefined &&
+        typeof validateMessagePublication !== 'function'
+    ) {
+        throw new Error(
+            'Message publication API validateMessagePublication must be a function when provided.'
+        );
+    }
+    if (
+        deriveMessagePublicationLockKeys !== undefined &&
+        typeof deriveMessagePublicationLockKeys !== 'function'
+    ) {
+        throw new Error(
+            'Message publication API deriveMessagePublicationLockKeys must be a function when provided.'
+        );
     }
 
     const keyEntries = buildBearerKeyEntries(config.messagePublishApiKeys ?? {});
@@ -164,6 +238,7 @@ function createMessagePublicationApiServer({
 
     let server;
     const publishOperationTails = new Map();
+    const publicationConflictTails = new Map();
     const volatilePublicationStates = new Map();
 
     function emitLog(level, message) {
@@ -207,6 +282,54 @@ function createMessagePublicationApiServer({
         );
     }
 
+    async function resolvePublicationValidation({
+        record,
+        envelope,
+        publishedAtMs,
+        publicationKey,
+    }) {
+        if (typeof validateMessagePublication !== 'function') {
+            return null;
+        }
+        const validation = await validateMessagePublication({
+            config,
+            store,
+            currentPublicationKey: publicationKey,
+            currentRecord: record,
+            envelope,
+            message: envelope.message,
+            receivedAtMs: record.receivedAtMs,
+            publishedAtMs,
+            getRecord: ({ signer, chainId, requestId }) =>
+                store.getRecord({ signer, chainId, requestId }),
+            listRecords:
+                typeof store.listRecords === 'function'
+                    ? () => store.listRecords()
+                    : undefined,
+        });
+        return normalizeMessagePublicationValidation(validation, 'validation');
+    }
+
+    async function resolvePublicationLockKeys({
+        envelope,
+        record = null,
+        publicationKey = null,
+    }) {
+        if (typeof deriveMessagePublicationLockKeys !== 'function') {
+            return [];
+        }
+        return normalizeMessagePublicationLockKeys(
+            await deriveMessagePublicationLockKeys({
+                config,
+                store,
+                currentPublicationKey: publicationKey,
+                currentRecord: record,
+                envelope,
+                message: envelope.message,
+            })
+        );
+    }
+
     async function publishRecord(record, { signerAllowlistMode, nodeName, publicationKey }) {
         let nextRecord = { ...record };
         const volatilePublicationState = volatilePublicationStates.get(publicationKey);
@@ -225,6 +348,12 @@ function createMessagePublicationApiServer({
         if (!nextRecord.artifact || nextRecord.publishedAtMs === null) {
             const envelope = parseEnvelopeFromCanonicalMessage(nextRecord.canonicalMessage);
             const publishedAtMs = Date.now();
+            const validation = await resolvePublicationValidation({
+                record: nextRecord,
+                envelope,
+                publishedAtMs,
+                publicationKey,
+            });
             const nodeAttestationEnvelope = buildMessagePublicationNodeAttestationEnvelope({
                 address: nodeSigner.address,
                 timestampMs: publishedAtMs,
@@ -233,6 +362,7 @@ function createMessagePublicationApiServer({
                     publishedAtMs,
                     signerAllowlistMode,
                     nodeName,
+                    validation,
                 },
                 signedMessage: {
                     signer: nextRecord.signer,
@@ -255,6 +385,7 @@ function createMessagePublicationApiServer({
                 publishedAtMs,
                 signerAllowlistMode,
                 nodeName,
+                validation,
                 nodeAttestation: {
                     signer: nodeSigner.address,
                     signature: nodeAttestationSignature,
@@ -540,27 +671,52 @@ function createMessagePublicationApiServer({
                 chainId: identity.chainId,
                 requestId: identity.requestId,
             });
+            let publicationLockKeys;
             try {
+                publicationLockKeys = await resolvePublicationLockKeys({
+                    envelope,
+                    record,
+                    publicationKey,
+                });
                 record = await enqueuePublicationOperation(
                     publishOperationTails,
                     publicationKey,
                     async () => {
-                        const latestRecord = await store.getRecord({
-                            signer: signedAuth.sender.address,
-                            chainId: identity.chainId,
-                            requestId: identity.requestId,
-                        });
-                        if (!latestRecord) {
-                            throw new Error('Publication record disappeared before publish.');
-                        }
-                        if (latestRecord.cid && latestRecord.pinned) {
+                        const loadLatestRecord = async () => {
+                            const latestRecord = await store.getRecord({
+                                signer: signedAuth.sender.address,
+                                chainId: identity.chainId,
+                                requestId: identity.requestId,
+                            });
+                            if (!latestRecord) {
+                                throw new Error('Publication record disappeared before publish.');
+                            }
                             return latestRecord;
+                        };
+                        const performPublish = async (latestRecord) => {
+                            if (latestRecord.cid && latestRecord.pinned) {
+                                return latestRecord;
+                            }
+                            return publishRecord(latestRecord, {
+                                signerAllowlistMode: requireSignerAllowlist ? 'explicit' : 'open',
+                                nodeName: config.messagePublishApiNodeName,
+                                publicationKey,
+                            });
+                        };
+
+                        let latestRecord = await loadLatestRecord();
+                        if (publicationLockKeys.length === 0) {
+                            return performPublish(latestRecord);
                         }
-                        return publishRecord(latestRecord, {
-                            signerAllowlistMode: requireSignerAllowlist ? 'explicit' : 'open',
-                            nodeName: config.messagePublishApiNodeName,
-                            publicationKey,
-                        });
+
+                        return enqueueMultiKeyOperation(
+                            publicationConflictTails,
+                            publicationLockKeys,
+                            async () => {
+                                latestRecord = await loadLatestRecord();
+                                return performPublish(latestRecord);
+                            }
+                        );
                     }
                 );
             } catch (error) {
@@ -610,10 +766,26 @@ function createMessagePublicationApiServer({
                         body,
                         signer: signedAuth.sender.address,
                         senderKeyId: signedAuth.senderKeyId,
-                        code: errorCode,
-                        statusCode: 502,
+                        code:
+                            error instanceof MessagePublicationValidationError
+                                ? error.code
+                                : errorCode,
+                        statusCode:
+                            error instanceof MessagePublicationValidationError
+                                ? error.statusCode
+                                : 502,
                     })}: ${error?.message ?? error}`
                 );
+                if (error instanceof MessagePublicationValidationError) {
+                    sendJson(res, error.statusCode, {
+                        error: error.message,
+                        code: error.code,
+                        details: error.details,
+                        cid: record?.cid ?? null,
+                        uri: record?.uri ?? null,
+                    });
+                    return;
+                }
                 sendJson(res, 502, {
                     error: error?.message ?? 'Unable to publish signed message artifact.',
                     code: errorCode,
@@ -631,6 +803,7 @@ function createMessagePublicationApiServer({
                 cid: record.cid,
                 uri: record.uri,
                 pinned: Boolean(record.pinned),
+                validation: record.artifact?.publication?.validation ?? null,
                 nodeSigner:
                     record.artifact?.publication?.nodeAttestation?.signer ?? null,
             });

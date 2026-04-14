@@ -68,6 +68,16 @@ function normalizeOptionalHash(value, label) {
     return value.toLowerCase();
 }
 
+function normalizeOptionalObject(value, label) {
+    if (value === undefined || value === null) {
+        return null;
+    }
+    if (!isPlainObject(value)) {
+        throw new Error(`${label} must be an object when provided.`);
+    }
+    return cloneJson(value);
+}
+
 function createEmptySubmissionState() {
     return {
         status: 'not_started',
@@ -189,6 +199,7 @@ function normalizeStoredRecord(record, label = 'record') {
         publishResult: record.publishResult === undefined ? null : cloneJson(record.publishResult),
         pinResult: record.pinResult === undefined ? null : cloneJson(record.pinResult),
         lastError: record.lastError === undefined ? null : cloneJson(record.lastError),
+        verification: normalizeOptionalObject(record.verification, `${label}.verification`),
         submission: normalizeSubmissionState(record.submission, `${label}.submission`),
         createdAtMs: normalizeTimestamp(
             record.createdAtMs ?? record.receivedAtMs,
@@ -343,6 +354,7 @@ function createProposalPublicationStore({ stateFile }) {
                     publishResult: null,
                     pinResult: null,
                     lastError: null,
+                    verification: null,
                     submission: createEmptySubmissionState(),
                     createdAtMs: nowMs,
                     updatedAtMs: nowMs,
@@ -376,11 +388,54 @@ function createProposalPublicationStore({ stateFile }) {
         });
     }
 
+    async function updateRecord(recordOrKey, updater) {
+        return enqueueStoreOperation(queueKey, async () => {
+            if (typeof updater !== 'function') {
+                throw new Error('updateRecord requires an updater function.');
+            }
+            const key = buildPublicationKey({
+                signer: recordOrKey?.signer,
+                chainId: recordOrKey?.chainId,
+                requestId: recordOrKey?.requestId,
+            });
+            const state = await readStoreState(resolvedStateFile);
+            const existing = state.records[key];
+            if (!existing) {
+                throw new Error(`Record not found for update: ${key}`);
+            }
+            const nextRecord = await updater(cloneJson(existing));
+            const normalized = normalizeStoredRecord(nextRecord, 'record');
+            const nextKey = buildPublicationKey({
+                signer: normalized.signer,
+                chainId: normalized.chainId,
+                requestId: normalized.requestId,
+            });
+            if (nextKey !== key) {
+                throw new Error('updateRecord must not change signer, chainId, or requestId.');
+            }
+            state.records[key] = {
+                ...normalized,
+                updatedAtMs: Date.now(),
+            };
+            await writeStoreState(resolvedStateFile, state);
+            return cloneJson(state.records[key]);
+        });
+    }
+
+    async function listRecords() {
+        return enqueueStoreOperation(queueKey, async () => {
+            const state = await readStoreState(resolvedStateFile);
+            return Object.values(state.records).map((record) => cloneJson(record));
+        });
+    }
+
     return {
         stateFile: resolvedStateFile,
         getRecord,
+        listRecords,
         prepareRecord,
         saveRecord,
+        updateRecord,
     };
 }
 

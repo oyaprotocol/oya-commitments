@@ -6,6 +6,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { privateKeyToAccount } from 'viem/accounts';
 import { createMessagePublicationApiServer } from '../src/lib/message-publication-api.js';
 import { createMessagePublicationStore } from '../src/lib/message-publication-store.js';
+import { MessagePublicationValidationError } from '../src/lib/message-publication-validation.js';
 import {
     buildMessagePublicationArtifact,
     buildSignedPublishedMessagePayload,
@@ -142,6 +143,15 @@ async function main() {
     const artifactByCid = new Map();
     const requestIdByCid = new Map();
     const failPinOnce = new Set(['pin-retry']);
+    const holdAddOnce = new Set(['stream-seq2-first']);
+    let releaseHeldAdd;
+    const heldAddBlocked = new Promise((resolve) => {
+        releaseHeldAdd = resolve;
+    });
+    let heldAddObservedResolve;
+    const heldAddObserved = new Promise((resolve) => {
+        heldAddObservedResolve = resolve;
+    });
     const failCidPersistenceAttempts = new Map();
     const originalSaveRecord = store.saveRecord;
 
@@ -169,6 +179,11 @@ async function main() {
             const requestId = artifact?.signedMessage?.envelope?.message?.requestId;
             const cid = `bafy${createHash('sha256').update(uploadedText).digest('hex').slice(0, 24)}`;
             addAttemptsByRequestId.set(requestId, (addAttemptsByRequestId.get(requestId) ?? 0) + 1);
+            if (holdAddOnce.has(requestId)) {
+                holdAddOnce.delete(requestId);
+                heldAddObservedResolve();
+                await heldAddBlocked;
+            }
             artifactByCid.set(cid, artifact);
             requestIdByCid.set(cid, requestId);
             return textResponse(
@@ -207,6 +222,108 @@ async function main() {
             async signMessage(message) {
                 return nodeAccount.signMessage({ message });
             },
+        },
+        deriveMessagePublicationLockKeys({ message }) {
+            if (message?.kind === 'sequenced_stream' && typeof message?.payload?.streamId === 'string') {
+                return [`sequenced_stream:${message.payload.streamId}`];
+            }
+            return [];
+        },
+        async validateMessagePublication({
+            message,
+            receivedAtMs,
+            publishedAtMs,
+            listRecords,
+        }) {
+            if (message.requestId === 'bad-sequence') {
+                throw new MessagePublicationValidationError('Sequence continuity failed.', {
+                    code: 'message_sequence_invalid',
+                    details: {
+                        validatorId: 'test-message-validator',
+                    },
+                });
+            }
+
+            if (message.requestId === 'publish-ok') {
+                const records = listRecords ? await listRecords() : [];
+                return {
+                    validatorId: 'test-message-validator',
+                    status: 'accepted',
+                    classifications: [
+                        {
+                            id: 'trade-1',
+                            classification: 'reimbursable',
+                            firstSeenAtMs: receivedAtMs,
+                        },
+                    ],
+                    summary: {
+                        seenRecordCount: records.length,
+                        publishedAtMs,
+                    },
+                };
+            }
+
+            if (message.requestId === 'publish-late') {
+                return {
+                    validatorId: 'test-message-validator',
+                    status: 'accepted',
+                    classifications: [
+                        {
+                            id: 'trade-late',
+                            classification: 'non_reimbursable_late',
+                            firstSeenAtMs: publishedAtMs,
+                            reason: 'published after logging window',
+                        },
+                    ],
+                };
+            }
+
+            if (message.kind === 'sequenced_stream') {
+                const records = listRecords ? await listRecords() : [];
+                const duplicateSequence = records.find((record) => {
+                    if (!record?.cid || record.requestId === message.requestId) {
+                        return false;
+                    }
+                    const publishedMessage =
+                        record?.artifact?.signedMessage?.envelope?.message ??
+                        (() => {
+                            try {
+                                return JSON.parse(record?.canonicalMessage ?? '{}')?.message ?? null;
+                            } catch {
+                                return null;
+                            }
+                        })();
+                    return (
+                        publishedMessage?.kind === 'sequenced_stream' &&
+                        publishedMessage?.payload?.streamId === message.payload?.streamId &&
+                        Number(publishedMessage?.payload?.sequence) ===
+                            Number(message.payload?.sequence)
+                    );
+                });
+                if (duplicateSequence) {
+                    throw new MessagePublicationValidationError(
+                        'Stream sequence already exists for this stream.',
+                        {
+                            code: 'message_sequence_invalid',
+                            details: {
+                                validatorId: 'test-message-validator',
+                                streamId: message.payload.streamId,
+                                sequence: message.payload.sequence,
+                            },
+                        }
+                    );
+                }
+                return {
+                    validatorId: 'test-message-validator',
+                    status: 'accepted',
+                    summary: {
+                        streamId: message.payload.streamId,
+                        sequence: message.payload.sequence,
+                    },
+                };
+            }
+
+            return null;
         },
     });
     const server = await api.start();
@@ -295,6 +412,26 @@ async function main() {
         );
         assert.equal(verification.publishedAtMs >= verification.receivedAtMs, true);
         assert.ok(verification.nodeAttestation);
+        assert.deepEqual(accepted.json.validation, {
+            validatorId: 'test-message-validator',
+            status: 'accepted',
+            classifications: [
+                {
+                    id: 'trade-1',
+                    classification: 'reimbursable',
+                    firstSeenAtMs: verification.receivedAtMs,
+                },
+            ],
+            summary: {
+                seenRecordCount: 1,
+                publishedAtMs: verification.publishedAtMs,
+            },
+        });
+        assert.deepEqual(verification.publication.validation, accepted.json.validation);
+        assert.deepEqual(
+            verification.nodeAttestation.envelope.publication.validation,
+            accepted.json.validation
+        );
         assert.equal(
             verification.nodeAttestation.signer,
             nodeAccount.address.toLowerCase()
@@ -310,8 +447,82 @@ async function main() {
         assert.equal(duplicate.json.status, 'duplicate');
         assert.equal(duplicate.json.cid, accepted.json.cid);
         assert.equal(duplicate.json.nodeSigner, nodeAccount.address.toLowerCase());
+        assert.deepEqual(duplicate.json.validation, accepted.json.validation);
         assert.equal(addAttemptsByRequestId.get('publish-ok'), 1);
         assert.equal(pinAttemptsByRequestId.get('publish-ok'), 1);
+
+        const streamSeedRequest = await buildSignedBody({
+            account,
+            requestId: 'stream-seq1',
+            messagePatch: {
+                kind: 'sequenced_stream',
+                payload: {
+                    streamId: 'stream-alpha',
+                    sequence: 1,
+                },
+            },
+        });
+        const streamSeedAccepted = await postPublication(baseUrl, streamSeedRequest.body);
+        assert.equal(streamSeedAccepted.status, 202);
+
+        const streamSeq2FirstRequest = await buildSignedBody({
+            account,
+            requestId: 'stream-seq2-first',
+            messagePatch: {
+                kind: 'sequenced_stream',
+                payload: {
+                    streamId: 'stream-alpha',
+                    sequence: 2,
+                },
+            },
+        });
+        const streamSeq2SecondRequest = await buildSignedBody({
+            account,
+            requestId: 'stream-seq2-second',
+            messagePatch: {
+                kind: 'sequenced_stream',
+                payload: {
+                    streamId: 'stream-alpha',
+                    sequence: 2,
+                },
+            },
+        });
+        const streamSeq2FirstPromise = postPublication(baseUrl, streamSeq2FirstRequest.body);
+        await heldAddObserved;
+        const streamSeq2SecondPromise = postPublication(baseUrl, streamSeq2SecondRequest.body);
+        releaseHeldAdd();
+        const [streamSeq2FirstResponse, streamSeq2SecondResponse] = await Promise.all([
+            streamSeq2FirstPromise,
+            streamSeq2SecondPromise,
+        ]);
+        assert.equal(streamSeq2FirstResponse.status, 202);
+        assert.equal(streamSeq2SecondResponse.status, 422);
+        assert.equal(streamSeq2SecondResponse.json.code, 'message_sequence_invalid');
+        assert.equal(addAttemptsByRequestId.get('stream-seq2-first'), 1);
+        assert.equal(addAttemptsByRequestId.get('stream-seq2-second') ?? 0, 0);
+
+        const lateRequest = await buildSignedBody({
+            account,
+            requestId: 'publish-late',
+            messagePatch: {
+                payload: {
+                    marketId: 'market-1',
+                    action: 'initiated',
+                    tradeId: 'trade-late',
+                },
+            },
+        });
+        const lateAccepted = await postPublication(baseUrl, lateRequest.body);
+        assert.equal(lateAccepted.status, 202);
+        assert.equal(lateAccepted.json.validation.validatorId, 'test-message-validator');
+        assert.deepEqual(lateAccepted.json.validation.classifications, [
+            {
+                id: 'trade-late',
+                classification: 'non_reimbursable_late',
+                firstSeenAtMs: lateAccepted.json.validation.classifications[0].firstSeenAtMs,
+                reason: 'published after logging window',
+            },
+        ]);
 
         const conflicting = await buildSignedBody({
             account,
@@ -346,6 +557,29 @@ async function main() {
         });
         const rejectedOtherSigner = await postPublication(baseUrl, rejectedOtherSignerRequest.body);
         assert.equal(rejectedOtherSigner.status, 401);
+
+        const structuralFailureRequest = await buildSignedBody({
+            account,
+            requestId: 'bad-sequence',
+            messagePatch: {
+                payload: {
+                    marketId: 'market-1',
+                    action: 'continuation',
+                    previousCid: 'bafy-missing',
+                },
+            },
+        });
+        const structuralFailure = await postPublication(baseUrl, structuralFailureRequest.body);
+        assert.equal(structuralFailure.status, 422);
+        assert.equal(structuralFailure.json.code, 'message_sequence_invalid');
+        assert.equal(addAttemptsByRequestId.get('bad-sequence') ?? 0, 0);
+        const structuralFailureRecord = await store.getRecord({
+            signer: account.address,
+            chainId: TEST_CHAIN_ID,
+            requestId: 'bad-sequence',
+        });
+        assert.equal(structuralFailureRecord.cid, null);
+        assert.equal(structuralFailureRecord.lastError.code, 'message_sequence_invalid');
 
         const stringChainIdRequest = await buildSignedBody({
             account,
@@ -486,6 +720,14 @@ async function main() {
         await assert.rejects(
             () => verifySignedPublishedMessageArtifact(tamperedNodeEnvelopeArtifact),
             /canonicalMessage does not match the normalized message publication node attestation envelope\.|artifact node attestation signer does not match the node attestation envelope address\./
+        );
+
+        const tamperedValidationArtifact = structuredClone(publishedArtifact);
+        tamperedValidationArtifact.publication.validation.classifications[0].classification =
+            'non_reimbursable_late';
+        await assert.rejects(
+            () => verifySignedPublishedMessageArtifact(tamperedValidationArtifact),
+            /artifact node attestation does not match the normalized publication metadata\./
         );
 
         assert.throws(

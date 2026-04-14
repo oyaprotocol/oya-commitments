@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { privateKeyToAccount } from 'viem/accounts';
 import { buildConfig } from '../../src/lib/config.js';
 import { createSignerClient } from '../../src/lib/signer.js';
@@ -239,9 +240,61 @@ async function resolveMessagePublishNodeSigner({
     };
 }
 
+async function resolveMessagePublishValidator({
+    runtimeConfig,
+} = {}) {
+    const modulePath = runtimeConfig?.modulePath;
+    if (!modulePath) {
+        return undefined;
+    }
+
+    const agentModule = await import(pathToFileURL(modulePath).href);
+    if (agentModule.validatePublishedMessage === undefined) {
+        return undefined;
+    }
+    if (typeof agentModule.validatePublishedMessage !== 'function') {
+        throw new Error(
+            `Agent module "${modulePath}" export validatePublishedMessage must be a function when provided.`
+        );
+    }
+
+    return (args) =>
+        agentModule.validatePublishedMessage({
+            ...args,
+            config: runtimeConfig,
+        });
+}
+
+async function resolveMessagePublishLockKeyDeriver({
+    runtimeConfig,
+} = {}) {
+    const modulePath = runtimeConfig?.modulePath;
+    if (!modulePath) {
+        return undefined;
+    }
+
+    const agentModule = await import(pathToFileURL(modulePath).href);
+    if (agentModule.derivePublishedMessageLockKeys === undefined) {
+        return undefined;
+    }
+    if (typeof agentModule.derivePublishedMessageLockKeys !== 'function') {
+        throw new Error(
+            `Agent module "${modulePath}" export derivePublishedMessageLockKeys must be a function when provided.`
+        );
+    }
+
+    return (args) =>
+        agentModule.derivePublishedMessageLockKeys({
+            ...args,
+            config: runtimeConfig,
+        });
+}
+
 export {
+    resolveMessagePublishLockKeyDeriver,
     resolveMessagePublishApiConfigForAgent,
     resolveMessagePublishNodeSigner,
     resolveMessagePublishServerConfig,
     resolveMessagePublishStateFile,
+    resolveMessagePublishValidator,
 };

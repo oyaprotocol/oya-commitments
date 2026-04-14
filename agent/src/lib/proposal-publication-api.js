@@ -15,6 +15,11 @@ import {
     buildSignedProposalPayload,
 } from './signed-proposal.js';
 import { buildPublicationKey } from './proposal-publication-store.js';
+import {
+    PROPOSAL_KIND_IDS,
+    normalizeProposalKind,
+    verifyProposal as verifyProposalCandidate,
+} from './proposal-verification.js';
 import { hasCommittedToolSideEffects } from './tool-execution-error.js';
 import { postBondAndPropose, resolveProposalHashFromReceipt } from './tx.js';
 
@@ -79,7 +84,7 @@ function canRefreshPendingRecord({ existingRecord, envelope }) {
     }
 }
 
-function validateProposalPublishBody(body) {
+function validateProposalRequestBody(body) {
     if (!isPlainObject(body)) {
         return { ok: false, message: 'Request body must be a JSON object.' };
     }
@@ -165,6 +170,35 @@ function enqueuePublicationOperation(queueMap, queueKey, operation) {
     });
 }
 
+function enqueueMultiKeyOperation(queueMap, queueKeys, operation) {
+    const normalizedQueueKeys = Array.from(
+        new Set(
+            (Array.isArray(queueKeys) ? queueKeys : [])
+                .filter((queueKey) => typeof queueKey === 'string' && queueKey.trim())
+                .map((queueKey) => queueKey.trim())
+        )
+    ).sort();
+    if (normalizedQueueKeys.length === 0) {
+        return operation();
+    }
+
+    const prior = Promise.all(
+        normalizedQueueKeys.map((queueKey) => queueMap.get(queueKey) ?? Promise.resolve())
+    );
+    const run = prior.then(operation, operation);
+    const tail = run.catch(() => {});
+    for (const queueKey of normalizedQueueKeys) {
+        queueMap.set(queueKey, tail);
+    }
+    return run.finally(() => {
+        for (const queueKey of normalizedQueueKeys) {
+            if (queueMap.get(queueKey) === tail) {
+                queueMap.delete(queueKey);
+            }
+        }
+    });
+}
+
 function buildSubmissionErrorPayload({
     code,
     message,
@@ -193,6 +227,38 @@ function buildSubmissionResponse(submission) {
     };
 }
 
+function buildVerificationResponse(verification) {
+    return verification && isPlainObject(verification) ? verification : null;
+}
+
+function buildAdvisoryVerificationFallback({ envelope, error, atMs = Date.now() }) {
+    const message = error?.message ?? String(error);
+    const proposalKind =
+        typeof envelope?.metadata?.verification?.proposalKind === 'string' &&
+        envelope.metadata.verification.proposalKind.trim()
+            ? envelope.metadata.verification.proposalKind.trim()
+            : null;
+    return {
+        status: 'unknown',
+        verifiedAtMs: atMs,
+        proposalKind,
+        rules: null,
+        checks: [
+            {
+                id: 'verification_runtime',
+                status: 'unknown',
+                message: `Proposal verification could not complete in advisory mode: ${message}`,
+                ...(error?.code ? { code: error.code } : {}),
+            },
+        ],
+        derivedFacts: {},
+    };
+}
+
+function canDegradeVerificationErrorToAdvisoryUnknown(error) {
+    return error?.code !== 'verification_history_unavailable';
+}
+
 function canBypassProposalRuntimeForDuplicate(record, exactExistingMatch) {
     if (!exactExistingMatch || !record) {
         return false;
@@ -204,6 +270,69 @@ function canBypassProposalRuntimeForDuplicate(record, exactExistingMatch) {
         submission.status === 'uncertain' ||
         (submission.status === 'submitted' && Boolean(submission.transactionHash))
     );
+}
+
+function shouldVerifyBeforeSubmissionAttempt(record) {
+    const submission = record?.submission ?? { status: 'not_started' };
+    if (submission.status === 'resolved') {
+        return false;
+    }
+    if (submission.status === 'submitted' && Boolean(submission.transactionHash)) {
+        return false;
+    }
+    if (
+        submission.status === 'uncertain' ||
+        (submission.sideEffectsLikelyCommitted && !submission.transactionHash)
+    ) {
+        return false;
+    }
+    return true;
+}
+
+function normalizePotentialDepositTxHash(value) {
+    return typeof value === 'string' && /^0x[0-9a-fA-F]{64}$/.test(value)
+        ? value.toLowerCase()
+        : null;
+}
+
+function buildDepositSubmissionLockKeys(envelope) {
+    const verificationMetadata = envelope?.metadata?.verification;
+    if (
+        !isPlainObject(verificationMetadata) ||
+        !Array.isArray(verificationMetadata.depositTxHashes)
+    ) {
+        return [];
+    }
+    let normalizedProposalKind;
+    try {
+        normalizedProposalKind = normalizeProposalKind(verificationMetadata.proposalKind);
+    } catch {
+        return [];
+    }
+    if (normalizedProposalKind.proposalKindId !== PROPOSAL_KIND_IDS.AGENT_PROXY_REIMBURSEMENT) {
+        return [];
+    }
+
+    let commitmentSafe;
+    let ogModule;
+    try {
+        commitmentSafe = getAddress(envelope.commitmentSafe).toLowerCase();
+        ogModule = getAddress(envelope.ogModule).toLowerCase();
+    } catch {
+        return [];
+    }
+
+    return Array.from(
+        new Set(
+            verificationMetadata.depositTxHashes
+                .map((depositTxHash) => normalizePotentialDepositTxHash(depositTxHash))
+                .filter(Boolean)
+                .map(
+                    (depositTxHash) =>
+                        `${Number(envelope.chainId)}:${commitmentSafe}:${ogModule}:${depositTxHash}`
+                )
+        )
+    ).sort();
 }
 
 function canReuseVolatilePublicationState(record, publicationState) {
@@ -230,8 +359,10 @@ function createProposalPublicationApiServer({
     store,
     logger = console,
     resolveProposalRuntime = undefined,
+    resolveVerificationRuntime = undefined,
     submitProposal = postBondAndPropose,
     resolveProposalHash = resolveProposalHashFromReceipt,
+    verifyProposal = verifyProposalCandidate,
 } = {}) {
     if (!config) {
         throw new Error('createProposalPublicationApiServer requires config.');
@@ -252,6 +383,9 @@ function createProposalPublicationApiServer({
     const requireSignerAllowlist = config.proposalPublishApiRequireSignerAllowlist !== false;
     const signatureMaxAgeSeconds = Number(config.proposalPublishApiSignatureMaxAgeSeconds ?? 300);
     const apiMode = config.proposalPublishApiMode ?? 'publish';
+    const proposalVerificationMode = String(config.proposalVerificationMode ?? 'off')
+        .trim()
+        .toLowerCase();
     const expectedChainId =
         config.chainId === undefined || config.chainId === null
             ? undefined
@@ -266,10 +400,14 @@ function createProposalPublicationApiServer({
             'Proposal publication API in propose mode requires resolveProposalRuntime(chainId).'
         );
     }
+    if (!['off', 'advisory', 'enforce'].includes(proposalVerificationMode)) {
+        throw new Error('proposalVerificationMode must be one of: off, advisory, enforce.');
+    }
 
     let server;
     const publishOperationTails = new Map();
     const submissionOperationTails = new Map();
+    const depositSubmissionOperationTails = new Map();
     const volatilePublicationStates = new Map();
 
     function emitLog(level, message) {
@@ -286,17 +424,30 @@ function createProposalPublicationApiServer({
         let persistError;
         for (let attempt = 0; attempt < 2; attempt += 1) {
             try {
-                const nextRecord = await store.saveRecord({
-                    ...record,
-                    signature: publicationState.signature,
-                    canonicalMessage: publicationState.canonicalMessage,
-                    artifact: publicationState.artifact,
-                    publishedAtMs: publicationState.publishedAtMs,
-                    cid: publicationState.cid,
-                    uri: publicationState.uri,
-                    publishResult: publicationState.publishResult,
-                    lastError: null,
-                });
+                const nextRecord =
+                    typeof store.updateRecord === 'function'
+                        ? await store.updateRecord(record, (current) => ({
+                              ...current,
+                              signature: publicationState.signature,
+                              canonicalMessage: publicationState.canonicalMessage,
+                              artifact: publicationState.artifact,
+                              publishedAtMs: publicationState.publishedAtMs,
+                              cid: publicationState.cid,
+                              uri: publicationState.uri,
+                              publishResult: publicationState.publishResult,
+                              lastError: null,
+                          }))
+                        : await store.saveRecord({
+                              ...record,
+                              signature: publicationState.signature,
+                              canonicalMessage: publicationState.canonicalMessage,
+                              artifact: publicationState.artifact,
+                              publishedAtMs: publicationState.publishedAtMs,
+                              cid: publicationState.cid,
+                              uri: publicationState.uri,
+                              publishResult: publicationState.publishResult,
+                              lastError: null,
+                          });
                 volatilePublicationStates.delete(publicationKey);
                 return nextRecord;
             } catch (error) {
@@ -343,12 +494,20 @@ function createProposalPublicationApiServer({
                     signerAllowlistMode,
                     nodeName,
                 });
-                nextRecord = await store.saveRecord({
-                    ...nextRecord,
-                    artifact,
-                    publishedAtMs,
-                    lastError: null,
-                });
+                nextRecord =
+                    typeof store.updateRecord === 'function'
+                        ? await store.updateRecord(nextRecord, (current) => ({
+                              ...current,
+                              artifact,
+                              publishedAtMs,
+                              lastError: null,
+                          }))
+                        : await store.saveRecord({
+                              ...nextRecord,
+                              artifact,
+                              publishedAtMs,
+                              lastError: null,
+                          });
             }
             const publishResponse = await publishIpfsContent({
                 config,
@@ -381,18 +540,35 @@ function createProposalPublicationApiServer({
                 config,
                 cid: nextRecord.cid,
             });
-            nextRecord = await store.saveRecord({
-                ...nextRecord,
-                pinned: true,
-                pinResult,
-                lastError: null,
-            });
+            nextRecord =
+                typeof store.updateRecord === 'function'
+                    ? await store.updateRecord(nextRecord, (current) => ({
+                          ...current,
+                          pinned: true,
+                          pinResult,
+                          lastError: null,
+                      }))
+                    : await store.saveRecord({
+                          ...nextRecord,
+                          pinned: true,
+                          pinResult,
+                          lastError: null,
+                      });
         }
 
         return nextRecord;
     }
 
     async function saveSubmission(record, patch) {
+        if (typeof store.updateRecord === 'function') {
+            return store.updateRecord(record, (current) => ({
+                ...current,
+                submission: {
+                    ...(current.submission ?? {}),
+                    ...patch,
+                },
+            }));
+        }
         return store.saveRecord({
             ...record,
             submission: {
@@ -400,6 +576,96 @@ function createProposalPublicationApiServer({
                 ...patch,
             },
         });
+    }
+
+    async function saveVerification(record, verification) {
+        if (typeof store.updateRecord === 'function') {
+            return store.updateRecord(record, (current) => ({
+                ...current,
+                verification,
+            }));
+        }
+        return store.saveRecord({
+            ...record,
+            verification,
+        });
+    }
+
+    async function resolveVerificationRuntimeForChain(chainId, proposalRuntime = undefined) {
+        if (proposalRuntime) {
+            return proposalRuntime;
+        }
+        if (typeof resolveVerificationRuntime !== 'function') {
+            return null;
+        }
+        return resolveVerificationRuntime({ chainId });
+    }
+
+    async function listStoreRecordsForVerification() {
+        if (typeof store.listRecords !== 'function') {
+            throw new ApiResponseError(
+                'Proposal verification requires a store implementation that supports listRecords().',
+                {
+                    statusCode: 503,
+                    code: 'verification_history_unavailable',
+                }
+            );
+        }
+        let records;
+        try {
+            records = await store.listRecords();
+        } catch (error) {
+            throw new ApiResponseError(
+                `Proposal verification could not enumerate prior proposals: ${error?.message ?? error}`,
+                {
+                    statusCode: 503,
+                    code: 'verification_history_unavailable',
+                }
+            );
+        }
+        if (!Array.isArray(records)) {
+            throw new ApiResponseError(
+                'Proposal verification store returned an invalid record list.',
+                {
+                    statusCode: 503,
+                    code: 'verification_history_unavailable',
+                }
+            );
+        }
+        return records;
+    }
+
+    async function runVerification({
+        record = null,
+        envelope,
+        proposalRuntime = undefined,
+    }) {
+        const verificationRuntime = await resolveVerificationRuntimeForChain(
+            envelope.chainId,
+            proposalRuntime
+        );
+        const publicationKey = buildPublicationKey({
+            signer: envelope.address,
+            chainId: envelope.chainId,
+            requestId: envelope.requestId,
+        });
+        const storeRecords = await listStoreRecordsForVerification();
+        const verification = await verifyProposal({
+            envelope,
+            publicClient: verificationRuntime?.publicClient,
+            storeRecords,
+            currentPublicationKey: publicationKey,
+        });
+        if (record) {
+            return {
+                record: await saveVerification(record, verification),
+                verification,
+            };
+        }
+        return {
+            record,
+            verification,
+        };
     }
 
     async function reconcileSubmittedRecord(record, { runtime, envelope }) {
@@ -720,7 +986,11 @@ function createProposalPublicationApiServer({
                 return;
             }
 
-            if (!(req.method === 'POST' && url.pathname === '/v1/proposals/publish')) {
+            const isPublishRoute =
+                req.method === 'POST' && url.pathname === '/v1/proposals/publish';
+            const isVerifyRoute =
+                req.method === 'POST' && url.pathname === '/v1/proposals/verify';
+            if (!(isPublishRoute || isVerifyRoute)) {
                 sendJson(res, 404, { error: 'Not found.' });
                 return;
             }
@@ -747,11 +1017,11 @@ function createProposalPublicationApiServer({
                 return;
             }
 
-            const validation = validateProposalPublishBody(body);
+            const validation = validateProposalRequestBody(body);
             if (!validation.ok) {
                 emitLog(
                     'warn',
-                    `[oya-node] Proposal publish API rejected request${formatRequestContext({
+                    `[oya-node] Proposal ${isVerifyRoute ? 'verify' : 'publish'} API rejected request${formatRequestContext({
                         body,
                         code: 'invalid_request',
                         statusCode: 400,
@@ -905,6 +1175,37 @@ function createProposalPublicationApiServer({
                 return;
             }
 
+            if (isVerifyRoute) {
+                let verification;
+                try {
+                    ({ verification } = await runVerification({
+                        record: exactExistingMatch ? existingRecord : null,
+                        envelope,
+                    }));
+                } catch (error) {
+                    const statusCode = error?.statusCode ?? 502;
+                    const code = error?.code ?? 'verification_failed';
+                    emitLog(
+                        'warn',
+                        `[oya-node] Proposal verify API failed${formatRequestContext({
+                            body,
+                            signer: signedAuth.sender.address,
+                            senderKeyId: signedAuth.senderKeyId,
+                            code,
+                            statusCode,
+                        })}: ${error?.message ?? error}`
+                    );
+                    sendJson(res, statusCode, {
+                        error: error?.message ?? 'Proposal verification failed.',
+                        code,
+                    });
+                    return;
+                }
+
+                sendJson(res, 200, verification);
+                return;
+            }
+
             let prepared;
             if (exactExistingMatch) {
                 prepared = {
@@ -1053,23 +1354,46 @@ function createProposalPublicationApiServer({
                     const shouldClearDurablePendingPublication =
                         code === 'publish_failed' && record.cid === null;
                     try {
-                        record = await store.saveRecord({
-                            ...record,
-                            ...(shouldClearDurablePendingPublication
-                                ? {
-                                      artifact: null,
-                                      publishedAtMs: null,
-                                  }
-                                : {}),
-                            lastError: {
-                                code,
-                                message: error?.message ?? String(error),
-                                atMs: Date.now(),
-                            },
-                        });
-                        if (partialPublicationState && record.cid) {
+                        const persistedRecord =
+                            typeof store.updateRecord === 'function'
+                                ? await store.updateRecord(record, (current) => ({
+                                      ...current,
+                                      ...(shouldClearDurablePendingPublication
+                                          ? {
+                                                artifact: null,
+                                                publishedAtMs: null,
+                                            }
+                                          : {}),
+                                      lastError: {
+                                          code,
+                                          message: error?.message ?? String(error),
+                                          atMs: Date.now(),
+                                      },
+                                  }))
+                                : await store.saveRecord({
+                                      ...record,
+                                      ...(shouldClearDurablePendingPublication
+                                          ? {
+                                                artifact: null,
+                                                publishedAtMs: null,
+                                            }
+                                          : {}),
+                                      lastError: {
+                                          code,
+                                          message: error?.message ?? String(error),
+                                          atMs: Date.now(),
+                                      },
+                                  });
+                        if (partialPublicationState && persistedRecord.cid) {
                             volatilePublicationStates.delete(publicationKey);
                         }
+                        record =
+                            partialPublicationState && !persistedRecord.cid
+                                ? {
+                                      ...persistedRecord,
+                                      ...partialPublicationState,
+                                  }
+                                : persistedRecord;
                     } catch (_persistError) {
                         record = {
                             ...record,
@@ -1115,38 +1439,136 @@ function createProposalPublicationApiServer({
                         chainId: body.chainId,
                         requestId: body.requestId,
                     });
+                    const depositSubmissionLockKeys = buildDepositSubmissionLockKeys(envelope);
                     ({ record, submissionAttempted } = await enqueuePublicationOperation(
                         submissionOperationTails,
                         publicationKey,
                         async () => {
-                            const latestRecord = await store.getRecord({
-                                signer: signedAuth.sender.address,
-                                chainId: body.chainId,
-                                requestId: body.requestId,
-                            });
-                            if (!latestRecord) {
-                                throw new Error(
-                                    'Publication record disappeared before proposal submission.'
+                            const loadLatestRecord = async () => {
+                                const latestRecord = await store.getRecord({
+                                    signer: signedAuth.sender.address,
+                                    chainId: body.chainId,
+                                    requestId: body.requestId,
+                                });
+                                if (!latestRecord) {
+                                    throw new Error(
+                                        'Publication record disappeared before proposal submission.'
+                                    );
+                                }
+                                return latestRecord;
+                            };
+
+                            let latestRecord = await loadLatestRecord();
+                            let runtime = proposalRuntime;
+
+                            const resolveRuntimeForLatestRecord = async () => {
+                                if (
+                                    !runtime &&
+                                    latestRecord.submission?.status === 'submitted' &&
+                                    latestRecord.submission?.transactionHash
+                                ) {
+                                    try {
+                                        runtime = await resolveProposalRuntime({
+                                            chainId: body.chainId,
+                                        });
+                                    } catch (error) {
+                                        runtime = undefined;
+                                    }
+                                }
+                            };
+
+                            const attemptSubmission = async () => {
+                                if (
+                                    proposalVerificationMode !== 'off' &&
+                                    shouldVerifyBeforeSubmissionAttempt(latestRecord)
+                                ) {
+                                    try {
+                                        ({ record: latestRecord } = await runVerification({
+                                            record: latestRecord,
+                                            envelope,
+                                            proposalRuntime: runtime,
+                                        }));
+                                    } catch (error) {
+                                        if (
+                                            proposalVerificationMode !== 'advisory' ||
+                                            !canDegradeVerificationErrorToAdvisoryUnknown(error)
+                                        ) {
+                                            throw error;
+                                        }
+                                        const statusCode = error?.statusCode ?? 502;
+                                        const code = error?.code ?? 'verification_failed';
+                                        emitLog(
+                                            'warn',
+                                            `[oya-node] Proposal verification degraded to advisory unknown${formatRequestContext({
+                                                body,
+                                                signer: signedAuth.sender.address,
+                                                senderKeyId: signedAuth.senderKeyId,
+                                                code,
+                                                statusCode,
+                                            })}: ${error?.message ?? error}`
+                                        );
+                                        latestRecord = await saveVerification(
+                                            latestRecord,
+                                            buildAdvisoryVerificationFallback({
+                                                envelope,
+                                                error,
+                                            })
+                                        );
+                                    }
+                                    const verification = buildVerificationResponse(
+                                        latestRecord.verification
+                                    );
+                                    if (
+                                        proposalVerificationMode === 'enforce' &&
+                                        verification?.status !== 'valid'
+                                    ) {
+                                        const code =
+                                            verification?.status === 'invalid'
+                                                ? 'verification_invalid'
+                                                : 'verification_unknown';
+                                        throw new ApiResponseError(
+                                            verification?.status === 'invalid'
+                                                ? 'Proposal verification failed. The node refused to submit this proposal onchain.'
+                                                : 'Proposal verification was inconclusive. The node refused to submit this proposal onchain.',
+                                            {
+                                                statusCode: 409,
+                                                code,
+                                                body: {
+                                                    error:
+                                                        verification?.status === 'invalid'
+                                                            ? 'Proposal verification failed. The node refused to submit this proposal onchain.'
+                                                            : 'Proposal verification was inconclusive. The node refused to submit this proposal onchain.',
+                                                    code,
+                                                    verification,
+                                                },
+                                            }
+                                        );
+                                    }
+                                }
+                                return submitPublishedRecord(latestRecord, {
+                                    runtime,
+                                    envelope,
+                                });
+                            };
+
+                            await resolveRuntimeForLatestRecord();
+                            if (
+                                proposalVerificationMode !== 'off' &&
+                                depositSubmissionLockKeys.length > 0 &&
+                                shouldVerifyBeforeSubmissionAttempt(latestRecord)
+                            ) {
+                                return enqueueMultiKeyOperation(
+                                    depositSubmissionOperationTails,
+                                    depositSubmissionLockKeys,
+                                    async () => {
+                                        latestRecord = await loadLatestRecord();
+                                        await resolveRuntimeForLatestRecord();
+                                        return attemptSubmission();
+                                    }
                                 );
                             }
-                            let runtime = proposalRuntime;
-                            if (
-                                !runtime &&
-                                latestRecord.submission?.status === 'submitted' &&
-                                latestRecord.submission?.transactionHash
-                            ) {
-                                try {
-                                    runtime = await resolveProposalRuntime({
-                                        chainId: body.chainId,
-                                    });
-                                } catch (error) {
-                                    runtime = undefined;
-                                }
-                            }
-                            return submitPublishedRecord(latestRecord, {
-                                runtime,
-                                envelope,
-                            });
+
+                            return attemptSubmission();
                         }
                     ));
                 } catch (error) {
@@ -1182,6 +1604,7 @@ function createProposalPublicationApiServer({
                         publishedAtMs: record?.publishedAtMs ?? null,
                         error: error?.body?.error ?? error?.message ?? 'Proposal submission failed.',
                         code,
+                        verification: buildVerificationResponse(record?.verification),
                         submission: buildSubmissionResponse(record?.submission),
                     });
                     return;
@@ -1199,6 +1622,7 @@ function createProposalPublicationApiServer({
                 pinned: record.pinned,
                 receivedAtMs: record.receivedAtMs,
                 publishedAtMs: record.publishedAtMs,
+                verification: buildVerificationResponse(record.verification),
                 ...(apiMode === 'propose'
                     ? { submission: buildSubmissionResponse(record.submission) }
                     : {}),

@@ -93,6 +93,8 @@ The designated agent at address [ ] must deposit a stake of [ ] to be considered
 
 To track this external trading, the agent will periodically sign an updated log documenting all of their trades, and send to the node at address [ ] for a second signature, and publication to IPFS.
 
+Trades must be logged within [ ] minutes of trade execution to be considered valid for reimbursement.
+
 When a Polymarket market resolves, the agent must deposit the resulting winnings (if any) into the commitment to receive reimbursement for the initial trade(s). Or, if the agent has already exited the position before the market resolved, they must deposit any proceeds into the commitment to receive reimbursement. If the position was held until market resolution and it was a losing position, no deposit is necessary from the agent to claim reimbursement, since the value of the position is zero.
 
 If the agent does not make the required deposit within [ ] hours of market resolution, they shall be considered in violation of this rule, and their stake will be forfeit in its entirety to the user.

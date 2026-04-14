@@ -14,6 +14,8 @@ import {
 const TEST_CHAIN_ID = 11155111;
 const TEST_SAFE = '0x2222222222222222222222222222222222222222';
 const TEST_OG_MODULE = '0x3333333333333333333333333333333333333333';
+const BASE_TIME_MS = 1_774_900_000_000;
+const SHARED_DEPOSIT_TX_HASH = `0x${'a'.repeat(64)}`;
 const TEST_TRANSACTIONS = [
     {
         to: '0x4444444444444444444444444444444444444444',
@@ -45,6 +47,7 @@ function buildServerConfig(signerAddress, overrides = {}) {
         proposalPublishApiSignatureMaxAgeSeconds: 300,
         proposalPublishApiMaxBodyBytes: 65_536,
         proposalPublishApiNodeName: 'test-node',
+        proposalVerificationMode: 'off',
         ...overrides,
     };
 }
@@ -107,8 +110,62 @@ async function buildSignedBody({
     };
 }
 
+function buildReimbursementVerificationMetadata({
+    depositTxHashes = [SHARED_DEPOSIT_TX_HASH],
+    rulesHash = `0x${'b'.repeat(64)}`,
+    proposalKind = 'agent_proxy_reimbursement',
+} = {}) {
+    return {
+        verification: {
+            proposalKind,
+            rulesHash,
+            depositTxHashes,
+        },
+    };
+}
+
+function extractVerificationDepositTxHashes(record) {
+    if (typeof record?.canonicalMessage !== 'string' || !record.canonicalMessage) {
+        return [];
+    }
+    try {
+        const parsed = JSON.parse(record.canonicalMessage);
+        const depositTxHashes = parsed?.metadata?.verification?.depositTxHashes;
+        return Array.isArray(depositTxHashes)
+            ? depositTxHashes
+                  .filter((depositTxHash) => typeof depositTxHash === 'string')
+                  .map((depositTxHash) => depositTxHash.toLowerCase())
+            : [];
+    } catch {
+        return [];
+    }
+}
+
 async function postPublication(baseUrl, body, { bearerToken = 'k_test_ops_secret' } = {}) {
     const response = await fetch(`${baseUrl}/v1/proposals/publish`, {
+        method: 'POST',
+        headers: {
+            ...(bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {}),
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+    });
+    const raw = await response.text();
+    let parsed;
+    try {
+        parsed = raw ? JSON.parse(raw) : {};
+    } catch (error) {
+        parsed = { raw };
+    }
+    return {
+        status: response.status,
+        ok: response.ok,
+        json: parsed,
+    };
+}
+
+async function postVerification(baseUrl, body, { bearerToken = 'k_test_ops_secret' } = {}) {
+    const response = await fetch(`${baseUrl}/v1/proposals/verify`, {
         method: 'POST',
         headers: {
             ...(bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {}),
@@ -376,8 +433,28 @@ async function main() {
             async prepareRecord(args) {
                 return publishPersistStoreBase.prepareRecord(args);
             },
+            async updateRecord(recordOrKey, updater) {
+                return publishPersistStoreBase.updateRecord(recordOrKey, async (current) => {
+                    const nextRecord = await updater(current);
+                    if (
+                        nextRecord.cid &&
+                        !nextRecord.pinned &&
+                        nextRecord.lastError === null &&
+                        publishPersistFailures < 3
+                    ) {
+                        publishPersistFailures += 1;
+                        throw new Error('simulated publish persistence failure');
+                    }
+                    return nextRecord;
+                });
+            },
             async saveRecord(record) {
-                if (record.cid && !record.pinned && publishPersistFailures < 3) {
+                if (
+                    record.cid &&
+                    !record.pinned &&
+                    record.lastError === null &&
+                    publishPersistFailures < 3
+                ) {
                     publishPersistFailures += 1;
                     throw new Error('simulated publish persistence failure');
                 }
@@ -471,8 +548,28 @@ async function main() {
             async prepareRecord(args) {
                 return publishPersistRestartStoreBase.prepareRecord(args);
             },
+            async updateRecord(recordOrKey, updater) {
+                return publishPersistRestartStoreBase.updateRecord(recordOrKey, async (current) => {
+                    const nextRecord = await updater(current);
+                    if (
+                        nextRecord.cid &&
+                        !nextRecord.pinned &&
+                        nextRecord.lastError === null &&
+                        publishPersistRestartFailures < 3
+                    ) {
+                        publishPersistRestartFailures += 1;
+                        throw new Error('simulated publish persistence failure across restart');
+                    }
+                    return nextRecord;
+                });
+            },
             async saveRecord(record) {
-                if (record.cid && !record.pinned && publishPersistRestartFailures < 3) {
+                if (
+                    record.cid &&
+                    !record.pinned &&
+                    record.lastError === null &&
+                    publishPersistRestartFailures < 3
+                ) {
                     publishPersistRestartFailures += 1;
                     throw new Error('simulated publish persistence failure across restart');
                 }
@@ -658,9 +755,320 @@ async function main() {
         assert.ok(resignedRecord.publishedAtMs >= retryBaseNowMs + 801_000);
         assert.equal(addAttemptsByRequestId.get('publish-retry-resigned'), 2);
 
+        const verifyStateFile = path.join(tempDir, 'proposal-publications-verify.json');
+        const verifyStore = createProposalPublicationStore({ stateFile: verifyStateFile });
+        const observedVerifyCalls = [];
+        const verifyApi = createProposalPublicationApiServer({
+            config: buildServerConfig(account.address),
+            store: verifyStore,
+            logger: {
+                info() {},
+                warn() {},
+            },
+            verifyProposal: async ({ envelope }) => {
+                observedVerifyCalls.push({
+                    requestId: envelope.requestId,
+                });
+                return {
+                    status: 'valid',
+                    verifiedAtMs: 1_760_000_000_123,
+                    proposalKind: 'agent_proxy_reimbursement',
+                    rules: {
+                        rulesHash: `0x${'a'.repeat(64)}`,
+                        matchedTemplates: [],
+                        unparsedSections: [],
+                    },
+                    checks: [
+                        {
+                            id: 'stubbed_verifier',
+                            status: 'pass',
+                            message: 'Stub verifier accepted the request.',
+                        },
+                    ],
+                    derivedFacts: {
+                        requestId: envelope.requestId,
+                    },
+                };
+            },
+        });
+        const verifyServer = await verifyApi.start();
+        const verifyAddress = verifyServer.address();
+        assert.ok(
+            verifyAddress &&
+                typeof verifyAddress === 'object' &&
+                typeof verifyAddress.port === 'number'
+        );
+        const verifyBaseUrl = `http://127.0.0.1:${verifyAddress.port}`;
+
+        try {
+            const verifyRequest = await buildSignedBody({
+                account,
+                requestId: 'verify-ok',
+                explanation: 'Verify only request.',
+            });
+            const verifyResponse = await postVerification(verifyBaseUrl, verifyRequest.body);
+            assert.equal(verifyResponse.status, 200);
+            assert.equal(verifyResponse.json.status, 'valid');
+            assert.equal(verifyResponse.json.derivedFacts.requestId, 'verify-ok');
+            assert.deepEqual(observedVerifyCalls, [
+                {
+                    requestId: 'verify-ok',
+                },
+            ]);
+            const verifyRecord = await verifyStore.getRecord({
+                signer: account.address,
+                chainId: TEST_CHAIN_ID,
+                requestId: 'verify-ok',
+            });
+            assert.equal(verifyRecord, null);
+
+            const verifyUnsupportedRulesText = await postVerification(verifyBaseUrl, {
+                ...verifyRequest.body,
+                rulesText:
+                    'Agent Proxy\n---\nThe agent at address 0x1111111111111111111111111111111111111111 may trade tokens in this commitment for different tokens.',
+            });
+            assert.equal(verifyUnsupportedRulesText.status, 400);
+            assert.match(
+                verifyUnsupportedRulesText.json.error,
+                /Unsupported field: rulesText/
+            );
+        } finally {
+            await verifyApi.stop();
+        }
+
+        const verifyNoHistoryStateFile = path.join(
+            tempDir,
+            'proposal-publications-verify-no-history.json'
+        );
+        const verifyNoHistoryStoreBase = createProposalPublicationStore({
+            stateFile: verifyNoHistoryStateFile,
+        });
+        const verifyNoHistoryStore = {
+            async getRecord(args) {
+                return verifyNoHistoryStoreBase.getRecord(args);
+            },
+        };
+        let verifyNoHistoryCalls = 0;
+        const verifyNoHistoryApi = createProposalPublicationApiServer({
+            config: buildServerConfig(account.address),
+            store: verifyNoHistoryStore,
+            logger: {
+                info() {},
+                warn() {},
+            },
+            verifyProposal: async () => {
+                verifyNoHistoryCalls += 1;
+                return {
+                    status: 'valid',
+                    verifiedAtMs: BASE_TIME_MS + 1,
+                    proposalKind: 'agent_proxy_reimbursement',
+                    rules: {
+                        rulesHash: `0x${'f'.repeat(64)}`,
+                        matchedTemplates: [],
+                        unparsedSections: [],
+                    },
+                    checks: [],
+                    derivedFacts: {},
+                };
+            },
+        });
+        const verifyNoHistoryServer = await verifyNoHistoryApi.start();
+        const verifyNoHistoryAddress = verifyNoHistoryServer.address();
+        assert.ok(
+            verifyNoHistoryAddress &&
+                typeof verifyNoHistoryAddress === 'object' &&
+                typeof verifyNoHistoryAddress.port === 'number'
+        );
+        const verifyNoHistoryBaseUrl = `http://127.0.0.1:${verifyNoHistoryAddress.port}`;
+
+        try {
+            const verifyNoHistoryRequest = await buildSignedBody({
+                account,
+                requestId: 'verify-no-history',
+                explanation: 'Verify should fail closed without record enumeration.',
+            });
+            const verifyNoHistoryResponse = await postVerification(
+                verifyNoHistoryBaseUrl,
+                verifyNoHistoryRequest.body
+            );
+            assert.equal(verifyNoHistoryResponse.status, 503);
+            assert.equal(
+                verifyNoHistoryResponse.json.code,
+                'verification_history_unavailable'
+            );
+            assert.match(
+                verifyNoHistoryResponse.json.error,
+                /supports listRecords\(\)/
+            );
+            assert.equal(verifyNoHistoryCalls, 0);
+        } finally {
+            await verifyNoHistoryApi.stop();
+        }
+
+        const verifyExistingStateFile = path.join(
+            tempDir,
+            'proposal-publications-verify-existing.json'
+        );
+        const verifyExistingStoreBase = createProposalPublicationStore({
+            stateFile: verifyExistingStateFile,
+        });
+        const verifyExistingRequest = await buildSignedBody({
+            account,
+            requestId: 'verify-existing',
+            explanation: 'Verify existing exact-match request.',
+        });
+        await verifyExistingStoreBase.saveRecord({
+            signer: account.address,
+            chainId: TEST_CHAIN_ID,
+            requestId: 'verify-existing',
+            signature: verifyExistingRequest.signature,
+            canonicalMessage: verifyExistingRequest.payload,
+            receivedAtMs: BASE_TIME_MS,
+            publishedAtMs: BASE_TIME_MS + 1,
+            artifact: {
+                version: 'test-artifact-v1',
+                requestId: 'verify-existing',
+            },
+            cid: 'bafy-verify-existing-old',
+            uri: 'ipfs://bafy-verify-existing-old',
+            pinned: true,
+            publishResult: {
+                cid: 'bafy-verify-existing-old',
+            },
+            pinResult: {
+                Pins: ['bafy-verify-existing-old'],
+            },
+            lastError: null,
+            verification: null,
+            submission: {
+                status: 'not_started',
+                submittedAtMs: null,
+                transactionHash: null,
+                ogProposalHash: null,
+                result: null,
+                error: null,
+                sideEffectsLikelyCommitted: false,
+            },
+            createdAtMs: BASE_TIME_MS,
+            updatedAtMs: BASE_TIME_MS,
+        });
+        let injectedVerifyExistingUpdate = false;
+        const verifyExistingStore = {
+            async getRecord(args) {
+                return verifyExistingStoreBase.getRecord(args);
+            },
+            async prepareRecord(args) {
+                return verifyExistingStoreBase.prepareRecord(args);
+            },
+            async saveRecord(record) {
+                return verifyExistingStoreBase.saveRecord(record);
+            },
+            async listRecords() {
+                return verifyExistingStoreBase.listRecords();
+            },
+            async updateRecord(recordOrKey, updater) {
+                if (!injectedVerifyExistingUpdate) {
+                    injectedVerifyExistingUpdate = true;
+                    const current = await verifyExistingStoreBase.getRecord(recordOrKey);
+                    await verifyExistingStoreBase.saveRecord({
+                        ...current,
+                        cid: 'bafy-verify-existing-new',
+                        uri: 'ipfs://bafy-verify-existing-new',
+                        publishResult: {
+                            cid: 'bafy-verify-existing-new',
+                        },
+                        submission: {
+                            status: 'resolved',
+                            submittedAtMs: BASE_TIME_MS + 2,
+                            transactionHash: `0x${'d'.repeat(64)}`,
+                            ogProposalHash: `0x${'e'.repeat(64)}`,
+                            result: {
+                                transactionHash: `0x${'d'.repeat(64)}`,
+                            },
+                            error: null,
+                            sideEffectsLikelyCommitted: true,
+                        },
+                    });
+                }
+                return verifyExistingStoreBase.updateRecord(recordOrKey, updater);
+            },
+        };
+        const verifyExistingApi = createProposalPublicationApiServer({
+            config: buildServerConfig(account.address),
+            store: verifyExistingStore,
+            logger: {
+                info() {},
+                warn() {},
+            },
+            verifyProposal: async ({ envelope }) => ({
+                status: 'valid',
+                verifiedAtMs: BASE_TIME_MS + 3,
+                proposalKind: 'agent_proxy_reimbursement',
+                rules: {
+                    rulesHash: `0x${'b'.repeat(64)}`,
+                    matchedTemplates: [],
+                    unparsedSections: [],
+                },
+                checks: [
+                    {
+                        id: 'stubbed_verifier',
+                        status: 'pass',
+                        message: `Stub verifier accepted ${envelope.requestId}.`,
+                    },
+                ],
+                derivedFacts: {
+                    requestId: envelope.requestId,
+                },
+            }),
+        });
+        const verifyExistingServer = await verifyExistingApi.start();
+        const verifyExistingAddress = verifyExistingServer.address();
+        assert.ok(
+            verifyExistingAddress &&
+                typeof verifyExistingAddress === 'object' &&
+                typeof verifyExistingAddress.port === 'number'
+        );
+        const verifyExistingBaseUrl = `http://127.0.0.1:${verifyExistingAddress.port}`;
+
+        try {
+            const verifyExistingResponse = await postVerification(verifyExistingBaseUrl, {
+                ...verifyExistingRequest.body,
+            });
+            assert.equal(verifyExistingResponse.status, 200);
+            assert.equal(verifyExistingResponse.json.status, 'valid');
+            const verifyExistingRecord = await verifyExistingStoreBase.getRecord({
+                signer: account.address,
+                chainId: TEST_CHAIN_ID,
+                requestId: 'verify-existing',
+            });
+            assert.equal(verifyExistingRecord.cid, 'bafy-verify-existing-new');
+            assert.equal(verifyExistingRecord.uri, 'ipfs://bafy-verify-existing-new');
+            assert.equal(verifyExistingRecord.submission.status, 'resolved');
+            assert.equal(
+                verifyExistingRecord.submission.transactionHash,
+                `0x${'d'.repeat(64)}`
+            );
+            assert.equal(verifyExistingRecord.verification.status, 'valid');
+            assert.equal(
+                verifyExistingRecord.verification.derivedFacts.requestId,
+                'verify-existing'
+            );
+        } finally {
+            await verifyExistingApi.stop();
+        }
+
         const proposeStateFile = path.join(tempDir, 'proposal-publications-propose.json');
         const proposeStore = createProposalPublicationStore({ stateFile: proposeStateFile });
         const submitAttemptsByExplanation = new Map();
+        const verifyAttemptsByExplanation = new Map();
+        let releaseDepositRaceFirstSubmit;
+        const depositRaceFirstSubmitBlocked = new Promise((resolve) => {
+            releaseDepositRaceFirstSubmit = resolve;
+        });
+        let depositRaceFirstSubmitObservedResolve;
+        const depositRaceFirstSubmitObserved = new Promise((resolve) => {
+            depositRaceFirstSubmitObservedResolve = resolve;
+        });
         const resolvedProposalHashes = new Map([
             [`0x${'3'.repeat(64)}`, `0x${'4'.repeat(64)}`],
         ]);
@@ -669,10 +1077,15 @@ async function main() {
             [11155111, true],
             [137, true],
         ]);
+        const verificationRuntimeAvailableByChain = new Map([
+            [11155111, true],
+            [137, true],
+        ]);
         const proposeApi = createProposalPublicationApiServer({
             config: buildServerConfig(account.address, {
                 chainId: undefined,
                 proposalPublishApiMode: 'propose',
+                proposalVerificationMode: 'enforce',
             }),
             store: proposeStore,
             logger: {
@@ -709,11 +1122,46 @@ async function main() {
                     account: { address: account.address },
                 };
             },
+            resolveVerificationRuntime: async ({ chainId }) => {
+                if (verificationRuntimeAvailableByChain.get(chainId) === false) {
+                    const error = new Error(
+                        `Verification runtime unavailable for chainId ${chainId}.`
+                    );
+                    error.code = 'verification_runtime_unavailable';
+                    error.statusCode = 502;
+                    throw error;
+                }
+                return {
+                    publicClient: {
+                        async getChainId() {
+                            return chainId;
+                        },
+                    },
+                };
+            },
             submitProposal: async ({ config, explanation }) => {
                 submitAttemptsByExplanation.set(
                     explanation,
                     (submitAttemptsByExplanation.get(explanation) ?? 0) + 1
                 );
+                if (explanation === 'Deposit race first request.') {
+                    depositRaceFirstSubmitObservedResolve();
+                    await depositRaceFirstSubmitBlocked;
+                    return {
+                        transactionHash: `0x${'1'.repeat(64)}`,
+                        proposalHash: `0x${'2'.repeat(64)}`,
+                        ogProposalHash: `0x${'2'.repeat(64)}`,
+                        sideEffectsLikelyCommitted: true,
+                    };
+                }
+                if (explanation === 'Deposit race second request.') {
+                    return {
+                        transactionHash: `0x${'b'.repeat(64)}`,
+                        proposalHash: `0x${'c'.repeat(64)}`,
+                        ogProposalHash: `0x${'c'.repeat(64)}`,
+                        sideEffectsLikelyCommitted: true,
+                    };
+                }
                 if (explanation === 'Retry after submission failure.') {
                     if (submitAttemptsByExplanation.get(explanation) === 1) {
                         throw new Error('submit unavailable');
@@ -762,6 +1210,106 @@ async function main() {
                 resolveProposalHashCalls.push(proposalTxHash);
                 return resolvedProposalHashes.get(proposalTxHash) ?? null;
             },
+            verifyProposal: async ({ envelope, storeRecords }) => {
+                verifyAttemptsByExplanation.set(
+                    envelope.explanation,
+                    (verifyAttemptsByExplanation.get(envelope.explanation) ?? 0) + 1
+                );
+                if (
+                    envelope.explanation === 'Deposit race first request.' ||
+                    envelope.explanation === 'Deposit race second request.'
+                ) {
+                    const requestedDepositTxHashes = Array.isArray(
+                        envelope.metadata?.verification?.depositTxHashes
+                    )
+                        ? envelope.metadata.verification.depositTxHashes.map((depositTxHash) =>
+                              String(depositTxHash).toLowerCase()
+                          )
+                        : [];
+                    const existingDepositConsumer = storeRecords.find((record) => {
+                        if (
+                            !record ||
+                            Number(record.chainId) !== Number(envelope.chainId) ||
+                            record.requestId === envelope.requestId
+                        ) {
+                            return false;
+                        }
+                        if (!['submitted', 'resolved'].includes(record.submission?.status)) {
+                            return false;
+                        }
+                        const referencedDeposits = extractVerificationDepositTxHashes(record);
+                        return referencedDeposits.some((depositTxHash) =>
+                            requestedDepositTxHashes.includes(depositTxHash)
+                        );
+                    });
+                    if (existingDepositConsumer) {
+                        return {
+                            status: 'invalid',
+                            verifiedAtMs: 1_760_000_000_666,
+                            proposalKind: 'agent_proxy_reimbursement',
+                            rules: {
+                                rulesHash: `0x${'d'.repeat(64)}`,
+                                matchedTemplates: [],
+                                unparsedSections: [],
+                            },
+                            checks: [
+                                {
+                                    id: 'deposit_reuse',
+                                    status: 'fail',
+                                    message: `Deposit ${SHARED_DEPOSIT_TX_HASH} is already reserved or consumed by another proposal.`,
+                                },
+                            ],
+                            derivedFacts: {},
+                        };
+                    }
+                }
+                if (
+                    envelope.explanation === 'Resolve proposal hash on duplicate retry.' &&
+                    verifyAttemptsByExplanation.get(envelope.explanation) > 1
+                ) {
+                    throw new Error(
+                        'Verification should not rerun for duplicate requests with an existing submission tx hash.'
+                    );
+                }
+                if (envelope.explanation === 'Block submit via verification.') {
+                    return {
+                        status: 'invalid',
+                        verifiedAtMs: 1_760_000_000_555,
+                        proposalKind: 'agent_proxy_reimbursement',
+                        rules: {
+                            rulesHash: `0x${'c'.repeat(64)}`,
+                            matchedTemplates: [],
+                            unparsedSections: [],
+                        },
+                        checks: [
+                            {
+                                id: 'stubbed_verifier',
+                                status: 'fail',
+                                message: 'Stub verifier blocked the proposal.',
+                            },
+                        ],
+                        derivedFacts: {},
+                    };
+                }
+                return {
+                    status: 'valid',
+                    verifiedAtMs: 1_760_000_000_444,
+                    proposalKind: 'agent_proxy_reimbursement',
+                    rules: {
+                        rulesHash: `0x${'d'.repeat(64)}`,
+                        matchedTemplates: [],
+                        unparsedSections: [],
+                    },
+                    checks: [
+                        {
+                            id: 'stubbed_verifier',
+                            status: 'pass',
+                            message: 'Stub verifier accepted the proposal.',
+                        },
+                    ],
+                    derivedFacts: {},
+                };
+            },
         });
         const proposeServer = await proposeApi.start();
         const proposeAddress = proposeServer.address();
@@ -792,7 +1340,9 @@ async function main() {
                 `0x${'1'.repeat(64)}`
             );
             assert.equal(submitAttemptsByExplanation.get('Propose success on sepolia.'), 1);
+            assert.equal(verifyAttemptsByExplanation.get('Propose success on sepolia.'), 1);
 
+            verificationRuntimeAvailableByChain.set(11155111, false);
             const proposeDuplicate = await postPublication(
                 proposeBaseUrl,
                 proposeAcceptedRequest.body
@@ -801,6 +1351,8 @@ async function main() {
             assert.equal(proposeDuplicate.json.status, 'duplicate');
             assert.equal(proposeDuplicate.json.submission.status, 'resolved');
             assert.equal(submitAttemptsByExplanation.get('Propose success on sepolia.'), 1);
+            assert.equal(verifyAttemptsByExplanation.get('Propose success on sepolia.'), 1);
+            verificationRuntimeAvailableByChain.set(11155111, true);
 
             const retryFailureRequest = await buildSignedBody({
                 account,
@@ -865,6 +1417,10 @@ async function main() {
                 submitAttemptsByExplanation.get('Resolve proposal hash on duplicate retry.'),
                 1
             );
+            assert.equal(
+                verifyAttemptsByExplanation.get('Resolve proposal hash on duplicate retry.'),
+                1
+            );
             assert.deepEqual(resolveProposalHashCalls, [`0x${'3'.repeat(64)}`]);
 
             const runtimeOutageDuplicateRequest = await buildSignedBody({
@@ -889,6 +1445,10 @@ async function main() {
             assert.equal(runtimeOutageDuplicate.json.submission.status, 'submitted');
             assert.equal(
                 submitAttemptsByExplanation.get('Duplicate while runtime unavailable.'),
+                1
+            );
+            assert.equal(
+                verifyAttemptsByExplanation.get('Duplicate while runtime unavailable.'),
                 1
             );
 
@@ -923,6 +1483,75 @@ async function main() {
             assert.equal(conflictingWhileRuntimeDown.json.code, 'request_conflict');
             proposalRuntimeAvailableByChain.set(11155111, true);
 
+            const blockedByVerificationRequest = await buildSignedBody({
+                account,
+                chainId: 11155111,
+                requestId: 'blocked-by-verification',
+                explanation: 'Block submit via verification.',
+            });
+            const blockedByVerification = await postPublication(
+                proposeBaseUrl,
+                blockedByVerificationRequest.body
+            );
+            assert.equal(blockedByVerification.status, 409);
+            assert.equal(blockedByVerification.json.code, 'verification_invalid');
+            assert.equal(blockedByVerification.json.verification.status, 'invalid');
+            assert.equal(
+                submitAttemptsByExplanation.get('Block submit via verification.') ?? 0,
+                0
+            );
+
+            const depositRaceFirstRequest = await buildSignedBody({
+                account,
+                chainId: 11155111,
+                requestId: 'deposit-race-first',
+                explanation: 'Deposit race first request.',
+                metadata: buildReimbursementVerificationMetadata({
+                    proposalKind: 'Agent_Proxy_Reimbursement',
+                }),
+            });
+            const depositRaceSecondRequest = await buildSignedBody({
+                account,
+                chainId: 11155111,
+                requestId: 'deposit-race-second',
+                explanation: 'Deposit race second request.',
+                metadata: buildReimbursementVerificationMetadata({
+                    proposalKind: 'Agent_Proxy_Reimbursement',
+                }),
+            });
+            const depositRaceFirstPromise = postPublication(
+                proposeBaseUrl,
+                depositRaceFirstRequest.body
+            );
+            await depositRaceFirstSubmitObserved;
+            const depositRaceSecondPromise = postPublication(
+                proposeBaseUrl,
+                depositRaceSecondRequest.body
+            );
+            releaseDepositRaceFirstSubmit();
+            const [depositRaceFirstResponse, depositRaceSecondResponse] = await Promise.all([
+                depositRaceFirstPromise,
+                depositRaceSecondPromise,
+            ]);
+            assert.equal(depositRaceFirstResponse.status, 202);
+            assert.equal(depositRaceFirstResponse.json.submission.status, 'resolved');
+            assert.equal(
+                depositRaceFirstResponse.json.submission.transactionHash,
+                `0x${'1'.repeat(64)}`
+            );
+            assert.equal(depositRaceSecondResponse.status, 409);
+            assert.equal(depositRaceSecondResponse.json.code, 'verification_invalid');
+            assert.equal(depositRaceSecondResponse.json.verification?.status, 'invalid');
+            assert.equal(
+                depositRaceSecondResponse.json.verification?.checks?.[0]?.id,
+                'deposit_reuse'
+            );
+            assert.equal(submitAttemptsByExplanation.get('Deposit race first request.'), 1);
+            assert.equal(
+                submitAttemptsByExplanation.get('Deposit race second request.') ?? 0,
+                0
+            );
+
             const polygonRequest = await buildSignedBody({
                 account,
                 chainId: 137,
@@ -954,6 +1583,326 @@ async function main() {
             await proposeApi.stop();
         }
 
+        const proposeNoHistoryStateFile = path.join(
+            tempDir,
+            'proposal-publications-propose-no-history.json'
+        );
+        const proposeNoHistoryStoreBase = createProposalPublicationStore({
+            stateFile: proposeNoHistoryStateFile,
+        });
+        const proposeNoHistoryStore = {
+            async getRecord(args) {
+                return proposeNoHistoryStoreBase.getRecord(args);
+            },
+            async prepareRecord(args) {
+                return proposeNoHistoryStoreBase.prepareRecord(args);
+            },
+            async saveRecord(record) {
+                return proposeNoHistoryStoreBase.saveRecord(record);
+            },
+            async updateRecord(recordOrKey, updater) {
+                return proposeNoHistoryStoreBase.updateRecord(recordOrKey, updater);
+            },
+        };
+        let proposeNoHistorySubmitCalls = 0;
+        let proposeNoHistoryVerifyCalls = 0;
+        const proposeNoHistoryApi = createProposalPublicationApiServer({
+            config: buildServerConfig(account.address, {
+                chainId: undefined,
+                proposalPublishApiMode: 'propose',
+                proposalVerificationMode: 'enforce',
+            }),
+            store: proposeNoHistoryStore,
+            logger: {
+                info() {},
+                warn() {},
+            },
+            resolveProposalRuntime: async ({ chainId }) => ({
+                runtimeConfig: {
+                    chainId,
+                    proposeEnabled: true,
+                    bondSpender: 'og',
+                    proposalHashResolveTimeoutMs: 1,
+                    proposalHashResolvePollIntervalMs: 1,
+                },
+                publicClient: {
+                    async getChainId() {
+                        return chainId;
+                    },
+                },
+                walletClient: {},
+                account: { address: account.address },
+            }),
+            verifyProposal: async () => {
+                proposeNoHistoryVerifyCalls += 1;
+                return {
+                    status: 'valid',
+                    verifiedAtMs: BASE_TIME_MS + 4,
+                    proposalKind: 'agent_proxy_reimbursement',
+                    rules: {
+                        rulesHash: `0x${'b'.repeat(64)}`,
+                        matchedTemplates: [],
+                        unparsedSections: [],
+                    },
+                    checks: [],
+                    derivedFacts: {},
+                };
+            },
+            submitProposal: async () => {
+                proposeNoHistorySubmitCalls += 1;
+                return {
+                    transactionHash: `0x${'c'.repeat(64)}`,
+                    proposalHash: `0x${'d'.repeat(64)}`,
+                    ogProposalHash: `0x${'d'.repeat(64)}`,
+                    sideEffectsLikelyCommitted: true,
+                };
+            },
+        });
+        const proposeNoHistoryServer = await proposeNoHistoryApi.start();
+        const proposeNoHistoryAddress = proposeNoHistoryServer.address();
+        assert.ok(
+            proposeNoHistoryAddress &&
+                typeof proposeNoHistoryAddress === 'object' &&
+                typeof proposeNoHistoryAddress.port === 'number'
+        );
+        const proposeNoHistoryBaseUrl = `http://127.0.0.1:${proposeNoHistoryAddress.port}`;
+
+        try {
+            const proposeNoHistoryRequest = await buildSignedBody({
+                account,
+                chainId: 11155111,
+                requestId: 'propose-no-history',
+                explanation: 'Enforce mode should fail closed without record enumeration.',
+            });
+            const proposeNoHistoryResponse = await postPublication(
+                proposeNoHistoryBaseUrl,
+                proposeNoHistoryRequest.body
+            );
+            assert.equal(proposeNoHistoryResponse.status, 503);
+            assert.equal(
+                proposeNoHistoryResponse.json.code,
+                'verification_history_unavailable'
+            );
+            assert.equal(proposeNoHistoryResponse.json.submission.status, 'not_started');
+            assert.equal(proposeNoHistoryResponse.json.verification, null);
+            assert.equal(proposeNoHistoryVerifyCalls, 0);
+            assert.equal(proposeNoHistorySubmitCalls, 0);
+        } finally {
+            await proposeNoHistoryApi.stop();
+        }
+
+        const advisoryNoHistoryStateFile = path.join(
+            tempDir,
+            'proposal-publications-propose-advisory-no-history.json'
+        );
+        const advisoryNoHistoryStoreBase = createProposalPublicationStore({
+            stateFile: advisoryNoHistoryStateFile,
+        });
+        const advisoryNoHistoryStore = {
+            async getRecord(args) {
+                return advisoryNoHistoryStoreBase.getRecord(args);
+            },
+            async prepareRecord(args) {
+                return advisoryNoHistoryStoreBase.prepareRecord(args);
+            },
+            async saveRecord(record) {
+                return advisoryNoHistoryStoreBase.saveRecord(record);
+            },
+            async updateRecord(recordOrKey, updater) {
+                return advisoryNoHistoryStoreBase.updateRecord(recordOrKey, updater);
+            },
+        };
+        let advisoryNoHistorySubmitCalls = 0;
+        let advisoryNoHistoryVerifyCalls = 0;
+        const advisoryNoHistoryApi = createProposalPublicationApiServer({
+            config: buildServerConfig(account.address, {
+                chainId: undefined,
+                proposalPublishApiMode: 'propose',
+                proposalVerificationMode: 'advisory',
+            }),
+            store: advisoryNoHistoryStore,
+            logger: {
+                info() {},
+                warn() {},
+            },
+            resolveProposalRuntime: async ({ chainId }) => ({
+                runtimeConfig: {
+                    chainId,
+                    proposeEnabled: true,
+                    bondSpender: 'og',
+                    proposalHashResolveTimeoutMs: 1,
+                    proposalHashResolvePollIntervalMs: 1,
+                },
+                publicClient: {
+                    async getChainId() {
+                        return chainId;
+                    },
+                },
+                walletClient: {},
+                account: { address: account.address },
+            }),
+            verifyProposal: async () => {
+                advisoryNoHistoryVerifyCalls += 1;
+                return {
+                    status: 'valid',
+                    verifiedAtMs: BASE_TIME_MS + 5,
+                    proposalKind: 'agent_proxy_reimbursement',
+                    rules: {
+                        rulesHash: `0x${'e'.repeat(64)}`,
+                        matchedTemplates: [],
+                        unparsedSections: [],
+                    },
+                    checks: [],
+                    derivedFacts: {},
+                };
+            },
+            submitProposal: async () => {
+                advisoryNoHistorySubmitCalls += 1;
+                return {
+                    transactionHash: `0x${'f'.repeat(64)}`,
+                    proposalHash: `0x${'1'.repeat(64)}`,
+                    ogProposalHash: `0x${'1'.repeat(64)}`,
+                    sideEffectsLikelyCommitted: true,
+                };
+            },
+        });
+        const advisoryNoHistoryServer = await advisoryNoHistoryApi.start();
+        const advisoryNoHistoryAddress = advisoryNoHistoryServer.address();
+        assert.ok(
+            advisoryNoHistoryAddress &&
+                typeof advisoryNoHistoryAddress === 'object' &&
+                typeof advisoryNoHistoryAddress.port === 'number'
+        );
+        const advisoryNoHistoryBaseUrl = `http://127.0.0.1:${advisoryNoHistoryAddress.port}`;
+
+        try {
+            const advisoryNoHistoryRequest = await buildSignedBody({
+                account,
+                chainId: 11155111,
+                requestId: 'advisory-no-history',
+                explanation: 'Advisory mode should still fail closed without history.',
+            });
+            const advisoryNoHistoryResponse = await postPublication(
+                advisoryNoHistoryBaseUrl,
+                advisoryNoHistoryRequest.body
+            );
+            assert.equal(advisoryNoHistoryResponse.status, 503);
+            assert.equal(
+                advisoryNoHistoryResponse.json.code,
+                'verification_history_unavailable'
+            );
+            assert.equal(advisoryNoHistoryResponse.json.submission.status, 'not_started');
+            assert.equal(advisoryNoHistoryResponse.json.verification, null);
+            assert.equal(advisoryNoHistoryVerifyCalls, 0);
+            assert.equal(advisoryNoHistorySubmitCalls, 0);
+        } finally {
+            await advisoryNoHistoryApi.stop();
+        }
+
+        const advisoryStateFile = path.join(tempDir, 'proposal-publications-propose-advisory.json');
+        const advisoryStore = createProposalPublicationStore({ stateFile: advisoryStateFile });
+        const advisorySubmitAttemptsByExplanation = new Map();
+        const advisoryApi = createProposalPublicationApiServer({
+            config: buildServerConfig(account.address, {
+                chainId: undefined,
+                proposalPublishApiMode: 'propose',
+                proposalVerificationMode: 'advisory',
+            }),
+            store: advisoryStore,
+            logger: {
+                info() {},
+                warn() {},
+            },
+            resolveProposalRuntime: async ({ chainId }) => {
+                assert.equal(chainId, 11155111);
+                return {
+                    runtimeConfig: {
+                        chainId,
+                        proposeEnabled: true,
+                        bondSpender: 'og',
+                        proposalHashResolveTimeoutMs: 1,
+                        proposalHashResolvePollIntervalMs: 1,
+                    },
+                    publicClient: {
+                        async getChainId() {
+                            return chainId;
+                        },
+                    },
+                    walletClient: {},
+                    account: { address: account.address },
+                };
+            },
+            submitProposal: async ({ explanation }) => {
+                advisorySubmitAttemptsByExplanation.set(
+                    explanation,
+                    (advisorySubmitAttemptsByExplanation.get(explanation) ?? 0) + 1
+                );
+                return {
+                    transactionHash: `0x${'e'.repeat(64)}`,
+                    proposalHash: `0x${'f'.repeat(64)}`,
+                    ogProposalHash: `0x${'f'.repeat(64)}`,
+                    sideEffectsLikelyCommitted: true,
+                };
+            },
+            verifyProposal: async () => {
+                const error = new Error(
+                    'Verification runtime unavailable for chainId 11155111.'
+                );
+                error.code = 'verification_runtime_unavailable';
+                error.statusCode = 502;
+                throw error;
+            },
+        });
+        const advisoryServer = await advisoryApi.start();
+        const advisoryAddress = advisoryServer.address();
+        assert.ok(
+            advisoryAddress &&
+                typeof advisoryAddress === 'object' &&
+                typeof advisoryAddress.port === 'number'
+        );
+        const advisoryBaseUrl = `http://127.0.0.1:${advisoryAddress.port}`;
+
+        try {
+            const advisoryRequest = await buildSignedBody({
+                account,
+                chainId: 11155111,
+                requestId: 'advisory-runtime-outage',
+                explanation: 'Advisory submit despite verification outage.',
+            });
+            const advisoryResponse = await postPublication(advisoryBaseUrl, advisoryRequest.body);
+            assert.equal(advisoryResponse.status, 202);
+            assert.equal(advisoryResponse.json.status, 'published');
+            assert.equal(advisoryResponse.json.submission.status, 'resolved');
+            assert.equal(advisoryResponse.json.verification.status, 'unknown');
+            assert.equal(advisoryResponse.json.verification.checks[0]?.id, 'verification_runtime');
+            assert.equal(
+                advisoryResponse.json.verification.checks[0]?.code,
+                'verification_runtime_unavailable'
+            );
+            assert.match(
+                advisoryResponse.json.verification.checks[0]?.message ?? '',
+                /advisory mode/i
+            );
+            assert.equal(
+                advisorySubmitAttemptsByExplanation.get(
+                    'Advisory submit despite verification outage.'
+                ),
+                1
+            );
+            const advisoryRecord = await advisoryStore.getRecord({
+                signer: account.address,
+                chainId: 11155111,
+                requestId: 'advisory-runtime-outage',
+            });
+            assert.equal(advisoryRecord?.verification?.status, 'unknown');
+            assert.equal(
+                advisoryRecord?.verification?.checks?.[0]?.id,
+                'verification_runtime'
+            );
+        } finally {
+            await advisoryApi.stop();
+        }
+
         const uncertainPersistStateFile = path.join(
             tempDir,
             'proposal-publications-propose-uncertain.json'
@@ -970,6 +1919,19 @@ async function main() {
             },
             async prepareRecord(args) {
                 return uncertainPersistStoreBase.prepareRecord(args);
+            },
+            async updateRecord(recordOrKey, updater) {
+                return uncertainPersistStoreBase.updateRecord(recordOrKey, async (current) => {
+                    const nextRecord = await updater(current);
+                    if (
+                        nextRecord.submission?.transactionHash === observedTxHash &&
+                        observedTxPersistFailures === 0
+                    ) {
+                        observedTxPersistFailures += 1;
+                        throw new Error('simulated submission store write failure');
+                    }
+                    return nextRecord;
+                });
             },
             async saveRecord(record) {
                 if (
@@ -1159,6 +2121,6 @@ async function main() {
 }
 
 main().catch((error) => {
-    console.error('[test] proposal publication API failed:', error?.message ?? error);
+    console.error('[test] proposal publication API failed:', error?.stack ?? error?.message ?? error);
     process.exit(1);
 });
