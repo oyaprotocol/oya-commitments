@@ -12,6 +12,7 @@ import {
 } from './agent.js';
 import {
     POLYMARKET_REIMBURSEMENT_REQUEST_KIND,
+    resolvePolicy,
 } from './trade-ledger.js';
 
 const TEST_AGENT = privateKeyToAccount(`0x${'1'.repeat(64)}`);
@@ -234,6 +235,31 @@ async function run() {
     });
     const mockNode = createMockPublicationFetch(config);
     const firstSeenAtMs = Date.now();
+
+    const perMarketOnlyPolicy = resolvePolicy({
+        chainId: TEST_CHAIN_ID,
+        commitmentSafe: TEST_COMMITMENT_SAFE,
+        ogModule: TEST_OG_MODULE,
+        watchAssets: [TEST_USDC],
+        agentConfig: {
+            polymarketStakedExternalSettlement: {
+                authorizedAgent: TEST_AGENT.address,
+                tradingWallet: TEST_TRADING_WALLET,
+                collateralToken: TEST_USDC,
+                marketsById: {
+                    'market-1': {
+                        label: 'Per-market user',
+                        userAddress: TEST_USER,
+                    },
+                },
+            },
+        },
+    });
+    assert.equal(perMarketOnlyPolicy.ready, true);
+    assert.equal(
+        perMarketOnlyPolicy.marketsById['market-1'].userAddress,
+        TEST_USER.toLowerCase()
+    );
 
     try {
         await resetModuleStateForTest({ config });

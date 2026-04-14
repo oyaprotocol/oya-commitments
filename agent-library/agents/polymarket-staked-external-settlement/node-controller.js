@@ -298,6 +298,7 @@ function syncNodeMarketLifecycle(state, publishedMarkets) {
             latestRequest.requestId !== nodeMarket.reimbursement.requestId &&
             !nodeMarket.reimbursement.submissionTxHash &&
             !nodeMarket.reimbursement.proposalHash &&
+            !nodeMarket.reimbursement.submittedAtMs &&
             !nodeMarket.reimbursement.reimbursedAtMs
         ) {
             nodeMarket.reimbursement.requestId = latestRequest.requestId;
@@ -670,6 +671,7 @@ async function getNodeDeterministicToolCalls({
             nodeMarket.reimbursement.dispatchAtMs ||
             nodeMarket.reimbursement.submissionTxHash ||
             nodeMarket.reimbursement.proposalHash ||
+            nodeMarket.reimbursement.submittedAtMs ||
             nodeMarket.reimbursement.reimbursedAtMs
         ) {
             continue;

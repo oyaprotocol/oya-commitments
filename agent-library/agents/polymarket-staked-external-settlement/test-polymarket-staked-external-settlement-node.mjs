@@ -525,6 +525,44 @@ async function run() {
         );
 
         await resetNodeStateForTest({ config });
+        toolCalls = await getNodeDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+            agentAddress: TEST_AGENT.address,
+            publicClient,
+            config,
+            messagePublicationStore,
+            onchainPendingProposal: false,
+        });
+        assert.equal(toolCalls.length, 1);
+        assert.equal(toolCalls[0].name, 'publish_signed_proposal');
+        await onNodeToolOutput({
+            callId: toolCalls[0].callId,
+            name: toolCalls[0].name,
+            parsedOutput: {
+                status: 'published',
+                mode: 'propose',
+                submission: {
+                    status: 'uncertain',
+                    transactionHash: null,
+                    ogProposalHash: null,
+                },
+            },
+            config,
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+        });
+        toolCalls = await getNodeDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+            agentAddress: TEST_AGENT.address,
+            publicClient,
+            config,
+            messagePublicationStore,
+            onchainPendingProposal: false,
+        });
+        assert.equal(toolCalls.length, 0);
+
+        await resetNodeStateForTest({ config });
         records.length = 0;
         const unconfiguredTradeLogMessage = {
             chainId: TEST_CHAIN_ID,

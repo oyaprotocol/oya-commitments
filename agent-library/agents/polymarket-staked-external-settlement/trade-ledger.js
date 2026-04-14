@@ -114,11 +114,6 @@ function resolvePolicy(config = {}) {
     if (!tradingWallet) {
         errors.push('polymarketStakedExternalSettlement.tradingWallet is required.');
     }
-    if (!userAddress) {
-        errors.push(
-            'polymarketStakedExternalSettlement.userAddress is required, either globally or per market.'
-        );
-    }
     if (!collateralToken) {
         errors.push(
             'polymarketStakedExternalSettlement.collateralToken is required or watchAssets[0] must be configured.'
@@ -132,6 +127,14 @@ function resolvePolicy(config = {}) {
     }
     if (Object.keys(marketsById).length === 0) {
         errors.push('polymarketStakedExternalSettlement.marketsById must define at least one market.');
+    }
+    const marketsMissingUserAddress = Object.values(marketsById)
+        .filter((market) => !market.userAddress)
+        .map((market) => market.marketId);
+    if (marketsMissingUserAddress.length > 0) {
+        errors.push(
+            `polymarketStakedExternalSettlement.userAddress is required globally or per market; missing for: ${marketsMissingUserAddress.join(', ')}.`
+        );
     }
 
     return {
