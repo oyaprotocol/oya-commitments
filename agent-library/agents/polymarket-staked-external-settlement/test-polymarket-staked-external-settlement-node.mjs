@@ -198,6 +198,43 @@ async function publishMessageToRecords({
     };
 }
 
+function appendPublishedRecord({
+    message,
+    validation,
+    records,
+    publishedAtMs = Date.now(),
+}) {
+    const canonical = JSON.stringify(message);
+    const cid = `bafy${createHash('sha256').update(canonical).digest('hex').slice(0, 24)}`;
+    records.push({
+        signer: TEST_AGENT.address.toLowerCase(),
+        chainId: TEST_CHAIN_ID,
+        requestId: message.requestId,
+        receivedAtMs: publishedAtMs - 1,
+        publishedAtMs,
+        createdAtMs: publishedAtMs,
+        updatedAtMs: publishedAtMs,
+        cid,
+        uri: `ipfs://${cid}`,
+        pinned: true,
+        signature: `0x${'c'.repeat(130)}`,
+        canonicalMessage: canonical,
+        artifact: {
+            publication: {
+                receivedAtMs: publishedAtMs - 1,
+                publishedAtMs,
+                validation,
+            },
+            signedMessage: {
+                envelope: {
+                    message,
+                },
+            },
+        },
+    });
+    return cid;
+}
+
 async function publishNextAgentMessage({
     signals,
     config,
@@ -486,6 +523,107 @@ async function run() {
             typeof nodeState.markets['market-1'].reimbursement.reimbursedAtMs,
             'number'
         );
+
+        await resetNodeStateForTest({ config });
+        records.length = 0;
+        const unconfiguredTradeLogMessage = {
+            chainId: TEST_CHAIN_ID,
+            requestId: 'unconfigured-market-trade-log',
+            commitmentAddresses: [TEST_COMMITMENT_SAFE, TEST_OG_MODULE],
+            agentAddress: TEST_AGENT.address,
+            kind: 'polymarketTradeLog',
+            payload: {
+                stream: {
+                    commitmentSafe: TEST_COMMITMENT_SAFE,
+                    ogModule: TEST_OG_MODULE,
+                    user: TEST_USER,
+                    marketId: 'market-unconfigured',
+                    tradingWallet: TEST_TRADING_WALLET,
+                },
+                sequence: 1,
+                previousCid: null,
+                trades: [
+                    {
+                        tradeId: 'trade-unconfigured',
+                        tradeEntryKind: 'initiated',
+                        executedAtMs: firstSeenAtMs - 5 * 60_000,
+                        principalContributionWei: '1000000',
+                    },
+                ],
+                summary: {
+                    finalSettlementValueWei: '0',
+                    settledAtMs: firstSeenAtMs,
+                    settlementKind: 'resolved',
+                    settlementDepositTxHash: null,
+                    settlementDepositConfirmedAtMs: null,
+                },
+            },
+        };
+        const unconfiguredTradeLogCid = appendPublishedRecord({
+            message: unconfiguredTradeLogMessage,
+            validation: {
+                validatorId: 'polymarket_trade_log_timeliness',
+                status: 'accepted',
+                classifications: [
+                    {
+                        id: 'trade-unconfigured',
+                        classification: 'reimbursable',
+                        firstSeenAtMs,
+                    },
+                ],
+                summary: {
+                    stream: unconfiguredTradeLogMessage.payload.stream,
+                    sequence: 1,
+                    previousCid: null,
+                    settlement: unconfiguredTradeLogMessage.payload.summary,
+                    loggingWindowMinutes: 15,
+                    evaluationBasis: 'receivedAtMs',
+                    previousPublishedCid: null,
+                    publishedAtMs: firstSeenAtMs,
+                    newTradeCount: 1,
+                    lateTradeCount: 0,
+                },
+            },
+            records,
+            publishedAtMs: firstSeenAtMs,
+        });
+        appendPublishedRecord({
+            message: {
+                chainId: TEST_CHAIN_ID,
+                requestId: 'unconfigured-market-reimbursement-request',
+                commitmentAddresses: [TEST_COMMITMENT_SAFE, TEST_OG_MODULE],
+                agentAddress: TEST_AGENT.address,
+                kind: 'polymarketReimbursementRequest',
+                payload: {
+                    stream: unconfiguredTradeLogMessage.payload.stream,
+                    snapshotCid: unconfiguredTradeLogCid,
+                },
+            },
+            validation: {
+                validatorId: 'polymarket_reimbursement_request',
+                status: 'accepted',
+                summary: {
+                    stream: unconfiguredTradeLogMessage.payload.stream,
+                    snapshotCid: unconfiguredTradeLogCid,
+                    previousPublishedCid: unconfiguredTradeLogCid,
+                },
+            },
+            records,
+            publishedAtMs: firstSeenAtMs + 1_000,
+        });
+
+        toolCalls = await getNodeDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+            agentAddress: TEST_AGENT.address,
+            publicClient,
+            config,
+            messagePublicationStore,
+            onchainPendingProposal: false,
+        });
+        assert.equal(toolCalls.length, 0);
+        nodeState = getNodeState();
+        assert.equal(nodeState.markets['market-unconfigured'], undefined);
     } finally {
         await resetModuleStateForTest({ config });
         await resetNodeStateForTest({ config });

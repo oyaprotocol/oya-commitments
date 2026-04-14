@@ -279,6 +279,11 @@ function clearStaleNodeDispatches(state, dispatchGraceMs, nowMs = Date.now()) {
     return changed;
 }
 
+function isConfiguredPublishedMarket(market, policy) {
+    const marketId = market?.stream?.marketId;
+    return typeof marketId === 'string' && Boolean(policy?.marketsById?.[marketId]);
+}
+
 function syncNodeMarketLifecycle(state, publishedMarkets) {
     let changed = false;
     const seenMarketIds = new Set();
@@ -593,14 +598,17 @@ async function getNodeDeterministicToolCalls({
         })) || changed;
 
     const publishedMarkets = buildPublishedMarketViews(await messagePublicationStore.listRecords());
-    changed = syncNodeMarketLifecycle(runtimeNodeState, publishedMarkets) || changed;
+    const configuredPublishedMarkets = publishedMarkets.filter((market) =>
+        isConfiguredPublishedMarket(market, policy)
+    );
+    changed = syncNodeMarketLifecycle(runtimeNodeState, configuredPublishedMarkets) || changed;
     if (changed) {
         await persistNodeState();
     }
 
     const decisionState = {
         markets: Object.fromEntries(
-            publishedMarkets.map((market) => [market.stream.marketId, cloneJson(market)])
+            configuredPublishedMarkets.map((market) => [market.stream.marketId, cloneJson(market)])
         ),
         disputedAssertionIds: runtimeNodeState.disputedAssertionIds,
         pendingDispute: runtimeNodeState.pendingDispute,
@@ -640,7 +648,7 @@ async function getNodeDeterministicToolCalls({
         return [];
     }
 
-    for (const market of publishedMarkets) {
+    for (const market of configuredPublishedMarkets) {
         const marketId = market.stream.marketId;
         const nodeMarket = ensureNodeMarketState(runtimeNodeState, marketId);
         if (!market.reimbursementRequest) {

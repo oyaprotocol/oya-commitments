@@ -91,6 +91,20 @@ function resolveModuleConfig(config) {
     return {};
 }
 
+function assertConfiguredMarketId(marketId, config) {
+    const moduleConfig = resolveModuleConfig(config);
+    const marketsById =
+        isPlainObject(moduleConfig.marketsById) ? moduleConfig.marketsById : null;
+    if (!marketsById) {
+        return;
+    }
+    if (!Object.prototype.hasOwnProperty.call(marketsById, marketId)) {
+        throw new Error(
+            `message.payload.stream.marketId "${marketId}" is not configured in polymarketStakedExternalSettlement.marketsById.`
+        );
+    }
+}
+
 function normalizeTradeEntry(entry, label) {
     if (!isPlainObject(entry)) {
         throw new Error(`${label} must be a JSON object.`);
@@ -244,6 +258,7 @@ function normalizeBasePolymarketMessage(
             'message.payload.stream.tradingWallet'
         ),
     });
+    assertConfiguredMarketId(stream.marketId, config);
 
     const commitmentAddresses = message.commitmentAddresses.map((address, index) =>
         normalizeAddress(address, `message.commitmentAddresses[${index}]`)
