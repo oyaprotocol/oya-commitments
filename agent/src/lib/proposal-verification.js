@@ -81,9 +81,9 @@ const TEMPLATE_COVERAGE_BY_KIND = Object.freeze({
 
 const DEPOSIT_STATUS_RANK = Object.freeze({
     available: 0,
-    reserved: 1,
-    consumed: 2,
-    unknown: 3,
+    unknown: 1,
+    reserved: 2,
+    consumed: 3,
 });
 
 const ogDeploymentBlockCacheByClient = new WeakMap();

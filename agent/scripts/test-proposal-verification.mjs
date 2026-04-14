@@ -436,6 +436,58 @@ async function main() {
         ['456', '456']
     );
 
+    const consumedBeatsUnknownClientBase = buildPublicClient({
+        extraReceipts: [
+            [
+                PENDING_PROPOSAL_TX_HASH,
+                {
+                    status: 'success',
+                    blockNumber: 456n,
+                    logs: [],
+                },
+            ],
+        ],
+        executedLogs: [
+            {
+                args: {
+                    proposalHash: `0x${'f'.repeat(64)}`,
+                },
+            },
+        ],
+    });
+    const consumedBeatsUnknownClient = {
+        ...consumedBeatsUnknownClientBase,
+        async getTransactionReceipt({ hash }) {
+            if (hash === DEPOSIT_TX_HASH) {
+                throw new Error('rpc unavailable for non-local deposit history');
+            }
+            return consumedBeatsUnknownClientBase.getTransactionReceipt({ hash });
+        },
+    };
+    const consumedStoreRecord = {
+        ...pendingStoreRecord,
+        requestId: 'existing-consumed-proven-local',
+        submission: {
+            ...pendingStoreRecord.submission,
+            ogProposalHash: `0x${'f'.repeat(64)}`,
+        },
+    };
+    const consumedBeatsUnknownResult = await verifyProposal({
+        envelope: buildEnvelope({ requestId: 'consumed-beats-unknown' }),
+        publicClient: consumedBeatsUnknownClient,
+        storeRecords: [consumedStoreRecord],
+        nowMs: 1_760_000_001_000,
+    });
+    assert.equal(consumedBeatsUnknownResult.status, 'invalid');
+    assert.equal(
+        consumedBeatsUnknownResult.checks.find((check) => check.id === 'deposit_reuse')?.status,
+        'fail'
+    );
+    assert.equal(
+        consumedBeatsUnknownResult.derivedFacts.referencedDeposits?.[0]?.statusBeforeVerification,
+        'consumed'
+    );
+
     const sameCommitmentDifferentAgentEnvelope = buildEnvelope({
         requestId: 'same-commitment-different-agent',
         signerAddress: OTHER_AGENT,
