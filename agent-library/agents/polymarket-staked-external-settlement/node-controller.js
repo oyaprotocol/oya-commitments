@@ -12,6 +12,7 @@ import {
 } from './state-store.js';
 import {
     buildReimbursementExplanation,
+    buildStream,
     buildStateScope,
     computeOutstandingSettlementWei,
     computeReimbursementEligibleWei,
@@ -227,6 +228,8 @@ function buildPublishedMarketViews(records) {
         const summary = latestTradeLog.message.payload.summary ?? {};
         const latestRequest = latestRequests.get(streamKey) ?? null;
         markets.push({
+            chainId: Number(latestTradeLog.message.chainId),
+            agentAddress: latestTradeLog.message.agentAddress,
             stream: cloneJson(latestTradeLog.message.payload.stream),
             trades: cloneJson(latestTradeLog.message.payload.trades),
             tradeClassifications,
@@ -279,9 +282,34 @@ function clearStaleNodeDispatches(state, dispatchGraceMs, nowMs = Date.now()) {
     return changed;
 }
 
-function isConfiguredPublishedMarket(market, policy) {
+function buildConfiguredPublishedMarketIdentity({ marketId, policy, config }) {
+    return {
+        chainId: Number(config.chainId),
+        agentAddress: policy.authorizedAgent,
+        stream: buildStream({ policy, config, marketId }),
+    };
+}
+
+function isConfiguredPublishedMarket(market, policy, config) {
     const marketId = market?.stream?.marketId;
-    return typeof marketId === 'string' && Boolean(policy?.marketsById?.[marketId]);
+    if (typeof marketId !== 'string' || !policy?.marketsById?.[marketId]) {
+        return false;
+    }
+
+    const expected = buildConfiguredPublishedMarketIdentity({
+        marketId,
+        policy,
+        config,
+    });
+    return (
+        Number(market?.chainId) === expected.chainId &&
+        normalizeOptionalString(market?.agentAddress)?.toLowerCase() === expected.agentAddress &&
+        market?.stream?.commitmentSafe === expected.stream.commitmentSafe &&
+        market?.stream?.ogModule === expected.stream.ogModule &&
+        market?.stream?.user === expected.stream.user &&
+        market?.stream?.marketId === expected.stream.marketId &&
+        market?.stream?.tradingWallet === expected.stream.tradingWallet
+    );
 }
 
 function syncNodeMarketLifecycle(state, publishedMarkets) {
@@ -600,7 +628,7 @@ async function getNodeDeterministicToolCalls({
 
     const publishedMarkets = buildPublishedMarketViews(await messagePublicationStore.listRecords());
     const configuredPublishedMarkets = publishedMarkets.filter((market) =>
-        isConfiguredPublishedMarket(market, policy)
+        isConfiguredPublishedMarket(market, policy, config)
     );
     changed = syncNodeMarketLifecycle(runtimeNodeState, configuredPublishedMarkets) || changed;
     if (changed) {

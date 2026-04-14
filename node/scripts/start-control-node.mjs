@@ -1,6 +1,7 @@
 import { pathToFileURL } from 'node:url';
 import { createValidatedReadWriteRuntime } from '../../agent/src/lib/chain-runtime.js';
 import { createMessagePublicationStore } from '../../agent/src/lib/message-publication-store.js';
+import { loadOgContext } from '../../agent/src/lib/og.js';
 import { pollProposalChanges } from '../../agent/src/lib/polling.js';
 import { executeToolCalls } from '../../agent/src/lib/tools.js';
 import {
@@ -54,6 +55,21 @@ function buildProposalSignal(proposal) {
         rules: proposal.rules,
         explanation: proposal.explanation,
     };
+}
+
+async function resolveToolExecutionOgContext({
+    toolCalls,
+    publicClient,
+    ogModule,
+    cachedOgContext = null,
+}) {
+    if (!Array.isArray(toolCalls) || !toolCalls.some((call) => call?.name === 'dispute_assertion')) {
+        return cachedOgContext;
+    }
+    if (cachedOgContext) {
+        return cachedOgContext;
+    }
+    return loadOgContext({ publicClient, ogModule });
 }
 
 async function main({ argv = process.argv } = {}) {
@@ -125,6 +141,7 @@ async function main({ argv = process.argv } = {}) {
 
     let lastProposalCheckedBlock = runtimeConfig.startBlock;
     const proposalsByHash = new Map();
+    let ogContext = null;
     let stopped = false;
     let loopTimer = null;
 
@@ -186,13 +203,19 @@ async function main({ argv = process.argv } = {}) {
             });
 
             if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+                ogContext = await resolveToolExecutionOgContext({
+                    toolCalls,
+                    publicClient,
+                    ogModule: runtimeConfig.ogModule,
+                    cachedOgContext: ogContext,
+                });
                 await executeToolCalls({
                     toolCalls,
                     publicClient,
                     walletClient,
                     account,
                     config: runtimeConfig,
-                    ogContext: null,
+                    ogContext,
                     onToolOutput: handleToolOutput,
                 });
             }
@@ -232,4 +255,4 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     });
 }
 
-export { main };
+export { main, resolveToolExecutionOgContext };

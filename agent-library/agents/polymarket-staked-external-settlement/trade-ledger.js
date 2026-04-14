@@ -643,6 +643,7 @@ export {
     buildReimbursementExplanation,
     buildReimbursementRequestMessage,
     buildStateScope,
+    buildStream,
     buildTradeLogMessage,
     clearStaleDispatches,
     computeOutstandingSettlementWei,

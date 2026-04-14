@@ -27,6 +27,7 @@ const TEST_CHAIN_ID = 137;
 const TEST_COMMITMENT_SAFE = '0x1111111111111111111111111111111111111111';
 const TEST_OG_MODULE = '0x2222222222222222222222222222222222222222';
 const TEST_USER = '0x3333333333333333333333333333333333333333';
+const TEST_FOREIGN_USER = '0x7777777777777777777777777777777777777777';
 const TEST_TRADING_WALLET = '0x4444444444444444444444444444444444444444';
 const TEST_USDC = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
 const TEST_RULES = `Staked External Polymarket Execution
@@ -662,6 +663,108 @@ async function run() {
         assert.equal(toolCalls.length, 0);
         nodeState = getNodeState();
         assert.equal(nodeState.markets['market-unconfigured'], undefined);
+
+        await resetNodeStateForTest({ config });
+        records.length = 0;
+        const foreignStream = {
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+            ogModule: TEST_OG_MODULE,
+            user: TEST_FOREIGN_USER,
+            marketId: 'market-1',
+            tradingWallet: TEST_TRADING_WALLET,
+        };
+        const foreignTradeLogMessage = {
+            chainId: TEST_CHAIN_ID,
+            requestId: 'foreign-scope-trade-log',
+            commitmentAddresses: [TEST_COMMITMENT_SAFE, TEST_OG_MODULE],
+            agentAddress: TEST_AGENT.address,
+            kind: 'polymarketTradeLog',
+            payload: {
+                stream: foreignStream,
+                sequence: 1,
+                previousCid: null,
+                trades: [
+                    {
+                        tradeId: 'trade-foreign-scope',
+                        tradeEntryKind: 'initiated',
+                        executedAtMs: firstSeenAtMs - 5 * 60_000,
+                        principalContributionWei: '1000000',
+                    },
+                ],
+                summary: {
+                    finalSettlementValueWei: '0',
+                    settledAtMs: firstSeenAtMs,
+                    settlementKind: 'resolved',
+                    settlementDepositTxHash: null,
+                    settlementDepositConfirmedAtMs: null,
+                },
+            },
+        };
+        const foreignTradeLogCid = appendPublishedRecord({
+            message: foreignTradeLogMessage,
+            validation: {
+                validatorId: 'polymarket_trade_log_timeliness',
+                status: 'accepted',
+                classifications: [
+                    {
+                        id: 'trade-foreign-scope',
+                        classification: 'reimbursable',
+                        firstSeenAtMs,
+                    },
+                ],
+                summary: {
+                    stream: foreignStream,
+                    sequence: 1,
+                    previousCid: null,
+                    settlement: foreignTradeLogMessage.payload.summary,
+                    loggingWindowMinutes: 15,
+                    evaluationBasis: 'receivedAtMs',
+                    previousPublishedCid: null,
+                    publishedAtMs: firstSeenAtMs,
+                    newTradeCount: 1,
+                    lateTradeCount: 0,
+                },
+            },
+            records,
+            publishedAtMs: firstSeenAtMs,
+        });
+        appendPublishedRecord({
+            message: {
+                chainId: TEST_CHAIN_ID,
+                requestId: 'foreign-scope-reimbursement-request',
+                commitmentAddresses: [TEST_COMMITMENT_SAFE, TEST_OG_MODULE],
+                agentAddress: TEST_AGENT.address,
+                kind: 'polymarketReimbursementRequest',
+                payload: {
+                    stream: foreignStream,
+                    snapshotCid: foreignTradeLogCid,
+                },
+            },
+            validation: {
+                validatorId: 'polymarket_reimbursement_request',
+                status: 'accepted',
+                summary: {
+                    stream: foreignStream,
+                    snapshotCid: foreignTradeLogCid,
+                    previousPublishedCid: foreignTradeLogCid,
+                },
+            },
+            records,
+            publishedAtMs: firstSeenAtMs + 2_000,
+        });
+
+        toolCalls = await getNodeDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+            agentAddress: TEST_AGENT.address,
+            publicClient,
+            config,
+            messagePublicationStore,
+            onchainPendingProposal: false,
+        });
+        assert.equal(toolCalls.length, 0);
+        nodeState = getNodeState();
+        assert.equal(nodeState.markets['market-1'], undefined);
     } finally {
         await resetModuleStateForTest({ config });
         await resetNodeStateForTest({ config });
