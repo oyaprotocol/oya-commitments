@@ -646,6 +646,7 @@ Keep `IPFS_HEADERS_JSON` in env when it contains auth headers, for example `{"Au
 Tool:
 
 - `ipfs_publish`: Publish either raw string content or structured JSON content to IPFS. For tool calls, JSON content is passed as JSON text and canonicalized before upload. It pins the returned CID by default and returns `cid`, `uri`, `pinned`, `publishResult`, and `pinResult`.
+- `publish_signed_message`: Sign a structured agent-authored message with the runtime signer and submit it to the standalone message publication node configured by `messagePublishApi.host` / `messagePublishApi.port`. It returns the node response, including `status`, `cid`, `uri`, and any module validator output such as `validation.classifications`.
 
 ### ERC1155 Tracking (Optional)
 

@@ -2,7 +2,7 @@
   "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
   "commitmentType": "standard",
   "name": "Oya Polymarket Staked External Settlement Agent",
-  "description": "Polymarket external-settlement commitment scaffold with node-attested cumulative trade-log validation.",
+  "description": "Deterministic Polymarket external-settlement agent with signed trade/settlement commands, node-attested cumulative trade-log publication, settlement deposits, withdrawal disputes, and reimbursement proposals.",
   "image": "https://raw.githubusercontent.com/oya-commitments/oya-commitments/main/agent-library/agents/default/agent.png",
   "endpoints": [],
   "registrations": []

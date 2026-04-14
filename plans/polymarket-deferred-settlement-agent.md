@@ -40,8 +40,9 @@ This plan intentionally treats the result as an example module, not a general-pu
 - [x] 2026-04-13 16:10 PDT: Added the first module-local Polymarket trade-log validator under `agent-library/agents/polymarket-staked-external-settlement/`. The new module now exists as a minimal scaffold with its own `agent.js`, `commitment.txt`, `agent.json`, `config.json`, and validator test. The validator reads `ogModule.rules()` onchain, parses the deployed logging-delay minutes from the `Staked External Polymarket Execution` clause, validates cumulative snapshot continuity against previously published records, and classifies newly introduced trades as `reimbursable` or `non_reimbursable_late`.
 - [x] 2026-04-13 17:02 PDT: Added validator-provided message publication lock keys and stream-scoped serialization in the shared node so concurrent requests for the same Polymarket stream but different `requestId`s cannot both validate against stale history. The staked external settlement module now exports per-stream lock keys derived from the same normalized stream identity as the validator.
 - [x] 2026-04-13 17:45 PDT: Hardened the module-local validator so read-only runtime initialization failures are re-wrapped as `message_validation_unavailable` instead of leaking as generic publish failures. This preserves validator-specific API semantics during RPC outages or chain mismatch.
-- [ ] Expand the deferred-settlement Polymarket agent module beyond the current scaffold and commitment draft.
-- [ ] Add tests, smoke harness coverage, and documentation updates.
+- [x] 2026-04-14 11:56 PDT: Expanded `agent-library/agents/polymarket-staked-external-settlement/` beyond the scaffold. The module now persists per-market trade/settlement state, ingests signed agent-authored `polymarket_trade` and `polymarket_settlement` commands, publishes cumulative trade-log snapshots through the companion node via the new shared `publish_signed_message` tool, tracks node reimbursement classifications, disputes user withdrawals while markets are unsettled, and proposes reimbursement only after the required settlement deposit is complete.
+- [x] 2026-04-14 11:56 PDT: Added focused module coverage in `test-polymarket-staked-external-settlement-agent.mjs`, updated module metadata/config/commitment text, and documented the new shared `publish_signed_message` tool in `agent/README.md`.
+- [ ] Add smoke harness coverage.
 
 ## Surprises & Discoveries
 
@@ -71,6 +72,9 @@ This plan intentionally treats the result as an example module, not a general-pu
 
 - Observation: Per-request duplicate handling is not enough for cumulative trade-log streams. Two different `requestId`s for the same stream can otherwise both validate against the same stale latest snapshot and produce permanently conflicting sequence history.
   Evidence: The shared message publisher originally serialized only by `(signer, chainId, requestId)`, while the Polymarket validator enforces sequence monotonicity by stream identity.
+
+- Observation: The deferred-settlement module could not use the new message publication node cleanly until the shared runner exposed a generic way for deterministic agents to sign and submit structured messages.
+  Evidence: `getDeterministicToolCalls()` only receives read-side runtime context, so module-local code could not reach the runtime signer without either a shared tool or a shared API-surface change. The implemented solution was a new generalized `publish_signed_message` tool in `agent/src/lib/tools.js`.
 
 ## Decision Log
 
@@ -147,6 +151,18 @@ Milestone 1 status after the first implementation pass:
 - Completed follow-up: the shared message publication node now supports an optional module-exported validator hook, signs normalized validator output into `publication.validation`, preserves that output across duplicate/pin-retry flows, and rejects only structural validator failures before publication.
 
 Remaining design work now moves from validator scaffolding into the full deferred-settlement agent implementation. The node-side hook and attested validation payload exist, and `agent-library/agents/polymarket-staked-external-settlement/` now owns the first local validator implementation plus a minimal module scaffold. What remains is to flesh out that module's actual trade-log publisher, settlement ledger, reimbursement logic, and smoke harness.
+
+Milestone 2 status after the current implementation pass:
+
+- Completed: `agent-library/agents/polymarket-staked-external-settlement/agent.js` now owns a deterministic deferred-settlement workflow that ingests signed agent-authored trade and settlement commands, persists per-market ledgers, publishes cumulative trade logs through the companion node, merges node reimbursement classifications, deposits settlement collateral, disputes user withdrawals while markets remain unsettled, and proposes reimbursement only after the required settlement deposit is satisfied.
+- Completed: module-local helpers now live in `state-store.js`, `trade-ledger.js`, and `settlement-reconciliation.js` instead of pushing that behavior into shared runner files.
+- Completed: the shared runner gained one generalized companion-node bridge, `publish_signed_message`, because signing and posting agent-authored publication requests is reusable across modules and cannot be implemented safely from module-local deterministic code alone.
+- Validated: `node agent-library/agents/polymarket-staked-external-settlement/test-polymarket-staked-external-settlement-agent.mjs`, `node agent-library/agents/polymarket-staked-external-settlement/test-published-message-validator.mjs`, `node agent/scripts/validate-agent.mjs --module=polymarket-staked-external-settlement`, and `node agent/scripts/test-message-publication-api.mjs`.
+
+Remaining work is now narrower:
+
+- add a one-command smoke harness under `agent-library/agents/polymarket-staked-external-settlement/harness.mjs`
+- decide whether to replace the current signed-command trade source with direct Polymarket trade discovery/execution, or keep signed commands as the explicit v1 ingress model
 
 ## Context and Orientation
 
