@@ -160,6 +160,16 @@ function selectSortedMarkets() {
     );
 }
 
+function resolveBearerTokenFromKeyMap(keyMap) {
+    if (!keyMap || typeof keyMap !== 'object' || Array.isArray(keyMap)) {
+        return null;
+    }
+    const entry = Object.entries(keyMap)
+        .filter(([, value]) => typeof value === 'string' && value.trim())
+        .sort(([left], [right]) => left.localeCompare(right))[0];
+    return entry ? entry[1].trim() : null;
+}
+
 function buildPublishToolCall({ message, callId }, policy) {
     return {
         callId,
@@ -167,7 +177,7 @@ function buildPublishToolCall({ message, callId }, policy) {
         arguments: JSON.stringify({
             message,
             baseUrl: null,
-            bearerToken: null,
+            bearerToken: resolveBearerTokenFromKeyMap(policy.messagePublishApiKeys),
             timeoutMs: policy.publishTimeoutMs,
         }),
     };

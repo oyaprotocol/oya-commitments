@@ -51,6 +51,9 @@ function buildBaseConfig(overrides = {}) {
         proposalPublishApiHost: '127.0.0.1',
         proposalPublishApiPort: 9890,
         proposalPublishApiMode: 'propose',
+        proposalPublishApiKeys: {
+            ops: 'k_proposal_publish_ops',
+        },
         watchAssets: [TEST_USDC],
         agentConfig: {
             polymarketStakedExternalSettlement: {
@@ -461,6 +464,7 @@ async function run() {
         assert.equal(toolCalls[0].name, 'publish_signed_proposal');
         const reimbursementArgs = JSON.parse(toolCalls[0].arguments);
         assert.equal(reimbursementArgs.timeoutMs, 10000);
+        assert.equal(reimbursementArgs.bearerToken, 'k_proposal_publish_ops');
         assert.equal(
             reimbursementArgs.proposal.requestId,
             `polymarket-staked-external-settlement:market-1:proposal:${reimbursementRequestPublication.cid}`

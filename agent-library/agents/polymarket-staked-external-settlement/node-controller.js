@@ -472,6 +472,16 @@ function assertProposalPublicationReady(config) {
     }
 }
 
+function resolveBearerTokenFromKeyMap(keyMap) {
+    if (!keyMap || typeof keyMap !== 'object' || Array.isArray(keyMap)) {
+        return null;
+    }
+    const entry = Object.entries(keyMap)
+        .filter(([, value]) => typeof value === 'string' && value.trim())
+        .sort(([left], [right]) => left.localeCompare(right))[0];
+    return entry ? entry[1].trim() : null;
+}
+
 function buildReimbursementProposalToolCall({ market, policy, config }) {
     const reimbursementAmountWei = computeReimbursementEligibleWei(market);
     const transactions = buildOgTransactions(
@@ -520,6 +530,7 @@ function buildReimbursementProposalToolCall({ market, policy, config }) {
                     reimbursementRequestSnapshotCid: requestSnapshotCid,
                 },
             },
+            bearerToken: resolveBearerTokenFromKeyMap(policy.proposalPublishApiKeys),
             timeoutMs: policy.publishTimeoutMs,
         }),
     };

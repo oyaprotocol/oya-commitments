@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { encodeFunctionData, erc20Abi } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { executeToolCalls } from '../../../agent/src/lib/tools.js';
@@ -42,7 +45,9 @@ function buildBaseConfig(overrides = {}) {
         watchAssets: [TEST_USDC],
         messagePublishApiHost: '127.0.0.1',
         messagePublishApiPort: 0,
-        messagePublishApiKeys: {},
+        messagePublishApiKeys: {
+            ops: 'k_message_publish_ops',
+        },
         messagePublishApiSignerAllowlist: [TEST_AGENT.address],
         messagePublishApiRequireSignerAllowlist: true,
         messagePublishApiSignatureMaxAgeSeconds: 300,
@@ -116,6 +121,7 @@ function createMockPublicationFetch(config) {
     const originalFetch = globalThis.fetch;
     const records = [];
     const byKey = new Map();
+    const expectedBearerToken = config.messagePublishApiKeys?.ops ?? null;
 
     const mockPublicClient = {
         async readContract({ functionName }) {
@@ -128,6 +134,9 @@ function createMockPublicationFetch(config) {
         const parsedUrl = new URL(String(url));
         if (parsedUrl.pathname !== '/v1/messages/publish') {
             return originalFetch(url, options);
+        }
+        if (expectedBearerToken) {
+            assert.equal(options?.headers?.Authorization, `Bearer ${expectedBearerToken}`);
         }
         const body = JSON.parse(String(options.body));
         const signer = String(body?.auth?.address ?? '').toLowerCase();
@@ -260,6 +269,20 @@ async function run() {
         perMarketOnlyPolicy.marketsById['market-1'].userAddress,
         TEST_USER.toLowerCase()
     );
+    const scopeTmpDir = await mkdtemp(path.join(tmpdir(), 'oya-poly-scope-'));
+    const scopeStateFile = path.join(scopeTmpDir, 'module-state.json');
+    const scopeBaseModuleConfig = {
+        authorizedAgent: TEST_AGENT.address,
+        tradingWallet: TEST_TRADING_WALLET,
+        collateralToken: TEST_USDC,
+        stateFile: scopeStateFile,
+        marketsById: {
+            'market-1': {
+                label: 'Scoped market',
+                userAddress: TEST_USER,
+            },
+        },
+    };
 
     try {
         await resetModuleStateForTest({ config });
@@ -290,6 +313,7 @@ async function run() {
         });
         assert.equal(toolCalls.length, 1);
         assert.equal(toolCalls[0].name, 'publish_signed_message');
+        assert.equal(JSON.parse(toolCalls[0].arguments).bearerToken, 'k_message_publish_ops');
         const firstPublication = await runPublishCall({
             toolCall: toolCalls[0],
             publicClient,
@@ -461,6 +485,63 @@ async function run() {
             reimbursementRequestPublication.cid
         );
 
+        const scopeConfigA = buildBaseConfig({
+            agentConfig: {
+                polymarketStakedExternalSettlement: scopeBaseModuleConfig,
+            },
+        });
+        const scopeConfigB = buildBaseConfig({
+            watchAssets: ['0x5555555555555555555555555555555555555555'],
+            agentConfig: {
+                polymarketStakedExternalSettlement: {
+                    ...scopeBaseModuleConfig,
+                    collateralToken: '0x5555555555555555555555555555555555555555',
+                    marketsById: {
+                        'market-1': {
+                            label: 'Scoped market',
+                            userAddress: '0x6666666666666666666666666666666666666666',
+                        },
+                    },
+                },
+            },
+        });
+        const scopeSignal = buildSignal({
+            requestId: 'scope-trade-1',
+            command: 'polymarket_trade',
+            receivedAtMs: firstSeenAtMs,
+            text: 'Scope test initiated trade',
+            args: {
+                marketId: 'market-1',
+                tradeId: 'scope-trade-1',
+                tradeEntryKind: 'initiated',
+                executedAtMs: firstSeenAtMs - 60_000,
+                principalContributionWei: '1',
+                collateralAmountWei: '1',
+                side: 'BUY',
+                outcome: 'YES',
+            },
+        });
+        await resetModuleStateForTest({ config: scopeConfigA });
+        await getDeterministicToolCalls({
+            signals: [scopeSignal],
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+            agentAddress: TEST_AGENT.address,
+            publicClient,
+            config: scopeConfigA,
+        });
+        await assert.rejects(
+            async () =>
+                getDeterministicToolCalls({
+                    signals: [],
+                    commitmentSafe: TEST_COMMITMENT_SAFE,
+                    agentAddress: TEST_AGENT.address,
+                    publicClient,
+                    config: scopeConfigB,
+                }),
+            /Persisted module state scope/
+        );
+        await resetModuleStateForTest({ config: scopeConfigA });
+
         await resetModuleStateForTest({ config });
         const replayToolCalls = await getDeterministicToolCalls({
             signals: [timelyTradeSignal],
@@ -512,6 +593,7 @@ async function run() {
         assert.equal(toolCalls.length, 0);
     } finally {
         mockNode.stop();
+        await rm(scopeTmpDir, { recursive: true, force: true });
         await resetModuleStateForTest({ config });
     }
 

@@ -144,6 +144,18 @@ function resolvePolicy(config = {}) {
         tradingWallet,
         userAddress,
         collateralToken,
+        messagePublishApiKeys:
+            config?.messagePublishApiKeys &&
+            typeof config.messagePublishApiKeys === 'object' &&
+            !Array.isArray(config.messagePublishApiKeys)
+                ? cloneJson(config.messagePublishApiKeys)
+                : {},
+        proposalPublishApiKeys:
+            config?.proposalPublishApiKeys &&
+            typeof config.proposalPublishApiKeys === 'object' &&
+            !Array.isArray(config.proposalPublishApiKeys)
+                ? cloneJson(config.proposalPublishApiKeys)
+                : {},
         stateFile: normalizeOptionalString(moduleConfig.stateFile),
         nodeStateFile: normalizeOptionalString(moduleConfig.nodeStateFile),
         dispatchGraceMs: parsePositiveInteger(
@@ -163,6 +175,16 @@ function resolvePolicy(config = {}) {
 }
 
 function buildStateScope({ config, policy, chainId, commitmentSafe, ogModule }) {
+    const marketScopes = Object.fromEntries(
+        Object.entries(policy.marketsById ?? {})
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([marketId, marketConfig]) => [
+                marketId,
+                {
+                    userAddress: marketConfig?.userAddress ?? null,
+                },
+            ])
+    );
     return {
         chainId: Number(chainId),
         commitmentSafe: normalizeAddress(commitmentSafe, 'commitmentSafe'),
@@ -170,6 +192,8 @@ function buildStateScope({ config, policy, chainId, commitmentSafe, ogModule }) 
         authorizedAgent: policy.authorizedAgent,
         tradingWallet: policy.tradingWallet,
         userAddress: policy.userAddress,
+        collateralToken: policy.collateralToken,
+        marketsById: marketScopes,
     };
 }
 
