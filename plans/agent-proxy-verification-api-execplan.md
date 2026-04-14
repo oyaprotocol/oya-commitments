@@ -30,6 +30,7 @@ Observable user value:
 - [x] 2026-04-13 14:34 PDT: Added canonical structured reimbursement explanations with `kind`, `description`, and `depositTxHashes`; the verifier now cross-checks explanation references against signed metadata and scans onchain `TransactionsProposed` history for the same OG module to derive non-local deposit reservation and consumption state.
 - [x] 2026-04-13 16:05 PDT: Added deposit-scoped submission serialization in propose mode so concurrent requests with different `requestId`s but overlapping `depositTxHashes` cannot both verify and submit before local reservation state is durable.
 - [x] 2026-04-13 17:02 PDT: Tightened proposal verification rollout safety so `proposalVerificationMode = advisory` still fails closed when proposal history cannot be enumerated. Advisory fallback remains available for transient runtime-read failures, but not for missing `listRecords()` history.
+- [x] 2026-04-13 17:27 PDT: Bounded verifier OG log scans to safe history floors instead of always scanning from genesis. Global reimbursement-history scans now start at the discovered OG deployment block, and local proposal lifecycle scans tighten further to the submission tx receipt block when available.
 - [ ] Expand verifier coverage so `first-proxy` commitments with extra templates such as `Trade Restrictions` and `Trading Limits` can reach `valid` instead of `unknown`.
 
 ## Surprises & Discoveries
@@ -60,6 +61,9 @@ Observable user value:
 
 - Observation: Advisory mode cannot safely degrade every verification error to `unknown`. Some errors, especially missing proposal-history enumeration, remove the node's ability to enforce single-use deposit evidence at all.
   Evidence: `verification_history_unavailable` comes from failed or missing `store.listRecords()` access, which is required for local duplicate-deposit protection even before broader onchain history reconstruction.
+
+- Observation: Chunked log pagination alone is not enough to keep proposal verification stable on long-lived OGs. Without a bounded lower block floor, each verification request still pays full-history log costs and becomes increasingly sensitive to provider range limits and timeouts.
+  Evidence: The first global-history implementation chunked `TransactionsProposed` / `ProposalExecuted` / `ProposalDeleted` queries in 5,000-block windows, but still started every request from block `0`.
 
 ## Decision Log
 

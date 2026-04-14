@@ -7,7 +7,7 @@ import {
     stringToHex,
 } from 'viem';
 import { isPlainObject } from './canonical-json.js';
-import { getLogsChunked } from './chain-history.js';
+import { findContractDeploymentBlock, getLogsChunked } from './chain-history.js';
 import {
     optimisticGovernorAbi,
     proposalDeletedEvent,
@@ -86,6 +86,8 @@ const DEPOSIT_STATUS_RANK = Object.freeze({
     unknown: 3,
 });
 
+const ogDeploymentBlockCacheByClient = new WeakMap();
+
 class VerificationUnknownError extends Error {
     constructor(message, { code = 'verification_runtime_unavailable' } = {}) {
         super(message);
@@ -99,6 +101,67 @@ function wrapVerificationUnknownError(error, prefix) {
         return error;
     }
     return new VerificationUnknownError(`${prefix}: ${error?.message ?? String(error)}`);
+}
+
+function getOgDeploymentBlockCache(publicClient) {
+    if (!publicClient || (typeof publicClient !== 'object' && typeof publicClient !== 'function')) {
+        return null;
+    }
+    let cache = ogDeploymentBlockCacheByClient.get(publicClient);
+    if (!cache) {
+        cache = new Map();
+        ogDeploymentBlockCacheByClient.set(publicClient, cache);
+    }
+    return cache;
+}
+
+async function resolveOgHistoryStartBlock({
+    publicClient,
+    ogModule,
+    latestBlock,
+    minimumFromBlock = undefined,
+}) {
+    const normalizedOgModule = getAddress(ogModule).toLowerCase();
+    const cache = getOgDeploymentBlockCache(publicClient);
+    let deploymentBlockPromise = cache?.get(normalizedOgModule) ?? null;
+    if (!deploymentBlockPromise) {
+        deploymentBlockPromise = (async () => {
+            let deploymentBlock;
+            try {
+                deploymentBlock = await findContractDeploymentBlock({
+                    publicClient,
+                    address: normalizedOgModule,
+                    latestBlock,
+                });
+            } catch (error) {
+                throw wrapVerificationUnknownError(
+                    error,
+                    `Could not determine the deployment block for OG module ${normalizedOgModule}`
+                );
+            }
+            if (deploymentBlock === null) {
+                throw new VerificationUnknownError(
+                    `OG module ${normalizedOgModule} is not deployed at block ${latestBlock.toString()}.`
+                );
+            }
+            return deploymentBlock;
+        })();
+        cache?.set(normalizedOgModule, deploymentBlockPromise);
+    }
+
+    let deploymentBlock;
+    try {
+        deploymentBlock = await deploymentBlockPromise;
+    } catch (error) {
+        cache?.delete(normalizedOgModule);
+        throw error;
+    }
+
+    if (minimumFromBlock === undefined || minimumFromBlock === null) {
+        return deploymentBlock;
+    }
+    const normalizedMinimum = BigInt(minimumFromBlock);
+    return normalizedMinimum > deploymentBlock ? normalizedMinimum : deploymentBlock;
 }
 
 function normalizeRulesText(rulesText) {
@@ -596,28 +659,38 @@ async function resolveStoredProposalLifecycle({
     }
 
     let proposalHash = submission.ogProposalHash;
-    if (!proposalHash) {
-        if (!submission.transactionHash) {
-            return 'unknown';
-        }
+    let proposalCreationBlock = null;
+    if (submission.transactionHash) {
         let receipt;
         try {
             receipt = await publicClient.getTransactionReceipt({
                 hash: submission.transactionHash,
             });
         } catch {
-            return 'unknown';
+            if (!proposalHash) {
+                return 'unknown';
+            }
         }
-        if (receipt?.status === 'reverted') {
-            return 'available';
+        if (receipt) {
+            proposalCreationBlock = receipt.blockNumber ?? null;
+            if (receipt?.status === 'reverted') {
+                return 'available';
+            }
+            if (!proposalHash) {
+                proposalHash = extractProposalHashFromReceipt({
+                    receipt,
+                    ogModule: resolvedEnvelope.ogModule,
+                });
+                if (!proposalHash) {
+                    return 'available';
+                }
+            }
         }
-        proposalHash = extractProposalHashFromReceipt({
-            receipt,
-            ogModule: resolvedEnvelope.ogModule,
-        });
-        if (!proposalHash) {
-            return 'available';
-        }
+    } else if (!proposalHash) {
+        return 'unknown';
+    }
+    if (!proposalHash) {
+        return 'unknown';
     }
 
     const cacheKey = `${resolvedEnvelope.ogModule}:${proposalHash}`;
@@ -626,10 +699,17 @@ async function resolveStoredProposalLifecycle({
     }
 
     let latestBlock;
+    let historyFromBlock;
     let executedLogs;
     let deletedLogs;
     try {
         latestBlock = await publicClient.getBlockNumber();
+        historyFromBlock = await resolveOgHistoryStartBlock({
+            publicClient,
+            ogModule: resolvedEnvelope.ogModule,
+            latestBlock,
+            minimumFromBlock: proposalCreationBlock,
+        });
         [executedLogs, deletedLogs] = await Promise.all([
             getLogsChunked({
                 publicClient,
@@ -638,7 +718,7 @@ async function resolveStoredProposalLifecycle({
                 args: {
                     proposalHash,
                 },
-                fromBlock: 0n,
+                fromBlock: historyFromBlock,
                 toBlock: latestBlock,
             }),
             getLogsChunked({
@@ -648,7 +728,7 @@ async function resolveStoredProposalLifecycle({
                 args: {
                     proposalHash,
                 },
-                fromBlock: 0n,
+                fromBlock: historyFromBlock,
                 toBlock: latestBlock,
             }),
         ]);
@@ -859,31 +939,37 @@ async function resolveOnchainProposalDepositStatuses({
     const statuses = new Map(depositTxHashes.map((depositTxHash) => [depositTxHash, 'available']));
 
     let latestBlock;
+    let historyFromBlock;
     let proposedLogs;
     let executedLogs;
     let deletedLogs;
     try {
         latestBlock = await publicClient.getBlockNumber();
+        historyFromBlock = await resolveOgHistoryStartBlock({
+            publicClient,
+            ogModule,
+            latestBlock,
+        });
         [proposedLogs, executedLogs, deletedLogs] = await Promise.all([
             getLogsChunked({
                 publicClient,
                 address: ogModule,
                 event: transactionsProposedEvent,
-                fromBlock: 0n,
+                fromBlock: historyFromBlock,
                 toBlock: latestBlock,
             }),
             getLogsChunked({
                 publicClient,
                 address: ogModule,
                 event: proposalExecutedEvent,
-                fromBlock: 0n,
+                fromBlock: historyFromBlock,
                 toBlock: latestBlock,
             }),
             getLogsChunked({
                 publicClient,
                 address: ogModule,
                 event: proposalDeletedEvent,
-                fromBlock: 0n,
+                fromBlock: historyFromBlock,
                 toBlock: latestBlock,
             }),
         ]);

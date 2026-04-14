@@ -26,6 +26,7 @@ const RECOVERY_A = '0x6666666666666666666666666666666666666666';
 const RECOVERY_B = '0x7777777777777777777777777777777777777777';
 const DEPOSIT_TX_HASH = `0x${'a'.repeat(64)}`;
 const PENDING_PROPOSAL_TX_HASH = `0x${'b'.repeat(64)}`;
+const OG_DEPLOYMENT_BLOCK = 500n;
 
 function buildRulesText(agentAddress = AGENT) {
     return [
@@ -137,6 +138,9 @@ function buildPublicClient({
     proposedLogs = [],
     executedLogs = [],
     deletedLogs = [],
+    deploymentBlock = OG_DEPLOYMENT_BLOCK,
+    logCalls = [],
+    getCodeCalls = [],
 } = {}) {
     const receipts = new Map([
         [
@@ -182,7 +186,29 @@ function buildPublicClient({
         async getBlockNumber() {
             return 999n;
         },
-        async getLogs({ event }) {
+        async getCode({ address, blockNumber }) {
+            getCodeCalls.push({
+                address,
+                blockNumber,
+            });
+            const normalized = address.toLowerCase();
+            if (
+                normalized === OG_MODULE.toLowerCase() &&
+                blockNumber !== undefined &&
+                BigInt(blockNumber) >= deploymentBlock
+            ) {
+                return '0x1234';
+            }
+            return '0x';
+        },
+        async getLogs({ address, event, args, fromBlock, toBlock }) {
+            logCalls.push({
+                address,
+                event,
+                args,
+                fromBlock,
+                toBlock,
+            });
             if (event === transactionsProposedEvent) {
                 return proposedLogs;
             }
@@ -357,6 +383,22 @@ async function main() {
         'pass'
     );
 
+    const boundedLifecycleLogCalls = [];
+    const boundedLifecycleClient = buildPublicClient({
+        deploymentBlock: 200n,
+        logCalls: boundedLifecycleLogCalls,
+        extraReceipts: [
+            [
+                PENDING_PROPOSAL_TX_HASH,
+                {
+                    status: 'success',
+                    blockNumber: 456n,
+                    logs: [],
+                },
+            ],
+        ],
+    });
+
     const reservedStoreRecord = {
         ...pendingStoreRecord,
         requestId: 'existing-pending-proven-reserved',
@@ -367,7 +409,7 @@ async function main() {
     };
     const reservedResult = await verifyProposal({
         envelope: buildEnvelope({ requestId: 'reserved-deposit' }),
-        publicClient,
+        publicClient: boundedLifecycleClient,
         storeRecords: [reservedStoreRecord],
         nowMs: 1_760_000_001_000,
     });
@@ -375,6 +417,12 @@ async function main() {
     assert.equal(
         reservedResult.checks.find((check) => check.id === 'deposit_reuse')?.status,
         'fail'
+    );
+    assert.deepEqual(
+        boundedLifecycleLogCalls
+            .filter((entry) => entry.args?.proposalHash === `0x${'c'.repeat(64)}`)
+            .map((entry) => entry.fromBlock?.toString()),
+        ['456', '456']
     );
 
     const sameCommitmentDifferentAgentEnvelope = buildEnvelope({
@@ -425,6 +473,7 @@ async function main() {
         'pass'
     );
 
+    const boundedOnchainLogCalls = [];
     const nonLocalConsumedClient = buildPublicClient({
         proposedLogs: [
             {
@@ -441,6 +490,7 @@ async function main() {
                 },
             },
         ],
+        logCalls: boundedOnchainLogCalls,
     });
     const nonLocalConsumedResult = await verifyProposal({
         envelope: buildEnvelope({ requestId: 'non-local-consumed' }),
@@ -452,6 +502,13 @@ async function main() {
     assert.equal(
         nonLocalConsumedResult.checks.find((check) => check.id === 'deposit_reuse')?.status,
         'fail'
+    );
+    assert.deepEqual(
+        boundedOnchainLogCalls
+            .filter((entry) => entry.address?.toLowerCase?.() === OG_MODULE.toLowerCase())
+            .slice(0, 3)
+            .map((entry) => entry.fromBlock?.toString()),
+        ['500', '500', '500']
     );
 
     const nonLocalDeletedClient = buildPublicClient({
