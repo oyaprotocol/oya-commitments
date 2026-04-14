@@ -134,7 +134,20 @@ async function publishToolCallToRecords({
     publicClient,
 }) {
     const args = JSON.parse(toolCall.arguments);
-    const message = args.message;
+    return publishMessageToRecords({
+        message: args.message,
+        config,
+        records,
+        publicClient,
+    });
+}
+
+async function publishMessageToRecords({
+    message,
+    config,
+    records,
+    publicClient,
+}) {
     const receivedAtMs = Date.now();
     const publishedAtMs = receivedAtMs + 1;
     const validation = await validatePublishedMessage({
@@ -254,7 +267,44 @@ async function run() {
             records,
         });
 
+        const prematureReimbursementRequest = await publishMessageToRecords({
+            message: {
+                chainId: TEST_CHAIN_ID,
+                requestId: 'premature-reimbursement-request',
+                commitmentAddresses: [TEST_COMMITMENT_SAFE, TEST_OG_MODULE],
+                agentAddress: TEST_AGENT.address,
+                kind: 'polymarketReimbursementRequest',
+                payload: {
+                    stream: {
+                        commitmentSafe: TEST_COMMITMENT_SAFE,
+                        ogModule: TEST_OG_MODULE,
+                        user: TEST_USER,
+                        marketId: 'market-1',
+                        tradingWallet: TEST_TRADING_WALLET,
+                    },
+                    snapshotCid: records[0].cid,
+                },
+            },
+            config,
+            records,
+            publicClient,
+        });
+        assert.equal(
+            prematureReimbursementRequest.validation.validatorId,
+            'polymarket_reimbursement_request'
+        );
         let toolCalls = await getNodeDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+            agentAddress: TEST_AGENT.address,
+            publicClient,
+            config,
+            messagePublicationStore,
+            onchainPendingProposal: false,
+        });
+        assert.equal(toolCalls.length, 0);
+
+        toolCalls = await getNodeDeterministicToolCalls({
             signals: [
                 {
                     kind: 'proposal',

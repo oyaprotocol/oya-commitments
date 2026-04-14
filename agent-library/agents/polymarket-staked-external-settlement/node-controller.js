@@ -47,26 +47,6 @@ function normalizeOptionalString(value) {
     return normalized ? normalized : null;
 }
 
-function parseNonNegativeBigIntString(value, label) {
-    try {
-        const normalized = BigInt(String(value));
-        if (normalized < 0n) {
-            throw new Error(`${label} must be a non-negative integer.`);
-        }
-        return normalized.toString();
-    } catch {
-        throw new Error(`${label} must be a non-negative integer.`);
-    }
-}
-
-function parseOptionalTimestamp(value) {
-    if (value === undefined || value === null || value === '') {
-        return null;
-    }
-    const parsed = Number(value);
-    return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
-}
-
 function resolveNodeStatePath(policy) {
     if (policy?.nodeStateFile) {
         return path.resolve(policy.nodeStateFile);
@@ -190,21 +170,6 @@ async function resetNodeStateForTest({ config } = {}) {
     }
 }
 
-function normalizePublishedTradeLogSummary(summary = {}) {
-    return {
-        finalSettlementValueWei: parseNonNegativeBigIntString(
-            summary.finalSettlementValueWei ?? '0',
-            'summary.finalSettlementValueWei'
-        ),
-        settledAtMs: parseOptionalTimestamp(summary.settledAtMs),
-        settlementKind: normalizeOptionalString(summary.settlementKind),
-        settlementDepositTxHash: normalizeHashOrNull(summary.settlementDepositTxHash),
-        settlementDepositConfirmedAtMs: parseOptionalTimestamp(
-            summary.settlementDepositConfirmedAtMs
-        ),
-    };
-}
-
 function buildPublishedMarketViews(records) {
     const groupedTradeLogs = new Map();
     const latestRequests = new Map();
@@ -259,8 +224,7 @@ function buildPublishedMarketViews(records) {
             }
         }
 
-        const rawPayload = latestTradeLog.record.artifact.signedMessage.envelope.message.payload ?? {};
-        const summary = normalizePublishedTradeLogSummary(rawPayload.summary ?? {});
+        const summary = latestTradeLog.message.payload.summary ?? {};
         const latestRequest = latestRequests.get(streamKey) ?? null;
         markets.push({
             stream: cloneJson(latestTradeLog.message.payload.stream),
@@ -364,6 +328,9 @@ async function verifySettlementDeposit({
     commitmentSafe,
 }) {
     const requiredAmount = BigInt(market.settlement.finalSettlementValueWei ?? '0');
+    if (!market.settlement.settledAtMs) {
+        return false;
+    }
     if (requiredAmount <= 0n) {
         return true;
     }
@@ -680,6 +647,9 @@ async function getNodeDeterministicToolCalls({
             continue;
         }
         if (market.reimbursementRequest.snapshotCid !== market.lastPublishedCid) {
+            continue;
+        }
+        if (!market.settlement.settledAtMs) {
             continue;
         }
         if (BigInt(computeReimbursementEligibleWei(market)) <= 0n) {

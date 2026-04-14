@@ -4,7 +4,7 @@ import {
 } from '../../../agent/src/lib/message-publication-validation.js';
 import { canonicalizeJson, isPlainObject } from '../../../agent/src/lib/canonical-json.js';
 import { createValidatedReadOnlyRuntime } from '../../../agent/src/lib/chain-runtime.js';
-import { normalizeAddressOrNull } from '../../../agent/src/lib/utils.js';
+import { normalizeAddressOrNull, normalizeHashOrNull } from '../../../agent/src/lib/utils.js';
 
 const POLYMARKET_TRADE_LOG_KIND = 'polymarketTradeLog';
 const POLYMARKET_REIMBURSEMENT_REQUEST_KIND = 'polymarketReimbursementRequest';
@@ -44,6 +44,18 @@ function parseNonNegativeInteger(value, label) {
         throw new Error(`${label} must be a non-negative integer.`);
     }
     return parsed;
+}
+
+function parseNonNegativeBigIntString(value, label) {
+    try {
+        const normalized = BigInt(String(value));
+        if (normalized < 0n) {
+            throw new Error(`${label} must be a non-negative integer.`);
+        }
+        return normalized.toString();
+    } catch {
+        throw new Error(`${label} must be a non-negative integer.`);
+    }
 }
 
 function normalizeNonEmptyString(value, label) {
@@ -96,6 +108,100 @@ function normalizeTradeEntry(entry, label) {
         tradeId: normalizeNonEmptyString(entry.tradeId, `${label}.tradeId`),
         tradeEntryKind: normalizedKind,
         executedAtMs: parseNonNegativeInteger(entry.executedAtMs, `${label}.executedAtMs`),
+    });
+}
+
+function normalizeSettlementSummary(summary, label = 'message.payload.summary') {
+    if (summary === undefined || summary === null) {
+        return {
+            finalSettlementValueWei: null,
+            settledAtMs: null,
+            settlementKind: null,
+            settlementDepositTxHash: null,
+            settlementDepositConfirmedAtMs: null,
+        };
+    }
+    if (!isPlainObject(summary)) {
+        throw new Error(`${label} must be a JSON object when provided.`);
+    }
+
+    const settledAtMs =
+        summary.settledAtMs === undefined || summary.settledAtMs === null || summary.settledAtMs === ''
+            ? null
+            : parseNonNegativeInteger(summary.settledAtMs, `${label}.settledAtMs`);
+    const settlementKind =
+        summary.settlementKind === undefined ||
+        summary.settlementKind === null ||
+        summary.settlementKind === ''
+            ? null
+            : normalizeNonEmptyString(summary.settlementKind, `${label}.settlementKind`);
+    const finalSettlementValueWei =
+        summary.finalSettlementValueWei === undefined ||
+        summary.finalSettlementValueWei === null ||
+        summary.finalSettlementValueWei === ''
+            ? null
+            : parseNonNegativeBigIntString(
+                  summary.finalSettlementValueWei,
+                  `${label}.finalSettlementValueWei`
+              );
+    const settlementDepositTxHash =
+        summary.settlementDepositTxHash === undefined ||
+        summary.settlementDepositTxHash === null ||
+        summary.settlementDepositTxHash === ''
+            ? null
+            : (() => {
+                  const normalized = normalizeHashOrNull(summary.settlementDepositTxHash);
+                  if (!normalized) {
+                      throw new Error(
+                          `${label}.settlementDepositTxHash must be a 32-byte hex string when provided.`
+                      );
+                  }
+                  return normalized;
+              })();
+    const settlementDepositConfirmedAtMs =
+        summary.settlementDepositConfirmedAtMs === undefined ||
+        summary.settlementDepositConfirmedAtMs === null ||
+        summary.settlementDepositConfirmedAtMs === ''
+            ? null
+            : parseNonNegativeInteger(
+                  summary.settlementDepositConfirmedAtMs,
+                  `${label}.settlementDepositConfirmedAtMs`
+              );
+
+    if (settledAtMs === null) {
+        if (finalSettlementValueWei !== null || settlementKind !== null) {
+            throw new Error(
+                `${label} must include settledAtMs before finalSettlementValueWei or settlementKind may be set.`
+            );
+        }
+        if (settlementDepositTxHash !== null || settlementDepositConfirmedAtMs !== null) {
+            throw new Error(
+                `${label} must include settledAtMs before settlement deposit fields may be set.`
+            );
+        }
+    } else {
+        if (finalSettlementValueWei === null) {
+            throw new Error(
+                `${label}.finalSettlementValueWei is required when settledAtMs is set.`
+            );
+        }
+        if (settlementKind === null) {
+            throw new Error(`${label}.settlementKind is required when settledAtMs is set.`);
+        }
+    }
+
+    if (settlementDepositConfirmedAtMs !== null && settlementDepositTxHash === null) {
+        throw new Error(
+            `${label}.settlementDepositTxHash is required when settlementDepositConfirmedAtMs is set.`
+        );
+    }
+
+    return canonicalizeJson({
+        finalSettlementValueWei,
+        settledAtMs,
+        settlementKind,
+        settlementDepositTxHash,
+        settlementDepositConfirmedAtMs,
     });
 }
 
@@ -236,6 +342,7 @@ function normalizeTradeLogMessage(message, { config = undefined, envelope = unde
                 'message.payload.previousCid'
             ),
             trades,
+            summary: normalizeSettlementSummary(message.payload.summary),
         },
     });
 }
@@ -706,6 +813,7 @@ async function validatePublishedMessage({
             stream: currentMessage.payload.stream,
             sequence: currentMessage.payload.sequence,
             previousCid: currentMessage.payload.previousCid,
+            settlement: currentMessage.payload.summary,
             loggingWindowMinutes,
             evaluationBasis: 'receivedAtMs',
             previousPublishedCid: latestPublishedSnapshot?.record?.cid ?? null,

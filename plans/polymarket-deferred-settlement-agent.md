@@ -45,6 +45,7 @@ This plan intentionally treats the result as an example module, not a general-pu
 - [x] 2026-04-14 11:56 PDT: Added focused module coverage in `test-polymarket-staked-external-settlement-agent.mjs`, updated module metadata/config/commitment text, and documented the new shared `publish_signed_message` tool in `agent/README.md`.
 - [x] 2026-04-14 13:12 PDT: Refactored the module boundary so the agent only trades, deposits settlement, and publishes signed trade-log / reimbursement-request messages, while a standalone node-side control loop now owns withdrawal disputes and reimbursement proposal submission from published node state. Added `node/scripts/start-control-node.mjs`, module-local node controller state/helpers, and focused node-controller coverage.
 - [x] 2026-04-14 15:09 PDT: Rewired the Polymarket control node so reimbursement proposals now go through the standalone proposal-publication node in `propose` mode instead of calling `post_bond_and_propose` directly. Added a shared signed proposal-publication bridge in `agent/src/lib/`, updated the module config to enable `proposalPublishApi`, and extended focused shared/module coverage.
+- [x] 2026-04-14 16:05 PDT: Hardened trade-log settlement handling so the validator now normalizes settlement summary fields into the accepted snapshot shape, rejects inconsistent settled snapshots, and the control node reads only that validated summary before allowing reimbursement. Added regressions for malformed settlement summaries and premature reimbursement requests against unsettled snapshots.
 - [ ] Add smoke harness coverage.
 
 ## Surprises & Discoveries
@@ -72,6 +73,9 @@ This plan intentionally treats the result as an example module, not a general-pu
 
 - Observation: Cumulative trade-log snapshots require timeliness checks only for newly introduced trade entries, not for the entire historical snapshot.
   Evidence: This plan intentionally uses hash-chained cumulative snapshots. Rechecking every historical entry against the current time would make retries and later updates fail after the original logging window passed, even if those older entries had already been accepted on time.
+
+- Observation: The control node cannot safely treat agent-authored settlement summaries as reimbursement gates unless those summary fields are themselves part of the validator-owned accepted snapshot shape.
+  Evidence: Before the hardening pass, `node-controller.js` read `payload.summary.finalSettlementValueWei` directly from the archived signed message even though `normalizeTradeLogMessage()` only validated `stream`, `sequence`, `previousCid`, and `trades`.
 
 - Observation: Rejecting an entire cumulative snapshot because one newly introduced trade is late would hide audit-relevant trade history and create incentives to omit losing trades from the publication stream.
   Evidence: The user clarified that the preferred path is to publish all trades, but separately track which ones remain reimbursement-eligible.
