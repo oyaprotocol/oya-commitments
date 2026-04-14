@@ -31,7 +31,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DEFAULT_NODE_STATE_FILE = path.join(__dirname, '.settlement-node-state.json');
 const MODULE_NAME = 'polymarket-staked-external-settlement';
-const REIMBURSEMENT_PROPOSAL_KIND = 'polymarket_staked_external_settlement_reimbursement';
+const REIMBURSEMENT_PROPOSAL_KIND = 'agent_proxy_reimbursement';
 
 let runtimeNodeState = createEmptyNodeState();
 let runtimeNodeStateHydrated = false;

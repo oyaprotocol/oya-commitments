@@ -49,7 +49,7 @@ For this module, operators should run:
 - the message publication node so cumulative trade logs and reimbursement-request messages are archived to IPFS and written to the durable message ledger
 - the proposal publication node in `propose` mode so the control node can archive reimbursement proposals to IPFS and submit them onchain
 
-Current limit: the Polymarket reimbursement path now uses the proposal-publication node, but it does not yet have a dedicated verifier like `agent_proxy_reimbursement`. Keep `proposalVerificationMode=off` unless you intentionally want advisory-only recording for this module.
+Current limit: the Polymarket reimbursement path now uses the canonical `agent_proxy_reimbursement` kind, but it still does not supply the full `metadata.verification` evidence bundle that the current deterministic verifier expects. Keep `proposalVerificationMode=off` unless you intentionally want advisory-only recording for this module.
 
 ### Verification Mode
 

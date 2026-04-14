@@ -532,7 +532,7 @@ function buildTradeLogMessage({ market, config, agentAddress, revision }) {
 
 function buildReimbursementExplanation({ market }) {
     return buildStructuredProposalExplanation({
-        kind: 'polymarket_staked_external_settlement_reimbursement',
+        kind: 'agent_proxy_reimbursement',
         description: `Reimburse the agent for published Polymarket market ${market.stream.marketId}. snapshotCid=${market.lastPublishedCid ?? 'missing'} requestCid=${market.reimbursement.requestCid ?? 'missing'}`,
     });
 }
