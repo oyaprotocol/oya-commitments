@@ -1366,13 +1366,24 @@ function buildProposalPlan({
 }
 
 function buildReplayPlan({ pendingPlan, config }) {
+    let explanation = pendingPlan.explanation;
+    const structuredExplanation = parseStructuredProposalExplanation(explanation, {
+        requireDepositTxHashes: true,
+    });
+    if (!structuredExplanation && strategyState.pendingDeposit?.epochIndex === pendingPlan.epochIndex) {
+        explanation = buildStructuredProposalExplanation({
+            kind: 'agent_proxy_reimbursement',
+            description: explanation,
+            depositTxHashes: [strategyState.pendingDeposit.depositTxHash],
+        });
+    }
     return buildProposalPlan({
         epochIndex: pendingPlan.epochIndex,
         winnerSymbol: pendingPlan.winnerSymbol,
         depositAsset: pendingPlan.depositAsset,
         depositAmountWei: pendingPlan.depositAmountWei,
         actions: pendingPlan.actions,
-        explanation: pendingPlan.explanation,
+        explanation,
         config,
     });
 }
@@ -1891,18 +1902,29 @@ async function validateToolCalls({
     }
 
     const normalizedExplanation = postArgs.explanation.trim();
-    const structuredExplanation = parseStructuredProposalExplanation(normalizedExplanation, {
-        requireDepositTxHashes: true,
-    });
-    if (!structuredExplanation || structuredExplanation.kind !== 'agent_proxy_reimbursement') {
-        throw new Error(
-            'first-proxy proposal explanation must be structured JSON with kind, description, and depositTxHashes.'
-        );
-    }
     const explanationFields = parseExplanationFields(normalizedExplanation);
     const epochIndex = parseStrategyEpochFromExplanation(normalizedExplanation);
     if (epochIndex === null) {
         throw new Error('first-proxy proposal explanation must include strategy and epoch.');
+    }
+    const matchingPendingPlan =
+        strategyState.pendingPlan?.epochIndex === epochIndex ? strategyState.pendingPlan : null;
+    const matchingPendingDeposit =
+        strategyState.pendingDeposit?.epochIndex === epochIndex ? strategyState.pendingDeposit : null;
+    const structuredExplanation = parseStructuredProposalExplanation(normalizedExplanation, {
+        requireDepositTxHashes: true,
+    });
+    const isLegacyReplayExplanation =
+        !structuredExplanation &&
+        matchingPendingPlan?.explanation === normalizedExplanation &&
+        !matchingPendingDeposit;
+    if (
+        (!structuredExplanation || structuredExplanation.kind !== 'agent_proxy_reimbursement') &&
+        !isLegacyReplayExplanation
+    ) {
+        throw new Error(
+            'first-proxy proposal explanation must be structured JSON with kind, description, and depositTxHashes.'
+        );
     }
     const winnerSymbol = canonicalizeSymbol(explanationFields.winner);
     if (!MOMENTUM_SYMBOLS.includes(winnerSymbol)) {
@@ -1964,18 +1986,14 @@ async function validateToolCalls({
         throw new Error('Reimbursement value must not exceed the deposited winner-token value.');
     }
 
-    const planSource =
-        strategyState.pendingPlan?.epochIndex === epochIndex
-            ? strategyState.pendingPlan
-            : strategyState.pendingDeposit?.epochIndex === epochIndex
-              ? strategyState.pendingDeposit
-              : null;
+    const planSource = matchingPendingPlan ?? matchingPendingDeposit ?? null;
     if (!planSource) {
         throw new Error('Proposal/replay runs require a matching pending deposit or replay plan.');
     }
     if (
-        strategyState.pendingDeposit?.epochIndex === epochIndex &&
-        !structuredExplanation.depositTxHashes.includes(strategyState.pendingDeposit.depositTxHash)
+        matchingPendingDeposit &&
+        structuredExplanation &&
+        !structuredExplanation.depositTxHashes.includes(matchingPendingDeposit.depositTxHash)
     ) {
         throw new Error(
             'Proposal explanation depositTxHashes must include the current pending deposit tx hash.'

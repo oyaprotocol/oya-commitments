@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import {
     buildMomentumPlan,
     computeClosedEpochIndex,
@@ -878,6 +878,20 @@ async function testDeletedProposalReplaysWithoutRedeposit() {
         });
 
         const explanation = getPendingPlan().explanation;
+        const legacyExplanation = JSON.parse(explanation).description;
+        const persistedState = JSON.parse(await readFile(stateFile, 'utf8'));
+        persistedState.pendingPlan.explanation = legacyExplanation;
+        await writeFile(stateFile, JSON.stringify(persistedState, null, 2), 'utf8');
+        const unrelatedStateFile = await createStateFile();
+        const unrelatedConfig = createConfig({ stateFile: unrelatedStateFile, balances });
+        await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: ADDRESSES.safe,
+            agentAddress: ADDRESSES.agent,
+            publicClient: initialClient,
+            config: unrelatedConfig,
+            onchainPendingProposal: false,
+        });
         const deletedClient = createPublicClient({
             latestBlock: 8n,
             balances,
@@ -887,7 +901,7 @@ async function testDeletedProposalReplaysWithoutRedeposit() {
                         blockNumber: 7n,
                         args: {
                             proposalHash: ogProposalHash,
-                            explanation,
+                            explanation: legacyExplanation,
                         },
                     },
                 ],
@@ -913,6 +927,22 @@ async function testDeletedProposalReplaysWithoutRedeposit() {
         assert.equal(replayCalls.length, 2);
         assert.equal(replayCalls[0].name, 'build_og_transactions');
         assert.equal(replayCalls[1].name, 'post_bond_and_propose');
+        const validatedReplay = await validateToolCalls({
+            toolCalls: replayCalls.map((call) => ({
+                ...call,
+                parsedArguments: parseToolArgs(call),
+            })),
+            commitmentSafe: ADDRESSES.safe,
+            agentAddress: ADDRESSES.agent,
+            publicClient: deletedClient,
+            config,
+            onchainPendingProposal: false,
+        });
+        assert.equal(validatedReplay.length, 2);
+        assert.equal(
+            validatedReplay[1].parsedArguments.explanation,
+            legacyExplanation
+        );
     });
 }
 
