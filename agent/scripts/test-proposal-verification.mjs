@@ -243,6 +243,25 @@ async function main() {
         'pass'
     );
 
+    const nonAgentSignerResult = await verifyProposal({
+        envelope: buildEnvelope({
+            requestId: 'non-agent-signer',
+            signerAddress: OTHER_AGENT,
+            authorizedAgent: AGENT,
+            reimbursementRecipient: AGENT,
+            rulesText: buildRulesText(AGENT),
+        }),
+        publicClient,
+        storeRecords: [],
+        nowMs: 1_760_000_001_000,
+    });
+    assert.equal(nonAgentSignerResult.status, 'invalid');
+    assert.equal(
+        nonAgentSignerResult.checks.find((check) => check.id === 'authorized_agent_signer')
+            ?.status,
+        'fail'
+    );
+
     const receiptRuntimeFailureClient = {
         ...buildPublicClient(),
         async getTransactionReceipt() {
@@ -257,16 +276,8 @@ async function main() {
     });
     assert.equal(receiptRuntimeFailureResult.status, 'unknown');
     assert.equal(
-        receiptRuntimeFailureResult.checks.find(
-            (check) => check.id === 'agent_proxy_reimbursement'
-        )?.status,
+        receiptRuntimeFailureResult.checks.find((check) => check.id === 'deposit_reuse')?.status,
         'unknown'
-    );
-    assert.match(
-        receiptRuntimeFailureResult.checks.find(
-            (check) => check.id === 'agent_proxy_reimbursement'
-        )?.message ?? '',
-        /rpc unavailable/
     );
 
     const contradictoryDepositEvidenceClient = {
@@ -475,6 +486,23 @@ async function main() {
 
     const boundedOnchainLogCalls = [];
     const nonLocalConsumedClient = buildPublicClient({
+        extraReceipts: [
+            [
+                DEPOSIT_TX_HASH,
+                {
+                    status: 'success',
+                    blockNumber: 700n,
+                    logs: [
+                        buildTransferLog({
+                            token: DEPOSIT_TOKEN,
+                            from: AGENT,
+                            to: SAFE,
+                            amountWei: '1000000',
+                        }),
+                    ],
+                },
+            ],
+        ],
         proposedLogs: [
             {
                 args: {
@@ -508,7 +536,7 @@ async function main() {
             .filter((entry) => entry.address?.toLowerCase?.() === OG_MODULE.toLowerCase())
             .slice(0, 3)
             .map((entry) => entry.fromBlock?.toString()),
-        ['500', '500', '500']
+        ['700', '700', '700']
     );
 
     const nonLocalDeletedClient = buildPublicClient({

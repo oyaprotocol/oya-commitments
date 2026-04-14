@@ -945,10 +945,36 @@ async function resolveOnchainProposalDepositStatuses({
     let deletedLogs;
     try {
         latestBlock = await publicClient.getBlockNumber();
+        let earliestDepositBlock = null;
+        for (const depositTxHash of depositTxHashes) {
+            let receipt;
+            try {
+                receipt = await publicClient.getTransactionReceipt({ hash: depositTxHash });
+            } catch (error) {
+                throw wrapVerificationUnknownError(
+                    error,
+                    `Deposit transaction ${depositTxHash} receipt could not be loaded to bound proposal history`
+                );
+            }
+            const receiptBlockNumber = receipt?.blockNumber;
+            if (receiptBlockNumber === undefined || receiptBlockNumber === null) {
+                throw new VerificationUnknownError(
+                    `Deposit transaction ${depositTxHash} receipt is missing a blockNumber, so proposal history could not be bounded safely.`
+                );
+            }
+            const normalizedReceiptBlock = BigInt(receiptBlockNumber);
+            if (
+                earliestDepositBlock === null ||
+                normalizedReceiptBlock < earliestDepositBlock
+            ) {
+                earliestDepositBlock = normalizedReceiptBlock;
+            }
+        }
         historyFromBlock = await resolveOgHistoryStartBlock({
             publicClient,
             ogModule,
             latestBlock,
+            minimumFromBlock: earliestDepositBlock,
         });
         [proposedLogs, executedLogs, deletedLogs] = await Promise.all([
             getLogsChunked({
@@ -1156,6 +1182,27 @@ async function verifyAgentProxyReimbursement({
 
     const authorizedAgent = agentProxyTemplate.params.agentAddress;
     derivedFacts.authorizedAgent = authorizedAgent;
+    const normalizedSignerAddress = normalizeAddressOrNull(envelope.address);
+    if (!normalizedSignerAddress || normalizedSignerAddress !== authorizedAgent) {
+        checks.push(
+            buildCheck(
+                'authorized_agent_signer',
+                'fail',
+                'agent_proxy_reimbursement proposals must be signed by the authorized agent address from the Agent Proxy rules.',
+                {
+                    signer: normalizedSignerAddress,
+                }
+            )
+        );
+        return;
+    }
+    checks.push(
+        buildCheck(
+            'authorized_agent_signer',
+            'pass',
+            'Proposal signer matches the authorized agent address from the Agent Proxy rules.'
+        )
+    );
 
     let reimbursements;
     try {
