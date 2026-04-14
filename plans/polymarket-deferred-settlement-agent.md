@@ -38,6 +38,7 @@ This plan intentionally treats the result as an example module, not a general-pu
 - [x] 2026-04-13 15:01 PDT: Revised the plan again so late trades stay visible in published cumulative snapshots, while the node separately attests which newly introduced trades are reimbursable versus non-reimbursable based on timeliness, sequence continuity, and internal consistency.
 - [x] 2026-04-13 15:11 PDT: Implemented the shared message-publication validator hook, attested `publication.validation` payloads, duplicate-safe persistence of validator output, runtime resolution of `validatePublishedMessage()` from agent modules, and focused store/API/runtime regressions.
 - [x] 2026-04-13 16:10 PDT: Added the first module-local Polymarket trade-log validator under `agent-library/agents/polymarket-staked-external-settlement/`. The new module now exists as a minimal scaffold with its own `agent.js`, `commitment.txt`, `agent.json`, `config.json`, and validator test. The validator reads `ogModule.rules()` onchain, parses the deployed logging-delay minutes from the `Staked External Polymarket Execution` clause, validates cumulative snapshot continuity against previously published records, and classifies newly introduced trades as `reimbursable` or `non_reimbursable_late`.
+- [x] 2026-04-13 17:02 PDT: Added validator-provided message publication lock keys and stream-scoped serialization in the shared node so concurrent requests for the same Polymarket stream but different `requestId`s cannot both validate against stale history. The staked external settlement module now exports per-stream lock keys derived from the same normalized stream identity as the validator.
 - [ ] Expand the deferred-settlement Polymarket agent module beyond the current scaffold and commitment draft.
 - [ ] Add tests, smoke harness coverage, and documentation updates.
 
@@ -66,6 +67,9 @@ This plan intentionally treats the result as an example module, not a general-pu
 
 - Observation: Rejecting an entire cumulative snapshot because one newly introduced trade is late would hide audit-relevant trade history and create incentives to omit losing trades from the publication stream.
   Evidence: The user clarified that the preferred path is to publish all trades, but separately track which ones remain reimbursement-eligible.
+
+- Observation: Per-request duplicate handling is not enough for cumulative trade-log streams. Two different `requestId`s for the same stream can otherwise both validate against the same stale latest snapshot and produce permanently conflicting sequence history.
+  Evidence: The shared message publisher originally serialized only by `(signer, chainId, requestId)`, while the Polymarket validator enforces sequence monotonicity by stream identity.
 
 ## Decision Log
 

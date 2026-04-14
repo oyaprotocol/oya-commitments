@@ -1691,6 +1691,114 @@ async function main() {
             await proposeNoHistoryApi.stop();
         }
 
+        const advisoryNoHistoryStateFile = path.join(
+            tempDir,
+            'proposal-publications-propose-advisory-no-history.json'
+        );
+        const advisoryNoHistoryStoreBase = createProposalPublicationStore({
+            stateFile: advisoryNoHistoryStateFile,
+        });
+        const advisoryNoHistoryStore = {
+            async getRecord(args) {
+                return advisoryNoHistoryStoreBase.getRecord(args);
+            },
+            async prepareRecord(args) {
+                return advisoryNoHistoryStoreBase.prepareRecord(args);
+            },
+            async saveRecord(record) {
+                return advisoryNoHistoryStoreBase.saveRecord(record);
+            },
+            async updateRecord(recordOrKey, updater) {
+                return advisoryNoHistoryStoreBase.updateRecord(recordOrKey, updater);
+            },
+        };
+        let advisoryNoHistorySubmitCalls = 0;
+        let advisoryNoHistoryVerifyCalls = 0;
+        const advisoryNoHistoryApi = createProposalPublicationApiServer({
+            config: buildServerConfig(account.address, {
+                chainId: undefined,
+                proposalPublishApiMode: 'propose',
+                proposalVerificationMode: 'advisory',
+            }),
+            store: advisoryNoHistoryStore,
+            logger: {
+                info() {},
+                warn() {},
+            },
+            resolveProposalRuntime: async ({ chainId }) => ({
+                runtimeConfig: {
+                    chainId,
+                    proposeEnabled: true,
+                    bondSpender: 'og',
+                    proposalHashResolveTimeoutMs: 1,
+                    proposalHashResolvePollIntervalMs: 1,
+                },
+                publicClient: {
+                    async getChainId() {
+                        return chainId;
+                    },
+                },
+                walletClient: {},
+                account: { address: account.address },
+            }),
+            verifyProposal: async () => {
+                advisoryNoHistoryVerifyCalls += 1;
+                return {
+                    status: 'valid',
+                    verifiedAtMs: BASE_TIME_MS + 5,
+                    proposalKind: 'agent_proxy_reimbursement',
+                    rules: {
+                        rulesHash: `0x${'e'.repeat(64)}`,
+                        matchedTemplates: [],
+                        unparsedSections: [],
+                    },
+                    checks: [],
+                    derivedFacts: {},
+                };
+            },
+            submitProposal: async () => {
+                advisoryNoHistorySubmitCalls += 1;
+                return {
+                    transactionHash: `0x${'f'.repeat(64)}`,
+                    proposalHash: `0x${'1'.repeat(64)}`,
+                    ogProposalHash: `0x${'1'.repeat(64)}`,
+                    sideEffectsLikelyCommitted: true,
+                };
+            },
+        });
+        const advisoryNoHistoryServer = await advisoryNoHistoryApi.start();
+        const advisoryNoHistoryAddress = advisoryNoHistoryServer.address();
+        assert.ok(
+            advisoryNoHistoryAddress &&
+                typeof advisoryNoHistoryAddress === 'object' &&
+                typeof advisoryNoHistoryAddress.port === 'number'
+        );
+        const advisoryNoHistoryBaseUrl = `http://127.0.0.1:${advisoryNoHistoryAddress.port}`;
+
+        try {
+            const advisoryNoHistoryRequest = await buildSignedBody({
+                account,
+                chainId: 11155111,
+                requestId: 'advisory-no-history',
+                explanation: 'Advisory mode should still fail closed without history.',
+            });
+            const advisoryNoHistoryResponse = await postPublication(
+                advisoryNoHistoryBaseUrl,
+                advisoryNoHistoryRequest.body
+            );
+            assert.equal(advisoryNoHistoryResponse.status, 503);
+            assert.equal(
+                advisoryNoHistoryResponse.json.code,
+                'verification_history_unavailable'
+            );
+            assert.equal(advisoryNoHistoryResponse.json.submission.status, 'not_started');
+            assert.equal(advisoryNoHistoryResponse.json.verification, null);
+            assert.equal(advisoryNoHistoryVerifyCalls, 0);
+            assert.equal(advisoryNoHistorySubmitCalls, 0);
+        } finally {
+            await advisoryNoHistoryApi.stop();
+        }
+
         const advisoryStateFile = path.join(tempDir, 'proposal-publications-propose-advisory.json');
         const advisoryStore = createProposalPublicationStore({ stateFile: advisoryStateFile });
         const advisorySubmitAttemptsByExplanation = new Map();

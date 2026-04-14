@@ -255,6 +255,10 @@ function buildAdvisoryVerificationFallback({ envelope, error, atMs = Date.now() 
     };
 }
 
+function canDegradeVerificationErrorToAdvisoryUnknown(error) {
+    return error?.code !== 'verification_history_unavailable';
+}
+
 function canBypassProposalRuntimeForDuplicate(record, exactExistingMatch) {
     if (!exactExistingMatch || !record) {
         return false;
@@ -1485,7 +1489,10 @@ function createProposalPublicationApiServer({
                                             proposalRuntime: runtime,
                                         }));
                                     } catch (error) {
-                                        if (proposalVerificationMode !== 'advisory') {
+                                        if (
+                                            proposalVerificationMode !== 'advisory' ||
+                                            !canDegradeVerificationErrorToAdvisoryUnknown(error)
+                                        ) {
                                             throw error;
                                         }
                                         const statusCode = error?.statusCode ?? 502;

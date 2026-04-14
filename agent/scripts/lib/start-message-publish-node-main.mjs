@@ -6,6 +6,7 @@ import {
     loadScriptEnv,
 } from './cli-runtime.mjs';
 import {
+    resolveMessagePublishLockKeyDeriver,
     resolveMessagePublishNodeSigner,
     resolveMessagePublishServerConfig,
     resolveMessagePublishValidator,
@@ -52,6 +53,9 @@ async function main({ argv = process.argv } = {}) {
     const validateMessagePublication = await resolveMessagePublishValidator({
         runtimeConfig,
     });
+    const deriveMessagePublicationLockKeys = await resolveMessagePublishLockKeyDeriver({
+        runtimeConfig,
+    });
     if (!runtimeConfig.messagePublishApiEnabled) {
         throw new Error(
             `Agent "${agentRef}" does not enable messagePublishApi. Enable messagePublishApi.enabled in the active config stack.`
@@ -76,6 +80,7 @@ async function main({ argv = process.argv } = {}) {
                     ipfsApiUrl: runtimeConfig.ipfsApiUrl,
                     nodeName: runtimeConfig.messagePublishApiNodeName ?? null,
                     hasValidatorHook: Boolean(validateMessagePublication),
+                    hasLockKeyHook: Boolean(deriveMessagePublicationLockKeys),
                 },
                 null,
                 2
@@ -93,6 +98,7 @@ async function main({ argv = process.argv } = {}) {
         store,
         nodeSigner,
         validateMessagePublication,
+        deriveMessagePublicationLockKeys,
     });
     await api.start();
 

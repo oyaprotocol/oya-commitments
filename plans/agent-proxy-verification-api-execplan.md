@@ -29,6 +29,7 @@ Observable user value:
 - [x] 2026-04-12 19:03 PDT: Documented the shipped verification surface in `node/README.md` and `agent/README.md`, including endpoint behavior, signed metadata requirements, config gating, and current verifier limits.
 - [x] 2026-04-13 14:34 PDT: Added canonical structured reimbursement explanations with `kind`, `description`, and `depositTxHashes`; the verifier now cross-checks explanation references against signed metadata and scans onchain `TransactionsProposed` history for the same OG module to derive non-local deposit reservation and consumption state.
 - [x] 2026-04-13 16:05 PDT: Added deposit-scoped submission serialization in propose mode so concurrent requests with different `requestId`s but overlapping `depositTxHashes` cannot both verify and submit before local reservation state is durable.
+- [x] 2026-04-13 17:02 PDT: Tightened proposal verification rollout safety so `proposalVerificationMode = advisory` still fails closed when proposal history cannot be enumerated. Advisory fallback remains available for transient runtime-read failures, but not for missing `listRecords()` history.
 - [ ] Expand verifier coverage so `first-proxy` commitments with extra templates such as `Trade Restrictions` and `Trading Limits` can reach `valid` instead of `unknown`.
 
 ## Surprises & Discoveries
@@ -56,6 +57,9 @@ Observable user value:
 
 - Observation: Global onchain proposal history does not remove the need for same-node deposit-scoped locking. Two different signed requests can otherwise verify against the same locally available deposits concurrently before either submission records a reserved or resolved state.
   Evidence: Propose-mode submission queueing originally serialized only by `(signer, chainId, requestId)`, while deposit reuse enforcement is keyed by `depositTxHashes` and depends on persisted proposal state becoming visible before the next verification pass.
+
+- Observation: Advisory mode cannot safely degrade every verification error to `unknown`. Some errors, especially missing proposal-history enumeration, remove the node's ability to enforce single-use deposit evidence at all.
+  Evidence: `verification_history_unavailable` comes from failed or missing `store.listRecords()` access, which is required for local duplicate-deposit protection even before broader onchain history reconstruction.
 
 ## Decision Log
 

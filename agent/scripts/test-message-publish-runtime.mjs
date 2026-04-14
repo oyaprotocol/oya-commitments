@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import {
+    resolveMessagePublishLockKeyDeriver,
     resolveMessagePublishServerConfig,
     resolveMessagePublishValidator,
 } from './lib/message-publish-runtime.mjs';
@@ -73,7 +74,11 @@ async function run() {
                 requireSignerAllowlist: false,
             },
         },
-        `export async function validatePublishedMessage({ message, config }) {
+        `export function derivePublishedMessageLockKeys({ message }) {
+  return message?.streamId ? [\`runtime-stream:\${message.streamId}\`] : [];
+}
+
+export async function validatePublishedMessage({ message, config }) {
   return {
     validatorId: 'runtime-validator',
     status: 'accepted',
@@ -102,7 +107,11 @@ async function run() {
     const validateMessagePublication = await resolveMessagePublishValidator({
         runtimeConfig: validatorConfig.runtimeConfig,
     });
+    const deriveMessagePublicationLockKeys = await resolveMessagePublishLockKeyDeriver({
+        runtimeConfig: validatorConfig.runtimeConfig,
+    });
     assert.equal(typeof validateMessagePublication, 'function');
+    assert.equal(typeof deriveMessagePublicationLockKeys, 'function');
     const validationResult = await validateMessagePublication({
         message: {
             requestId: 'runtime-test-trade',
@@ -122,6 +131,14 @@ async function run() {
             chainId: 11155111,
         },
     });
+    assert.deepEqual(
+        await deriveMessagePublicationLockKeys({
+            message: {
+                streamId: 'runtime-alpha',
+            },
+        }),
+        ['runtime-stream:runtime-alpha']
+    );
 
     console.log('[test] message publish runtime OK');
 }

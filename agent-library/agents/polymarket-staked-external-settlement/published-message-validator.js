@@ -224,6 +224,22 @@ function buildStreamKey(message) {
     ].join(':');
 }
 
+function derivePublishedMessageLockKeys({
+    config,
+    envelope,
+    message,
+} = {}) {
+    if (!isPlainObject(message) || message.kind !== POLYMARKET_TRADE_LOG_KIND) {
+        return [];
+    }
+    try {
+        const normalizedMessage = normalizeTradeLogMessage(message, { config, envelope });
+        return [`polymarket_stream:${buildStreamKey(normalizedMessage)}`];
+    } catch {
+        return [];
+    }
+}
+
 function extractPublishedTradeLogRecord(record) {
     if (!record?.cid || !record?.artifact?.signedMessage?.envelope?.message) {
         return null;
@@ -530,6 +546,7 @@ async function validatePublishedMessage({
 }
 
 export {
+    derivePublishedMessageLockKeys,
     POLYMARKET_TRADE_LOG_KIND,
     POLYMARKET_TRADE_LOG_VALIDATOR_ID,
     validatePublishedMessage,

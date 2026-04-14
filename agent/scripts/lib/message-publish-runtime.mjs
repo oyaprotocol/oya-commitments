@@ -265,7 +265,33 @@ async function resolveMessagePublishValidator({
         });
 }
 
+async function resolveMessagePublishLockKeyDeriver({
+    runtimeConfig,
+} = {}) {
+    const modulePath = runtimeConfig?.modulePath;
+    if (!modulePath) {
+        return undefined;
+    }
+
+    const agentModule = await import(pathToFileURL(modulePath).href);
+    if (agentModule.derivePublishedMessageLockKeys === undefined) {
+        return undefined;
+    }
+    if (typeof agentModule.derivePublishedMessageLockKeys !== 'function') {
+        throw new Error(
+            `Agent module "${modulePath}" export derivePublishedMessageLockKeys must be a function when provided.`
+        );
+    }
+
+    return (args) =>
+        agentModule.derivePublishedMessageLockKeys({
+            ...args,
+            config: runtimeConfig,
+        });
+}
+
 export {
+    resolveMessagePublishLockKeyDeriver,
     resolveMessagePublishApiConfigForAgent,
     resolveMessagePublishNodeSigner,
     resolveMessagePublishServerConfig,

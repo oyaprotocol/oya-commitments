@@ -1,4 +1,5 @@
 import {
+    derivePublishedMessageLockKeys,
     validatePublishedMessage,
 } from './published-message-validator.js';
 
@@ -29,6 +30,7 @@ async function getDeterministicToolCalls() {
 }
 
 export {
+    derivePublishedMessageLockKeys,
     getDeterministicToolCalls,
     getSystemPrompt,
     validatePublishedMessage,
