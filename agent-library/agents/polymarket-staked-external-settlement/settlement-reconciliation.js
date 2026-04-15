@@ -175,11 +175,10 @@ async function refreshPendingSettlementDeposits(state, { publicClient, pendingTx
                 submittedAtMs > 0 &&
                 nowMs - submittedAtMs > Number(pendingTxTimeoutMs ?? 0)
             ) {
-                market.settlement.depositTxHash = null;
                 market.settlement.depositSubmittedAtMs = null;
                 market.settlement.depositConfirmedAtMs = null;
                 market.settlement.depositError =
-                    'Settlement deposit transaction could not be reconciled before timeout; retrying is allowed.';
+                    'Settlement deposit transaction could not be reconciled before timeout; automatic retry is blocked until the original tx hash is reconciled.';
                 markMarketDirty(market);
                 changed = true;
             }

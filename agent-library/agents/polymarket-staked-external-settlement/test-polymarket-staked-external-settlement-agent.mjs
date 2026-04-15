@@ -850,16 +850,27 @@ async function run() {
                 publicClient: timeoutPublicClient,
                 config: timeoutConfig,
             });
-            assert.equal(toolCalls.length, 1);
             const timeoutState = getModuleState();
-            assert.equal(timeoutState.markets['market-1'].settlement.depositTxHash, null);
+            assert.equal(
+                timeoutState.markets['market-1'].settlement.depositTxHash,
+                timeoutSubmissionHash
+            );
             assert.equal(
                 timeoutState.markets['market-1'].settlement.depositSubmittedAtMs,
                 null
             );
+            assert.equal(
+                timeoutState.markets['market-1'].settlement.depositConfirmedAtMs,
+                null
+            );
             assert.match(
                 timeoutState.markets['market-1'].settlement.depositError,
-                /could not be reconciled before timeout/i
+                /automatic retry is blocked until the original tx hash is reconciled/i
+            );
+            assert.equal(
+                toolCalls.length,
+                1,
+                'timeout path should publish the updated blocked state to the node'
             );
             assert.equal(toolCalls[0].name, 'publish_signed_message');
             const timeoutRecoveryPublicationArgs = JSON.parse(toolCalls[0].arguments);
@@ -891,39 +902,10 @@ async function run() {
                 publicClient: timeoutPublicClient,
                 config: timeoutConfig,
             });
-            for (
-                let attempts = 0;
-                attempts < 10 && toolCalls[0].name === 'publish_signed_message';
-                attempts += 1
-            ) {
-                const followUpPublication = await runPublishCall({
-                    toolCall: toolCalls[0],
-                    publicClient,
-                    config: timeoutConfig,
-                });
-                await onToolOutput({
-                    name: 'publish_signed_message',
-                    parsedOutput: followUpPublication,
-                    config: timeoutConfig,
-                    commitmentSafe: TEST_COMMITMENT_SAFE,
-                });
-                toolCalls = await getDeterministicToolCalls({
-                    signals: [],
-                    commitmentSafe: TEST_COMMITMENT_SAFE,
-                    agentAddress: TEST_AGENT.address,
-                    publicClient: timeoutPublicClient,
-                    config: timeoutConfig,
-                });
-            }
-            assert.equal(toolCalls.length, 1);
             assert.equal(
-                toolCalls[0].name,
-                'make_deposit',
-                'timeout path should reach retry make_deposit after clearing the stuck tx and draining follow-up publications'
-            );
-            assert.equal(
-                typeof getModuleState().markets['market-1'].settlement.depositDispatchAtMs,
-                'number'
+                toolCalls.length,
+                0,
+                'timeout path should stay blocked behind the original deposit tx hash instead of dispatching a second deposit'
             );
         } finally {
             Date.now = originalDateNow;
