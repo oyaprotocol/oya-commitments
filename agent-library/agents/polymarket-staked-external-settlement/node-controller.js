@@ -240,7 +240,8 @@ function buildPublishedMarketViews(records) {
                 settledAtMs: summary.settledAtMs,
                 settlementKind: summary.settlementKind,
                 depositTxHash: summary.settlementDepositTxHash,
-                depositConfirmedAtMs: summary.settlementDepositConfirmedAtMs,
+                claimedDepositConfirmedAtMs: summary.settlementDepositConfirmedAtMs,
+                depositConfirmedAtMs: null,
             },
             reimbursementRequest: latestRequest
                 ? {
@@ -451,6 +452,30 @@ function buildSharedSettlementDepositRequirements(publishedMarkets) {
         );
     }
     return sharedRequiredByDepositTxHash;
+}
+
+async function applyVerifiedSettlementDepositStatus({
+    publishedMarkets,
+    publicClient,
+    policy,
+    commitmentSafe,
+}) {
+    const sharedRequiredByDepositTxHash = buildSharedSettlementDepositRequirements(publishedMarkets);
+    const settlementTransferCache = new Map();
+    for (const market of Array.isArray(publishedMarkets) ? publishedMarkets : []) {
+        const depositReady = await verifySettlementDeposit({
+            publicClient,
+            market,
+            policy,
+            commitmentSafe,
+            sharedRequiredByDepositTxHash,
+            settlementTransferCache,
+        });
+        market.settlement.depositConfirmedAtMs = depositReady
+            ? market.settlement.claimedDepositConfirmedAtMs ?? market.publishedAtMs ?? null
+            : null;
+    }
+    return { sharedRequiredByDepositTxHash, settlementTransferCache };
 }
 
 function buildDisputeToolCall(assertionId, blockingMarketIds) {
@@ -703,9 +728,13 @@ async function getNodeDeterministicToolCalls({
     const configuredPublishedMarkets = publishedMarkets.filter((market) =>
         isConfiguredPublishedMarket(market, policy, config)
     );
-    const sharedRequiredByDepositTxHash =
-        buildSharedSettlementDepositRequirements(configuredPublishedMarkets);
-    const settlementTransferCache = new Map();
+    const { sharedRequiredByDepositTxHash, settlementTransferCache } =
+        await applyVerifiedSettlementDepositStatus({
+            publishedMarkets: configuredPublishedMarkets,
+            publicClient,
+            policy,
+            commitmentSafe,
+        });
     changed = syncNodeMarketLifecycle(runtimeNodeState, configuredPublishedMarkets) || changed;
     if (changed) {
         await persistNodeState();

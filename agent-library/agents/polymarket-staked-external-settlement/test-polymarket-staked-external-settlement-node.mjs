@@ -403,6 +403,179 @@ async function run() {
             commitmentSafe: TEST_COMMITMENT_SAFE,
         });
 
+        await resetNodeStateForTest({ config });
+        const fakeSettledStream = {
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+            ogModule: TEST_OG_MODULE,
+            user: TEST_USER,
+            marketId: 'market-1',
+            tradingWallet: TEST_TRADING_WALLET,
+        };
+        const fakeRecords = [];
+        const fakeMessagePublicationStore = {
+            async listRecords() {
+                return fakeRecords;
+            },
+        };
+        appendPublishedRecord({
+            message: {
+                chainId: TEST_CHAIN_ID,
+                requestId: 'fake-settled-trade-log',
+                commitmentAddresses: [TEST_COMMITMENT_SAFE, TEST_OG_MODULE],
+                agentAddress: TEST_AGENT.address,
+                kind: 'polymarketTradeLog',
+                payload: {
+                    stream: fakeSettledStream,
+                    sequence: 1,
+                    previousCid: null,
+                    trades: [
+                        {
+                            tradeId: 'fake-settled-trade-1',
+                            tradeEntryKind: 'initiated',
+                            executedAtMs: firstSeenAtMs - 5 * 60_000,
+                            principalContributionWei: '1000000',
+                        },
+                    ],
+                    summary: {
+                        finalSettlementValueWei: '700000',
+                        settledAtMs: firstSeenAtMs,
+                        settlementKind: 'resolved',
+                        settlementDepositTxHash: `0x${'a'.repeat(64)}`,
+                        settlementDepositConfirmedAtMs: firstSeenAtMs,
+                    },
+                },
+            },
+            validation: {
+                validatorId: 'polymarket_trade_log_timeliness',
+                status: 'accepted',
+                classifications: [
+                    {
+                        id: 'fake-settled-trade-1',
+                        classification: 'reimbursable',
+                        firstSeenAtMs,
+                    },
+                ],
+                summary: {
+                    stream: fakeSettledStream,
+                    sequence: 1,
+                    previousCid: null,
+                    settlement: {
+                        finalSettlementValueWei: '700000',
+                        settledAtMs: firstSeenAtMs,
+                        settlementKind: 'resolved',
+                        settlementDepositTxHash: `0x${'a'.repeat(64)}`,
+                        settlementDepositConfirmedAtMs: firstSeenAtMs,
+                    },
+                    loggingWindowMinutes: 15,
+                    evaluationBasis: 'receivedAtMs',
+                    previousPublishedCid: null,
+                    publishedAtMs: firstSeenAtMs,
+                    newTradeCount: 1,
+                    lateTradeCount: 0,
+                },
+            },
+            records: fakeRecords,
+            publishedAtMs: firstSeenAtMs,
+        });
+        toolCalls = await getNodeDeterministicToolCalls({
+            signals: [
+                {
+                    kind: 'proposal',
+                    proposalHash: `0x${'4'.repeat(64)}`,
+                    assertionId: `0x${'3'.repeat(64)}`,
+                    proposer: TEST_USER,
+                    transactions: [
+                        {
+                            to: TEST_USDC,
+                            value: 0n,
+                            operation: 0,
+                            data: encodeFunctionData({
+                                abi: erc20Abi,
+                                functionName: 'transfer',
+                                args: [TEST_USER, 1_000_000n],
+                            }),
+                        },
+                    ],
+                    explanation: 'User withdrawal while claimed settlement deposit is unverified.',
+                },
+            ],
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+            agentAddress: TEST_AGENT.address,
+            publicClient,
+            config,
+            messagePublicationStore: fakeMessagePublicationStore,
+            onchainPendingProposal: true,
+        });
+        assert.equal(toolCalls.length, 1);
+        assert.equal(toolCalls[0].name, 'dispute_assertion');
+        await resetNodeStateForTest({ config });
+        const retryDisputeRecords = [];
+        const retryDisputeMessagePublicationStore = {
+            async listRecords() {
+                return retryDisputeRecords;
+            },
+        };
+        appendPublishedRecord({
+            message: {
+                chainId: TEST_CHAIN_ID,
+                requestId: 'retry-dispute-trade-log',
+                commitmentAddresses: [TEST_COMMITMENT_SAFE, TEST_OG_MODULE],
+                agentAddress: TEST_AGENT.address,
+                kind: 'polymarketTradeLog',
+                payload: {
+                    stream: fakeSettledStream,
+                    sequence: 1,
+                    previousCid: null,
+                    trades: [
+                        {
+                            tradeId: 'retry-dispute-trade-1',
+                            tradeEntryKind: 'initiated',
+                            executedAtMs: firstSeenAtMs - 5 * 60_000,
+                            principalContributionWei: '1000000',
+                        },
+                    ],
+                    summary: {
+                        finalSettlementValueWei: null,
+                        settledAtMs: null,
+                        settlementKind: null,
+                        settlementDepositTxHash: null,
+                        settlementDepositConfirmedAtMs: null,
+                    },
+                },
+            },
+            validation: {
+                validatorId: 'polymarket_trade_log_timeliness',
+                status: 'accepted',
+                classifications: [
+                    {
+                        id: 'retry-dispute-trade-1',
+                        classification: 'reimbursable',
+                        firstSeenAtMs,
+                    },
+                ],
+                summary: {
+                    stream: fakeSettledStream,
+                    sequence: 1,
+                    previousCid: null,
+                    settlement: {
+                        finalSettlementValueWei: null,
+                        settledAtMs: null,
+                        settlementKind: null,
+                        settlementDepositTxHash: null,
+                        settlementDepositConfirmedAtMs: null,
+                    },
+                    loggingWindowMinutes: 15,
+                    evaluationBasis: 'receivedAtMs',
+                    previousPublishedCid: null,
+                    publishedAtMs: firstSeenAtMs,
+                    newTradeCount: 1,
+                    lateTradeCount: 0,
+                },
+            },
+            records: retryDisputeRecords,
+            publishedAtMs: firstSeenAtMs,
+        });
+
         const retryDisputeConfig = buildBaseConfig({
             agentConfig: {
                 polymarketStakedExternalSettlement: {
@@ -449,7 +622,7 @@ async function run() {
                 agentAddress: TEST_AGENT.address,
                 publicClient,
                 config: retryDisputeConfig,
-                messagePublicationStore,
+                messagePublicationStore: retryDisputeMessagePublicationStore,
                 onchainPendingProposal: true,
             });
             assert.equal(toolCalls.length, 1);
@@ -461,7 +634,7 @@ async function run() {
                 agentAddress: TEST_AGENT.address,
                 publicClient,
                 config: retryDisputeConfig,
-                messagePublicationStore,
+                messagePublicationStore: retryDisputeMessagePublicationStore,
                 onchainPendingProposal: true,
             });
             assert.equal(toolCalls.length, 1);
@@ -479,7 +652,7 @@ async function run() {
                 agentAddress: TEST_AGENT.address,
                 publicClient,
                 config: retryDisputeConfig,
-                messagePublicationStore,
+                messagePublicationStore: retryDisputeMessagePublicationStore,
                 onchainPendingProposal: true,
             });
             assert.equal(toolCalls.length, 1);
