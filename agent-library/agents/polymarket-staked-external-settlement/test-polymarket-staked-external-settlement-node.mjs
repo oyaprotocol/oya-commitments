@@ -567,6 +567,90 @@ async function run() {
         });
         assert.equal(toolCalls.length, 0);
 
+        const timeoutConfig = buildBaseConfig({
+            agentConfig: {
+                polymarketStakedExternalSettlement: {
+                    authorizedAgent: TEST_AGENT.address,
+                    userAddress: TEST_USER,
+                    tradingWallet: TEST_TRADING_WALLET,
+                    collateralToken: TEST_USDC,
+                    pendingTxTimeoutMs: 1,
+                    marketsById: {
+                        'market-1': {
+                            label: 'Test market',
+                        },
+                    },
+                },
+            },
+        });
+        const timeoutSubmissionHash = `0x${'1'.repeat(64)}`;
+        const timeoutBaseNow = Date.now();
+        const originalDateNow = Date.now;
+        const timeoutPublicClient = buildMockPublicClient();
+        const originalTimeoutGetReceipt =
+            timeoutPublicClient.getTransactionReceipt.bind(timeoutPublicClient);
+        timeoutPublicClient.getTransactionReceipt = async ({ hash }) => {
+            if (String(hash).toLowerCase() === timeoutSubmissionHash) {
+                throw new Error('receipt unavailable');
+            }
+            return originalTimeoutGetReceipt({ hash });
+        };
+        try {
+            Date.now = () => timeoutBaseNow;
+            await resetNodeStateForTest({ config: timeoutConfig });
+            toolCalls = await getNodeDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: timeoutConfig,
+                messagePublicationStore,
+                onchainPendingProposal: false,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'publish_signed_proposal');
+            await onNodeToolOutput({
+                callId: toolCalls[0].callId,
+                name: toolCalls[0].name,
+                parsedOutput: {
+                    status: 'published',
+                    mode: 'propose',
+                    submission: {
+                        status: 'submitted',
+                        transactionHash: timeoutSubmissionHash,
+                        ogProposalHash: null,
+                    },
+                },
+                config: timeoutConfig,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+            });
+            Date.now = () => timeoutBaseNow + 10;
+            toolCalls = await getNodeDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient: timeoutPublicClient,
+                config: timeoutConfig,
+                messagePublicationStore,
+                onchainPendingProposal: false,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'publish_signed_proposal');
+            nodeState = getNodeState();
+            assert.equal(nodeState.markets['market-1'].reimbursement.submissionTxHash, null);
+            assert.equal(nodeState.markets['market-1'].reimbursement.submittedAtMs, null);
+            assert.equal(
+                typeof nodeState.markets['market-1'].reimbursement.dispatchAtMs,
+                'number'
+            );
+            assert.match(
+                nodeState.markets['market-1'].reimbursement.lastError,
+                /could not be reconciled before timeout/i
+            );
+        } finally {
+            Date.now = originalDateNow;
+        }
+
         await resetNodeStateForTest({ config });
         records.length = 0;
         const unconfiguredTradeLogMessage = {

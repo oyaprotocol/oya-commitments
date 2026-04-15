@@ -376,6 +376,16 @@ function markMarketDirty(market) {
     market.revision = Number(market.revision ?? 0) + 1;
 }
 
+function settlementTermsChanged(currentSettlement, nextSettlement) {
+    return (
+        String(currentSettlement?.finalSettlementValueWei ?? '0') !==
+            String(nextSettlement?.finalSettlementValueWei ?? '0') ||
+        Number(currentSettlement?.settledAtMs ?? 0) !== Number(nextSettlement?.settledAtMs ?? 0) ||
+        String(currentSettlement?.settlementKind ?? '') !==
+            String(nextSettlement?.settlementKind ?? '')
+    );
+}
+
 function ingestCommand(state, command, { policy, config }) {
     if (!command) {
         return false;
@@ -413,6 +423,11 @@ function ingestCommand(state, command, { policy, config }) {
             requestId: command.requestId,
             depositError: null,
         };
+        if (settlementTermsChanged(market.settlement, nextSettlement)) {
+            nextSettlement.depositDispatchAtMs = null;
+            nextSettlement.depositTxHash = null;
+            nextSettlement.depositConfirmedAtMs = null;
+        }
         if (stringifyCanonicalJson(nextSettlement) !== stringifyCanonicalJson(market.settlement)) {
             market.settlement = nextSettlement;
             markMarketDirty(market);

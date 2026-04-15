@@ -536,11 +536,15 @@ function buildReimbursementProposalToolCall({ market, policy, config }) {
     };
 }
 
-async function refreshPendingNodeReimbursements(state, { publicClient, ogModule }) {
+async function refreshPendingNodeReimbursements(
+    state,
+    { publicClient, ogModule, pendingTxTimeoutMs }
+) {
     if (!publicClient || typeof publicClient.getTransactionReceipt !== 'function') {
         return false;
     }
     let changed = false;
+    const nowMs = Date.now();
     for (const marketState of Object.values(state.markets ?? {})) {
         if (marketState.reimbursement.proposalHash || marketState.reimbursement.reimbursedAtMs) {
             continue;
@@ -564,8 +568,25 @@ async function refreshPendingNodeReimbursements(state, { publicClient, ogModule 
                 marketState.reimbursement.proposalHash = proposalHash;
                 marketState.reimbursement.lastError = null;
                 changed = true;
+                continue;
             }
+            marketState.reimbursement.submissionTxHash = null;
+            marketState.reimbursement.submittedAtMs = null;
+            marketState.reimbursement.lastError =
+                'Reimbursement proposal transaction confirmed without creating an OG proposal.';
+            changed = true;
         } catch {
+            const submittedAtMs = Number(marketState.reimbursement.submittedAtMs ?? 0);
+            if (
+                submittedAtMs > 0 &&
+                nowMs - submittedAtMs > Number(pendingTxTimeoutMs ?? 0)
+            ) {
+                marketState.reimbursement.submissionTxHash = null;
+                marketState.reimbursement.submittedAtMs = null;
+                marketState.reimbursement.lastError =
+                    'Reimbursement proposal transaction could not be reconciled before timeout; retrying is allowed.';
+                changed = true;
+            }
             continue;
         }
     }
@@ -635,6 +656,7 @@ async function getNodeDeterministicToolCalls({
         (await refreshPendingNodeReimbursements(runtimeNodeState, {
             publicClient,
             ogModule: config.ogModule,
+            pendingTxTimeoutMs: policy.pendingTxTimeoutMs,
         })) || changed;
 
     const publishedMarkets = buildPublishedMarketViews(await messagePublicationStore.listRecords());

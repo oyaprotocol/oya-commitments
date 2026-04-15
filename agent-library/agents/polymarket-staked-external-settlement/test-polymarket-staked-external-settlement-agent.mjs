@@ -14,6 +14,7 @@ import {
     validatePublishedMessage,
 } from './agent.js';
 import {
+    computeOutstandingSettlementWei,
     POLYMARKET_REIMBURSEMENT_REQUEST_KIND,
     resolvePolicy,
 } from './trade-ledger.js';
@@ -409,6 +410,26 @@ async function run() {
             publicClient,
             config,
         });
+        for (let attempts = 0; attempts < 3 && toolCalls[0].name === 'publish_signed_message'; attempts += 1) {
+            const followUpPublication = await runPublishCall({
+                toolCall: toolCalls[0],
+                publicClient,
+                config,
+            });
+            await onToolOutput({
+                name: 'publish_signed_message',
+                parsedOutput: followUpPublication,
+                config,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+            });
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config,
+            });
+        }
         assert.equal(toolCalls[0].name, 'make_deposit');
         assert.equal(JSON.parse(toolCalls[0].arguments).amountWei, '700000');
         await onToolOutput({
@@ -483,6 +504,40 @@ async function run() {
         assert.equal(
             state.markets['market-1'].reimbursement.requestCid,
             reimbursementRequestPublication.cid
+        );
+        const updatedSettlementSignal = buildSignal({
+            requestId: 'settlement-reset-2',
+            command: 'polymarket_settlement',
+            receivedAtMs: firstSeenAtMs + 181_000,
+            text: 'Updated settlement for reset test',
+            args: {
+                marketId: 'market-1',
+                finalSettlementValueWei: '900000',
+                settledAtMs: firstSeenAtMs + 181_000,
+                settlementKind: 'resolved',
+            },
+        });
+        toolCalls = await getDeterministicToolCalls({
+            signals: [updatedSettlementSignal],
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+            agentAddress: TEST_AGENT.address,
+            publicClient,
+            config,
+        });
+        assert.equal(toolCalls[0].name, 'publish_signed_message');
+        const resetSettlementState = getModuleState();
+        assert.equal(
+            resetSettlementState.markets['market-1'].settlement.finalSettlementValueWei,
+            '900000'
+        );
+        assert.equal(resetSettlementState.markets['market-1'].settlement.depositTxHash, null);
+        assert.equal(
+            resetSettlementState.markets['market-1'].settlement.depositConfirmedAtMs,
+            null
+        );
+        assert.equal(
+            computeOutstandingSettlementWei(resetSettlementState.markets['market-1']),
+            '900000'
         );
 
         const scopeConfigA = buildBaseConfig({
