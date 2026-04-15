@@ -347,7 +347,11 @@ async function getDeterministicToolCalls({
     });
 
     let changed = clearStaleDispatches(runtimeState, policy.dispatchGraceMs);
-    changed = (await refreshPendingSettlementDeposits(runtimeState, { publicClient })) || changed;
+    changed =
+        (await refreshPendingSettlementDeposits(runtimeState, {
+            publicClient,
+            pendingTxTimeoutMs: policy.pendingTxTimeoutMs,
+        })) || changed;
     changed = ingestSignals(signals, { policy, config }) || changed;
 
     if (changed) {

@@ -124,6 +124,7 @@ function applyDepositToolOutput(state, parsedOutput) {
     market.settlement.depositDispatchAtMs = null;
 
     if (!isSuccessishToolStatus(parsedOutput)) {
+        market.settlement.depositSubmittedAtMs = null;
         market.settlement.depositError = parsedOutput?.message ?? 'Settlement deposit failed.';
         markMarketDirty(market);
         return true;
@@ -131,19 +132,22 @@ function applyDepositToolOutput(state, parsedOutput) {
 
     const transactionHash = normalizeHashOrNull(parsedOutput?.transactionHash);
     market.settlement.depositTxHash = transactionHash;
+    market.settlement.depositSubmittedAtMs = transactionHash ? Date.now() : null;
     market.settlement.depositError = null;
     if (String(parsedOutput?.status ?? '').trim().toLowerCase() === 'confirmed') {
+        market.settlement.depositSubmittedAtMs = null;
         market.settlement.depositConfirmedAtMs = Date.now();
     }
     markMarketDirty(market);
     return true;
 }
 
-async function refreshPendingSettlementDeposits(state, { publicClient }) {
+async function refreshPendingSettlementDeposits(state, { publicClient, pendingTxTimeoutMs }) {
     if (!publicClient || typeof publicClient.getTransactionReceipt !== 'function') {
         return false;
     }
     let changed = false;
+    const nowMs = Date.now();
     for (const market of Object.values(state.markets ?? {})) {
         const txHash = normalizeHashOrNull(market.settlement?.depositTxHash);
         if (!txHash || market.settlement.depositConfirmedAtMs) {
@@ -153,17 +157,32 @@ async function refreshPendingSettlementDeposits(state, { publicClient }) {
             const receipt = await publicClient.getTransactionReceipt({ hash: txHash });
             if (receipt?.status === 0n || receipt?.status === 0 || receipt?.status === 'reverted') {
                 market.settlement.depositTxHash = null;
+                market.settlement.depositSubmittedAtMs = null;
                 market.settlement.depositConfirmedAtMs = null;
                 market.settlement.depositError = 'Settlement deposit transaction reverted.';
                 markMarketDirty(market);
                 changed = true;
                 continue;
             }
+            market.settlement.depositSubmittedAtMs = null;
             market.settlement.depositConfirmedAtMs = Date.now();
             market.settlement.depositError = null;
             markMarketDirty(market);
             changed = true;
         } catch {
+            const submittedAtMs = Number(market.settlement.depositSubmittedAtMs ?? 0);
+            if (
+                submittedAtMs > 0 &&
+                nowMs - submittedAtMs > Number(pendingTxTimeoutMs ?? 0)
+            ) {
+                market.settlement.depositTxHash = null;
+                market.settlement.depositSubmittedAtMs = null;
+                market.settlement.depositConfirmedAtMs = null;
+                market.settlement.depositError =
+                    'Settlement deposit transaction could not be reconciled before timeout; retrying is allowed.';
+                markMarketDirty(market);
+                changed = true;
+            }
             continue;
         }
     }

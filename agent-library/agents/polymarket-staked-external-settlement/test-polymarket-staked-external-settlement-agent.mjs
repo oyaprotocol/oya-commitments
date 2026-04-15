@@ -617,6 +617,230 @@ async function run() {
             '900000'
         );
 
+        const timeoutConfig = buildBaseConfig({
+            agentConfig: {
+                polymarketStakedExternalSettlement: {
+                    authorizedAgent: TEST_AGENT.address,
+                    userAddress: TEST_USER,
+                    tradingWallet: TEST_TRADING_WALLET,
+                    collateralToken: TEST_USDC,
+                    pendingTxTimeoutMs: 1,
+                    marketsById: {
+                        'market-1': {
+                            label: 'Timeout retry market',
+                        },
+                    },
+                },
+            },
+        });
+        const timeoutSettlementSignal = buildSignal({
+            requestId: 'timeout-settlement-1',
+            command: 'polymarket_settlement',
+            receivedAtMs: firstSeenAtMs + 240_000,
+            text: 'Settlement for deposit timeout retry test',
+            args: {
+                marketId: 'market-1',
+                finalSettlementValueWei: '300000',
+                settledAtMs: firstSeenAtMs + 240_000,
+                settlementKind: 'resolved',
+            },
+        });
+        const timeoutTradeSignal = buildSignal({
+            requestId: 'timeout-trade-1',
+            command: 'polymarket_trade',
+            receivedAtMs: firstSeenAtMs + 239_000,
+            text: 'Trade for deposit timeout retry test',
+            args: {
+                marketId: 'market-1',
+                tradeId: 'timeout-trade-1',
+                tradeEntryKind: 'initiated',
+                executedAtMs: firstSeenAtMs + 238_000,
+                principalContributionWei: '300000',
+                collateralAmountWei: '300000',
+                side: 'BUY',
+                outcome: 'YES',
+            },
+        });
+        const timeoutSubmissionHash = `0x${'7'.repeat(64)}`;
+        const timeoutBaseNow = Date.now();
+        const originalDateNow = Date.now;
+        const timeoutPublicClient = {
+            async getTransactionReceipt({ hash }) {
+                if (String(hash).toLowerCase() === timeoutSubmissionHash) {
+                    throw new Error('receipt unavailable');
+                }
+                return publicClient.getTransactionReceipt({ hash });
+            },
+        };
+        try {
+            Date.now = () => timeoutBaseNow;
+            await resetModuleStateForTest({ config: timeoutConfig });
+            toolCalls = await getDeterministicToolCalls({
+                signals: [timeoutTradeSignal, timeoutSettlementSignal],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: timeoutConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'publish_signed_message');
+            const timeoutPublicationArgs = JSON.parse(toolCalls[0].arguments);
+            const timeoutPublication = {
+                status: 'published',
+                requestId: timeoutPublicationArgs.message.requestId,
+                cid: 'bafy-timeout-publication-1',
+                validation: {
+                    validatorId: 'polymarket_trade_log_timeliness',
+                    classifications: [
+                        {
+                            id: 'timeout-trade-1',
+                            classification: 'reimbursable',
+                            firstSeenAtMs: timeoutBaseNow,
+                        },
+                    ],
+                },
+            };
+            await onToolOutput({
+                name: 'publish_signed_message',
+                parsedOutput: timeoutPublication,
+                config: timeoutConfig,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+            });
+
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: timeoutConfig,
+            });
+            for (
+                let attempts = 0;
+                attempts < 10 && toolCalls[0].name === 'publish_signed_message';
+                attempts += 1
+            ) {
+                const followUpPublication = await runPublishCall({
+                    toolCall: toolCalls[0],
+                    publicClient,
+                    config: timeoutConfig,
+                });
+                await onToolOutput({
+                    name: 'publish_signed_message',
+                    parsedOutput: followUpPublication,
+                    config: timeoutConfig,
+                    commitmentSafe: TEST_COMMITMENT_SAFE,
+                });
+                toolCalls = await getDeterministicToolCalls({
+                    signals: [],
+                    commitmentSafe: TEST_COMMITMENT_SAFE,
+                    agentAddress: TEST_AGENT.address,
+                    publicClient,
+                    config: timeoutConfig,
+                });
+            }
+            assert.equal(toolCalls.length, 1);
+            assert.equal(
+                toolCalls[0].name,
+                'make_deposit',
+                'timeout path should reach initial make_deposit after draining follow-up publications'
+            );
+            await onToolOutput({
+                name: 'make_deposit',
+                parsedOutput: {
+                    status: 'submitted',
+                    transactionHash: timeoutSubmissionHash,
+                },
+                config: timeoutConfig,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+            });
+
+            Date.now = () => timeoutBaseNow + 10;
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient: timeoutPublicClient,
+                config: timeoutConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            const timeoutState = getModuleState();
+            assert.equal(timeoutState.markets['market-1'].settlement.depositTxHash, null);
+            assert.equal(
+                timeoutState.markets['market-1'].settlement.depositSubmittedAtMs,
+                null
+            );
+            assert.match(
+                timeoutState.markets['market-1'].settlement.depositError,
+                /could not be reconciled before timeout/i
+            );
+            assert.equal(toolCalls[0].name, 'publish_signed_message');
+            const timeoutRecoveryPublicationArgs = JSON.parse(toolCalls[0].arguments);
+            const timeoutRecoveryPublication = {
+                status: 'published',
+                requestId: timeoutRecoveryPublicationArgs.message.requestId,
+                cid: 'bafy-timeout-publication-2',
+                validation: {
+                    validatorId: 'polymarket_trade_log_timeliness',
+                    classifications: [
+                        {
+                            id: 'timeout-trade-1',
+                            classification: 'reimbursable',
+                            firstSeenAtMs: timeoutBaseNow,
+                        },
+                    ],
+                },
+            };
+            await onToolOutput({
+                name: 'publish_signed_message',
+                parsedOutput: timeoutRecoveryPublication,
+                config: timeoutConfig,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+            });
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient: timeoutPublicClient,
+                config: timeoutConfig,
+            });
+            for (
+                let attempts = 0;
+                attempts < 10 && toolCalls[0].name === 'publish_signed_message';
+                attempts += 1
+            ) {
+                const followUpPublication = await runPublishCall({
+                    toolCall: toolCalls[0],
+                    publicClient,
+                    config: timeoutConfig,
+                });
+                await onToolOutput({
+                    name: 'publish_signed_message',
+                    parsedOutput: followUpPublication,
+                    config: timeoutConfig,
+                    commitmentSafe: TEST_COMMITMENT_SAFE,
+                });
+                toolCalls = await getDeterministicToolCalls({
+                    signals: [],
+                    commitmentSafe: TEST_COMMITMENT_SAFE,
+                    agentAddress: TEST_AGENT.address,
+                    publicClient: timeoutPublicClient,
+                    config: timeoutConfig,
+                });
+            }
+            assert.equal(toolCalls.length, 1);
+            assert.equal(
+                toolCalls[0].name,
+                'make_deposit',
+                'timeout path should reach retry make_deposit after clearing the stuck tx and draining follow-up publications'
+            );
+            assert.equal(
+                typeof getModuleState().markets['market-1'].settlement.depositDispatchAtMs,
+                'number'
+            );
+        } finally {
+            Date.now = originalDateNow;
+        }
+
         const scopeConfigA = buildBaseConfig({
             agentConfig: {
                 polymarketStakedExternalSettlement: scopeBaseModuleConfig,

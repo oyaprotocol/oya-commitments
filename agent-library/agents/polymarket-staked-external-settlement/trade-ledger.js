@@ -233,6 +233,7 @@ function createEmptyMarketState({ policy, config, marketId }) {
             requestId: null,
             depositDispatchAtMs: null,
             depositTxHash: null,
+            depositSubmittedAtMs: null,
             depositConfirmedAtMs: null,
             depositError: null,
         },
@@ -427,6 +428,7 @@ function ingestCommand(state, command, { policy, config }) {
         if (settlementTermsChanged(market.settlement, nextSettlement)) {
             nextSettlement.depositDispatchAtMs = null;
             nextSettlement.depositTxHash = null;
+            nextSettlement.depositSubmittedAtMs = null;
             nextSettlement.depositConfirmedAtMs = null;
         }
         if (stringifyCanonicalJson(nextSettlement) !== stringifyCanonicalJson(market.settlement)) {
