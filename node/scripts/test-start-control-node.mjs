@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+    assertExplicitChainIdMatchesRuntime,
     buildActiveProposalSignals,
     resolveToolExecutionOgContext,
 } from './start-control-node.mjs';
@@ -105,6 +106,12 @@ async function run() {
         ['0xassertionA', '0xassertionB']
     );
     assert.equal(activeSignals[0].kind, 'proposal');
+
+    assert.doesNotThrow(() => assertExplicitChainIdMatchesRuntime(137, 137));
+    assert.throws(
+        () => assertExplicitChainIdMatchesRuntime(1, 137),
+        /did not match explicit --chain-id=1/i
+    );
 
     console.log('[test] start-control-node OG context resolution OK');
 }

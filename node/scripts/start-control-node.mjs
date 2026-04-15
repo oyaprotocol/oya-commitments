@@ -63,6 +63,17 @@ function buildActiveProposalSignals(proposalsByHash) {
     return Array.from(proposalsByHash?.values?.() ?? []).map(buildProposalSignal);
 }
 
+function assertExplicitChainIdMatchesRuntime(explicitChainId, runtimeChainId) {
+    if (explicitChainId === undefined || explicitChainId === null) {
+        return;
+    }
+    if (Number(runtimeChainId) !== Number(explicitChainId)) {
+        throw new Error(
+            `Resolved control-node chainId ${runtimeChainId} did not match explicit --chain-id=${explicitChainId}.`
+        );
+    }
+}
+
 async function resolveToolExecutionOgContext({
     toolCalls,
     publicClient,
@@ -85,12 +96,12 @@ async function main({ argv = process.argv } = {}) {
     }
 
     const explicitChainIdRaw = getArgValue('--chain-id=', argv);
-    if (explicitChainIdRaw !== null) {
-        parseInteger(explicitChainIdRaw, 'chainId');
-    }
+    const explicitChainId =
+        explicitChainIdRaw === null ? undefined : parseInteger(explicitChainIdRaw, 'chainId');
 
     const { agentRef, runtimeConfig, stateFile: messagePublicationStateFile } =
         await resolveMessagePublishServerConfig({ argv });
+    assertExplicitChainIdMatchesRuntime(explicitChainId, runtimeConfig.chainId);
     if (!runtimeConfig.messagePublishApiEnabled) {
         throw new Error(
             `Agent "${agentRef}" does not enable messagePublishApi. Enable messagePublishApi.enabled in the active config stack.`
@@ -261,4 +272,9 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     });
 }
 
-export { buildActiveProposalSignals, main, resolveToolExecutionOgContext };
+export {
+    assertExplicitChainIdMatchesRuntime,
+    buildActiveProposalSignals,
+    main,
+    resolveToolExecutionOgContext,
+};
