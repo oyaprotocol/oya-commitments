@@ -1,17 +1,19 @@
 import { pathToFileURL } from 'node:url';
-import { createValidatedReadWriteRuntime } from '../../agent/src/lib/chain-runtime.js';
-import { createMessagePublicationStore } from '../../agent/src/lib/message-publication-store.js';
-import { loadOgContext } from '../../agent/src/lib/og.js';
-import { pollProposalChanges } from '../../agent/src/lib/polling.js';
-import { executeToolCalls } from '../../agent/src/lib/tools.js';
+import {
+    createValidatedReadWriteRuntime,
+    createMessagePublicationStore,
+    executeToolCalls,
+    loadOgContext,
+    pollProposalChanges,
+} from './lib/control-node-runtime.mjs';
 import {
     getArgValue,
     hasFlag,
     loadScriptEnv,
-} from '../../agent/scripts/lib/cli-runtime.mjs';
+} from './lib/cli-runtime.mjs';
 import {
     resolveMessagePublishServerConfig,
-} from '../../agent/scripts/lib/message-publish-runtime.mjs';
+} from './lib/message-publish-runtime.mjs';
 
 loadScriptEnv();
 
