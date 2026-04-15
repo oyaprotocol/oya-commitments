@@ -658,6 +658,7 @@ function applyNodeProposalLifecycleEvents(state, { executedProposals = [], delet
 async function getNodeDeterministicToolCalls({
     signals,
     commitmentSafe,
+    agentAddress,
     publicClient,
     config,
     messagePublicationStore,
@@ -666,6 +667,11 @@ async function getNodeDeterministicToolCalls({
     const policy = resolvePolicy(config);
     if (!policy.ready) {
         return [];
+    }
+    if (String(agentAddress).toLowerCase() !== String(policy.authorizedAgent).toLowerCase()) {
+        throw new Error(
+            `polymarket-staked-external-settlement control node may only be served by authorized agent ${policy.authorizedAgent}.`
+        );
     }
     if (!messagePublicationStore || typeof messagePublicationStore.listRecords !== 'function') {
         throw new Error(

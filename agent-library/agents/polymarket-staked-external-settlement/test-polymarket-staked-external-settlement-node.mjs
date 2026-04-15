@@ -284,6 +284,20 @@ async function run() {
         await resetModuleStateForTest({ config });
         await resetNodeStateForTest({ config });
 
+        await assert.rejects(
+            async () =>
+                getNodeDeterministicToolCalls({
+                    signals: [],
+                    commitmentSafe: TEST_COMMITMENT_SAFE,
+                    agentAddress: '0x9999999999999999999999999999999999999999',
+                    publicClient,
+                    config,
+                    messagePublicationStore,
+                    onchainPendingProposal: false,
+                }),
+            /control node may only be served by authorized agent/i
+        );
+
         await publishNextAgentMessage({
             signals: [
                 buildSignal({
