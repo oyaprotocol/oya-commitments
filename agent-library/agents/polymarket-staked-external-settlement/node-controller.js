@@ -825,24 +825,31 @@ async function onNodeToolOutput({ callId, name, parsedOutput, config, commitment
         const marketId = extractNodeReimbursementProposalMarketId(callId);
         const nodeMarket = runtimeNodeState.markets?.[marketId];
         if (nodeMarket) {
-            nodeMarket.reimbursement.dispatchAtMs = null;
             const publicationStatus = String(parsedOutput?.status ?? '').trim().toLowerCase();
             const submission = parsedOutput?.submission;
             const submissionStatus = String(submission?.status ?? '').trim().toLowerCase();
+            const normalizedTransactionHash = normalizeHashOrNull(submission?.transactionHash);
+            const normalizedProposalHash = normalizeHashOrNull(submission?.ogProposalHash);
             if (
                 submissionStatus === 'submitted' ||
                 submissionStatus === 'resolved' ||
                 submissionStatus === 'uncertain'
             ) {
-                nodeMarket.reimbursement.submissionTxHash =
-                    normalizeHashOrNull(submission?.transactionHash) ??
-                    nodeMarket.reimbursement.submissionTxHash;
-                nodeMarket.reimbursement.proposalHash =
-                    normalizeHashOrNull(submission?.ogProposalHash) ??
-                    nodeMarket.reimbursement.proposalHash;
-                nodeMarket.reimbursement.submittedAtMs = Date.now();
-                nodeMarket.reimbursement.lastError = null;
+                if (normalizedTransactionHash || normalizedProposalHash) {
+                    nodeMarket.reimbursement.dispatchAtMs = null;
+                    nodeMarket.reimbursement.submissionTxHash =
+                        normalizedTransactionHash ?? nodeMarket.reimbursement.submissionTxHash;
+                    nodeMarket.reimbursement.proposalHash =
+                        normalizedProposalHash ?? nodeMarket.reimbursement.proposalHash;
+                    nodeMarket.reimbursement.submittedAtMs = Date.now();
+                    nodeMarket.reimbursement.lastError = null;
+                } else {
+                    nodeMarket.reimbursement.dispatchAtMs = Date.now();
+                    nodeMarket.reimbursement.lastError =
+                        'Reimbursement proposal publication did not return a transaction or proposal hash; retrying is deferred until the dispatch grace window expires.';
+                }
             } else {
+                nodeMarket.reimbursement.dispatchAtMs = null;
                 nodeMarket.reimbursement.lastError =
                     parsedOutput?.message ??
                     (publicationStatus

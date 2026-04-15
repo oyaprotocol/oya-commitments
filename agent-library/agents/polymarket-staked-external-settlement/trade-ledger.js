@@ -549,7 +549,7 @@ function isMarketBlockingWithdrawals(market) {
 }
 
 function buildPublicationRequestId(market) {
-    return `${MODULE_NAME}:${market.stream.marketId}:seq:${Number(market.lastPublishedSequence) + 1}`;
+    return `${MODULE_NAME}:${market.stream.marketId}:seq:${Number(market.lastPublishedSequence) + 1}:rev:${Number(market.revision)}`;
 }
 
 function buildReimbursementRequestId(market) {

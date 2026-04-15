@@ -617,6 +617,91 @@ async function run() {
             '900000'
         );
 
+        const staleDispatchConfig = buildBaseConfig({
+            agentConfig: {
+                polymarketStakedExternalSettlement: {
+                    authorizedAgent: TEST_AGENT.address,
+                    userAddress: TEST_USER,
+                    tradingWallet: TEST_TRADING_WALLET,
+                    collateralToken: TEST_USDC,
+                    dispatchGraceMs: 1,
+                    marketsById: {
+                        'market-1': {
+                            label: 'Stale dispatch market',
+                        },
+                    },
+                },
+            },
+        });
+        const staleTradeSignalA = buildSignal({
+            requestId: 'stale-trade-1',
+            command: 'polymarket_trade',
+            receivedAtMs: firstSeenAtMs + 210_000,
+            text: 'Initial stale dispatch trade',
+            args: {
+                marketId: 'market-1',
+                tradeId: 'stale-trade-1',
+                tradeEntryKind: 'initiated',
+                executedAtMs: firstSeenAtMs + 209_000,
+                principalContributionWei: '100',
+                collateralAmountWei: '100',
+                side: 'BUY',
+                outcome: 'YES',
+            },
+        });
+        const staleTradeSignalB = buildSignal({
+            requestId: 'stale-trade-2',
+            command: 'polymarket_trade',
+            receivedAtMs: firstSeenAtMs + 220_000,
+            text: 'Replacement stale dispatch trade',
+            args: {
+                marketId: 'market-1',
+                tradeId: 'stale-trade-2',
+                tradeEntryKind: 'initiated',
+                executedAtMs: firstSeenAtMs + 219_000,
+                principalContributionWei: '200',
+                collateralAmountWei: '200',
+                side: 'BUY',
+                outcome: 'NO',
+            },
+        });
+        const staleBaseNow = Date.now();
+        const originalStaleDateNow = Date.now;
+        try {
+            Date.now = () => staleBaseNow;
+            await resetModuleStateForTest({ config: staleDispatchConfig });
+            toolCalls = await getDeterministicToolCalls({
+                signals: [staleTradeSignalA],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: staleDispatchConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'publish_signed_message');
+            const firstStalePublishArgs = JSON.parse(toolCalls[0].arguments);
+            assert.match(firstStalePublishArgs.message.requestId, /:seq:1:rev:1$/);
+            Date.now = () => staleBaseNow + 10;
+            toolCalls = await getDeterministicToolCalls({
+                signals: [staleTradeSignalB],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: staleDispatchConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'publish_signed_message');
+            const secondStalePublishArgs = JSON.parse(toolCalls[0].arguments);
+            assert.equal(secondStalePublishArgs.message.payload.sequence, 1);
+            assert.notEqual(
+                secondStalePublishArgs.message.requestId,
+                firstStalePublishArgs.message.requestId
+            );
+            assert.match(secondStalePublishArgs.message.requestId, /:seq:1:rev:2$/);
+        } finally {
+            Date.now = originalStaleDateNow;
+        }
+
         const timeoutConfig = buildBaseConfig({
             agentConfig: {
                 polymarketStakedExternalSettlement: {
