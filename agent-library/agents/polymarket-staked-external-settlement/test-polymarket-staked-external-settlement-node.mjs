@@ -651,6 +651,127 @@ async function run() {
             Date.now = originalDateNow;
         }
 
+        const sharedDepositConfig = buildBaseConfig({
+            agentConfig: {
+                polymarketStakedExternalSettlement: {
+                    authorizedAgent: TEST_AGENT.address,
+                    userAddress: TEST_USER,
+                    tradingWallet: TEST_TRADING_WALLET,
+                    collateralToken: TEST_USDC,
+                    marketsById: {
+                        'market-1': {
+                            label: 'Shared deposit market one',
+                        },
+                        'market-2': {
+                            label: 'Shared deposit market two',
+                        },
+                    },
+                },
+            },
+        });
+        await resetNodeStateForTest({ config: sharedDepositConfig });
+        records.length = 0;
+        for (const marketId of ['market-1', 'market-2']) {
+            const tradeLogMessage = {
+                chainId: TEST_CHAIN_ID,
+                requestId: `${marketId}-shared-deposit-trade-log`,
+                commitmentAddresses: [TEST_COMMITMENT_SAFE, TEST_OG_MODULE],
+                agentAddress: TEST_AGENT.address,
+                kind: 'polymarketTradeLog',
+                payload: {
+                    stream: {
+                        commitmentSafe: TEST_COMMITMENT_SAFE,
+                        ogModule: TEST_OG_MODULE,
+                        user: TEST_USER,
+                        marketId,
+                        tradingWallet: TEST_TRADING_WALLET,
+                    },
+                    sequence: 1,
+                    previousCid: null,
+                    trades: [
+                        {
+                            tradeId: `${marketId}-trade-1`,
+                            tradeEntryKind: 'initiated',
+                            executedAtMs: firstSeenAtMs - 5 * 60_000,
+                            principalContributionWei: '500000',
+                        },
+                    ],
+                    summary: {
+                        finalSettlementValueWei: '400000',
+                        settledAtMs: firstSeenAtMs,
+                        settlementKind: 'resolved',
+                        settlementDepositTxHash: `0x${'d'.repeat(64)}`,
+                        settlementDepositConfirmedAtMs: firstSeenAtMs,
+                    },
+                },
+            };
+            const tradeLogCid = appendPublishedRecord({
+                message: tradeLogMessage,
+                validation: {
+                    validatorId: 'polymarket_trade_log_timeliness',
+                    status: 'accepted',
+                    classifications: [
+                        {
+                            id: `${marketId}-trade-1`,
+                            classification: 'reimbursable',
+                            firstSeenAtMs,
+                        },
+                    ],
+                    summary: {
+                        stream: tradeLogMessage.payload.stream,
+                        sequence: 1,
+                        previousCid: null,
+                        settlement: tradeLogMessage.payload.summary,
+                        loggingWindowMinutes: 15,
+                        evaluationBasis: 'receivedAtMs',
+                        previousPublishedCid: null,
+                        publishedAtMs: firstSeenAtMs,
+                        newTradeCount: 1,
+                        lateTradeCount: 0,
+                    },
+                },
+                records,
+                publishedAtMs: firstSeenAtMs,
+            });
+            appendPublishedRecord({
+                message: {
+                    chainId: TEST_CHAIN_ID,
+                    requestId: `${marketId}-shared-deposit-reimbursement-request`,
+                    commitmentAddresses: [TEST_COMMITMENT_SAFE, TEST_OG_MODULE],
+                    agentAddress: TEST_AGENT.address,
+                    kind: 'polymarketReimbursementRequest',
+                    payload: {
+                        stream: tradeLogMessage.payload.stream,
+                        snapshotCid: tradeLogCid,
+                    },
+                },
+                validation: {
+                    validatorId: 'polymarket_reimbursement_request',
+                    status: 'accepted',
+                    summary: {
+                        stream: tradeLogMessage.payload.stream,
+                        snapshotCid: tradeLogCid,
+                        previousPublishedCid: tradeLogCid,
+                    },
+                },
+                records,
+                publishedAtMs: firstSeenAtMs + 1_000,
+            });
+        }
+        toolCalls = await getNodeDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+            agentAddress: TEST_AGENT.address,
+            publicClient,
+            config: sharedDepositConfig,
+            messagePublicationStore,
+            onchainPendingProposal: false,
+        });
+        assert.equal(toolCalls.length, 0);
+        nodeState = getNodeState();
+        assert.equal(nodeState.markets['market-1'].reimbursement.dispatchAtMs, null);
+        assert.equal(nodeState.markets['market-2'].reimbursement.dispatchAtMs, null);
+
         await resetNodeStateForTest({ config });
         records.length = 0;
         const unconfiguredTradeLogMessage = {

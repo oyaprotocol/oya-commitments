@@ -97,6 +97,7 @@ function applyPublicationToolOutput(state, parsedOutput) {
     }
     reimbursementRequestMarket.reimbursement.requestDispatchAtMs = null;
     if (!isSuccessishToolStatus(parsedOutput)) {
+        reimbursementRequestMarket.reimbursement.pendingRevision = null;
         reimbursementRequestMarket.reimbursement.lastError =
             parsedOutput?.message ?? 'Reimbursement request publication failed.';
         return true;
@@ -105,8 +106,11 @@ function applyPublicationToolOutput(state, parsedOutput) {
         parsedOutput?.cid ?? reimbursementRequestMarket.reimbursement.requestCid;
     reimbursementRequestMarket.reimbursement.requestedAtMs = Date.now();
     reimbursementRequestMarket.reimbursement.requestedRevision = Number(
-        reimbursementRequestMarket.revision ?? reimbursementRequestMarket.reimbursement.requestedRevision
+        reimbursementRequestMarket.reimbursement.pendingRevision ??
+            reimbursementRequestMarket.reimbursement.requestedRevision ??
+            reimbursementRequestMarket.revision
     );
+    reimbursementRequestMarket.reimbursement.pendingRevision = null;
     reimbursementRequestMarket.reimbursement.pendingMessage = null;
     reimbursementRequestMarket.reimbursement.lastError = null;
     return true;

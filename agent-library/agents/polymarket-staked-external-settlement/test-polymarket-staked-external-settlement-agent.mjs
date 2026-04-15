@@ -479,6 +479,83 @@ async function run() {
             reimbursementRequestArgs.message.payload.snapshotCid,
             postDepositPublication.cid
         );
+        const delayedReimbursementRequestPublication = await runPublishCall({
+            toolCall: toolCalls[0],
+            publicClient,
+            config,
+        });
+        let delayedSuccessState = getModuleState();
+        const dispatchedReimbursementRevision =
+            delayedSuccessState.markets['market-1'].reimbursement.pendingRevision;
+        assert.equal(
+            dispatchedReimbursementRevision,
+            delayedSuccessState.markets['market-1'].revision
+        );
+        const settlementMetadataUpdateSignal = buildSignal({
+            requestId: 'settlement-note-2',
+            command: 'polymarket_settlement',
+            receivedAtMs: firstSeenAtMs + 180_000,
+            text: 'Settlement note update after reimbursement dispatch',
+            args: {
+                marketId: 'market-1',
+                finalSettlementValueWei: '700000',
+                settledAtMs: firstSeenAtMs + 120_000,
+                settlementKind: 'resolved',
+            },
+        });
+        toolCalls = await getDeterministicToolCalls({
+            signals: [settlementMetadataUpdateSignal],
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+            agentAddress: TEST_AGENT.address,
+            publicClient,
+            config,
+        });
+        assert.equal(toolCalls[0].name, 'publish_signed_message');
+        const revisionBumpPublication = await runPublishCall({
+            toolCall: toolCalls[0],
+            publicClient,
+            config,
+        });
+        await onToolOutput({
+            name: 'publish_signed_message',
+            parsedOutput: revisionBumpPublication,
+            config,
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+        });
+        await onToolOutput({
+            name: 'publish_signed_message',
+            parsedOutput: delayedReimbursementRequestPublication,
+            config,
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+        });
+        delayedSuccessState = getModuleState();
+        assert.equal(
+            delayedSuccessState.markets['market-1'].reimbursement.requestedRevision,
+            dispatchedReimbursementRevision
+        );
+        assert.equal(delayedSuccessState.markets['market-1'].reimbursement.pendingRevision, null);
+        assert.ok(
+            delayedSuccessState.markets['market-1'].revision >
+                delayedSuccessState.markets['market-1'].reimbursement.requestedRevision
+        );
+        toolCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+            agentAddress: TEST_AGENT.address,
+            publicClient,
+            config,
+        });
+        assert.equal(toolCalls[0].name, 'publish_signed_message');
+        const refreshedReimbursementArgs = JSON.parse(toolCalls[0].arguments);
+        assert.equal(
+            refreshedReimbursementArgs.message.kind,
+            POLYMARKET_REIMBURSEMENT_REQUEST_KIND
+        );
+        assert.equal(
+            refreshedReimbursementArgs.message.payload.snapshotCid,
+            revisionBumpPublication.cid
+        );
+        assert.match(refreshedReimbursementArgs.message.requestId, /reimbursement:5$/);
         const reimbursementRequestPublication = await runPublishCall({
             toolCall: toolCalls[0],
             publicClient,

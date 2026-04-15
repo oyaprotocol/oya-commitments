@@ -306,6 +306,7 @@ function findOrCreatePendingReimbursementRequest({ policy, config, agentAddress 
             config,
             agentAddress,
         });
+        market.reimbursement.pendingRevision = Number(market.revision);
         market.reimbursement.requestDispatchAtMs = Date.now();
         return {
             changed: true,

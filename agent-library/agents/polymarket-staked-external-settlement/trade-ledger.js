@@ -241,6 +241,7 @@ function createEmptyMarketState({ policy, config, marketId }) {
             requestId: null,
             requestCid: null,
             requestedAtMs: null,
+            pendingRevision: null,
             requestedRevision: null,
             pendingMessage: null,
             lastError: null,

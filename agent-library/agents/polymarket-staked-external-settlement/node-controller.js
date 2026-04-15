@@ -360,12 +360,14 @@ async function verifySettlementDeposit({
     market,
     policy,
     commitmentSafe,
+    sharedRequiredByDepositTxHash,
+    settlementTransferCache,
 }) {
-    const requiredAmount = BigInt(market.settlement.finalSettlementValueWei ?? '0');
+    const marketRequiredAmount = BigInt(market.settlement.finalSettlementValueWei ?? '0');
     if (!market.settlement.settledAtMs) {
         return false;
     }
-    if (requiredAmount <= 0n) {
+    if (marketRequiredAmount <= 0n) {
         return true;
     }
 
@@ -373,13 +375,21 @@ async function verifySettlementDeposit({
     if (!txHash || !publicClient || typeof publicClient.getTransactionReceipt !== 'function') {
         return false;
     }
+    const requiredAmount =
+        sharedRequiredByDepositTxHash?.get(txHash) ?? marketRequiredAmount;
+    if (settlementTransferCache?.has(txHash)) {
+        const cachedTransferred = settlementTransferCache.get(txHash);
+        return typeof cachedTransferred === 'bigint' && cachedTransferred >= requiredAmount;
+    }
 
     try {
         const receipt = await publicClient.getTransactionReceipt({ hash: txHash });
         if (receipt?.status === 0n || receipt?.status === 0 || receipt?.status === 'reverted') {
+            settlementTransferCache?.set(txHash, null);
             return false;
         }
         if (policy.collateralToken === ZERO_ADDRESS) {
+            settlementTransferCache?.set(txHash, null);
             return false;
         }
 
@@ -413,10 +423,34 @@ async function verifySettlementDeposit({
                 continue;
             }
         }
+        settlementTransferCache?.set(txHash, transferred);
         return transferred >= requiredAmount;
     } catch {
+        settlementTransferCache?.set(txHash, null);
         return false;
     }
+}
+
+function buildSharedSettlementDepositRequirements(publishedMarkets) {
+    const sharedRequiredByDepositTxHash = new Map();
+    for (const market of Array.isArray(publishedMarkets) ? publishedMarkets : []) {
+        if (!market?.settlement?.settledAtMs) {
+            continue;
+        }
+        const txHash = normalizeHashOrNull(market?.settlement?.depositTxHash);
+        if (!txHash) {
+            continue;
+        }
+        const requiredAmount = BigInt(String(market?.settlement?.finalSettlementValueWei ?? '0'));
+        if (requiredAmount <= 0n) {
+            continue;
+        }
+        sharedRequiredByDepositTxHash.set(
+            txHash,
+            (sharedRequiredByDepositTxHash.get(txHash) ?? 0n) + requiredAmount
+        );
+    }
+    return sharedRequiredByDepositTxHash;
 }
 
 function buildDisputeToolCall(assertionId, blockingMarketIds) {
@@ -663,6 +697,9 @@ async function getNodeDeterministicToolCalls({
     const configuredPublishedMarkets = publishedMarkets.filter((market) =>
         isConfiguredPublishedMarket(market, policy, config)
     );
+    const sharedRequiredByDepositTxHash =
+        buildSharedSettlementDepositRequirements(configuredPublishedMarkets);
+    const settlementTransferCache = new Map();
     changed = syncNodeMarketLifecycle(runtimeNodeState, configuredPublishedMarkets) || changed;
     if (changed) {
         await persistNodeState();
@@ -742,6 +779,8 @@ async function getNodeDeterministicToolCalls({
             market,
             policy,
             commitmentSafe,
+            sharedRequiredByDepositTxHash,
+            settlementTransferCache,
         });
         if (!depositReady) {
             continue;
