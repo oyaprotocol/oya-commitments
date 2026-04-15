@@ -59,6 +59,10 @@ function buildProposalSignal(proposal) {
     };
 }
 
+function buildActiveProposalSignals(proposalsByHash) {
+    return Array.from(proposalsByHash?.values?.() ?? []).map(buildProposalSignal);
+}
+
 async function resolveToolExecutionOgContext({
     toolCalls,
     publicClient,
@@ -195,7 +199,7 @@ async function main({ argv = process.argv } = {}) {
             }
 
             const toolCalls = await agentModule.getNodeDeterministicToolCalls({
-                signals: newProposals.map(buildProposalSignal),
+                signals: buildActiveProposalSignals(proposalsByHash),
                 commitmentSafe: runtimeConfig.commitmentSafe,
                 agentAddress: account.address,
                 publicClient,
@@ -257,4 +261,4 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     });
 }
 
-export { main, resolveToolExecutionOgContext };
+export { buildActiveProposalSignals, main, resolveToolExecutionOgContext };

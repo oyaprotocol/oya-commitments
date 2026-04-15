@@ -720,6 +720,8 @@ async function getNodeDeterministicToolCalls({
     };
 
     if (config?.disputeEnabled && runtimeNodeState.pendingDispute?.assertionId) {
+        runtimeNodeState.pendingDispute.dispatchAtMs = Date.now();
+        await persistNodeState();
         return [
             buildDisputeToolCall(
                 runtimeNodeState.pendingDispute.assertionId,

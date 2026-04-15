@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { resolveToolExecutionOgContext } from './start-control-node.mjs';
+import {
+    buildActiveProposalSignals,
+    resolveToolExecutionOgContext,
+} from './start-control-node.mjs';
 
 const TEST_OG_MODULE = '0x1111111111111111111111111111111111111111';
 const TEST_COLLATERAL = '0x2222222222222222222222222222222222222222';
@@ -67,6 +70,41 @@ async function run() {
     });
     assert.equal(cachedContext, loadedContext);
     assert.equal(readCalls.length, cachedReadCount);
+
+    const activeSignals = buildActiveProposalSignals(
+        new Map([
+            [
+                '0xproposalA',
+                {
+                    proposalHash: '0xproposalA',
+                    assertionId: '0xassertionA',
+                    proposer: '0xaaaa',
+                    challengeWindowEnds: 123,
+                    transactions: [{ to: '0x1' }],
+                    rules: 'rules A',
+                    explanation: 'proposal A',
+                },
+            ],
+            [
+                '0xproposalB',
+                {
+                    proposalHash: '0xproposalB',
+                    assertionId: '0xassertionB',
+                    proposer: '0xbbbb',
+                    challengeWindowEnds: 456,
+                    transactions: [{ to: '0x2' }],
+                    rules: 'rules B',
+                    explanation: 'proposal B',
+                },
+            ],
+        ])
+    );
+    assert.equal(activeSignals.length, 2);
+    assert.deepEqual(
+        activeSignals.map((signal) => signal.assertionId),
+        ['0xassertionA', '0xassertionB']
+    );
+    assert.equal(activeSignals[0].kind, 'proposal');
 
     console.log('[test] start-control-node OG context resolution OK');
 }

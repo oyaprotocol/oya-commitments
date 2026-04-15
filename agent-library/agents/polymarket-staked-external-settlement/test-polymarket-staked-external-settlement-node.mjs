@@ -403,6 +403,96 @@ async function run() {
             commitmentSafe: TEST_COMMITMENT_SAFE,
         });
 
+        const retryDisputeConfig = buildBaseConfig({
+            agentConfig: {
+                polymarketStakedExternalSettlement: {
+                    authorizedAgent: TEST_AGENT.address,
+                    userAddress: TEST_USER,
+                    tradingWallet: TEST_TRADING_WALLET,
+                    collateralToken: TEST_USDC,
+                    dispatchGraceMs: 100,
+                    marketsById: {
+                        'market-1': {
+                            label: 'Retry dispute market',
+                        },
+                    },
+                },
+            },
+        });
+        const retryDisputeSignal = {
+            kind: 'proposal',
+            proposalHash: `0x${'6'.repeat(64)}`,
+            assertionId: `0x${'5'.repeat(64)}`,
+            proposer: TEST_USER,
+            transactions: [
+                {
+                    to: TEST_USDC,
+                    value: 0n,
+                    operation: 0,
+                    data: encodeFunctionData({
+                        abi: erc20Abi,
+                        functionName: 'transfer',
+                        args: [TEST_USER, 1_000_000n],
+                    }),
+                },
+            ],
+            explanation: 'Retry dispute timing test.',
+        };
+        const retryDisputeBaseNow = Date.now();
+        const originalRetryDisputeDateNow = Date.now;
+        try {
+            Date.now = () => retryDisputeBaseNow;
+            await resetNodeStateForTest({ config: retryDisputeConfig });
+            toolCalls = await getNodeDeterministicToolCalls({
+                signals: [retryDisputeSignal],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: retryDisputeConfig,
+                messagePublicationStore,
+                onchainPendingProposal: true,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'dispute_assertion');
+            Date.now = () => retryDisputeBaseNow + 50;
+            toolCalls = await getNodeDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: retryDisputeConfig,
+                messagePublicationStore,
+                onchainPendingProposal: true,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'dispute_assertion');
+            let retryDisputeState = getNodeState();
+            assert.equal(
+                retryDisputeState.pendingDispute.assertionId,
+                retryDisputeSignal.assertionId
+            );
+            assert.equal(retryDisputeState.pendingDispute.dispatchAtMs, retryDisputeBaseNow + 50);
+            Date.now = () => retryDisputeBaseNow + 120;
+            toolCalls = await getNodeDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: retryDisputeConfig,
+                messagePublicationStore,
+                onchainPendingProposal: true,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'dispute_assertion');
+            retryDisputeState = getNodeState();
+            assert.equal(
+                retryDisputeState.pendingDispute.assertionId,
+                retryDisputeSignal.assertionId
+            );
+        } finally {
+            Date.now = originalRetryDisputeDateNow;
+        }
+
         await resetNodeStateForTest({ config });
 
         await publishNextAgentMessage({
