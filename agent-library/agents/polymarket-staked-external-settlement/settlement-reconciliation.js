@@ -20,6 +20,65 @@ function findMarketByPendingPublication(state, requestId) {
     );
 }
 
+function buildStreamKey(stream) {
+    if (!stream || typeof stream !== 'object') {
+        return null;
+    }
+    const marketId = typeof stream.marketId === 'string' ? stream.marketId.trim() : '';
+    if (!marketId) {
+        return null;
+    }
+    return [
+        String(stream.commitmentSafe ?? '').trim().toLowerCase(),
+        String(stream.ogModule ?? '').trim().toLowerCase(),
+        String(stream.user ?? '').trim().toLowerCase(),
+        marketId,
+        String(stream.tradingWallet ?? '').trim().toLowerCase(),
+    ].join('|');
+}
+
+function findMarketByPublishedTradeLogMessage(state, parsedOutput) {
+    const message = parsedOutput?.message;
+    if (message?.kind !== 'polymarketTradeLog') {
+        return null;
+    }
+    const publishedStreamKey = buildStreamKey(message?.payload?.stream);
+    if (!publishedStreamKey) {
+        return null;
+    }
+    return Object.values(state.markets ?? {}).find(
+        (market) => buildStreamKey(market?.stream) === publishedStreamKey
+    );
+}
+
+function applyTradeLogPublicationSuccess(market, parsedOutput, pending = null) {
+    const sequence = Number(parsedOutput?.message?.payload?.sequence ?? pending?.sequence ?? 0);
+    if (!Number.isInteger(sequence) || sequence < 1) {
+        return false;
+    }
+    const revision = Number(parsedOutput?.message?.payload?.revision ?? pending?.revision ?? 0);
+    market.lastPublishedCid = parsedOutput?.cid ?? market.lastPublishedCid;
+    market.lastPublishedSequence = Math.max(Number(market.lastPublishedSequence ?? 0), sequence);
+    if (Number.isInteger(revision) && revision >= 0) {
+        market.publishedRevision = Math.max(Number(market.publishedRevision ?? 0), revision);
+    }
+    market.latestValidation = parsedOutput?.validation ?? null;
+    mergeTradeClassifications(
+        market,
+        parsedOutput?.validation?.classifications,
+        parsedOutput?.cid ?? null
+    );
+    const pendingSequence = Number(market.pendingPublication?.sequence ?? 0);
+    if (
+        market.pendingPublication &&
+        Number.isInteger(pendingSequence) &&
+        pendingSequence <= sequence
+    ) {
+        market.pendingPublication = null;
+    }
+    return true;
+}
+
 function findMarketByPendingReimbursementRequest(state, requestId) {
     return Object.values(state.markets ?? {}).find(
         (market) => market.reimbursement?.requestId === requestId
@@ -77,18 +136,14 @@ function applyPublicationToolOutput(state, parsedOutput) {
             return true;
         }
 
-        const pending = market.pendingPublication;
-        market.lastPublishedCid = parsedOutput?.cid ?? market.lastPublishedCid;
-        market.lastPublishedSequence = Number(pending.sequence ?? market.lastPublishedSequence);
-        market.publishedRevision = Number(pending.revision ?? market.publishedRevision);
-        market.latestValidation = parsedOutput?.validation ?? null;
-        mergeTradeClassifications(
-            market,
-            parsedOutput?.validation?.classifications,
-            parsedOutput?.cid ?? null
-        );
-        market.pendingPublication = null;
-        return true;
+        return applyTradeLogPublicationSuccess(market, parsedOutput, market.pendingPublication);
+    }
+
+    if (isSuccessishToolStatus(parsedOutput)) {
+        const lateTradeLogMarket = findMarketByPublishedTradeLogMessage(state, parsedOutput);
+        if (lateTradeLogMarket) {
+            return applyTradeLogPublicationSuccess(lateTradeLogMarket, parsedOutput);
+        }
     }
 
     const reimbursementRequestMarket = findMarketByPendingReimbursementRequest(state, requestId.trim());

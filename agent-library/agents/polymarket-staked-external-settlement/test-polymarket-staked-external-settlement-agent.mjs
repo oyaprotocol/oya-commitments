@@ -621,6 +621,7 @@ async function run() {
         );
 
         const staleDispatchConfig = buildBaseConfig({
+            messagePublishApiPort: 9892,
             agentConfig: {
                 polymarketStakedExternalSettlement: {
                     authorizedAgent: TEST_AGENT.address,
@@ -629,7 +630,7 @@ async function run() {
                     collateralToken: TEST_USDC,
                     dispatchGraceMs: 1,
                     marketsById: {
-                        'market-1': {
+                        'stale-market-1': {
                             label: 'Stale dispatch market',
                         },
                     },
@@ -642,7 +643,7 @@ async function run() {
             receivedAtMs: firstSeenAtMs + 210_000,
             text: 'Initial stale dispatch trade',
             args: {
-                marketId: 'market-1',
+                marketId: 'stale-market-1',
                 tradeId: 'stale-trade-1',
                 tradeEntryKind: 'initiated',
                 executedAtMs: firstSeenAtMs + 209_000,
@@ -658,7 +659,7 @@ async function run() {
             receivedAtMs: firstSeenAtMs + 220_000,
             text: 'Replacement stale dispatch trade',
             args: {
-                marketId: 'market-1',
+                marketId: 'stale-market-1',
                 tradeId: 'stale-trade-2',
                 tradeEntryKind: 'initiated',
                 executedAtMs: firstSeenAtMs + 219_000,
@@ -668,8 +669,9 @@ async function run() {
                 outcome: 'NO',
             },
         });
-        const staleBaseNow = Date.now();
+        const staleBaseNow = firstSeenAtMs + 230_000;
         const originalStaleDateNow = Date.now;
+        const staleMockNode = createMockPublicationFetch(staleDispatchConfig);
         try {
             Date.now = () => staleBaseNow;
             await resetModuleStateForTest({ config: staleDispatchConfig });
@@ -682,6 +684,7 @@ async function run() {
             });
             assert.equal(toolCalls.length, 1);
             assert.equal(toolCalls[0].name, 'publish_signed_message');
+            const firstStaleToolCall = toolCalls[0];
             const firstStalePublishArgs = JSON.parse(toolCalls[0].arguments);
             assert.match(firstStalePublishArgs.message.requestId, /:seq:1:rev:1$/);
             Date.now = () => staleBaseNow + 10;
@@ -701,7 +704,50 @@ async function run() {
                 firstStalePublishArgs.message.requestId
             );
             assert.match(secondStalePublishArgs.message.requestId, /:seq:1:rev:2$/);
+
+            const lateFirstPublication = await runPublishCall({
+                toolCall: firstStaleToolCall,
+                publicClient,
+                config: staleDispatchConfig,
+            });
+            assert.equal(lateFirstPublication.status, 'published');
+            await onToolOutput({
+                name: 'publish_signed_message',
+                parsedOutput: lateFirstPublication,
+                config: staleDispatchConfig,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+            });
+
+            const reconciledState = getModuleState();
+            assert.equal(reconciledState.markets['stale-market-1'].lastPublishedSequence, 1);
+            assert.equal(reconciledState.markets['stale-market-1'].publishedRevision, 1);
+            assert.equal(reconciledState.markets['stale-market-1'].pendingPublication, null);
+
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: staleDispatchConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'publish_signed_message');
+            const recoveredPublishArgs = JSON.parse(toolCalls[0].arguments);
+            assert.equal(recoveredPublishArgs.message.payload.sequence, 2);
+            assert.match(recoveredPublishArgs.message.requestId, /:seq:2:rev:2$/);
+
+            const recoveredPublication = await runPublishCall({
+                toolCall: toolCalls[0],
+                publicClient,
+                config: staleDispatchConfig,
+            });
+            assert.equal(
+                recoveredPublication.status,
+                'published',
+                'late reconciliation should unblock the next sequence instead of looping on sequence 1'
+            );
         } finally {
+            staleMockNode.stop();
             Date.now = originalStaleDateNow;
         }
 
