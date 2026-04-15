@@ -76,6 +76,7 @@ function createEmptyNodeMarketState() {
             requestCid: null,
             requestSnapshotCid: null,
             requestedAtMs: null,
+            proposalRetryGeneration: 0,
             dispatchAtMs: null,
             submissionTxHash: null,
             proposalHash: null,
@@ -330,10 +331,14 @@ function syncNodeMarketLifecycle(state, publishedMarkets) {
             !nodeMarket.reimbursement.submittedAtMs &&
             !nodeMarket.reimbursement.reimbursedAtMs
         ) {
+            const previousRequestCid = nodeMarket.reimbursement.requestCid;
             nodeMarket.reimbursement.requestId = latestRequest.requestId;
             nodeMarket.reimbursement.requestCid = latestRequest.requestCid;
             nodeMarket.reimbursement.requestSnapshotCid = latestRequest.snapshotCid;
             nodeMarket.reimbursement.requestedAtMs = latestRequest.requestedAtMs;
+            if (latestRequest.requestCid !== previousRequestCid) {
+                nodeMarket.reimbursement.proposalRetryGeneration = 0;
+            }
             nodeMarket.reimbursement.lastError = null;
             changed = true;
         } else if (latestRequest && !nodeMarket.reimbursement.requestId) {
@@ -341,6 +346,7 @@ function syncNodeMarketLifecycle(state, publishedMarkets) {
             nodeMarket.reimbursement.requestCid = latestRequest.requestCid;
             nodeMarket.reimbursement.requestSnapshotCid = latestRequest.snapshotCid;
             nodeMarket.reimbursement.requestedAtMs = latestRequest.requestedAtMs;
+            nodeMarket.reimbursement.proposalRetryGeneration = 0;
             changed = true;
         }
     }
@@ -515,7 +521,11 @@ function buildReimbursementProposalPublicationRequestId(market) {
         market.reimbursementRequest?.requestCid ??
         market.lastPublishedCid ??
         market.stream.marketId;
-    return `${MODULE_NAME}:${market.stream.marketId}:proposal:${requestCid}`;
+    const proposalRetryGeneration = Number(market.nodeReimbursement?.proposalRetryGeneration ?? 0);
+    const baseRequestId = `${MODULE_NAME}:${market.stream.marketId}:proposal:${requestCid}`;
+    return proposalRetryGeneration > 0
+        ? `${baseRequestId}:retry:${proposalRetryGeneration}`
+        : baseRequestId;
 }
 
 function assertProposalPublicationReady(config) {
@@ -672,6 +682,8 @@ function applyNodeProposalLifecycleEvents(state, { executedProposals = [], delet
             marketState.reimbursement.proposalHash = null;
             marketState.reimbursement.submittedAtMs = null;
             marketState.reimbursement.reimbursedAtMs = null;
+            marketState.reimbursement.proposalRetryGeneration =
+                Number(marketState.reimbursement.proposalRetryGeneration ?? 0) + 1;
             marketState.reimbursement.lastError = null;
             changed = true;
         }
@@ -830,7 +842,16 @@ async function getNodeDeterministicToolCalls({
         nodeMarket.reimbursement.requestedAtMs = market.reimbursementRequest.requestedAtMs;
         nodeMarket.reimbursement.dispatchAtMs = Date.now();
         await persistNodeState();
-        return [buildReimbursementProposalToolCall({ market, policy, config })];
+        return [
+            buildReimbursementProposalToolCall({
+                market: {
+                    ...market,
+                    nodeReimbursement: cloneJson(nodeMarket.reimbursement),
+                },
+                policy,
+                config,
+            }),
+        ];
     }
 
     return [];

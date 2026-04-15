@@ -785,9 +785,55 @@ async function run() {
             nodeState.markets['market-1'].reimbursement.proposalHash,
             `0x${'f'.repeat(64)}`
         );
+        assert.equal(nodeState.markets['market-1'].reimbursement.proposalRetryGeneration, 0);
 
         onNodeProposalEvents({
-            executedProposals: [`0x${'f'.repeat(64)}`],
+            executedProposals: [],
+            deletedProposals: [`0x${'f'.repeat(64)}`],
+        });
+        toolCalls = await getNodeDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+            agentAddress: TEST_AGENT.address,
+            publicClient,
+            config,
+            messagePublicationStore,
+            onchainPendingProposal: false,
+        });
+        nodeState = getNodeState();
+        assert.equal(nodeState.markets['market-1'].reimbursement.proposalHash, null);
+        assert.equal(nodeState.markets['market-1'].reimbursement.proposalRetryGeneration, 1);
+        assert.equal(toolCalls.length, 1);
+        assert.equal(toolCalls[0].name, 'publish_signed_proposal');
+        const retryReimbursementArgs = JSON.parse(toolCalls[0].arguments);
+        assert.equal(
+            retryReimbursementArgs.proposal.requestId,
+            `polymarket-staked-external-settlement:market-1:proposal:${reimbursementRequestPublication.cid}:retry:1`
+        );
+
+        await onNodeToolOutput({
+            callId: toolCalls[0].callId,
+            name: toolCalls[0].name,
+            parsedOutput: {
+                status: 'published',
+                mode: 'propose',
+                submission: {
+                    status: 'resolved',
+                    transactionHash: `0x${'1'.repeat(64)}`,
+                    ogProposalHash: `0x${'2'.repeat(64)}`,
+                },
+            },
+            config,
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+        });
+        nodeState = getNodeState();
+        assert.equal(
+            nodeState.markets['market-1'].reimbursement.proposalHash,
+            `0x${'2'.repeat(64)}`
+        );
+
+        onNodeProposalEvents({
+            executedProposals: [`0x${'2'.repeat(64)}`],
             deletedProposals: [],
         });
         toolCalls = await getNodeDeterministicToolCalls({
