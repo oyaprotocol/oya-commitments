@@ -14,10 +14,13 @@ import {
     validatePublishedMessage,
 } from './agent.js';
 import {
+    buildStateScope,
+    createEmptyMarketState,
     computeOutstandingSettlementWei,
     POLYMARKET_REIMBURSEMENT_REQUEST_KIND,
     resolvePolicy,
 } from './trade-ledger.js';
+import { createEmptyState, writePersistedState } from './state-store.js';
 
 const TEST_AGENT = privateKeyToAccount(`0x${'1'.repeat(64)}`);
 const TEST_CHAIN_ID = 137;
@@ -924,6 +927,99 @@ async function run() {
             );
         } finally {
             Date.now = originalDateNow;
+        }
+
+        const staleDepositDispatchConfig = buildBaseConfig({
+            agentConfig: {
+                polymarketStakedExternalSettlement: {
+                    authorizedAgent: TEST_AGENT.address,
+                    userAddress: TEST_USER,
+                    tradingWallet: TEST_TRADING_WALLET,
+                    collateralToken: TEST_USDC,
+                    stateFile: path.join(scopeTmpDir, 'stale-deposit-dispatch-state.json'),
+                    dispatchGraceMs: 1,
+                    marketsById: {
+                        'market-1': {
+                            label: 'Stale deposit dispatch market',
+                        },
+                    },
+                },
+            },
+        });
+        const staleDepositBaseNow = Date.now();
+        const originalStaleDepositDateNow = Date.now;
+        try {
+            Date.now = () => staleDepositBaseNow;
+            await resetModuleStateForTest({ config });
+            const staleDepositPolicy = resolvePolicy(staleDepositDispatchConfig);
+            const staleDepositScope = buildStateScope({
+                config: staleDepositDispatchConfig,
+                policy: staleDepositPolicy,
+                chainId: staleDepositDispatchConfig.chainId,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                ogModule: TEST_OG_MODULE,
+            });
+            const persistedStaleDepositState = createEmptyState(staleDepositScope);
+            const staleMarketState = createEmptyMarketState({
+                policy: staleDepositPolicy,
+                config: staleDepositDispatchConfig,
+                marketId: 'market-1',
+            });
+            staleMarketState.revision = 1;
+            staleMarketState.publishedRevision = 1;
+            staleMarketState.lastPublishedSequence = 1;
+            staleMarketState.trades = [
+                {
+                    tradeId: 'stale-deposit-trade-1',
+                    tradeEntryKind: 'initiated',
+                    executedAtMs: firstSeenAtMs + 259_000,
+                    principalContributionWei: '400000',
+                    collateralAmountWei: '400000',
+                    side: 'BUY',
+                    outcome: 'YES',
+                },
+            ];
+            staleMarketState.tradeClassifications['stale-deposit-trade-1'] = {
+                classification: 'reimbursable',
+                firstSeenAtMs: firstSeenAtMs + 260_000,
+                reason: null,
+                cid: 'bafy-stale-deposit-fixture',
+            };
+            staleMarketState.settlement.finalSettlementValueWei = '400000';
+            staleMarketState.settlement.settledAtMs = firstSeenAtMs + 261_000;
+            staleMarketState.settlement.settlementKind = 'resolved';
+            staleMarketState.settlement.depositDispatchAtMs = staleDepositBaseNow;
+            persistedStaleDepositState.markets['market-1'] = staleMarketState;
+            await writePersistedState(
+                staleDepositDispatchConfig.agentConfig.polymarketStakedExternalSettlement.stateFile,
+                persistedStaleDepositState
+            );
+
+            Date.now = () => staleDepositBaseNow + 10;
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: staleDepositDispatchConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'make_deposit');
+            const staleDepositState = getModuleState();
+            assert.equal(
+                staleDepositState.markets['market-1'].settlement.depositTxHash,
+                null
+            );
+            assert.equal(
+                staleDepositState.markets['market-1'].settlement.depositDispatchAtMs,
+                staleDepositBaseNow + 10
+            );
+            assert.match(
+                staleDepositState.markets['market-1'].settlement.depositError,
+                /dispatch expired before tool output arrived/i
+            );
+        } finally {
+            Date.now = originalStaleDepositDateNow;
         }
 
         const scopeConfigA = buildBaseConfig({

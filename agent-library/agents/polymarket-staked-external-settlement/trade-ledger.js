@@ -671,6 +671,20 @@ function clearStaleDispatches(state, dispatchGraceMs, nowMs = Date.now()) {
             market.reimbursement.requestDispatchAtMs = null;
             changed = true;
         }
+        const settlementDepositDispatchAge = Number.isInteger(
+            market.settlement?.depositDispatchAtMs
+        )
+            ? nowMs - market.settlement.depositDispatchAtMs
+            : null;
+        if (
+            settlementDepositDispatchAge !== null &&
+            settlementDepositDispatchAge > dispatchGraceMs
+        ) {
+            market.settlement.depositDispatchAtMs = null;
+            market.settlement.depositError =
+                'Settlement deposit dispatch expired before tool output arrived; retrying is allowed.';
+            changed = true;
+        }
     }
     return changed;
 }
