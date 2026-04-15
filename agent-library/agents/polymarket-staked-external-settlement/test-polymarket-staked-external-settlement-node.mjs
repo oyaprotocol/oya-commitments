@@ -937,6 +937,73 @@ async function run() {
             Date.now = originalHashlessDateNow;
         }
 
+        const hashlessResolvedBaseNow = Date.now();
+        const originalHashlessResolvedDateNow = Date.now;
+        try {
+            Date.now = () => hashlessResolvedBaseNow;
+            await resetNodeStateForTest({ config: hashlessUncertainConfig });
+            toolCalls = await getNodeDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: hashlessUncertainConfig,
+                messagePublicationStore,
+                onchainPendingProposal: false,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'publish_signed_proposal');
+            await onNodeToolOutput({
+                callId: toolCalls[0].callId,
+                name: toolCalls[0].name,
+                parsedOutput: {
+                    status: 'published',
+                    mode: 'propose',
+                    submission: {
+                        status: 'resolved',
+                        skipped: true,
+                        skipReason: 'duplicate_onchain_proposal',
+                        transactionHash: null,
+                        ogProposalHash: null,
+                    },
+                },
+                config: hashlessUncertainConfig,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+            });
+            nodeState = getNodeState();
+            assert.equal(nodeState.markets['market-1'].reimbursement.dispatchAtMs, null);
+            assert.equal(nodeState.markets['market-1'].reimbursement.submissionTxHash, null);
+            assert.equal(nodeState.markets['market-1'].reimbursement.proposalHash, null);
+            assert.equal(
+                typeof nodeState.markets['market-1'].reimbursement.submittedAtMs,
+                'number'
+            );
+            assert.equal(nodeState.markets['market-1'].reimbursement.lastError, null);
+            toolCalls = await getNodeDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: hashlessUncertainConfig,
+                messagePublicationStore,
+                onchainPendingProposal: false,
+            });
+            assert.equal(toolCalls.length, 0);
+            Date.now = () => hashlessResolvedBaseNow + 10;
+            toolCalls = await getNodeDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: hashlessUncertainConfig,
+                messagePublicationStore,
+                onchainPendingProposal: false,
+            });
+            assert.equal(toolCalls.length, 0);
+        } finally {
+            Date.now = originalHashlessResolvedDateNow;
+        }
+
         const timeoutConfig = buildBaseConfig({
             agentConfig: {
                 polymarketStakedExternalSettlement: {

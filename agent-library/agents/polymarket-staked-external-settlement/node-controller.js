@@ -325,6 +325,24 @@ function syncNodeMarketLifecycle(state, publishedMarkets) {
         const latestRequest = market.reimbursementRequest;
         if (
             latestRequest &&
+            latestRequest.requestCid !== nodeMarket.reimbursement.requestCid &&
+            !nodeMarket.reimbursement.submissionTxHash &&
+            !nodeMarket.reimbursement.proposalHash &&
+            !nodeMarket.reimbursement.reimbursedAtMs
+        ) {
+            nodeMarket.reimbursement.requestId = latestRequest.requestId;
+            nodeMarket.reimbursement.requestCid = latestRequest.requestCid;
+            nodeMarket.reimbursement.requestSnapshotCid = latestRequest.snapshotCid;
+            nodeMarket.reimbursement.requestedAtMs = latestRequest.requestedAtMs;
+            nodeMarket.reimbursement.dispatchAtMs = null;
+            nodeMarket.reimbursement.submittedAtMs = null;
+            nodeMarket.reimbursement.proposalRetryGeneration = 0;
+            nodeMarket.reimbursement.lastError = null;
+            changed = true;
+            continue;
+        }
+        if (
+            latestRequest &&
             latestRequest.requestId !== nodeMarket.reimbursement.requestId &&
             !nodeMarket.reimbursement.submissionTxHash &&
             !nodeMarket.reimbursement.proposalHash &&
@@ -888,7 +906,16 @@ async function onNodeToolOutput({ callId, name, parsedOutput, config, commitment
             const submissionStatus = String(submission?.status ?? '').trim().toLowerCase();
             const normalizedTransactionHash = normalizeHashOrNull(submission?.transactionHash);
             const normalizedProposalHash = normalizeHashOrNull(submission?.ogProposalHash);
-            if (
+            const resolvedSkippedWithoutHashes =
+                submissionStatus === 'resolved' &&
+                Boolean(submission?.skipped) &&
+                !normalizedTransactionHash &&
+                !normalizedProposalHash;
+            if (resolvedSkippedWithoutHashes) {
+                nodeMarket.reimbursement.dispatchAtMs = null;
+                nodeMarket.reimbursement.submittedAtMs = Date.now();
+                nodeMarket.reimbursement.lastError = null;
+            } else if (
                 submissionStatus === 'submitted' ||
                 submissionStatus === 'resolved' ||
                 submissionStatus === 'uncertain'
