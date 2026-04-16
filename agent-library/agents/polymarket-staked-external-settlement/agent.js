@@ -366,14 +366,18 @@ async function getDeterministicToolCalls({
     if (pendingPublication) {
         if (pendingPublication.changed) {
             await persistState();
+            return [pendingPublication.toolCall];
         }
-        return [pendingPublication.toolCall];
     }
 
     const settlementDepositMarket = selectSettlementDepositCandidate();
     if (settlementDepositMarket) {
         await persistState();
         return [buildSettlementDepositToolCall(settlementDepositMarket, policy)];
+    }
+
+    if (pendingPublication) {
+        return [pendingPublication.toolCall];
     }
 
     const reimbursementRequest = findOrCreatePendingReimbursementRequest({

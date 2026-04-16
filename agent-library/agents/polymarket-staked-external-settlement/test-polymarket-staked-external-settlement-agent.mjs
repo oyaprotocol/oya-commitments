@@ -14,6 +14,7 @@ import {
     validatePublishedMessage,
 } from './agent.js';
 import {
+    buildTradeLogMessage,
     buildStateScope,
     createEmptyMarketState,
     computeOutstandingSettlementWei,
@@ -1048,6 +1049,109 @@ async function run() {
             );
         } finally {
             Date.now = originalStaleDepositDateNow;
+        }
+
+        const blockedPublicationConfig = buildBaseConfig({
+            agentConfig: {
+                polymarketStakedExternalSettlement: {
+                    authorizedAgent: TEST_AGENT.address,
+                    userAddress: TEST_USER,
+                    tradingWallet: TEST_TRADING_WALLET,
+                    collateralToken: TEST_USDC,
+                    stateFile: path.join(scopeTmpDir, 'blocked-publication-state.json'),
+                    marketsById: {
+                        'market-1': {
+                            label: 'Blocked publication market',
+                        },
+                    },
+                },
+            },
+        });
+        const blockedPublicationNow = firstSeenAtMs + 280_000;
+        const originalBlockedPublicationDateNow = Date.now;
+        try {
+            Date.now = () => blockedPublicationNow;
+            await resetModuleStateForTest({ config });
+            const blockedPublicationPolicy = resolvePolicy(blockedPublicationConfig);
+            const blockedPublicationScope = buildStateScope({
+                config: blockedPublicationConfig,
+                policy: blockedPublicationPolicy,
+                chainId: blockedPublicationConfig.chainId,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                ogModule: TEST_OG_MODULE,
+            });
+            const persistedBlockedPublicationState = createEmptyState(blockedPublicationScope);
+            const blockedMarketState = createEmptyMarketState({
+                policy: blockedPublicationPolicy,
+                config: blockedPublicationConfig,
+                marketId: 'market-1',
+            });
+            blockedMarketState.revision = 1;
+            blockedMarketState.publishedRevision = 0;
+            blockedMarketState.lastPublishedSequence = 0;
+            blockedMarketState.trades = [
+                {
+                    tradeId: 'blocked-publication-trade-1',
+                    tradeEntryKind: 'initiated',
+                    executedAtMs: firstSeenAtMs + 270_000,
+                    principalContributionWei: '250000',
+                    collateralAmountWei: '250000',
+                    side: 'BUY',
+                    outcome: 'YES',
+                },
+            ];
+            blockedMarketState.tradeClassifications['blocked-publication-trade-1'] = {
+                classification: 'reimbursable',
+                firstSeenAtMs: blockedPublicationNow,
+                reason: null,
+                cid: 'bafy-blocked-publication-fixture',
+            };
+            blockedMarketState.settlement.finalSettlementValueWei = '250000';
+            blockedMarketState.settlement.settledAtMs = firstSeenAtMs + 275_000;
+            blockedMarketState.settlement.settlementKind = 'resolved';
+            const blockedPublicationMessage = buildTradeLogMessage({
+                market: blockedMarketState,
+                config: blockedPublicationConfig,
+                agentAddress: TEST_AGENT.address,
+                revision: blockedMarketState.revision,
+            });
+            blockedMarketState.pendingPublication = {
+                requestId: blockedPublicationMessage.requestId,
+                sequence: blockedPublicationMessage.payload.sequence,
+                revision: blockedMarketState.revision,
+                dispatchAtMs: blockedPublicationNow - 1,
+                message: blockedPublicationMessage,
+            };
+            persistedBlockedPublicationState.markets['market-1'] = blockedMarketState;
+            await writePersistedState(
+                blockedPublicationConfig.agentConfig.polymarketStakedExternalSettlement.stateFile,
+                persistedBlockedPublicationState
+            );
+
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: blockedPublicationConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(
+                toolCalls[0].name,
+                'make_deposit',
+                'retrying a blocked publication should not starve settlement repayment'
+            );
+            const blockedPublicationState = getModuleState();
+            assert.equal(
+                blockedPublicationState.markets['market-1'].pendingPublication.requestId,
+                blockedPublicationMessage.requestId
+            );
+            assert.equal(
+                typeof blockedPublicationState.markets['market-1'].settlement.depositDispatchAtMs,
+                'number'
+            );
+        } finally {
+            Date.now = originalBlockedPublicationDateNow;
         }
 
         const scopeConfigA = buildBaseConfig({
