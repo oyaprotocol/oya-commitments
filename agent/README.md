@@ -268,6 +268,8 @@ Compatibility note: `agent/scripts/start-message-publish-node.mjs` still works a
 
 Agent modules may optionally export `validatePublishedMessage(args)` to attach domain-specific validation output to published artifacts. The shared node remains generic: the hook can reject structurally invalid messages by throwing, or it can return a validation object that the node signs into the publication attestation.
 
+Modules may also export node-side control hooks such as `getNodeDeterministicToolCalls(args)`, `onNodeToolOutput(args)`, and `onNodeProposalEvents(args)`. Those hooks are served by the standalone control loop at `node/scripts/start-control-node.mjs`, which lets a module move commitment-enforcement actions such as disputes or reimbursement proposals out of the trading agent loop and into the node.
+
 Current request shape:
 
 ```json
@@ -646,6 +648,11 @@ Keep `IPFS_HEADERS_JSON` in env when it contains auth headers, for example `{"Au
 Tool:
 
 - `ipfs_publish`: Publish either raw string content or structured JSON content to IPFS. For tool calls, JSON content is passed as JSON text and canonicalized before upload. It pins the returned CID by default and returns `cid`, `uri`, `pinned`, `publishResult`, and `pinResult`.
+- `publish_signed_message`: Sign a structured agent-authored message with the runtime signer and submit it to the standalone message publication node configured by `messagePublishApi.host` / `messagePublishApi.port`. It returns the node response, including `status`, `cid`, `uri`, and any module validator output such as `validation.classifications`.
+
+Standalone-node bridge:
+
+- `executeToolCalls()` also supports `publish_signed_proposal` for deterministic module/control-hook code that needs to sign a proposal-publication request with the runtime signer and submit it to the standalone proposal-publication node configured by `proposalPublishApi.host` / `proposalPublishApi.port`. This bridge is currently used by the `polymarket-staked-external-settlement` control node rather than by the main LLM tool schema.
 
 ### ERC1155 Tracking (Optional)
 

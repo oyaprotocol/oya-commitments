@@ -10,6 +10,7 @@ import {
     buildSignedProposalPayload,
     verifySignedProposalArtifact,
 } from '../src/lib/signed-proposal.js';
+import { executeToolCalls } from '../src/lib/tools.js';
 
 const TEST_CHAIN_ID = 11155111;
 const TEST_SAFE = '0x2222222222222222222222222222222222222222';
@@ -327,6 +328,49 @@ async function main() {
         assert.equal(verification.requestId, 'publish-ok');
         assert.equal(verification.signer, account.address.toLowerCase());
         assert.equal(verification.publishedAtMs >= verification.receivedAtMs, true);
+
+        const proposalToolOutputs = await executeToolCalls({
+            toolCalls: [
+                {
+                    callId: 'publish-signed-proposal-tool',
+                    name: 'publish_signed_proposal',
+                    arguments: {
+                        proposal: {
+                            chainId: TEST_CHAIN_ID,
+                            requestId: 'publish-via-tool',
+                            commitmentSafe: TEST_SAFE,
+                            ogModule: TEST_OG_MODULE,
+                            transactions: TEST_TRANSACTIONS,
+                            explanation: 'Publish a signed proposal via executeToolCalls.',
+                            metadata: {
+                                module: 'proposal-publication-api-test',
+                                source: 'executeToolCalls',
+                            },
+                        },
+                        baseUrl,
+                        bearerToken: 'k_test_ops_secret',
+                        timeoutMs: 10_000,
+                    },
+                },
+            ],
+            publicClient: {},
+            walletClient: {
+                async signMessage({ account: signingAccount, message }) {
+                    return signingAccount.signMessage({ message });
+                },
+            },
+            account,
+            config: buildServerConfig(account.address),
+            ogContext: null,
+        });
+        assert.equal(proposalToolOutputs.length, 1);
+        const proposalToolOutput = JSON.parse(proposalToolOutputs[0].output);
+        assert.equal(proposalToolOutput.status, 'published');
+        assert.equal(proposalToolOutput.requestId, 'publish-via-tool');
+        assert.equal(proposalToolOutput.proposal.requestId, 'publish-via-tool');
+        assert.ok(proposalToolOutput.cid);
+        assert.equal(addAttemptsByRequestId.get('publish-via-tool'), 1);
+        assert.equal(pinAttemptsByRequestId.get('publish-via-tool'), 1);
 
         const duplicate = await postPublication(baseUrl, acceptedRequest.body);
         assert.equal(duplicate.status, 200);

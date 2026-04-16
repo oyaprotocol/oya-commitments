@@ -16,6 +16,8 @@ import {
     resolveClobExchangeAddress,
     signClobOrder,
 } from './polymarket.js';
+import { publishSignedMessage } from './message-publication-client.js';
+import { publishSignedProposal } from './proposal-publication-client.js';
 import { parseToolArguments } from './utils.js';
 import { annotateToolExecutionError, hasCommittedToolSideEffects } from './tool-execution-error.js';
 
@@ -46,6 +48,30 @@ function normalizeIpfsPublishJsonArgument(jsonArg) {
         return jsonArg;
     }
     throw new Error('ipfs_publish json must be a JSON object or JSON object string.');
+}
+
+function normalizeOptionalPlainObject(value, fieldName) {
+    if (value === undefined || value === null) {
+        return undefined;
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error(`${fieldName} must be a JSON object.`);
+    }
+    return value;
+}
+
+function parseRetryableHttpStatus(status) {
+    const normalized = Number(status);
+    if (!Number.isInteger(normalized)) return false;
+    return normalized === 408 || normalized === 429 || normalized >= 500;
+}
+
+function extractProposalPublicationSideEffects(result) {
+    const submission = result?.response?.submission;
+    return Boolean(
+        submission?.sideEffectsLikelyCommitted ||
+            (typeof submission?.transactionHash === 'string' && submission.transactionHash)
+    );
 }
 
 function isReceiptWaitTimeoutError(error) {
@@ -526,6 +552,39 @@ function toolDefinitions({
                 required: ['content', 'json', 'filename', 'mediaType', 'pin'],
             },
         });
+        tools.push({
+            type: 'function',
+            name: 'publish_signed_message',
+            description:
+                'Sign an agent-authored structured message with the runtime signer and submit it to the configured standalone Oya message-publication node.',
+            strict: true,
+            parameters: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                    message: {
+                        type: 'object',
+                        description:
+                            'Structured message payload for POST /v1/messages/publish. Must already include chainId, requestId, commitmentAddresses, agentAddress, kind, and payload.',
+                    },
+                    baseUrl: {
+                        type: ['string', 'null'],
+                        description:
+                            'Optional publication node base URL override. Defaults to http://<messagePublishApi.host>:<messagePublishApi.port>.',
+                    },
+                    bearerToken: {
+                        type: ['string', 'null'],
+                        description:
+                            'Optional bearer token for the publication node. Use when the node also requires bearer auth.',
+                    },
+                    timeoutMs: {
+                        type: ['integer', 'null'],
+                        description: 'Optional HTTP timeout in milliseconds. Defaults to 10000.',
+                    },
+                },
+                required: ['message', 'baseUrl', 'bearerToken', 'timeoutMs'],
+            },
+        });
     }
 
     if (onchainToolsEnabled && proposeEnabled) {
@@ -868,6 +927,149 @@ async function executeToolCalls({
                         output: safeStringify({
                             status: 'published',
                             ...result,
+                        }),
+                    });
+                } catch (error) {
+                    await emitOutput({
+                        callId: call.callId,
+                        name: call.name,
+                        output: safeStringify({
+                            status: 'error',
+                            message: error?.message ?? String(error),
+                            retryable: isRetryableToolError(error),
+                            sideEffectsLikelyCommitted: false,
+                        }),
+                    });
+                }
+                continue;
+            }
+
+            if (call.name === 'publish_signed_message') {
+                try {
+                    const message = normalizeOptionalPlainObject(args.message, 'message');
+                    if (!message) {
+                        throw new Error('message is required.');
+                    }
+                    const result = await publishSignedMessage({
+                        walletClient,
+                        account,
+                        config,
+                        message,
+                        baseUrl: typeof args.baseUrl === 'string' ? args.baseUrl : undefined,
+                        bearerToken:
+                            typeof args.bearerToken === 'string' ? args.bearerToken : undefined,
+                        timeoutMs: args.timeoutMs,
+                    });
+                    if (!result.ok) {
+                        const retryable = parseRetryableHttpStatus(result.status);
+                        await emitOutput({
+                            callId: call.callId,
+                            name: call.name,
+                            output: safeStringify({
+                                status: 'error',
+                                message:
+                                    result.response?.error ??
+                                    result.response?.message ??
+                                    `Message publication request failed with status ${result.status}.`,
+                                code: result.response?.code ?? 'message_publication_failed',
+                                retryable,
+                                httpStatus: result.status,
+                                endpoint: result.endpoint,
+                                requestId: message.requestId ?? null,
+                                response: result.response,
+                            }),
+                        });
+                        continue;
+                    }
+                    await emitOutput({
+                        callId: call.callId,
+                        name: call.name,
+                        output: safeStringify({
+                            status:
+                                typeof result.response?.status === 'string' &&
+                                result.response.status.trim()
+                                    ? result.response.status.trim().toLowerCase()
+                                    : 'published',
+                            endpoint: result.endpoint,
+                            requestId: message.requestId ?? null,
+                            message,
+                            ...result.response,
+                        }),
+                    });
+                } catch (error) {
+                    await emitOutput({
+                        callId: call.callId,
+                        name: call.name,
+                        output: safeStringify({
+                            status: 'error',
+                            message: error?.message ?? String(error),
+                            retryable: isRetryableToolError(error),
+                            sideEffectsLikelyCommitted: false,
+                        }),
+                    });
+                }
+                continue;
+            }
+
+            if (call.name === 'publish_signed_proposal') {
+                try {
+                    const proposal = normalizeOptionalPlainObject(args.proposal, 'proposal');
+                    if (!proposal) {
+                        throw new Error('proposal is required.');
+                    }
+                    const result = await publishSignedProposal({
+                        walletClient,
+                        account,
+                        config,
+                        proposal,
+                        baseUrl: typeof args.baseUrl === 'string' ? args.baseUrl : undefined,
+                        bearerToken:
+                            typeof args.bearerToken === 'string' ? args.bearerToken : undefined,
+                        timeoutMs: args.timeoutMs,
+                    });
+                    const sideEffectsLikelyCommittedForCall =
+                        extractProposalPublicationSideEffects(result);
+                    if (sideEffectsLikelyCommittedForCall) {
+                        sideEffectsLikelyCommitted = true;
+                    }
+                    if (!result.ok) {
+                        const retryable = parseRetryableHttpStatus(result.status);
+                        await emitOutput({
+                            callId: call.callId,
+                            name: call.name,
+                            output: safeStringify({
+                                status: 'error',
+                                message:
+                                    result.response?.error ??
+                                    result.response?.message ??
+                                    `Proposal publication request failed with status ${result.status}.`,
+                                code: result.response?.code ?? 'proposal_publication_failed',
+                                retryable: !sideEffectsLikelyCommittedForCall && retryable,
+                                sideEffectsLikelyCommitted: sideEffectsLikelyCommittedForCall,
+                                httpStatus: result.status,
+                                endpoint: result.endpoint,
+                                requestId: proposal.requestId ?? null,
+                                response: result.response,
+                                ...(result.response?.submission
+                                    ? { submission: result.response.submission }
+                                    : {}),
+                            }),
+                        });
+                        continue;
+                    }
+                    await emitOutput({
+                        callId: call.callId,
+                        name: call.name,
+                        output: safeStringify({
+                            status:
+                                typeof result.response?.status === 'string' &&
+                                result.response.status.trim()
+                                    ? result.response.status.trim().toLowerCase()
+                                    : 'published',
+                            endpoint: result.endpoint,
+                            requestId: proposal.requestId ?? null,
+                            proposal,
+                            ...result.response,
                         }),
                     });
                 } catch (error) {

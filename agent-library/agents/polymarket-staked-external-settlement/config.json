@@ -1,10 +1,30 @@
 {
   "chainId": 137,
   "ipfsEnabled": true,
+  "messageApi": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 8787,
+    "requireSignerAllowlist": true,
+    "signerAllowlist": [
+      "0x2967C076182F0303037072670e744e26Ed4A830f"
+    ],
+    "signatureMaxAgeSeconds": 300
+  },
   "messagePublishApi": {
     "enabled": true,
     "host": "127.0.0.1",
     "port": 9892,
+    "requireSignerAllowlist": true,
+    "signerAllowlist": [
+      "0x2967C076182F0303037072670e744e26Ed4A830f"
+    ]
+  },
+  "proposalPublishApi": {
+    "enabled": true,
+    "mode": "propose",
+    "host": "127.0.0.1",
+    "port": 9890,
     "requireSignerAllowlist": true,
     "signerAllowlist": [
       "0x2967C076182F0303037072670e744e26Ed4A830f"
@@ -21,7 +41,12 @@
   },
   "polymarketStakedExternalSettlement": {
     "authorizedAgent": "0x2967C076182F0303037072670e744e26Ed4A830f",
+    "userAddress": "0x3333333333333333333333333333333333333333",
     "tradingWallet": "0x4444444444444444444444444444444444444444",
-    "marketsById": {}
+    "marketsById": {
+      "market-1": {
+        "label": "Example Polymarket market"
+      }
+    }
   }
 }

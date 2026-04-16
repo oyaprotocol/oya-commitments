@@ -25,6 +25,11 @@ const BASE_CONFIG = {
         polymarketStakedExternalSettlement: {
             authorizedAgent: TEST_AGENT,
             tradingWallet: TEST_TRADING_WALLET,
+            marketsById: {
+                'market-1': {
+                    label: 'Configured market',
+                },
+            },
         },
     },
 };
@@ -57,6 +62,7 @@ function buildTradeLogMessage({
     trades = [],
     marketId = 'market-1',
     tradingWallet = TEST_TRADING_WALLET,
+    summary = undefined,
 } = {}) {
     return {
         chainId: TEST_CHAIN_ID,
@@ -75,6 +81,7 @@ function buildTradeLogMessage({
             sequence,
             previousCid,
             trades,
+            ...(summary !== undefined ? { summary } : {}),
         },
     };
 }
@@ -159,6 +166,35 @@ async function run() {
                     config: BASE_CONFIG,
                     publicClient: mockPublicClient,
                     message: buildTradeLogMessage({
+                        requestId: 'trade-log-unconfigured-market',
+                        marketId: 'market-unconfigured',
+                        trades: [
+                            buildTrade({
+                                tradeId: 'trade-unconfigured-market',
+                                executedAtMs: firstSeenAtMs - 5 * 60_000,
+                            }),
+                        ],
+                    }),
+                    receivedAtMs: firstSeenAtMs,
+                    publishedAtMs: firstSeenAtMs + 1_000,
+                    listRecords: async () => [],
+                }),
+            (error) => {
+                assert.ok(error instanceof MessagePublicationValidationError);
+                assert.equal(error.code, 'message_payload_invalid');
+                assert.match(error.message, /not configured/i);
+                return true;
+            }
+        );
+    }
+
+    {
+        await assert.rejects(
+            () =>
+                validatePublishedMessage({
+                    config: BASE_CONFIG,
+                    publicClient: mockPublicClient,
+                    message: buildTradeLogMessage({
                         requestId: 'trade-log-wallet-mismatch',
                         trades: [
                             buildTrade({
@@ -166,7 +202,6 @@ async function run() {
                                 executedAtMs: firstSeenAtMs - 5 * 60_000,
                             }),
                         ],
-                        marketId: 'market-wallet-mismatch',
                         tradingWallet: '0x5555555555555555555555555555555555555555',
                     }),
                     receivedAtMs: firstSeenAtMs,
@@ -253,6 +288,38 @@ async function run() {
         } finally {
             globalThis.fetch = originalFetch;
         }
+    }
+
+    {
+        await assert.rejects(
+            () =>
+                validatePublishedMessage({
+                    config: BASE_CONFIG,
+                    publicClient: mockPublicClient,
+                    message: buildTradeLogMessage({
+                        requestId: 'trade-log-bad-settlement-summary',
+                        trades: [
+                            buildTrade({
+                                tradeId: 'trade-settlement-summary',
+                                executedAtMs: firstSeenAtMs - 5 * 60_000,
+                            }),
+                        ],
+                        summary: {
+                            settledAtMs: firstSeenAtMs,
+                            settlementKind: 'resolved',
+                        },
+                    }),
+                    receivedAtMs: firstSeenAtMs,
+                    publishedAtMs: firstSeenAtMs + 1_000,
+                    listRecords: async () => [],
+                }),
+            (error) => {
+                assert.ok(error instanceof MessagePublicationValidationError);
+                assert.equal(error.code, 'message_payload_invalid');
+                assert.match(error.message, /finalSettlementValueWei is required/i);
+                return true;
+            }
+        );
     }
 
     {
