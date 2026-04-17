@@ -116,8 +116,51 @@ function textResponse(status, text, statusText = '') {
         ok: status >= 200 && status < 300,
         status,
         statusText,
+        async json() {
+            return JSON.parse(text);
+        },
         async text() {
             return text;
+        },
+    };
+}
+
+function createMockDirectExecutionFetch({
+    activity = [],
+    orderById = {},
+    tradesByOrderId = {},
+}) {
+    const originalFetch = globalThis.fetch;
+
+    globalThis.fetch = async (url) => {
+        const parsedUrl = new URL(String(url));
+        if (parsedUrl.hostname === 'data-api.polymarket.com') {
+            return textResponse(200, JSON.stringify(activity));
+        }
+        if (
+            parsedUrl.hostname === 'clob.polymarket.com' &&
+            parsedUrl.pathname.startsWith('/data/order/')
+        ) {
+            const orderId = decodeURIComponent(parsedUrl.pathname.slice('/data/order/'.length));
+            const order = orderById[orderId];
+            if (!order) {
+                return textResponse(404, JSON.stringify({ error: 'missing order' }), 'Not Found');
+            }
+            return textResponse(200, JSON.stringify(order));
+        }
+        if (
+            parsedUrl.hostname === 'clob.polymarket.com' &&
+            parsedUrl.pathname === '/data/trades'
+        ) {
+            const trades = Object.values(tradesByOrderId).flat();
+            return textResponse(200, JSON.stringify(trades));
+        }
+        return originalFetch(url);
+    };
+
+    return {
+        stop() {
+            globalThis.fetch = originalFetch;
         },
     };
 }
@@ -291,6 +334,142 @@ async function run() {
 
     try {
         await resetModuleStateForTest({ config });
+        let toolCalls;
+
+        const directExecutionConfig = buildBaseConfig({
+            messagePublishApiPort: 9892,
+            polymarketClobEnabled: true,
+            polymarketClobApiKey: 'clob-key',
+            polymarketClobApiSecret: 'clob-secret',
+            polymarketClobApiPassphrase: 'clob-passphrase',
+            agentConfig: {
+                polymarketStakedExternalSettlement: {
+                    authorizedAgent: TEST_AGENT.address,
+                    userAddress: TEST_USER,
+                    tradingWallet: TEST_TRADING_WALLET,
+                    collateralToken: TEST_USDC,
+                    marketsById: {
+                        'market-1': {
+                            label: 'Direct market',
+                            sourceUser: TEST_USER,
+                            sourceMarket: 'market-1',
+                            yesTokenId: '11',
+                            noTokenId: '22',
+                            initiatedCollateralAmountWei: '1000000',
+                        },
+                    },
+                },
+            },
+        });
+        const directExecutionTrade = {
+            id: 'source-trade-1',
+            side: 'BUY',
+            outcome: 'YES',
+            price: 0.4,
+            timestamp: new Date(firstSeenAtMs - 30_000).toISOString(),
+        };
+        const directExecutionFetch = createMockDirectExecutionFetch({
+            activity: [directExecutionTrade],
+            orderById: {
+                'direct-order-1': {
+                    order: {
+                        id: 'direct-order-1',
+                        status: 'MATCHED',
+                        original_size: 2.5,
+                        size_matched: 2.5,
+                    },
+                },
+            },
+            tradesByOrderId: {
+                'direct-order-1': [
+                    {
+                        id: 'trade-fill-1',
+                        status: 'CONFIRMED',
+                        taker_order_id: 'direct-order-1',
+                        price: '0.4',
+                        size: '2.5',
+                    },
+                ],
+            },
+        });
+        const directMockNode = createMockPublicationFetch(directExecutionConfig);
+        try {
+            await resetModuleStateForTest({ config: directExecutionConfig });
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: directExecutionConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'polymarket_clob_build_sign_and_place_order');
+            const directOrderArgs = JSON.parse(toolCalls[0].arguments);
+            assert.equal(directOrderArgs.side, 'BUY');
+            assert.equal(directOrderArgs.tokenId, '11');
+            assert.equal(directOrderArgs.makerAmount, '1000000');
+            assert.equal(directOrderArgs.takerAmount, '2500000');
+
+            await onToolOutput({
+                name: 'polymarket_clob_build_sign_and_place_order',
+                parsedOutput: {
+                    status: 'submitted',
+                    result: {
+                        order: {
+                            id: 'direct-order-1',
+                            status: 'LIVE',
+                        },
+                    },
+                },
+                config: directExecutionConfig,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+            });
+
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: directExecutionConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'publish_signed_message');
+            const directPublication = await runPublishCall({
+                toolCall: toolCalls[0],
+                publicClient,
+                config: directExecutionConfig,
+            });
+            assert.equal(
+                directPublication.status,
+                'published',
+                JSON.stringify(directPublication)
+            );
+            assert.equal(
+                directPublication.validation.classifications[0].classification,
+                'reimbursable'
+            );
+            await onToolOutput({
+                name: 'publish_signed_message',
+                parsedOutput: directPublication,
+                config: directExecutionConfig,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+            });
+
+            const directState = getModuleState();
+            const directMarket = directState.markets['market-1'];
+            assert.equal(directMarket.trades.length, 1);
+            assert.equal(directMarket.trades[0].tradeId, 'clob:direct-order-1');
+            assert.equal(directMarket.trades[0].tradeEntryKind, 'initiated');
+            assert.equal(directMarket.trades[0].principalContributionWei, '1000000');
+            assert.equal(directMarket.trades[0].shareAmount, '2500000');
+            assert.equal(directMarket.execution.observedSourceTradeId, 'source-trade-1');
+            assert.equal(directMarket.execution.currentSourceTradeId, null);
+            assert.equal(directMarket.lastPublishedSequence, 1);
+        } finally {
+            directMockNode.stop();
+            directExecutionFetch.stop();
+        }
+        await resetModuleStateForTest({ config });
 
         const timelyTradeSignal = buildSignal({
             requestId: 'trade-1',
@@ -309,7 +488,7 @@ async function run() {
             },
         });
 
-        let toolCalls = await getDeterministicToolCalls({
+        toolCalls = await getDeterministicToolCalls({
             signals: [timelyTradeSignal],
             commitmentSafe: TEST_COMMITMENT_SAFE,
             agentAddress: TEST_AGENT.address,
@@ -324,7 +503,7 @@ async function run() {
             publicClient,
             config,
         });
-        assert.equal(firstPublication.status, 'published');
+        assert.equal(firstPublication.status, 'published', JSON.stringify(firstPublication));
         assert.equal(firstPublication.validation.classifications[0].classification, 'reimbursable');
         await onToolOutput({
             name: 'publish_signed_message',
@@ -711,7 +890,11 @@ async function run() {
                 publicClient,
                 config: staleDispatchConfig,
             });
-            assert.equal(lateFirstPublication.status, 'published');
+            assert.equal(
+                lateFirstPublication.status,
+                'published',
+                JSON.stringify(lateFirstPublication)
+            );
             await onToolOutput({
                 name: 'publish_signed_message',
                 parsedOutput: lateFirstPublication,

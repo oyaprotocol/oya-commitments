@@ -4,6 +4,7 @@ import {
     decodeErc20TransferCallData,
     normalizeAddressOrNull,
     normalizeAddressOrThrow,
+    normalizeTokenId,
 } from '../../../agent/src/lib/utils.js';
 import { cloneJson } from './state-store.js';
 
@@ -80,6 +81,11 @@ function normalizeMarketConfig(rawMarket, marketId, fallbackUserAddress) {
             marketId,
             userAddress: fallbackUserAddress,
             label: null,
+            sourceUser: null,
+            sourceMarket: null,
+            yesTokenId: null,
+            noTokenId: null,
+            initiatedCollateralAmountWei: null,
         };
     }
     return {
@@ -87,7 +93,43 @@ function normalizeMarketConfig(rawMarket, marketId, fallbackUserAddress) {
         userAddress:
             normalizeOptionalAddress(rawMarket.userAddress ?? rawMarket.user) ?? fallbackUserAddress,
         label: normalizeOptionalString(rawMarket.label ?? rawMarket.description),
+        sourceUser: normalizeOptionalAddress(rawMarket.sourceUser),
+        sourceMarket: normalizeOptionalString(rawMarket.sourceMarket),
+        yesTokenId: normalizeTokenId(rawMarket.yesTokenId),
+        noTokenId: normalizeTokenId(rawMarket.noTokenId),
+        initiatedCollateralAmountWei:
+            rawMarket.initiatedCollateralAmountWei === undefined ||
+            rawMarket.initiatedCollateralAmountWei === null ||
+            rawMarket.initiatedCollateralAmountWei === ''
+                ? null
+                : parseNonNegativeBigIntString(
+                      rawMarket.initiatedCollateralAmountWei,
+                      `marketsById.${marketId}.initiatedCollateralAmountWei`
+                  ),
     };
+}
+
+function hasDirectTradingConfig(marketConfig) {
+    if (!marketConfig || typeof marketConfig !== 'object') {
+        return false;
+    }
+    return Boolean(
+        marketConfig.sourceUser ||
+            marketConfig.sourceMarket ||
+            marketConfig.yesTokenId ||
+            marketConfig.noTokenId ||
+            marketConfig.initiatedCollateralAmountWei
+    );
+}
+
+function isDirectTradingReady(marketConfig) {
+    return Boolean(
+        marketConfig?.sourceUser &&
+            marketConfig?.yesTokenId &&
+            marketConfig?.noTokenId &&
+            marketConfig?.initiatedCollateralAmountWei &&
+            BigInt(marketConfig.initiatedCollateralAmountWei) > 0n
+    );
 }
 
 function resolvePolicy(config = {}) {
@@ -134,6 +176,14 @@ function resolvePolicy(config = {}) {
     if (marketsMissingUserAddress.length > 0) {
         errors.push(
             `polymarketStakedExternalSettlement.userAddress is required globally or per market; missing for: ${marketsMissingUserAddress.join(', ')}.`
+        );
+    }
+    const incompleteDirectMarkets = Object.values(marketsById)
+        .filter((market) => hasDirectTradingConfig(market) && !isDirectTradingReady(market))
+        .map((market) => market.marketId);
+    if (incompleteDirectMarkets.length > 0) {
+        errors.push(
+            `Direct Polymarket execution requires sourceUser, yesTokenId, noTokenId, and initiatedCollateralAmountWei for markets: ${incompleteDirectMarkets.join(', ')}.`
         );
     }
 
@@ -237,6 +287,23 @@ function createEmptyMarketState({ policy, config, marketId }) {
             depositConfirmedAtMs: null,
             depositError: null,
         },
+        execution: {
+            observedSourceTradeId: null,
+            currentSourceTradeId: null,
+            currentSourceTradeExecutedAtMs: null,
+            currentSourceTradePrice: null,
+            currentSourceTradeOutcome: null,
+            currentSourceTradeSide: null,
+            currentSourceTradeDescription: null,
+            tokenId: null,
+            pendingOrderArgs: null,
+            orderDispatchAtMs: null,
+            orderId: null,
+            orderStatus: null,
+            orderSubmittedAtMs: null,
+            orderError: null,
+            orderStatusRefreshFailedAtMs: null,
+        },
         reimbursement: {
             requestDispatchAtMs: null,
             requestId: null,
@@ -259,6 +326,35 @@ function ensureMarketState(state, { policy, config, marketId }) {
 
 function findTradeById(market, tradeId) {
     return market.trades.find((trade) => trade.tradeId === tradeId) ?? null;
+}
+
+function appendTradeToMarket(market, trade) {
+    const existing = findTradeById(market, trade.tradeId);
+    if (existing) {
+        throw new Error(
+            `Trade "${trade.tradeId}" already exists for market "${market.stream.marketId}".`
+        );
+    }
+    if (
+        trade.tradeEntryKind === 'continuation' &&
+        !market.trades.some((entry) => entry.tradeEntryKind === 'initiated')
+    ) {
+        throw new Error(
+            `Continuation trade "${trade.tradeId}" requires at least one prior initiated trade for market "${market.stream.marketId}".`
+        );
+    }
+    market.trades.push(cloneJson(trade));
+    markMarketDirty(market);
+}
+
+function ingestObservedTrade(state, { policy, config, marketId, trade }) {
+    const market = ensureMarketState(state, {
+        policy,
+        config,
+        marketId,
+    });
+    appendTradeToMarket(market, trade);
+    return market;
 }
 
 function normalizeTradeCommand(signal, { policy }) {
@@ -402,22 +498,7 @@ function ingestCommand(state, command, { policy, config }) {
     });
 
     if (command.commandType === 'trade') {
-        const existing = findTradeById(market, command.trade.tradeId);
-        if (existing) {
-            throw new Error(
-                `Trade "${command.trade.tradeId}" already exists for market "${command.marketId}".`
-            );
-        }
-        if (
-            command.trade.tradeEntryKind === 'continuation' &&
-            !market.trades.some((trade) => trade.tradeEntryKind === 'initiated')
-        ) {
-            throw new Error(
-                `Continuation trade "${command.trade.tradeId}" requires at least one prior initiated trade for market "${command.marketId}".`
-            );
-        }
-        market.trades.push(cloneJson(command.trade));
-        markMarketDirty(market);
+        appendTradeToMarket(market, command.trade);
     } else if (command.commandType === 'settlement') {
         const nextSettlement = {
             ...market.settlement,
@@ -685,6 +766,15 @@ function clearStaleDispatches(state, dispatchGraceMs, nowMs = Date.now()) {
                 'Settlement deposit dispatch expired before tool output arrived; retrying is allowed.';
             changed = true;
         }
+        const executionOrderDispatchAge = Number.isInteger(market.execution?.orderDispatchAtMs)
+            ? nowMs - market.execution.orderDispatchAtMs
+            : null;
+        if (executionOrderDispatchAge !== null && executionOrderDispatchAge > dispatchGraceMs) {
+            market.execution.orderDispatchAtMs = null;
+            market.execution.orderError =
+                'Polymarket order dispatch expired before tool output arrived; retrying is allowed.';
+            changed = true;
+        }
     }
     return changed;
 }
@@ -706,10 +796,13 @@ export {
     computeReimbursementEligibleWei,
     createEmptyMarketState,
     ensureMarketState,
+    findTradeById,
     findWithdrawalViolationSignals,
     ingestCommand,
+    ingestObservedTrade,
     interpretSignedAgentCommandSignal,
     isMarketBlockingWithdrawals,
+    isDirectTradingReady,
     markMarketDirty,
     mergeTradeClassifications,
     POLYMARKET_REIMBURSEMENT_REQUEST_KIND,

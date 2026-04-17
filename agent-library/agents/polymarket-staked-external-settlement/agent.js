@@ -2,6 +2,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getAlwaysEmitBalanceSnapshotPollingOptions } from '../../../agent/src/lib/polling.js';
 import {
+    applyDirectOrderToolOutput,
+    findOrCreateDirectOrderToolCall,
+    refreshDirectExecutionState,
+} from './direct-trading.js';
+import {
     applyDepositToolOutput,
     applyPublicationToolOutput,
     refreshPendingSettlementDeposits,
@@ -139,7 +144,8 @@ async function resetModuleStateForTest({ config } = {}) {
 function getSystemPrompt({ commitmentText }) {
     return [
         'You are a deterministic Polymarket external-settlement agent.',
-        'Accept only signed agent-authored trade and settlement commands.',
+        'Discover configured Polymarket trade triggers, place trades directly from the agent wallet, and publish the resulting market-state changes through the companion Oya node.',
+        'Signed trade or settlement commands are only a bootstrap/testing path and not the primary workflow.',
         'Publish every material market-state change through the companion Oya message-publication node before reimbursement requests advance.',
         'Treat node-attested trade classifications as the only source of reimbursement eligibility.',
         'This agent loop is responsible for trade logging and settlement deposits, while the standalone node owns withdrawal disputes and reimbursement proposal submission.',
@@ -352,6 +358,13 @@ async function getDeterministicToolCalls({
             publicClient,
             pendingTxTimeoutMs: policy.pendingTxTimeoutMs,
         })) || changed;
+    changed =
+        (await refreshDirectExecutionState({
+            state: runtimeState,
+            policy,
+            config,
+            agentAddress: policy.authorizedAgent,
+        })) || changed;
     changed = ingestSignals(signals, { policy, config }) || changed;
 
     if (changed) {
@@ -378,6 +391,19 @@ async function getDeterministicToolCalls({
 
     if (pendingPublication) {
         return [pendingPublication.toolCall];
+    }
+
+    const directOrderCall = await findOrCreateDirectOrderToolCall({
+        state: runtimeState,
+        policy,
+        config,
+        agentAddress: policy.authorizedAgent,
+    });
+    if (directOrderCall) {
+        if (directOrderCall.changed) {
+            await persistState();
+        }
+        return [directOrderCall.toolCall];
     }
 
     const reimbursementRequest = findOrCreatePendingReimbursementRequest({
@@ -412,6 +438,8 @@ async function onToolOutput({ name, parsedOutput, config, commitmentSafe }) {
         changed = applyPublicationToolOutput(runtimeState, parsedOutput) || changed;
     } else if (name === 'make_deposit') {
         changed = applyDepositToolOutput(runtimeState, parsedOutput) || changed;
+    } else if (name === 'polymarket_clob_build_sign_and_place_order') {
+        changed = applyDirectOrderToolOutput(runtimeState, parsedOutput) || changed;
     }
 
     if (changed) {

@@ -87,6 +87,10 @@ function buildBaseConfig(tempDir) {
         proposalPublishApiSignerAllowlist: [TEST_AGENT.address],
         proposalPublishApiSignatureMaxAgeSeconds: 300,
         proposalVerificationMode: 'off',
+        polymarketClobEnabled: true,
+        polymarketClobApiKey: 'clob-key',
+        polymarketClobApiSecret: 'clob-secret',
+        polymarketClobApiPassphrase: 'clob-passphrase',
         watchAssets: [TEST_USDC],
         ipfsApiUrl: 'http://ipfs.mock',
         agentConfig: {
@@ -100,6 +104,11 @@ function buildBaseConfig(tempDir) {
                 marketsById: {
                     'market-1': {
                         label: 'Smoke market',
+                        sourceUser: TEST_USER,
+                        sourceMarket: 'market-1',
+                        yesTokenId: '11',
+                        noTokenId: '22',
+                        initiatedCollateralAmountWei: '1000000',
                     },
                 },
             },
@@ -135,6 +144,20 @@ function buildSignal({
 
 function parseToolOutput(output) {
     return JSON.parse(output.output);
+}
+
+function textResponse(status, text, statusText = '') {
+    return {
+        ok: status >= 200 && status < 300,
+        status,
+        statusText,
+        async json() {
+            return JSON.parse(text);
+        },
+        async text() {
+            return text;
+        },
+    };
 }
 
 function buildTransferLog({ from, to, value }) {
@@ -228,6 +251,50 @@ function createIpfsFetchMock() {
     };
 }
 
+function createDirectExecutionFetchMock({
+    activity = [],
+    placedOrder = { orderID: 'direct-order-1', status: 'LIVE' },
+    orderById = {},
+    tradesByOrderId = {},
+}) {
+    const originalFetch = globalThis.fetch;
+
+    globalThis.fetch = async (url, options = {}) => {
+        const parsedUrl = new URL(String(url));
+        if (parsedUrl.hostname === 'data-api.polymarket.com') {
+            return textResponse(200, JSON.stringify(activity));
+        }
+        if (parsedUrl.hostname === 'clob.polymarket.com' && parsedUrl.pathname === '/order') {
+            return textResponse(200, JSON.stringify(placedOrder));
+        }
+        if (
+            parsedUrl.hostname === 'clob.polymarket.com' &&
+            parsedUrl.pathname.startsWith('/data/order/')
+        ) {
+            const orderId = decodeURIComponent(parsedUrl.pathname.slice('/data/order/'.length));
+            const order = orderById[orderId];
+            if (!order) {
+                return textResponse(404, JSON.stringify({ error: 'missing order' }), 'Not Found');
+            }
+            return textResponse(200, JSON.stringify(order));
+        }
+        if (
+            parsedUrl.hostname === 'clob.polymarket.com' &&
+            parsedUrl.pathname === '/data/trades'
+        ) {
+            const trades = Object.values(tradesByOrderId).flat();
+            return textResponse(200, JSON.stringify(trades));
+        }
+        return originalFetch(url, options);
+    };
+
+    return {
+        stop() {
+            globalThis.fetch = originalFetch;
+        },
+    };
+}
+
 async function runToolCall({ toolCall, publicClient, walletClient, account, config }) {
     const outputs = await executeToolCalls({
         toolCalls: [toolCall],
@@ -267,6 +334,9 @@ async function runSmokeScenario() {
         async signMessage({ message }) {
             return await TEST_AGENT.signMessage({ message });
         },
+        async signTypedData(parameters) {
+            return await TEST_AGENT.signTypedData(parameters);
+        },
     };
     const account = TEST_AGENT;
     const nodeSigner = {
@@ -275,7 +345,45 @@ async function runSmokeScenario() {
             return await TEST_NODE.signMessage({ message });
         },
     };
+    const firstSeenAtMs = Date.now();
     const ipfsMock = createIpfsFetchMock();
+    const directExecutionFetch = createDirectExecutionFetchMock({
+        activity: [
+            {
+                id: 'source-trade-1',
+                side: 'BUY',
+                outcome: 'YES',
+                price: 0.4,
+                timestamp: new Date(firstSeenAtMs - 30_000).toISOString(),
+                title: 'Smoke direct source trade',
+            },
+        ],
+        placedOrder: {
+            orderID: 'direct-order-1',
+            status: 'LIVE',
+        },
+        orderById: {
+            'direct-order-1': {
+                order: {
+                    id: 'direct-order-1',
+                    status: 'MATCHED',
+                    original_size: 2.5,
+                    size_matched: 2.5,
+                },
+            },
+        },
+        tradesByOrderId: {
+            'direct-order-1': [
+                {
+                    id: 'trade-fill-1',
+                    status: 'CONFIRMED',
+                    taker_order_id: 'direct-order-1',
+                    price: '0.4',
+                    size: '2.5',
+                },
+            ],
+        },
+    });
     const messageStore = createMessagePublicationStore({
         stateFile: path.join(tempDir, 'message-publications.json'),
     });
@@ -313,7 +421,6 @@ async function runSmokeScenario() {
         }),
     });
 
-    const firstSeenAtMs = Date.now();
     let messageServer;
     let proposalServer;
     try {
@@ -330,24 +437,31 @@ async function runSmokeScenario() {
         await resetNodeStateForTest({ config });
 
         let toolCalls = await getDeterministicToolCalls({
-            signals: [
-                buildSignal({
-                    requestId: 'smoke-trade-1',
-                    command: 'polymarket_trade',
-                    receivedAtMs: firstSeenAtMs,
-                    text: 'Smoke timely initiated trade',
-                    args: {
-                        marketId: 'market-1',
-                        tradeId: 'smoke-trade-1',
-                        tradeEntryKind: 'initiated',
-                        executedAtMs: firstSeenAtMs - 5 * 60_000,
-                        principalContributionWei: '1000000',
-                        collateralAmountWei: '1000000',
-                        side: 'BUY',
-                        outcome: 'YES',
-                    },
-                }),
-            ],
+            signals: [],
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+            agentAddress: TEST_AGENT.address,
+            publicClient,
+            config,
+        });
+        assert.equal(toolCalls.length, 1);
+        assert.equal(toolCalls[0].name, 'polymarket_clob_build_sign_and_place_order');
+        const directOrderResult = await runToolCall({
+            toolCall: toolCalls[0],
+            publicClient,
+            walletClient,
+            account,
+            config,
+        });
+        assert.equal(directOrderResult.status, 'submitted');
+        await onToolOutput({
+            name: 'polymarket_clob_build_sign_and_place_order',
+            parsedOutput: directOrderResult,
+            config,
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+        });
+
+        toolCalls = await getDeterministicToolCalls({
+            signals: [],
             commitmentSafe: TEST_COMMITMENT_SAFE,
             agentAddress: TEST_AGENT.address,
             publicClient,
@@ -547,6 +661,7 @@ async function runSmokeScenario() {
     } finally {
         await proposalApi.stop().catch(() => {});
         await messageApi.stop().catch(() => {});
+        directExecutionFetch.stop();
         ipfsMock.stop();
         await rm(tempDir, { recursive: true, force: true });
     }

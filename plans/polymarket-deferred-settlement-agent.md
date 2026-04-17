@@ -67,6 +67,7 @@ This plan intentionally treats the result as an example module, not a general-pu
 - [x] 2026-04-16 09:12 PDT: Relaxed agent-side tool scheduling so retrying stuck trade-log publications no longer starve settlement deposits. Newly created trade-log publications still take priority, but if a market is only replaying an existing `pendingPublication`, the module now allows `make_deposit` to run first for any settled market with unpaid settlement. Added a persisted-state regression proving a blocked publication retry no longer prevents settlement repayment dispatch.
 - [x] 2026-04-16 17:13 PDT: Added module-local smoke coverage in `agent-library/agents/polymarket-staked-external-settlement/harness.mjs` plus `test-polymarket-staked-external-settlement-harness.mjs`. The new in-process harness stands up real message/proposal publication API servers on ephemeral local ports with mock IPFS and mocked onchain reads, then drives the full happy-path flow: timely trade-log publication, settlement publication, settlement deposit confirmation, post-deposit trade-log publication, reimbursement-request publication, and node-side reimbursement proposal publication through the standalone proposal node.
 - [x] 2026-04-16 17:20 PDT: Reframed the remaining roadmap after user direction to require direct Polymarket trade discovery and execution. The signed `polymarket_trade` / `polymarket_settlement` ingress is now explicitly temporary scaffolding to be replaced by module-local market observation, CLOB order placement, and execution reconciliation using the existing `copy-trading` and `polymarket-intent-trader` code paths as references.
+- [x] 2026-04-16 18:07 PDT: Completed the first direct-execution slice inside `agent-library/agents/polymarket-staked-external-settlement/`. The module now supports direct market observation via configured source-user / token mappings, emits real `polymarket_clob_build_sign_and_place_order` tool calls, reconciles filled CLOB orders back into the existing trade ledger as `initiated` / `continuation` entries, and the smoke harness now opens the market through that direct path before continuing through settlement deposit, reimbursement request publication, and node-side reimbursement proposal publication.
 
 ## Surprises & Discoveries
 
@@ -205,8 +206,9 @@ Milestone 2 status after the current implementation pass:
 
 Remaining work is now narrower:
 
-- replace the temporary signed-command ingress in `agent-library/agents/polymarket-staked-external-settlement/agent.js` and `trade-ledger.js` with direct Polymarket discovery/execution and order reconciliation
-- expand smoke and local-mock harness coverage so the direct execution path, not just the publication / node path, is exercised end to end
+- replace the remaining signed-command settlement scaffold in `agent-library/agents/polymarket-staked-external-settlement/agent.js` and `trade-ledger.js` with direct settlement discovery / reconciliation from Polymarket state instead of `polymarket_settlement` signals
+- broaden direct execution beyond the current single-source BUY-copy slice so the module can handle richer trigger policies, additional outcomes / exits, and repeated source-trade observation without relying on manual command ingress
+- decide whether the temporary signed `polymarket_trade` / `polymarket_settlement` ingestion path should stay as test-only scaffolding or be removed entirely once direct settlement observation lands
 
 ## Context and Orientation
 
