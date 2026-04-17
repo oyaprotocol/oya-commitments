@@ -66,6 +66,7 @@ This plan intentionally treats the result as an example module, not a general-pu
 - [x] 2026-04-15 10:39 PDT: Hardened hashless resolved proposal-publication handling. When `publish_signed_proposal` returns `submission.status = "resolved"` with `skipped: true` and no tx/proposal hash, the control node now treats that as terminal for the current reimbursement request instead of re-arming the dispatch timer and looping forever. A new reimbursement request CID still resets that terminal state so later fresh requests can proceed.
 - [x] 2026-04-16 09:12 PDT: Relaxed agent-side tool scheduling so retrying stuck trade-log publications no longer starve settlement deposits. Newly created trade-log publications still take priority, but if a market is only replaying an existing `pendingPublication`, the module now allows `make_deposit` to run first for any settled market with unpaid settlement. Added a persisted-state regression proving a blocked publication retry no longer prevents settlement repayment dispatch.
 - [x] 2026-04-16 17:13 PDT: Added module-local smoke coverage in `agent-library/agents/polymarket-staked-external-settlement/harness.mjs` plus `test-polymarket-staked-external-settlement-harness.mjs`. The new in-process harness stands up real message/proposal publication API servers on ephemeral local ports with mock IPFS and mocked onchain reads, then drives the full happy-path flow: timely trade-log publication, settlement publication, settlement deposit confirmation, post-deposit trade-log publication, reimbursement-request publication, and node-side reimbursement proposal publication through the standalone proposal node.
+- [x] 2026-04-16 17:20 PDT: Reframed the remaining roadmap after user direction to require direct Polymarket trade discovery and execution. The signed `polymarket_trade` / `polymarket_settlement` ingress is now explicitly temporary scaffolding to be replaced by module-local market observation, CLOB order placement, and execution reconciliation using the existing `copy-trading` and `polymarket-intent-trader` code paths as references.
 
 ## Surprises & Discoveries
 
@@ -104,6 +105,9 @@ This plan intentionally treats the result as an example module, not a general-pu
 
 - Observation: The deferred-settlement module could not use the new message publication node cleanly until the shared runner exposed a generic way for deterministic agents to sign and submit structured messages.
   Evidence: `getDeterministicToolCalls()` only receives read-side runtime context, so module-local code could not reach the runtime signer without either a shared tool or a shared API-surface change. The implemented solution was a new generalized `publish_signed_message` tool in `agent/src/lib/tools.js`.
+
+- Observation: The current module boundary is right, but the current trade ingress is still a scaffold.
+  Evidence: `agent-library/agents/polymarket-staked-external-settlement/trade-ledger.js` still centers `TRADE_COMMANDS` / `SETTLEMENT_COMMANDS`, while `agent-library/agents/copy-trading/agent.js` and `agent-library/agents/polymarket-intent-trader/polymarket-reconciliation.js` already contain the repo’s real Polymarket execution and reconciliation patterns.
 
 ## Decision Log
 
@@ -146,6 +150,10 @@ This plan intentionally treats the result as an example module, not a general-pu
 - Decision: The Polymarket module should stop issuing `dispute_assertion` and reimbursement proposal tool calls from the agent loop. Instead, the agent should publish signed reimbursement-request messages and a standalone node-side control loop should act from published node state.
   Rationale: The user clarified that the agent should trade and report, while the node should own commitment-enforcement actions. Keeping disputes and reimbursement proposal submission on the node side also makes those actions depend on node-attested published history instead of unpublished agent-local state.
   Date/Author: 2026-04-14 / Codex.
+
+- Decision: Replace the temporary signed-command trade ingress with direct Polymarket trade discovery and execution inside `agent-library/agents/polymarket-staked-external-settlement/`.
+  Rationale: The user chose the production-shaped direction. The module should discover opportunities from a configured trigger source, place and reconcile Polymarket CLOB orders from the agent wallet directly, and only use signed message publication for node-facing trade logs and reimbursement requests, not as the primary source of trade truth.
+  Date/Author: 2026-04-16 / Codex.
 
 - Decision: Reimbursement accounting in v1 is "initial principal reimbursement plus separate final settlement deposit," not netted reimbursement across flips.
   Rationale: The user clarified that later trading affects how much the agent must deposit into the commitment at settlement, but reimbursement is for the amount initially spent to open the user's market exposure.
@@ -193,10 +201,12 @@ Milestone 2 status after the current implementation pass:
 - Completed follow-up: `agent-library/agents/polymarket-staked-external-settlement/node-controller.js` and `node/scripts/start-control-node.mjs` now provide the node-side half. The control node reads the durable message-publication ledger, watches OG proposals, disputes invalid user withdrawals from published unsettled-market state, and routes reimbursement proposals through `POST /v1/proposals/publish` so the proposal node archives them to IPFS and submits them onchain in `propose` mode.
 - Completed follow-up: the shared runner gained a second reusable companion-node bridge, `publish_signed_proposal`, so deterministic module/control-hook code can sign proposal-publication requests with the runtime signer and submit them to the standalone proposal node without bypassing shared auth/canonicalization code.
 - Validated: `node agent-library/agents/polymarket-staked-external-settlement/test-polymarket-staked-external-settlement-agent.mjs`, `node agent-library/agents/polymarket-staked-external-settlement/test-polymarket-staked-external-settlement-node.mjs`, `node agent-library/agents/polymarket-staked-external-settlement/test-published-message-validator.mjs`, `node agent/scripts/validate-agent.mjs --module=polymarket-staked-external-settlement`, `node agent/scripts/test-message-publication-api.mjs`, `node agent/scripts/test-proposal-publication-api.mjs`, and `node node/scripts/start-control-node.mjs --module=polymarket-staked-external-settlement --dry-run`.
+- Follow-up direction: the current signed `polymarket_trade` / `polymarket_settlement` signal ingestion should now be treated as a bootstrap path, not the target architecture. The next implementation slice should replace it with direct trigger observation, CLOB order placement, and fill / settlement reconciliation inside this module.
 
 Remaining work is now narrower:
 
-- decide whether to replace the current signed-command trade source with direct Polymarket trade discovery/execution, or keep signed commands as the explicit v1 ingress model
+- replace the temporary signed-command ingress in `agent-library/agents/polymarket-staked-external-settlement/agent.js` and `trade-ledger.js` with direct Polymarket discovery/execution and order reconciliation
+- expand smoke and local-mock harness coverage so the direct execution path, not just the publication / node path, is exercised end to end
 
 ## Context and Orientation
 
@@ -210,7 +220,7 @@ The relevant current code paths are:
 - `agent-library/agents/polymarket-intent-trader/`
   - IPFS archival of signed trade intents
   - durable local state, reimbursement accounting, and restart recovery
-  - useful local helpers to borrow conceptually for ledgering and proposal matching
+  - useful local helpers to borrow conceptually for ledgering, proposal matching, and Polymarket order reconciliation via `polymarket-reconciliation.js`
 
 - `agent/src/lib/message-api.js` and `agent/src/lib/runtime-loop.js`
   - signed message ingestion for the main agent process
@@ -226,7 +236,7 @@ The relevant current code paths are:
 
 - `agent/src/lib/polymarket.js` and `agent/src/lib/polymarket-relayer.js`
   - shared Polymarket execution helpers
-  - currently focused on CLOB orders, trades, and relayer wallet resolution, not on market-resolution or generalized message-publication flows
+  - currently focused on CLOB orders, trades, and relayer wallet resolution, and they should remain the shared foundation for the direct-execution refactor rather than duplicating CLOB request logic inside the deferred-settlement module
 
 - `agent-library/RULE_TEMPLATES.md`
   - the `Staked External Polymarket Execution` template now includes `Trades must be logged within [ ] minutes of trade execution to be considered valid for reimbursement.`
@@ -234,7 +244,7 @@ The relevant current code paths are:
 The commitment side remains rule-driven rather than contract-driven. This means no new Solidity code should be assumed unless implementation proves a contract gap. The expected enforcement model is:
 
 - the agent deposits stake into the commitment
-- the agent publishes signed messages to the Oya node for each active market, with Polymarket-specific trade details embedded in those messages
+- the agent discovers configured trade opportunities and executes Polymarket trades directly from its wallet, then publishes signed messages to the Oya node for each active market with the resulting Polymarket-specific trade details embedded in those messages
 - the node co-signs and publishes full trade-log snapshots when sequence and internal-consistency checks pass, and adds node-attested per-trade reimbursement classifications for newly introduced trades
 - the agent deposits the final settlement amount owed to the user for a given market into the Safe before requesting reimbursement for that market
 - the node disputes user withdrawals that violate the commitment's withdrawal rule while any market settlement is still outstanding
@@ -279,8 +289,9 @@ Milestone 1 adds a generalized signed-message publication protocol to the Oya no
 
 Milestone 2 creates the new agent module under `agent-library/agents/polymarket-staked-external-settlement/`. The module should own all agent-specific behavior. It should:
 
-- observe one configured trigger source for v1 trading decisions
+- observe one configured trigger source for v1 trading decisions and convert those observations into direct Polymarket order attempts
 - execute external Polymarket trades from the agent wallet across any number of supported markets
+- reconcile submitted CLOB orders and fills from Polymarket APIs instead of depending on externally injected signed trade commands
 - update and persist per-market ledgers plus portfolio-level unsettled-state rollups locally
 - publish a signed message to the Oya node after every material state change in the affected market
 - persist which trade entries the node first classified as `reimbursable` versus `non_reimbursable_late`, and exclude any trade without a reimbursable node classification from reimbursement eligibility
@@ -377,6 +388,7 @@ From the repository root:
    Expected behavior:
 
    - the module refuses to trade when fixed stake is inactive or policy gating fails
+   - the module can discover a configured trade opportunity, place a Polymarket order directly, and reconcile the resulting fill into the local market ledger without requiring a signed `polymarket_trade` command
    - every accepted trade state change yields one signed publication request for the affected `marketId`
    - every logged trade is classified as `initiated` or `continuation`
    - every logged trade entry includes an execution timestamp that the node can compare against the current logging window
@@ -435,6 +447,7 @@ Acceptance requires all of the following:
 - the trade ledger preserves the separation between reimbursable initiated-trade principal and final settlement owed to the user for each market
 - continuation trades do not add reimbursement principal, but they do affect final settlement accounting
 - reimbursement proposals only count initiated trades that the node first classified as `reimbursable`
+- the module’s primary trading path uses direct Polymarket execution and reconciliation, not externally injected signed trade commands
 - portfolio-level withdrawal/dispute logic is derived from the aggregate state of all unsettled markets, not only one market
 - the module enforces active fixed-stake and withdrawal-policy assumptions before approving reimbursement
 - the module deposits the final settlement amount before proposing reimbursement
