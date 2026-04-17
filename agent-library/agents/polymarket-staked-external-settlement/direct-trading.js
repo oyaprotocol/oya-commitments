@@ -642,7 +642,15 @@ async function findOrCreateDirectOrderToolCall({
             continue;
         }
         if (preflightError) {
-            throw new Error(preflightError);
+            if (
+                market.execution.orderError !== preflightError ||
+                market.execution.orderStatusRefreshFailedAtMs !== null
+            ) {
+                market.execution.orderError = preflightError;
+                market.execution.orderStatusRefreshFailedAtMs = null;
+                changed = true;
+            }
+            continue;
         }
         const { makerAmount, takerAmount } = computeBuyOrderAmounts({
             collateralAmountWei: marketConfig.initiatedCollateralAmountWei,

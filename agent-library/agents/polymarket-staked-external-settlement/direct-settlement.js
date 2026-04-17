@@ -269,7 +269,11 @@ async function refreshObservedSettlements({
         if (!Array.isArray(market.trades) || market.trades.length === 0) {
             continue;
         }
-        if (Number.isInteger(market.settlement?.depositConfirmedAtMs)) {
+        if (
+            Number.isInteger(market.settlement?.depositConfirmedAtMs) ||
+            Number.isInteger(market.settlement?.depositSubmittedAtMs) ||
+            normalizeNonEmptyString(market.settlement?.depositTxHash)
+        ) {
             continue;
         }
         if (

@@ -1243,6 +1243,136 @@ async function run() {
             preservedDepositSettlementFetch.stop();
         }
 
+        const inFlightSettlementConfig = buildBaseConfig({
+            agentConfig: {
+                polymarketStakedExternalSettlement: {
+                    authorizedAgent: TEST_AGENT.address,
+                    userAddress: TEST_USER,
+                    tradingWallet: TEST_TRADING_WALLET,
+                    collateralToken: TEST_USDC,
+                    stateFile: path.join(scopeTmpDir, 'in-flight-direct-settlement-state.json'),
+                    marketsById: {
+                        'market-1': {
+                            label: 'In-flight paid settlement market',
+                            sourceUser: TEST_USER,
+                            sourceMarket: 'market-1',
+                            yesTokenId: '11',
+                            noTokenId: '22',
+                            initiatedCollateralAmountWei: '1000000',
+                        },
+                    },
+                },
+            },
+        });
+        const inFlightSettlementFetch = createMockDirectExecutionFetch({
+            marketById: {
+                'market-1': {
+                    id: 'market-1',
+                    outcomePrices: '["1","0"]',
+                    outcomes: '["Yes","No"]',
+                    closed: true,
+                    umaResolutionStatus: 'resolved',
+                    closedTime: new Date(firstSeenAtMs + 240_000).toISOString(),
+                    clobTokenIds: '["11","22"]',
+                },
+            },
+        });
+        let inFlightBalanceReadCount = 0;
+        const inFlightSettlementPublicClient = {
+            async readContract({ functionName }) {
+                if (functionName === 'balanceOf') {
+                    inFlightBalanceReadCount += 1;
+                    return 0n;
+                }
+                throw new Error(`Unsupported readContract function in test: ${functionName}`);
+            },
+            async getTransactionReceipt() {
+                throw new Error('receipt unavailable');
+            },
+        };
+        try {
+            await resetModuleStateForTest({ config: inFlightSettlementConfig });
+            const inFlightPolicy = resolvePolicy(inFlightSettlementConfig);
+            const inFlightScope = buildStateScope({
+                config: inFlightSettlementConfig,
+                policy: inFlightPolicy,
+                chainId: inFlightSettlementConfig.chainId,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                ogModule: TEST_OG_MODULE,
+            });
+            const inFlightState = createEmptyState(inFlightScope);
+            const inFlightMarket = createEmptyMarketState({
+                policy: inFlightPolicy,
+                config: inFlightSettlementConfig,
+                marketId: 'market-1',
+            });
+            inFlightMarket.revision = 1;
+            inFlightMarket.publishedRevision = 1;
+            inFlightMarket.lastPublishedSequence = 1;
+            inFlightMarket.lastPublishedCid = 'bafy-in-flight-settlement';
+            inFlightMarket.trades = [
+                {
+                    tradeId: 'in-flight-trade-1',
+                    tradeEntryKind: 'initiated',
+                    executedAtMs: firstSeenAtMs - 60_000,
+                    principalContributionWei: '1000000',
+                    collateralAmountWei: '1000000',
+                    side: 'BUY',
+                    outcome: 'YES',
+                },
+            ];
+            inFlightMarket.tradeClassifications['in-flight-trade-1'] = {
+                classification: 'reimbursable',
+                firstSeenAtMs,
+                reason: null,
+                cid: 'bafy-in-flight-classification',
+            };
+            inFlightMarket.settlement.finalSettlementValueWei = '700000';
+            inFlightMarket.settlement.settledAtMs = firstSeenAtMs + 120_000;
+            inFlightMarket.settlement.settlementKind = 'resolved';
+            inFlightMarket.settlement.depositTxHash = `0x${'e'.repeat(64)}`;
+            inFlightMarket.settlement.depositSubmittedAtMs = firstSeenAtMs + 121_000;
+            inFlightState.markets['market-1'] = inFlightMarket;
+            await setModuleStateForTest({
+                config: inFlightSettlementConfig,
+                state: inFlightState,
+            });
+
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient: inFlightSettlementPublicClient,
+                config: inFlightSettlementConfig,
+            });
+            assert.equal(inFlightBalanceReadCount, 0);
+            assert.equal(toolCalls.length, 0);
+            const inFlightStateAfter = getModuleState();
+            assert.equal(
+                inFlightStateAfter.markets['market-1'].settlement.finalSettlementValueWei,
+                '700000'
+            );
+            assert.equal(
+                inFlightStateAfter.markets['market-1'].settlement.settledAtMs,
+                firstSeenAtMs + 120_000
+            );
+            assert.equal(
+                inFlightStateAfter.markets['market-1'].settlement.depositTxHash,
+                `0x${'e'.repeat(64)}`
+            );
+            assert.equal(
+                inFlightStateAfter.markets['market-1'].settlement.depositSubmittedAtMs,
+                firstSeenAtMs + 121_000
+            );
+            assert.equal(
+                inFlightStateAfter.markets['market-1'].settlement.depositConfirmedAtMs,
+                null
+            );
+        } finally {
+            await resetModuleStateForTest({ config: inFlightSettlementConfig });
+            inFlightSettlementFetch.stop();
+        }
+
         const fractionalSettlementConfig = buildBaseConfig({
             messagePublishApiPort: 9892,
             polymarketClobEnabled: true,
@@ -1519,6 +1649,131 @@ async function run() {
         } finally {
             await resetModuleStateForTest({ config: bootstrapSettledConfig });
             bootstrapSettledFetch.stop();
+        }
+
+        const directPreflightFailureConfig = buildBaseConfig({
+            agentConfig: {
+                polymarketStakedExternalSettlement: {
+                    authorizedAgent: TEST_AGENT.address,
+                    userAddress: TEST_USER,
+                    tradingWallet: TEST_TRADING_WALLET,
+                    collateralToken: TEST_USDC,
+                    stateFile: path.join(scopeTmpDir, 'direct-preflight-failure-state.json'),
+                    marketsById: {
+                        'market-1': {
+                            label: 'Direct market missing CLOB config',
+                            sourceUser: TEST_USER,
+                            sourceMarket: 'market-1',
+                            yesTokenId: '11',
+                            noTokenId: '22',
+                            initiatedCollateralAmountWei: '1000000',
+                        },
+                        'market-2': {
+                            label: 'Bootstrap reimbursement market',
+                            userAddress: TEST_USER,
+                        },
+                    },
+                },
+            },
+        });
+        const directPreflightFailureFetch = createMockDirectExecutionFetch({
+            activity: [
+                {
+                    id: 'source-preflight-trade-1',
+                    side: 'BUY',
+                    outcome: 'YES',
+                    price: 0.4,
+                    timestamp: new Date(firstSeenAtMs - 30_000).toISOString(),
+                },
+            ],
+        });
+        try {
+            await resetModuleStateForTest({ config: directPreflightFailureConfig });
+            const directPreflightFailurePolicy = resolvePolicy(directPreflightFailureConfig);
+            const directPreflightFailureScope = buildStateScope({
+                config: directPreflightFailureConfig,
+                policy: directPreflightFailurePolicy,
+                chainId: directPreflightFailureConfig.chainId,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                ogModule: TEST_OG_MODULE,
+            });
+            const directPreflightFailureState = createEmptyState(directPreflightFailureScope);
+            directPreflightFailureState.markets['market-1'] = createEmptyMarketState({
+                policy: directPreflightFailurePolicy,
+                config: directPreflightFailureConfig,
+                marketId: 'market-1',
+            });
+            const bootstrapPreflightMarket = createEmptyMarketState({
+                policy: directPreflightFailurePolicy,
+                config: directPreflightFailureConfig,
+                marketId: 'market-2',
+            });
+            bootstrapPreflightMarket.revision = 1;
+            bootstrapPreflightMarket.publishedRevision = 1;
+            bootstrapPreflightMarket.lastPublishedSequence = 1;
+            bootstrapPreflightMarket.lastPublishedCid = 'bafy-preflight-failure-snapshot';
+            bootstrapPreflightMarket.trades = [
+                {
+                    tradeId: 'bootstrap-preflight-failure-trade-1',
+                    tradeEntryKind: 'initiated',
+                    executedAtMs: firstSeenAtMs - 60_000,
+                    principalContributionWei: '1000000',
+                    collateralAmountWei: '1000000',
+                    side: 'BUY',
+                    outcome: 'YES',
+                },
+            ];
+            bootstrapPreflightMarket.tradeClassifications[
+                'bootstrap-preflight-failure-trade-1'
+            ] = {
+                classification: 'reimbursable',
+                firstSeenAtMs,
+                reason: null,
+                cid: 'bafy-preflight-failure-classification',
+            };
+            bootstrapPreflightMarket.settlement.finalSettlementValueWei = '700000';
+            bootstrapPreflightMarket.settlement.settledAtMs = firstSeenAtMs + 120_000;
+            bootstrapPreflightMarket.settlement.settlementKind = 'resolved';
+            bootstrapPreflightMarket.settlement.depositConfirmedAtMs =
+                firstSeenAtMs + 121_000;
+            bootstrapPreflightMarket.reimbursement.requestId =
+                'bootstrap-preflight-failure-reimbursement-1';
+            bootstrapPreflightMarket.reimbursement.requestDispatchAtMs =
+                firstSeenAtMs + 122_000;
+            bootstrapPreflightMarket.reimbursement.pendingMessage = {
+                chainId: TEST_CHAIN_ID,
+                requestId: 'bootstrap-preflight-failure-reimbursement-1',
+                commitmentAddresses: [TEST_COMMITMENT_SAFE, TEST_OG_MODULE],
+                agentAddress: TEST_AGENT.address,
+                kind: POLYMARKET_REIMBURSEMENT_REQUEST_KIND,
+                payload: {
+                    stream: bootstrapPreflightMarket.stream,
+                    snapshotCid: 'bafy-preflight-failure-snapshot',
+                },
+            };
+            directPreflightFailureState.markets['market-2'] = bootstrapPreflightMarket;
+            await setModuleStateForTest({
+                config: directPreflightFailureConfig,
+                state: directPreflightFailureState,
+            });
+
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: directPreflightFailureConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'publish_signed_message');
+            const directPreflightFailureStateAfter = getModuleState();
+            assert.match(
+                directPreflightFailureStateAfter.markets['market-1'].execution.orderError,
+                /polymarketClobEnabled=true is required before direct Polymarket execution/i
+            );
+        } finally {
+            await resetModuleStateForTest({ config: directPreflightFailureConfig });
+            directPreflightFailureFetch.stop();
         }
         const sourceFetchFailureConfig = buildBaseConfig({
             agentConfig: {
