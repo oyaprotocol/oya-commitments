@@ -129,6 +129,7 @@ function hasDirectTradingConfig(marketConfig) {
 function isDirectTradingReady(marketConfig) {
     return Boolean(
         marketConfig?.sourceUser &&
+            marketConfig?.sourceMarket &&
             marketConfig?.yesTokenId &&
             marketConfig?.noTokenId &&
             marketConfig?.initiatedCollateralAmountWei &&
@@ -190,7 +191,7 @@ function resolvePolicy(config = {}) {
         .map((market) => market.marketId);
     if (incompleteDirectMarkets.length > 0) {
         errors.push(
-            `Direct Polymarket execution requires sourceUser, yesTokenId, noTokenId, and initiatedCollateralAmountWei for markets: ${incompleteDirectMarkets.join(', ')}.`
+            `Direct Polymarket execution requires sourceUser, sourceMarket, yesTokenId, noTokenId, and initiatedCollateralAmountWei for markets: ${incompleteDirectMarkets.join(', ')}.`
         );
     }
 

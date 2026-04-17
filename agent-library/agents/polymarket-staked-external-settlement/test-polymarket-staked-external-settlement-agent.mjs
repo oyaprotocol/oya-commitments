@@ -347,6 +347,37 @@ async function run() {
         perMarketOnlyPolicy.marketsById['market-1'].userAddress,
         TEST_USER.toLowerCase()
     );
+    const incompleteDirectPolicy = resolvePolicy({
+        chainId: TEST_CHAIN_ID,
+        commitmentSafe: TEST_COMMITMENT_SAFE,
+        ogModule: TEST_OG_MODULE,
+        watchAssets: [TEST_USDC],
+        agentConfig: {
+            polymarketStakedExternalSettlement: {
+                authorizedAgent: TEST_AGENT.address,
+                tradingWallet: TEST_TRADING_WALLET,
+                collateralToken: TEST_USDC,
+                marketsById: {
+                    'market-1': {
+                        label: 'Incomplete direct market',
+                        userAddress: TEST_USER,
+                        sourceUser: TEST_USER,
+                        yesTokenId: '11',
+                        noTokenId: '22',
+                        initiatedCollateralAmountWei: '1000000',
+                    },
+                },
+            },
+        },
+    });
+    assert.equal(incompleteDirectPolicy.ready, false);
+    assert.ok(
+        incompleteDirectPolicy.errors.some((error) =>
+            /sourceUser, sourceMarket, yesTokenId, noTokenId, and initiatedCollateralAmountWei/.test(
+                error
+            )
+        )
+    );
     const scopeTmpDir = await mkdtemp(path.join(tmpdir(), 'oya-poly-scope-'));
     const scopeStateFile = path.join(scopeTmpDir, 'module-state.json');
     const scopeBaseModuleConfig = {
