@@ -142,6 +142,21 @@ async function resetModuleStateForTest({ config } = {}) {
     }
 }
 
+async function setModuleStateForTest({ config, state }) {
+    const policy = resolvePolicy(config ?? {});
+    await configureStateContext({
+        config: config ?? {},
+        policy,
+        commitmentSafe: config?.commitmentSafe ?? '0x1111111111111111111111111111111111111111',
+        ogModule: config?.ogModule ?? '0x2222222222222222222222222222222222222222',
+    });
+    runtimeState = cloneJson(state);
+    runtimeStateHydrated = true;
+    if (runtimeStatePath) {
+        await writePersistedState(runtimeStatePath, runtimeState);
+    }
+}
+
 function getSystemPrompt({ commitmentText }) {
     return [
         'You are a deterministic Polymarket external-settlement agent.',
@@ -473,6 +488,7 @@ export {
     onProposalEvents,
     onToolOutput,
     resetModuleStateForTest,
+    setModuleStateForTest,
     resetNodeStateForTest,
     validatePublishedMessage,
 };

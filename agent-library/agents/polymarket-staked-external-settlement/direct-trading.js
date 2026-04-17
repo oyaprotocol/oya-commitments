@@ -865,7 +865,6 @@ function applyDirectOrderToolOutput(state, parsedOutput) {
     }
 
     if (status === 'error' || status === 'skipped') {
-        execution.orderDispatchAtMs = Date.now();
         execution.orderError =
             normalizeOptionalString(parsedOutput?.message) ??
             normalizeOptionalString(parsedOutput?.reason) ??

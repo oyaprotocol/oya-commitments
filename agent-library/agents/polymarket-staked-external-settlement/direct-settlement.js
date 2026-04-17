@@ -269,6 +269,9 @@ async function refreshObservedSettlements({
         if (!Array.isArray(market.trades) || market.trades.length === 0) {
             continue;
         }
+        if (Number.isInteger(market.settlement?.depositConfirmedAtMs)) {
+            continue;
+        }
         if (
             market.settlement?.observationSource === RESOLVED_SETTLEMENT_SOURCE &&
             Number.isInteger(market.settlement?.settledAtMs)

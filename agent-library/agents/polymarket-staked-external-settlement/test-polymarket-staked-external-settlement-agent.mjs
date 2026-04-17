@@ -11,6 +11,7 @@ import {
     getModuleState,
     onToolOutput,
     resetModuleStateForTest,
+    setModuleStateForTest,
     validatePublishedMessage,
 } from './agent.js';
 import {
@@ -761,6 +762,58 @@ async function run() {
                 maker: TEST_TRADING_WALLET,
                 chainId: TEST_CHAIN_ID,
             });
+
+            await onToolOutput({
+                name: 'polymarket_clob_build_sign_and_place_order',
+                parsedOutput: {
+                    status: 'error',
+                    message: 'bad creds',
+                },
+                config: staleDirectOrderConfig,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+            });
+            staleDirectState = getModuleState();
+            assert.equal(
+                staleDirectState.markets['market-1'].execution.orderDispatchAtMs,
+                firstSeenAtMs + 40_010
+            );
+            assert.equal(staleDirectState.markets['market-1'].execution.orderError, 'bad creds');
+
+            Date.now = () => firstSeenAtMs + 40_011;
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: staleDirectOrderConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'polymarket_clob_build_sign_and_place_order');
+            staleDirectState = getModuleState();
+            assert.equal(
+                staleDirectState.markets['market-1'].execution.orderDispatchAtMs,
+                firstSeenAtMs + 40_010
+            );
+
+            Date.now = () => firstSeenAtMs + 40_013;
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: staleDirectOrderConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'polymarket_clob_build_sign_and_place_order');
+            staleDirectState = getModuleState();
+            assert.equal(
+                staleDirectState.markets['market-1'].execution.orderDispatchAtMs,
+                firstSeenAtMs + 40_013
+            );
+            assert.equal(
+                staleDirectState.markets['market-1'].execution.currentSourceTradeId,
+                'source-stale-order-1'
+            );
         } finally {
             Date.now = originalStaleDirectOrderDateNow;
             staleDirectOrderFetch.stop();
@@ -1061,6 +1114,133 @@ async function run() {
         } finally {
             directSettlementMockNode.stop();
             directSettlementFetch.stop();
+        }
+
+        const preservedDepositSettlementConfig = buildBaseConfig({
+            agentConfig: {
+                polymarketStakedExternalSettlement: {
+                    authorizedAgent: TEST_AGENT.address,
+                    userAddress: TEST_USER,
+                    tradingWallet: TEST_TRADING_WALLET,
+                    collateralToken: TEST_USDC,
+                    stateFile: path.join(scopeTmpDir, 'preserved-direct-settlement-state.json'),
+                    marketsById: {
+                        'market-1': {
+                            label: 'Preserved paid settlement market',
+                            sourceUser: TEST_USER,
+                            sourceMarket: 'market-1',
+                            yesTokenId: '11',
+                            noTokenId: '22',
+                            initiatedCollateralAmountWei: '1000000',
+                        },
+                    },
+                },
+            },
+        });
+        const preservedDepositSettlementFetch = createMockDirectExecutionFetch({
+            marketById: {
+                'market-1': {
+                    id: 'market-1',
+                    outcomePrices: '["1","0"]',
+                    outcomes: '["Yes","No"]',
+                    closed: true,
+                    umaResolutionStatus: 'resolved',
+                    closedTime: new Date(firstSeenAtMs + 180_000).toISOString(),
+                    clobTokenIds: '["11","22"]',
+                },
+            },
+        });
+        const preservedDepositSettlementPublicClient = {
+            async readContract({ functionName, args }) {
+                if (functionName === 'balanceOf') {
+                    assert.equal(args?.[0], TEST_TRADING_WALLET);
+                    return BigInt(args?.[1] ?? 0n) === 11n ? 2_500_000n : 0n;
+                }
+                throw new Error(`Unsupported readContract function in test: ${functionName}`);
+            },
+            async getTransactionReceipt({ hash }) {
+                return {
+                    transactionHash: hash,
+                    status: 1n,
+                    logs: [],
+                };
+            },
+        };
+        try {
+            await resetModuleStateForTest({ config: preservedDepositSettlementConfig });
+            const preservedPolicy = resolvePolicy(preservedDepositSettlementConfig);
+            const preservedScope = buildStateScope({
+                config: preservedDepositSettlementConfig,
+                policy: preservedPolicy,
+                chainId: preservedDepositSettlementConfig.chainId,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                ogModule: TEST_OG_MODULE,
+            });
+            const preservedState = createEmptyState(preservedScope);
+            const preservedMarket = createEmptyMarketState({
+                policy: preservedPolicy,
+                config: preservedDepositSettlementConfig,
+                marketId: 'market-1',
+            });
+            preservedMarket.revision = 1;
+            preservedMarket.publishedRevision = 1;
+            preservedMarket.lastPublishedSequence = 1;
+            preservedMarket.lastPublishedCid = 'bafy-preserved-paid-settlement';
+            preservedMarket.trades = [
+                {
+                    tradeId: 'preserved-paid-trade-1',
+                    tradeEntryKind: 'initiated',
+                    executedAtMs: firstSeenAtMs - 60_000,
+                    principalContributionWei: '1000000',
+                    collateralAmountWei: '1000000',
+                    side: 'BUY',
+                    outcome: 'YES',
+                },
+            ];
+            preservedMarket.tradeClassifications['preserved-paid-trade-1'] = {
+                classification: 'reimbursable',
+                firstSeenAtMs,
+                reason: null,
+                cid: 'bafy-preserved-paid-classification',
+            };
+            preservedMarket.settlement.finalSettlementValueWei = '700000';
+            preservedMarket.settlement.settledAtMs = firstSeenAtMs + 120_000;
+            preservedMarket.settlement.settlementKind = 'resolved';
+            preservedMarket.settlement.depositTxHash = `0x${'d'.repeat(64)}`;
+            preservedMarket.settlement.depositConfirmedAtMs = firstSeenAtMs + 121_000;
+            preservedState.markets['market-1'] = preservedMarket;
+            await setModuleStateForTest({
+                config: preservedDepositSettlementConfig,
+                state: preservedState,
+            });
+
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient: preservedDepositSettlementPublicClient,
+                config: preservedDepositSettlementConfig,
+            });
+            const preservedStateAfter = getModuleState();
+            assert.equal(
+                preservedStateAfter.markets['market-1'].settlement.finalSettlementValueWei,
+                '700000'
+            );
+            assert.equal(
+                preservedStateAfter.markets['market-1'].settlement.settledAtMs,
+                firstSeenAtMs + 120_000
+            );
+            assert.equal(
+                preservedStateAfter.markets['market-1'].settlement.depositTxHash,
+                `0x${'d'.repeat(64)}`
+            );
+            assert.equal(
+                preservedStateAfter.markets['market-1'].settlement.depositConfirmedAtMs,
+                firstSeenAtMs + 121_000
+            );
+        } finally {
+            await resetModuleStateForTest({ config: preservedDepositSettlementConfig });
+            preservedDepositSettlementFetch.stop();
         }
 
         const fractionalSettlementConfig = buildBaseConfig({
