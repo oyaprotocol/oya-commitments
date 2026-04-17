@@ -9,6 +9,7 @@ const DEFAULT_POLYMARKET_CTF_BY_CHAIN_ID = Object.freeze({
 const RESOLVED_SETTLEMENT_SOURCE = 'polymarket_resolved_state';
 const REQUEST_TIMEOUT_MS = 10_000;
 const FLOAT_TOLERANCE = 1e-9;
+const EXPLICIT_RESOLVED_GAMMA_STATUSES = new Set(['resolved', 'finalized', 'settled']);
 
 function normalizeNonEmptyString(value) {
     if (typeof value !== 'string') {
@@ -71,6 +72,21 @@ function normalizeOutcome(value) {
 
 function approximatelyEqual(left, right) {
     return Math.abs(Number(left) - Number(right)) <= FLOAT_TOLERANCE;
+}
+
+function isExplicitlyResolvedMarket(marketPayload) {
+    const candidates = [
+        marketPayload?.umaResolutionStatus,
+        marketPayload?.resolutionStatus,
+        marketPayload?.marketStatus,
+    ];
+    for (const value of candidates) {
+        const normalized = normalizeNonEmptyString(value)?.toLowerCase();
+        if (normalized && EXPLICIT_RESOLVED_GAMMA_STATUSES.has(normalized)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 function resolveGammaMarketRequest(marketConfig, market) {
@@ -262,6 +278,9 @@ async function refreshObservedSettlements({
                 market,
             });
         } catch {
+            continue;
+        }
+        if (!isExplicitlyResolvedMarket(marketPayload)) {
             continue;
         }
         const payout = parseResolutionPayout(marketPayload);

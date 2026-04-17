@@ -500,6 +500,99 @@ async function run() {
             directExecutionFetch.stop();
         }
 
+        const staleDirectOrderConfig = buildBaseConfig({
+            polymarketClobEnabled: true,
+            polymarketClobApiKey: 'clob-key',
+            polymarketClobApiSecret: 'clob-secret',
+            polymarketClobApiPassphrase: 'clob-passphrase',
+            agentConfig: {
+                polymarketStakedExternalSettlement: {
+                    authorizedAgent: TEST_AGENT.address,
+                    userAddress: TEST_USER,
+                    tradingWallet: TEST_TRADING_WALLET,
+                    collateralToken: TEST_USDC,
+                    dispatchGraceMs: 1,
+                    marketsById: {
+                        'market-1': {
+                            label: 'Stale direct order market',
+                            sourceUser: TEST_USER,
+                            sourceMarket: 'market-1',
+                            yesTokenId: '11',
+                            noTokenId: '22',
+                            initiatedCollateralAmountWei: '1000000',
+                        },
+                    },
+                },
+            },
+        });
+        const staleDirectOrderFetch = createMockDirectExecutionFetch({
+            activity: [
+                {
+                    id: 'source-stale-order-1',
+                    side: 'BUY',
+                    outcome: 'YES',
+                    price: 0.4,
+                    timestamp: new Date(firstSeenAtMs - 15_000).toISOString(),
+                },
+            ],
+        });
+        const originalStaleDirectOrderDateNow = Date.now;
+        try {
+            await resetModuleStateForTest({ config: staleDirectOrderConfig });
+            Date.now = () => firstSeenAtMs + 40_000;
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: staleDirectOrderConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'polymarket_clob_build_sign_and_place_order');
+
+            let staleDirectState = getModuleState();
+            assert.equal(
+                staleDirectState.markets['market-1'].execution.currentSourceTradeId,
+                'source-stale-order-1'
+            );
+            assert.equal(
+                staleDirectState.markets['market-1'].execution.orderDispatchAtMs,
+                firstSeenAtMs + 40_000
+            );
+
+            Date.now = () => firstSeenAtMs + 40_010;
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: staleDirectOrderConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'polymarket_clob_build_sign_and_place_order');
+
+            staleDirectState = getModuleState();
+            assert.equal(
+                staleDirectState.markets['market-1'].execution.currentSourceTradeId,
+                'source-stale-order-1'
+            );
+            assert.equal(
+                staleDirectState.markets['market-1'].execution.orderDispatchAtMs,
+                firstSeenAtMs + 40_010
+            );
+            assert.deepEqual(staleDirectState.markets['market-1'].execution.pendingOrderArgs, {
+                side: 'BUY',
+                tokenId: '11',
+                orderType: 'FOK',
+                makerAmount: '1000000',
+                takerAmount: '2500000',
+                chainId: TEST_CHAIN_ID,
+            });
+        } finally {
+            Date.now = originalStaleDirectOrderDateNow;
+            staleDirectOrderFetch.stop();
+        }
+
         const directSettlementConfig = buildBaseConfig({
             messagePublishApiPort: 9892,
             polymarketClobEnabled: true,
@@ -558,7 +651,7 @@ async function run() {
                 'market-1': [
                     {
                         id: 'market-1',
-                        outcomePrices: '["0.4","0.6"]',
+                        outcomePrices: '["0.5","0.5"]',
                         outcomes: '["Yes","No"]',
                         closed: false,
                         umaResolutionStatus: 'pending',
@@ -633,6 +726,15 @@ async function run() {
             });
             assert.equal(toolCalls.length, 1);
             assert.equal(toolCalls[0].name, 'publish_signed_message');
+            const firstDirectSettlementArgs = JSON.parse(toolCalls[0].arguments);
+            assert.equal(
+                firstDirectSettlementArgs.message.payload.summary.finalSettlementValueWei,
+                null
+            );
+            assert.equal(
+                firstDirectSettlementArgs.message.payload.summary.settlementKind,
+                null
+            );
             const firstDirectSettlementPublication = await runPublishCall({
                 toolCall: toolCalls[0],
                 publicClient: directSettlementPublicClient,

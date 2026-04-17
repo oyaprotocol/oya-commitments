@@ -790,6 +790,18 @@ function clearStaleDispatches(state, dispatchGraceMs, nowMs = Date.now()) {
             : null;
         if (executionOrderDispatchAge !== null && executionOrderDispatchAge > dispatchGraceMs) {
             market.execution.orderDispatchAtMs = null;
+            market.execution.pendingOrderArgs = null;
+            market.execution.orderId = null;
+            market.execution.orderStatus = null;
+            market.execution.orderSubmittedAtMs = null;
+            market.execution.orderStatusRefreshFailedAtMs = null;
+            market.execution.tokenId = null;
+            market.execution.currentSourceTradeId = null;
+            market.execution.currentSourceTradeExecutedAtMs = null;
+            market.execution.currentSourceTradePrice = null;
+            market.execution.currentSourceTradeOutcome = null;
+            market.execution.currentSourceTradeSide = null;
+            market.execution.currentSourceTradeDescription = null;
             market.execution.orderError =
                 'Polymarket order dispatch expired before tool output arrived; retrying is allowed.';
             changed = true;
