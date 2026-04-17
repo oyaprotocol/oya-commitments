@@ -102,8 +102,30 @@ function parseActivityEntry(entry) {
     };
 }
 
-function getClobAuthAddress({ config, agentAddress }) {
-    return normalizeAddressOrNull(config?.polymarketClobAddress) ?? normalizeAddressOrNull(agentAddress);
+function getClobAuthAddress({ config, policy, agentAddress }) {
+    return (
+        normalizeAddressOrNull(config?.polymarketClobAddress) ??
+        normalizeAddressOrNull(policy?.tradingWallet) ??
+        normalizeAddressOrNull(agentAddress)
+    );
+}
+
+function ensureClobAuthAddressFallback({ config, policy, agentAddress }) {
+    const effectiveClobAuthAddress = getClobAuthAddress({
+        config,
+        policy,
+        agentAddress,
+    });
+    if (
+        effectiveClobAuthAddress &&
+        config &&
+        typeof config === 'object' &&
+        !Array.isArray(config) &&
+        !normalizeAddressOrNull(config.polymarketClobAddress)
+    ) {
+        config.polymarketClobAddress = effectiveClobAuthAddress;
+    }
+    return effectiveClobAuthAddress;
 }
 
 function getDirectTradingPreflightError(config) {
@@ -573,6 +595,7 @@ async function findOrCreateDirectOrderToolCall({
             continue;
         }
         if (market.execution?.orderDispatchAtMs && market.execution?.pendingOrderArgs) {
+            ensureClobAuthAddressFallback({ config, policy, agentAddress });
             return {
                 changed: false,
                 toolCall: buildDirectOrderToolCall(market, config),
@@ -644,6 +667,7 @@ async function findOrCreateDirectOrderToolCall({
             orderType: 'FOK',
             makerAmount,
             takerAmount,
+            maker: ensureClobAuthAddressFallback({ config, policy, agentAddress }),
             chainId: Number(config.chainId),
         };
         market.execution.orderDispatchAtMs = Date.now();
@@ -682,7 +706,7 @@ async function refreshDirectExecutionState({
     agentAddress,
 }) {
     let changed = false;
-    const clobAuthAddress = getClobAuthAddress({ config, agentAddress });
+    const clobAuthAddress = getClobAuthAddress({ config, policy, agentAddress });
 
     for (const market of Object.values(state.markets ?? {})) {
         const marketConfig = policy.marketsById?.[market.stream.marketId];

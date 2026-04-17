@@ -200,9 +200,10 @@ function resolveCtfContract({ policy, config }) {
     return normalizeAddressOrNull(fallback);
 }
 
-function resolveSettlementHolderAddress({ config, agentAddress }) {
+function resolveSettlementHolderAddress({ policy, config, agentAddress }) {
     return (
         normalizeAddressOrNull(config?.polymarketClobAddress) ??
+        normalizeAddressOrNull(policy?.tradingWallet) ??
         normalizeAddressOrNull(agentAddress)
     );
 }
@@ -250,7 +251,11 @@ async function refreshObservedSettlements({
     }
 
     const ctfContract = resolveCtfContract({ policy, config });
-    const tokenHolderAddress = resolveSettlementHolderAddress({ config, agentAddress });
+    const tokenHolderAddress = resolveSettlementHolderAddress({
+        policy,
+        config,
+        agentAddress,
+    });
     if (!ctfContract || !tokenHolderAddress) {
         return false;
     }

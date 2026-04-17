@@ -492,6 +492,8 @@ async function run() {
             assert.equal(directOrderArgs.tokenId, '11');
             assert.equal(directOrderArgs.makerAmount, '1000000');
             assert.equal(directOrderArgs.takerAmount, '2500000');
+            assert.equal(directOrderArgs.maker, TEST_TRADING_WALLET);
+            assert.equal(directExecutionConfig.polymarketClobAddress, TEST_TRADING_WALLET);
 
             await onToolOutput({
                 name: 'polymarket_clob_build_sign_and_place_order',
@@ -756,6 +758,7 @@ async function run() {
                 orderType: 'FOK',
                 makerAmount: '1000000',
                 takerAmount: '2500000',
+                maker: TEST_TRADING_WALLET,
                 chainId: TEST_CHAIN_ID,
             });
         } finally {
@@ -842,6 +845,7 @@ async function run() {
                 orderType: 'FOK',
                 makerAmount: '1000000',
                 takerAmount: '2500000',
+                maker: TEST_TRADING_WALLET,
                 chainId: TEST_CHAIN_ID,
             });
         } finally {
@@ -876,6 +880,7 @@ async function run() {
         const directSettlementPublicClient = {
             async readContract({ functionName, args }) {
                 if (functionName === 'balanceOf') {
+                    assert.equal(args?.[0], TEST_TRADING_WALLET);
                     const tokenId = BigInt(args?.[1] ?? 0n).toString();
                     if (tokenId === '11') {
                         return 2_500_000n;
