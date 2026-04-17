@@ -129,7 +129,18 @@ function ensureClobAuthAddressFallback({ config, policy, agentAddress }) {
     return effectiveClobAuthAddress;
 }
 
-function getDirectTradingPreflightError(config) {
+function resolveConfiguredSignatureType(config) {
+    if (
+        config?.polymarketClobSignatureType === undefined ||
+        config?.polymarketClobSignatureType === null
+    ) {
+        return null;
+    }
+    const normalized = String(config.polymarketClobSignatureType).trim();
+    return normalized ? normalized : null;
+}
+
+function getDirectTradingPreflightError({ config, clobAuthAddress, agentAddress }) {
     if (!config?.polymarketClobEnabled) {
         return 'polymarketClobEnabled=true is required before direct Polymarket execution.';
     }
@@ -139,6 +150,16 @@ function getDirectTradingPreflightError(config) {
         !config?.polymarketClobApiPassphrase
     ) {
         return 'Missing CLOB credentials. Set POLYMARKET_CLOB_API_KEY, POLYMARKET_CLOB_API_SECRET, and POLYMARKET_CLOB_API_PASSPHRASE.';
+    }
+    const runtimeSignerAddress = normalizeAddressOrNull(agentAddress);
+    const effectiveClobAuthAddress = normalizeAddressOrNull(clobAuthAddress);
+    if (
+        runtimeSignerAddress &&
+        effectiveClobAuthAddress &&
+        effectiveClobAuthAddress !== runtimeSignerAddress &&
+        !resolveConfiguredSignatureType(config)
+    ) {
+        return 'polymarketClobSignatureType is required when the trading wallet differs from the runtime signer; set it to POLY_PROXY or POLY_GNOSIS_SAFE for the configured trading wallet.';
     }
     return null;
 }
@@ -571,7 +592,16 @@ async function findOrCreateDirectOrderToolCall({
     config,
     agentAddress,
 }) {
-    const preflightError = getDirectTradingPreflightError(config);
+    const effectiveClobAuthAddress = ensureClobAuthAddressFallback({
+        config,
+        policy,
+        agentAddress,
+    });
+    const preflightError = getDirectTradingPreflightError({
+        config,
+        clobAuthAddress: effectiveClobAuthAddress,
+        agentAddress,
+    });
     const marketIds = Object.keys(policy.marketsById ?? {}).sort((left, right) =>
         left.localeCompare(right)
     );
@@ -676,7 +706,8 @@ async function findOrCreateDirectOrderToolCall({
             orderType: 'FOK',
             makerAmount,
             takerAmount,
-            maker: ensureClobAuthAddressFallback({ config, policy, agentAddress }),
+            maker: effectiveClobAuthAddress,
+            signatureType: resolveConfiguredSignatureType(config),
             chainId: Number(config.chainId),
         };
         market.execution.orderDispatchAtMs = Date.now();

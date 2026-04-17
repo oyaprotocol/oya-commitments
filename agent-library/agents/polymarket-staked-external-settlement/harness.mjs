@@ -91,6 +91,7 @@ function buildBaseConfig(tempDir) {
         polymarketClobApiKey: 'clob-key',
         polymarketClobApiSecret: 'clob-secret',
         polymarketClobApiPassphrase: 'clob-passphrase',
+        polymarketClobSignatureType: 'POLY_PROXY',
         watchAssets: [TEST_USDC],
         ipfsApiUrl: 'http://ipfs.mock',
         agentConfig: {

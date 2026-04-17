@@ -60,6 +60,7 @@ function buildBaseConfig(overrides = {}) {
         messagePublishApiSignatureMaxAgeSeconds: 300,
         messagePublishApiMaxBodyBytes: 65_536,
         ipfsApiUrl: 'http://ipfs.mock',
+        polymarketClobSignatureType: 'POLY_PROXY',
         ipfsHeaders: {
             Authorization: 'Bearer ipfs-test-token',
         },
@@ -494,6 +495,7 @@ async function run() {
             assert.equal(directOrderArgs.makerAmount, '1000000');
             assert.equal(directOrderArgs.takerAmount, '2500000');
             assert.equal(directOrderArgs.maker, TEST_TRADING_WALLET);
+            assert.equal(directOrderArgs.signatureType, 'POLY_PROXY');
             assert.equal(directExecutionConfig.polymarketClobAddress, TEST_TRADING_WALLET);
 
             await onToolOutput({
@@ -861,6 +863,7 @@ async function run() {
                 makerAmount: '1000000',
                 takerAmount: '2500000',
                 maker: TEST_TRADING_WALLET,
+                signatureType: 'POLY_PROXY',
                 chainId: TEST_CHAIN_ID,
             });
 
@@ -1000,6 +1003,7 @@ async function run() {
                 makerAmount: '1000000',
                 takerAmount: '2500000',
                 maker: TEST_TRADING_WALLET,
+                signatureType: 'POLY_PROXY',
                 chainId: TEST_CHAIN_ID,
             });
         } finally {
@@ -2001,6 +2005,140 @@ async function run() {
         } finally {
             await resetModuleStateForTest({ config: directPreflightFailureConfig });
             directPreflightFailureFetch.stop();
+        }
+
+        const directSignatureTypeFailureConfig = buildBaseConfig({
+            polymarketClobEnabled: true,
+            polymarketClobApiKey: 'clob-key',
+            polymarketClobApiSecret: 'clob-secret',
+            polymarketClobApiPassphrase: 'clob-passphrase',
+            polymarketClobSignatureType: undefined,
+            agentConfig: {
+                polymarketStakedExternalSettlement: {
+                    authorizedAgent: TEST_AGENT.address,
+                    userAddress: TEST_USER,
+                    tradingWallet: TEST_TRADING_WALLET,
+                    collateralToken: TEST_USDC,
+                    stateFile: path.join(scopeTmpDir, 'direct-signature-type-failure-state.json'),
+                    marketsById: {
+                        'market-1': {
+                            label: 'Direct market missing non-EOA signature type',
+                            sourceUser: TEST_USER,
+                            sourceMarket: 'market-1',
+                            yesTokenId: '11',
+                            noTokenId: '22',
+                            initiatedCollateralAmountWei: '1000000',
+                        },
+                        'market-2': {
+                            label: 'Bootstrap reimbursement market',
+                            userAddress: TEST_USER,
+                        },
+                    },
+                },
+            },
+        });
+        const directSignatureTypeFailureFetch = createMockDirectExecutionFetch({
+            activity: [
+                {
+                    id: 'source-signature-type-trade-1',
+                    side: 'BUY',
+                    outcome: 'YES',
+                    price: 0.4,
+                    timestamp: new Date(firstSeenAtMs - 30_000).toISOString(),
+                },
+            ],
+        });
+        try {
+            await resetModuleStateForTest({ config: directSignatureTypeFailureConfig });
+            const directSignatureTypeFailurePolicy = resolvePolicy(
+                directSignatureTypeFailureConfig
+            );
+            const directSignatureTypeFailureScope = buildStateScope({
+                config: directSignatureTypeFailureConfig,
+                policy: directSignatureTypeFailurePolicy,
+                chainId: directSignatureTypeFailureConfig.chainId,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                ogModule: TEST_OG_MODULE,
+            });
+            const directSignatureTypeFailureState = createEmptyState(
+                directSignatureTypeFailureScope
+            );
+            directSignatureTypeFailureState.markets['market-1'] = createEmptyMarketState({
+                policy: directSignatureTypeFailurePolicy,
+                config: directSignatureTypeFailureConfig,
+                marketId: 'market-1',
+            });
+            const bootstrapSignatureTypeMarket = createEmptyMarketState({
+                policy: directSignatureTypeFailurePolicy,
+                config: directSignatureTypeFailureConfig,
+                marketId: 'market-2',
+            });
+            bootstrapSignatureTypeMarket.revision = 1;
+            bootstrapSignatureTypeMarket.publishedRevision = 1;
+            bootstrapSignatureTypeMarket.lastPublishedSequence = 1;
+            bootstrapSignatureTypeMarket.lastPublishedCid = 'bafy-signature-type-failure-snapshot';
+            bootstrapSignatureTypeMarket.trades = [
+                {
+                    tradeId: 'bootstrap-signature-type-failure-trade-1',
+                    tradeEntryKind: 'initiated',
+                    executedAtMs: firstSeenAtMs - 60_000,
+                    principalContributionWei: '1000000',
+                    collateralAmountWei: '1000000',
+                    side: 'BUY',
+                    outcome: 'YES',
+                },
+            ];
+            bootstrapSignatureTypeMarket.tradeClassifications[
+                'bootstrap-signature-type-failure-trade-1'
+            ] = {
+                classification: 'reimbursable',
+                firstSeenAtMs,
+                reason: null,
+                cid: 'bafy-signature-type-failure-classification',
+            };
+            bootstrapSignatureTypeMarket.settlement.finalSettlementValueWei = '700000';
+            bootstrapSignatureTypeMarket.settlement.settledAtMs = firstSeenAtMs + 120_000;
+            bootstrapSignatureTypeMarket.settlement.settlementKind = 'resolved';
+            bootstrapSignatureTypeMarket.settlement.depositConfirmedAtMs =
+                firstSeenAtMs + 121_000;
+            bootstrapSignatureTypeMarket.reimbursement.requestId =
+                'bootstrap-signature-type-failure-reimbursement-1';
+            bootstrapSignatureTypeMarket.reimbursement.requestDispatchAtMs =
+                firstSeenAtMs + 122_000;
+            bootstrapSignatureTypeMarket.reimbursement.pendingMessage = {
+                chainId: TEST_CHAIN_ID,
+                requestId: 'bootstrap-signature-type-failure-reimbursement-1',
+                commitmentAddresses: [TEST_COMMITMENT_SAFE, TEST_OG_MODULE],
+                agentAddress: TEST_AGENT.address,
+                kind: POLYMARKET_REIMBURSEMENT_REQUEST_KIND,
+                payload: {
+                    stream: bootstrapSignatureTypeMarket.stream,
+                    snapshotCid: 'bafy-signature-type-failure-snapshot',
+                },
+            };
+            directSignatureTypeFailureState.markets['market-2'] = bootstrapSignatureTypeMarket;
+            await setModuleStateForTest({
+                config: directSignatureTypeFailureConfig,
+                state: directSignatureTypeFailureState,
+            });
+
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: directSignatureTypeFailureConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'publish_signed_message');
+            const directSignatureTypeFailureStateAfter = getModuleState();
+            assert.match(
+                directSignatureTypeFailureStateAfter.markets['market-1'].execution.orderError,
+                /polymarketClobSignatureType is required when the trading wallet differs from the runtime signer/i
+            );
+        } finally {
+            await resetModuleStateForTest({ config: directSignatureTypeFailureConfig });
+            directSignatureTypeFailureFetch.stop();
         }
         const sourceFetchFailureConfig = buildBaseConfig({
             agentConfig: {
