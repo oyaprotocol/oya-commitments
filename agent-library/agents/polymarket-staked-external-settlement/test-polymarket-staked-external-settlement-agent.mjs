@@ -593,6 +593,91 @@ async function run() {
             staleDirectOrderFetch.stop();
         }
 
+        const legacyDirectOrderConfig = buildBaseConfig({
+            polymarketClobEnabled: true,
+            polymarketClobApiKey: 'clob-key',
+            polymarketClobApiSecret: 'clob-secret',
+            polymarketClobApiPassphrase: 'clob-passphrase',
+            agentConfig: {
+                polymarketStakedExternalSettlement: {
+                    authorizedAgent: TEST_AGENT.address,
+                    userAddress: TEST_USER,
+                    tradingWallet: TEST_TRADING_WALLET,
+                    collateralToken: TEST_USDC,
+                    stateFile: path.join(scopeTmpDir, 'legacy-direct-order-state.json'),
+                    marketsById: {
+                        'market-1': {
+                            label: 'Legacy direct order market',
+                            sourceUser: TEST_USER,
+                            sourceMarket: 'market-1',
+                            yesTokenId: '11',
+                            noTokenId: '22',
+                            initiatedCollateralAmountWei: '1000000',
+                        },
+                    },
+                },
+            },
+        });
+        const legacyDirectOrderFetch = createMockDirectExecutionFetch({
+            activity: [
+                {
+                    id: 'legacy-source-trade-1',
+                    side: 'BUY',
+                    outcome: 'YES',
+                    price: 0.4,
+                    timestamp: new Date(firstSeenAtMs - 20_000).toISOString(),
+                },
+            ],
+        });
+        try {
+            await resetModuleStateForTest({ config: legacyDirectOrderConfig });
+            const legacyDirectOrderPolicy = resolvePolicy(legacyDirectOrderConfig);
+            const legacyDirectOrderScope = buildStateScope({
+                config: legacyDirectOrderConfig,
+                policy: legacyDirectOrderPolicy,
+                chainId: legacyDirectOrderConfig.chainId,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                ogModule: TEST_OG_MODULE,
+            });
+            const legacyPersistedState = createEmptyState(legacyDirectOrderScope);
+            const legacyMarketState = createEmptyMarketState({
+                policy: legacyDirectOrderPolicy,
+                config: legacyDirectOrderConfig,
+                marketId: 'market-1',
+            });
+            delete legacyMarketState.execution;
+            legacyPersistedState.markets['market-1'] = legacyMarketState;
+            await writePersistedState(
+                legacyDirectOrderConfig.agentConfig.polymarketStakedExternalSettlement.stateFile,
+                legacyPersistedState
+            );
+
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: legacyDirectOrderConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'polymarket_clob_build_sign_and_place_order');
+            const legacyState = getModuleState();
+            assert.equal(
+                legacyState.markets['market-1'].execution.currentSourceTradeId,
+                'legacy-source-trade-1'
+            );
+            assert.deepEqual(legacyState.markets['market-1'].execution.pendingOrderArgs, {
+                side: 'BUY',
+                tokenId: '11',
+                orderType: 'FOK',
+                makerAmount: '1000000',
+                takerAmount: '2500000',
+                chainId: TEST_CHAIN_ID,
+            });
+        } finally {
+            legacyDirectOrderFetch.stop();
+        }
+
         const directSettlementConfig = buildBaseConfig({
             messagePublishApiPort: 9892,
             polymarketClobEnabled: true,

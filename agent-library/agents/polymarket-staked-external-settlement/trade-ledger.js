@@ -325,9 +325,64 @@ function createEmptyMarketState({ policy, config, marketId }) {
     };
 }
 
+function isPlainObject(value) {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function backfillMarketStateShape(market, { policy, config, marketId }) {
+    const defaults = createEmptyMarketState({ policy, config, marketId });
+    if (!isPlainObject(market)) {
+        return defaults;
+    }
+
+    for (const [key, value] of Object.entries(defaults)) {
+        if (market[key] === undefined) {
+            market[key] = cloneJson(value);
+        }
+    }
+
+    if (!isPlainObject(market.stream)) {
+        market.stream = cloneJson(defaults.stream);
+    } else {
+        for (const [key, value] of Object.entries(defaults.stream)) {
+            if (market.stream[key] === undefined) {
+                market.stream[key] = cloneJson(value);
+            }
+        }
+    }
+
+    if (!Array.isArray(market.trades)) {
+        market.trades = cloneJson(defaults.trades);
+    }
+
+    if (!isPlainObject(market.tradeClassifications)) {
+        market.tradeClassifications = cloneJson(defaults.tradeClassifications);
+    }
+
+    for (const field of ['settlement', 'execution', 'reimbursement']) {
+        if (!isPlainObject(market[field])) {
+            market[field] = cloneJson(defaults[field]);
+            continue;
+        }
+        for (const [key, value] of Object.entries(defaults[field])) {
+            if (market[field][key] === undefined) {
+                market[field][key] = cloneJson(value);
+            }
+        }
+    }
+
+    return market;
+}
+
 function ensureMarketState(state, { policy, config, marketId }) {
     if (!state.markets[marketId]) {
         state.markets[marketId] = createEmptyMarketState({ policy, config, marketId });
+    } else {
+        state.markets[marketId] = backfillMarketStateShape(state.markets[marketId], {
+            policy,
+            config,
+            marketId,
+        });
     }
     return state.markets[marketId];
 }
