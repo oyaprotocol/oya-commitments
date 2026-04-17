@@ -531,6 +531,122 @@ async function run() {
             directExecutionFetch.stop();
         }
 
+        const orderSummaryFallbackConfig = buildBaseConfig({
+            messagePublishApiPort: 9892,
+            polymarketClobEnabled: true,
+            polymarketClobApiKey: 'clob-key',
+            polymarketClobApiSecret: 'clob-secret',
+            polymarketClobApiPassphrase: 'clob-passphrase',
+            agentConfig: {
+                polymarketStakedExternalSettlement: {
+                    authorizedAgent: TEST_AGENT.address,
+                    userAddress: TEST_USER,
+                    tradingWallet: TEST_TRADING_WALLET,
+                    collateralToken: TEST_USDC,
+                    marketsById: {
+                        'market-1': {
+                            label: 'Order summary fallback market',
+                            sourceUser: TEST_USER,
+                            sourceMarket: 'market-1',
+                            yesTokenId: '11',
+                            noTokenId: '22',
+                            initiatedCollateralAmountWei: '1000000',
+                        },
+                    },
+                },
+            },
+        });
+        const orderSummaryFallbackFetch = createMockDirectExecutionFetch({
+            activity: [directExecutionTrade],
+            orderById: {
+                'direct-order-fallback-1': {
+                    order: {
+                        id: 'direct-order-fallback-1',
+                        status: 'MATCHED',
+                        original_size: 2.5,
+                        size_matched: 2.5,
+                        maker_amount_filled: '1000000',
+                        taker_amount_filled: '2500000',
+                    },
+                },
+            },
+            tradesByOrderId: {
+                'direct-order-fallback-1': [],
+            },
+        });
+        const orderSummaryFallbackMockNode = createMockPublicationFetch(orderSummaryFallbackConfig);
+        try {
+            await resetModuleStateForTest({ config: orderSummaryFallbackConfig });
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: orderSummaryFallbackConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'polymarket_clob_build_sign_and_place_order');
+
+            await onToolOutput({
+                name: 'polymarket_clob_build_sign_and_place_order',
+                parsedOutput: {
+                    status: 'submitted',
+                    result: {
+                        order: {
+                            id: 'direct-order-fallback-1',
+                            status: 'LIVE',
+                        },
+                    },
+                },
+                config: orderSummaryFallbackConfig,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+            });
+
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: orderSummaryFallbackConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'publish_signed_message');
+            const orderSummaryFallbackPublication = await runPublishCall({
+                toolCall: toolCalls[0],
+                publicClient,
+                config: orderSummaryFallbackConfig,
+            });
+            assert.equal(
+                orderSummaryFallbackPublication.status,
+                'published',
+                JSON.stringify(orderSummaryFallbackPublication)
+            );
+            await onToolOutput({
+                name: 'publish_signed_message',
+                parsedOutput: orderSummaryFallbackPublication,
+                config: orderSummaryFallbackConfig,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+            });
+
+            const orderSummaryFallbackState = getModuleState();
+            assert.equal(orderSummaryFallbackState.markets['market-1'].trades.length, 1);
+            assert.equal(
+                orderSummaryFallbackState.markets['market-1'].trades[0].tradeId,
+                'clob:direct-order-fallback-1'
+            );
+            assert.equal(
+                orderSummaryFallbackState.markets['market-1'].trades[0].principalContributionWei,
+                '1000000'
+            );
+            assert.equal(
+                orderSummaryFallbackState.markets['market-1'].trades[0].shareAmount,
+                '2500000'
+            );
+        } finally {
+            orderSummaryFallbackMockNode.stop();
+            orderSummaryFallbackFetch.stop();
+        }
+
         const staleDirectOrderConfig = buildBaseConfig({
             polymarketClobEnabled: true,
             polymarketClobApiKey: 'clob-key',
@@ -917,6 +1033,174 @@ async function run() {
         } finally {
             directSettlementMockNode.stop();
             directSettlementFetch.stop();
+        }
+
+        const fractionalSettlementConfig = buildBaseConfig({
+            messagePublishApiPort: 9892,
+            polymarketClobEnabled: true,
+            polymarketClobApiKey: 'clob-key',
+            polymarketClobApiSecret: 'clob-secret',
+            polymarketClobApiPassphrase: 'clob-passphrase',
+            agentConfig: {
+                polymarketStakedExternalSettlement: {
+                    authorizedAgent: TEST_AGENT.address,
+                    userAddress: TEST_USER,
+                    tradingWallet: TEST_TRADING_WALLET,
+                    collateralToken: TEST_USDC,
+                    marketsById: {
+                        'market-1': {
+                            label: 'Fractional settlement market',
+                            sourceUser: TEST_USER,
+                            sourceMarket: 'market-1',
+                            yesTokenId: '11',
+                            noTokenId: '22',
+                            initiatedCollateralAmountWei: '1000000',
+                        },
+                    },
+                },
+            },
+        });
+        const fractionalSettlementPublicClient = {
+            async readContract({ functionName, args }) {
+                if (functionName === 'balanceOf') {
+                    const tokenId = BigInt(args?.[1] ?? 0n).toString();
+                    if (tokenId === '11') {
+                        return 1n;
+                    }
+                    return 0n;
+                }
+                throw new Error(`Unsupported readContract function in test: ${functionName}`);
+            },
+            async getTransactionReceipt({ hash }) {
+                return {
+                    transactionHash: hash,
+                    status: 1n,
+                    logs: [],
+                };
+            },
+        };
+        const fractionalSettlementFetch = createMockDirectExecutionFetch({
+            activity: [
+                {
+                    id: 'source-fractional-trade-1',
+                    side: 'BUY',
+                    outcome: 'YES',
+                    price: 0.4,
+                    timestamp: new Date(firstSeenAtMs - 30_000).toISOString(),
+                },
+            ],
+            marketById: {
+                'market-1': [
+                    {
+                        id: 'market-1',
+                        outcomePrices: '["0.4","0.6"]',
+                        outcomes: '["Yes","No"]',
+                        closed: false,
+                        umaResolutionStatus: 'pending',
+                    },
+                    {
+                        id: 'market-1',
+                        outcomePrices: '["0.5","0.5"]',
+                        outcomes: '["Yes","No"]',
+                        closed: true,
+                        umaResolutionStatus: 'resolved',
+                        closedTime: new Date(firstSeenAtMs + 180_000).toISOString(),
+                        clobTokenIds: '["11","22"]',
+                    },
+                ],
+            },
+            orderById: {
+                'direct-fractional-order-1': {
+                    order: {
+                        id: 'direct-fractional-order-1',
+                        status: 'MATCHED',
+                        original_size: 2.5,
+                        size_matched: 2.5,
+                    },
+                },
+            },
+            tradesByOrderId: {
+                'direct-fractional-order-1': [
+                    {
+                        id: 'trade-fractional-fill-1',
+                        status: 'CONFIRMED',
+                        taker_order_id: 'direct-fractional-order-1',
+                        price: '0.4',
+                        size: '2.5',
+                    },
+                ],
+            },
+        });
+        const fractionalSettlementMockNode = createMockPublicationFetch(fractionalSettlementConfig);
+        try {
+            await resetModuleStateForTest({ config: fractionalSettlementConfig });
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient: fractionalSettlementPublicClient,
+                config: fractionalSettlementConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'polymarket_clob_build_sign_and_place_order');
+
+            await onToolOutput({
+                name: 'polymarket_clob_build_sign_and_place_order',
+                parsedOutput: {
+                    status: 'submitted',
+                    result: {
+                        order: {
+                            id: 'direct-fractional-order-1',
+                            status: 'LIVE',
+                        },
+                    },
+                },
+                config: fractionalSettlementConfig,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+            });
+
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient: fractionalSettlementPublicClient,
+                config: fractionalSettlementConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'publish_signed_message');
+            const firstFractionalPublication = await runPublishCall({
+                toolCall: toolCalls[0],
+                publicClient: fractionalSettlementPublicClient,
+                config: fractionalSettlementConfig,
+            });
+            await onToolOutput({
+                name: 'publish_signed_message',
+                parsedOutput: firstFractionalPublication,
+                config: fractionalSettlementConfig,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+            });
+
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient: fractionalSettlementPublicClient,
+                config: fractionalSettlementConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'publish_signed_message');
+            const fractionalSettlementArgs = JSON.parse(toolCalls[0].arguments);
+            assert.equal(
+                fractionalSettlementArgs.message.payload.summary.finalSettlementValueWei,
+                '0'
+            );
+            assert.equal(
+                fractionalSettlementArgs.message.payload.summary.settlementKind,
+                'resolved'
+            );
+        } finally {
+            fractionalSettlementMockNode.stop();
+            fractionalSettlementFetch.stop();
         }
         await resetModuleStateForTest({ config });
 

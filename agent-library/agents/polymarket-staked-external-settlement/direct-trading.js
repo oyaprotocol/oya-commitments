@@ -211,6 +211,21 @@ function extractOrderSummary(payload) {
         status: normalizeClobStatus(order.status),
         originalSize: parseFiniteNumber(order.original_size ?? order.originalSize),
         sizeMatched: parseFiniteNumber(order.size_matched ?? order.sizeMatched),
+        makerAmountFilled: parseOptionalNonNegativeIntegerString(
+            order.maker_amount_filled ??
+                order.makerAmountFilled ??
+                order.making_amount_filled ??
+                order.makingAmountFilled
+        ),
+        takerAmountFilled: parseOptionalNonNegativeIntegerString(
+            order.taker_amount_filled ??
+                order.takerAmountFilled ??
+                order.taking_amount_filled ??
+                order.takingAmountFilled
+        ),
+        feeAmount: parseOptionalNonNegativeIntegerString(
+            order.fee ?? order.fee_amount ?? order.feeAmount
+        ),
     };
 }
 
@@ -439,6 +454,39 @@ function sumConfirmedTradeShareAmount({ relatedTrades }) {
     return sawConfirmedTrade ? total.toString() : null;
 }
 
+function resolveFilledBuySpendWei({ orderSummary, relatedTrades }) {
+    const orderSummarySpend = parseOptionalNonNegativeIntegerString(
+        orderSummary?.makerAmountFilled
+    );
+    if (orderSummarySpend) {
+        return orderSummarySpend;
+    }
+
+    return sumConfirmedTradeSpendWei({ relatedTrades });
+}
+
+function resolveFilledBuyShareAmount({ orderSummary, relatedTrades }) {
+    const netTakerAmountFilled = subtractFilledShareFee(
+        orderSummary?.takerAmountFilled,
+        orderSummary?.feeAmount
+    );
+    if (netTakerAmountFilled && BigInt(netTakerAmountFilled) > 0n) {
+        return netTakerAmountFilled;
+    }
+
+    const confirmedTradeShares = sumConfirmedTradeShareAmount({ relatedTrades });
+    if (confirmedTradeShares && BigInt(confirmedTradeShares) > 0n) {
+        return confirmedTradeShares;
+    }
+
+    const sizeMatchedShares = parseOptionalShareAmountString(orderSummary?.sizeMatched);
+    if (sizeMatchedShares && BigInt(sizeMatchedShares) > 0n) {
+        return sizeMatchedShares;
+    }
+
+    return null;
+}
+
 function extractOrderIdFromSubmission(parsedOutput) {
     return normalizeOrderId(
         parsedOutput?.result?.order?.id ??
@@ -646,9 +694,34 @@ async function refreshDirectExecutionState({
                 continue;
             }
 
-            if (orderFilled && allConfirmedTrades) {
-                const collateralAmountWei = sumConfirmedTradeSpendWei({ relatedTrades });
-                const shareAmount = sumConfirmedTradeShareAmount({ relatedTrades });
+            if (orderFilled) {
+                const collateralAmountWei = resolveFilledBuySpendWei({
+                    orderSummary,
+                    relatedTrades,
+                });
+                const shareAmount = resolveFilledBuyShareAmount({
+                    orderSummary,
+                    relatedTrades,
+                });
+                const filledSettlementReady =
+                    (allConfirmedTrades && Boolean(collateralAmountWei) && Boolean(shareAmount)) ||
+                    (relatedTrades.length === 0 &&
+                        Boolean(collateralAmountWei) &&
+                        Boolean(shareAmount));
+                if (!filledSettlementReady) {
+                    if (
+                        execution.orderError !==
+                            'Filled Polymarket order is waiting for trade reconciliation details.' ||
+                        !Number.isInteger(execution.orderStatusRefreshFailedAtMs)
+                    ) {
+                        execution.orderError =
+                            'Filled Polymarket order is waiting for trade reconciliation details.';
+                        execution.orderStatusRefreshFailedAtMs = Date.now();
+                        changed = true;
+                    }
+                    continue;
+                }
+
                 if (!collateralAmountWei || !shareAmount) {
                     execution.orderError =
                         'Filled Polymarket order could not be reconciled into collateral and share amounts.';

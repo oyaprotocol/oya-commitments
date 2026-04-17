@@ -232,9 +232,8 @@ function computeSettlementValueWei({
     if (denominator <= 0n) {
         throw new Error('Resolved payout denominator must be positive.');
     }
-    if (numerator % denominator !== 0n) {
-        throw new Error('Resolved payout produced a fractional collateral amount.');
-    }
+    // The collateral token settles in base units only, so round down
+    // deterministically when the resolved payout lands between base units.
     return (numerator / denominator).toString();
 }
 
