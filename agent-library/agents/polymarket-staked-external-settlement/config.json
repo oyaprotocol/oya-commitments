@@ -30,6 +30,7 @@
       "0x2967C076182F0303037072670e744e26Ed4A830f"
     ]
   },
+  "polymarketClobSignatureType": "POLY_PROXY",
   "byChain": {
     "137": {
       "commitmentSafe": "0x1111111111111111111111111111111111111111",
