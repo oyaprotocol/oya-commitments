@@ -552,6 +552,7 @@ async function findOrCreateDirectOrderToolCall({
     const marketIds = Object.keys(policy.marketsById ?? {}).sort((left, right) =>
         left.localeCompare(right)
     );
+    let changed = false;
 
     for (const marketId of marketIds) {
         const marketConfig = policy.marketsById[marketId];
@@ -585,7 +586,26 @@ async function findOrCreateDirectOrderToolCall({
             continue;
         }
 
-        const latestTrade = await fetchLatestSourceTrade({ marketConfig });
+        let latestTrade;
+        try {
+            latestTrade = await fetchLatestSourceTrade({ marketConfig });
+            if (market.execution.orderError || market.execution.orderStatusRefreshFailedAtMs) {
+                market.execution.orderError = null;
+                market.execution.orderStatusRefreshFailedAtMs = null;
+                changed = true;
+            }
+        } catch (error) {
+            const detail = error?.message ?? String(error);
+            if (
+                market.execution.orderError !== detail ||
+                !Number.isInteger(market.execution.orderStatusRefreshFailedAtMs)
+            ) {
+                market.execution.orderError = detail;
+                market.execution.orderStatusRefreshFailedAtMs = Date.now();
+                changed = true;
+            }
+            continue;
+        }
         if (!latestTrade || latestTrade.side !== 'BUY') {
             continue;
         }
@@ -634,7 +654,7 @@ async function findOrCreateDirectOrderToolCall({
         };
     }
 
-    return null;
+    return changed ? { changed: true, toolCall: null } : null;
 }
 
 function clearPendingDirectOrder(execution, { keepCurrentSource = false } = {}) {

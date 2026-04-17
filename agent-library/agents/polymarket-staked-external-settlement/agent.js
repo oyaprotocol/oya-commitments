@@ -412,7 +412,9 @@ async function getDeterministicToolCalls({
         if (directOrderCall.changed) {
             await persistState();
         }
-        return [directOrderCall.toolCall];
+        if (directOrderCall.toolCall) {
+            return [directOrderCall.toolCall];
+        }
     }
 
     const reimbursementRequest = findOrCreatePendingReimbursementRequest({

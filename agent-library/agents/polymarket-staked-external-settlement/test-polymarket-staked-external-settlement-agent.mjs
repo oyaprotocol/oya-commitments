@@ -29,6 +29,7 @@ const TEST_COMMITMENT_SAFE = '0x1111111111111111111111111111111111111111';
 const TEST_OG_MODULE = '0x2222222222222222222222222222222222222222';
 const TEST_USER = '0x3333333333333333333333333333333333333333';
 const TEST_TRADING_WALLET = '0x4444444444444444444444444444444444444444';
+const TEST_CTF_CONTRACT = '0x6666666666666666666666666666666666666666';
 const TEST_USDC = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
 const TEST_RULES = `Staked External Polymarket Execution
 ---
@@ -378,6 +379,27 @@ async function run() {
             )
         )
     );
+    const conditionalTokensPolicy = resolvePolicy({
+        chainId: 10,
+        commitmentSafe: TEST_COMMITMENT_SAFE,
+        ogModule: TEST_OG_MODULE,
+        watchAssets: [TEST_USDC],
+        polymarketConditionalTokens: TEST_CTF_CONTRACT,
+        agentConfig: {
+            polymarketStakedExternalSettlement: {
+                authorizedAgent: TEST_AGENT.address,
+                tradingWallet: TEST_TRADING_WALLET,
+                collateralToken: TEST_USDC,
+                marketsById: {
+                    'market-1': {
+                        label: 'Conditional tokens market',
+                        userAddress: TEST_USER,
+                    },
+                },
+            },
+        },
+    });
+    assert.equal(conditionalTokensPolicy.ctfContract, TEST_CTF_CONTRACT.toLowerCase());
     const scopeTmpDir = await mkdtemp(path.join(tmpdir(), 'oya-poly-scope-'));
     const scopeStateFile = path.join(scopeTmpDir, 'module-state.json');
     const scopeBaseModuleConfig = {
@@ -1312,6 +1334,128 @@ async function run() {
         } finally {
             await resetModuleStateForTest({ config: bootstrapSettledConfig });
             bootstrapSettledFetch.stop();
+        }
+        const sourceFetchFailureConfig = buildBaseConfig({
+            agentConfig: {
+                polymarketStakedExternalSettlement: {
+                    authorizedAgent: TEST_AGENT.address,
+                    userAddress: TEST_USER,
+                    tradingWallet: TEST_TRADING_WALLET,
+                    collateralToken: TEST_USDC,
+                    stateFile: path.join(scopeTmpDir, 'source-fetch-failure-state.json'),
+                    marketsById: {
+                        'market-1': {
+                            label: 'Direct market with failing source fetch',
+                            sourceUser: TEST_USER,
+                            sourceMarket: 'market-1',
+                            yesTokenId: '11',
+                            noTokenId: '22',
+                            initiatedCollateralAmountWei: '1000000',
+                        },
+                        'market-2': {
+                            label: 'Bootstrap reimbursement market',
+                            userAddress: TEST_USER,
+                        },
+                    },
+                },
+            },
+        });
+        const originalFetchForSourceFailure = globalThis.fetch;
+        globalThis.fetch = async (url) => {
+            const parsedUrl = new URL(String(url));
+            if (parsedUrl.hostname === 'data-api.polymarket.com') {
+                return textResponse(503, JSON.stringify({ error: 'down' }), 'Service Unavailable');
+            }
+            return originalFetchForSourceFailure(url);
+        };
+        try {
+            await resetModuleStateForTest({ config: sourceFetchFailureConfig });
+            const sourceFetchFailurePolicy = resolvePolicy(sourceFetchFailureConfig);
+            const sourceFetchFailureScope = buildStateScope({
+                config: sourceFetchFailureConfig,
+                policy: sourceFetchFailurePolicy,
+                chainId: sourceFetchFailureConfig.chainId,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                ogModule: TEST_OG_MODULE,
+            });
+            const sourceFetchFailureState = createEmptyState(sourceFetchFailureScope);
+            sourceFetchFailureState.markets['market-1'] = createEmptyMarketState({
+                policy: sourceFetchFailurePolicy,
+                config: sourceFetchFailureConfig,
+                marketId: 'market-1',
+            });
+            const bootstrapReimbursementMarket = createEmptyMarketState({
+                policy: sourceFetchFailurePolicy,
+                config: sourceFetchFailureConfig,
+                marketId: 'market-2',
+            });
+            bootstrapReimbursementMarket.revision = 1;
+            bootstrapReimbursementMarket.publishedRevision = 1;
+            bootstrapReimbursementMarket.lastPublishedSequence = 1;
+            bootstrapReimbursementMarket.lastPublishedCid = 'bafy-fetch-failure-snapshot';
+            bootstrapReimbursementMarket.trades = [
+                {
+                    tradeId: 'bootstrap-fetch-failure-trade-1',
+                    tradeEntryKind: 'initiated',
+                    executedAtMs: firstSeenAtMs - 60_000,
+                    principalContributionWei: '1000000',
+                    collateralAmountWei: '1000000',
+                    side: 'BUY',
+                    outcome: 'YES',
+                },
+            ];
+            bootstrapReimbursementMarket.tradeClassifications[
+                'bootstrap-fetch-failure-trade-1'
+            ] = {
+                classification: 'reimbursable',
+                firstSeenAtMs,
+                reason: null,
+                cid: 'bafy-fetch-failure-classification',
+            };
+            bootstrapReimbursementMarket.settlement.finalSettlementValueWei = '700000';
+            bootstrapReimbursementMarket.settlement.settledAtMs = firstSeenAtMs + 120_000;
+            bootstrapReimbursementMarket.settlement.settlementKind = 'resolved';
+            bootstrapReimbursementMarket.settlement.depositConfirmedAtMs =
+                firstSeenAtMs + 121_000;
+            bootstrapReimbursementMarket.reimbursement.requestId =
+                'bootstrap-fetch-failure-reimbursement-1';
+            bootstrapReimbursementMarket.reimbursement.requestDispatchAtMs =
+                firstSeenAtMs + 122_000;
+            bootstrapReimbursementMarket.reimbursement.pendingMessage = {
+                chainId: TEST_CHAIN_ID,
+                requestId: 'bootstrap-fetch-failure-reimbursement-1',
+                commitmentAddresses: [TEST_COMMITMENT_SAFE, TEST_OG_MODULE],
+                agentAddress: TEST_AGENT.address,
+                kind: POLYMARKET_REIMBURSEMENT_REQUEST_KIND,
+                payload: {
+                    stream: bootstrapReimbursementMarket.stream,
+                    snapshotCid: 'bafy-fetch-failure-snapshot',
+                },
+            };
+            sourceFetchFailureState.markets['market-2'] = bootstrapReimbursementMarket;
+            await writePersistedState(
+                sourceFetchFailureConfig.agentConfig.polymarketStakedExternalSettlement.stateFile,
+                sourceFetchFailureState
+            );
+            await resetModuleStateForTest({ config });
+
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: sourceFetchFailureConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'publish_signed_message');
+            const sourceFetchFailureStateAfter = getModuleState();
+            assert.match(
+                sourceFetchFailureStateAfter.markets['market-1'].execution.orderError,
+                /Data API request failed \(503\)/
+            );
+        } finally {
+            await resetModuleStateForTest({ config: sourceFetchFailureConfig });
+            globalThis.fetch = originalFetchForSourceFailure;
         }
         await resetModuleStateForTest({ config });
 

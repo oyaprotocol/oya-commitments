@@ -191,7 +191,8 @@ function configuredTokensMatchMarket({
 function resolveCtfContract({ policy, config }) {
     const configured =
         normalizeAddressOrNull(policy?.ctfContract) ??
-        normalizeAddressOrNull(config?.polymarketCtfContract);
+        normalizeAddressOrNull(config?.polymarketCtfContract) ??
+        normalizeAddressOrNull(config?.polymarketConditionalTokens);
     if (configured) {
         return configured;
     }

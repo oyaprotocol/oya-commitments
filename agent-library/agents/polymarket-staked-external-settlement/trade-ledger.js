@@ -149,7 +149,8 @@ function resolvePolicy(config = {}) {
         normalizeOptionalAddress(Array.isArray(config?.watchAssets) ? config.watchAssets[0] : null);
     const ctfContract =
         normalizeOptionalAddress(moduleConfig.ctfContract) ??
-        normalizeOptionalAddress(config?.polymarketCtfContract);
+        normalizeOptionalAddress(config?.polymarketCtfContract) ??
+        normalizeOptionalAddress(config?.polymarketConditionalTokens);
     const marketsById = Object.fromEntries(
         Object.entries(moduleConfig.marketsById ?? {}).map(([marketId, rawMarket]) => [
             String(marketId),
