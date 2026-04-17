@@ -1,0 +1,555 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import os from 'node:os';
+import path from 'node:path';
+import { mkdtemp, rm } from 'node:fs/promises';
+import {
+    decodeFunctionData,
+    erc20Abi,
+    keccak256,
+    padHex,
+    parseAbi,
+    stringToHex,
+    toHex,
+} from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
+import { executeToolCalls } from '../../../agent/src/lib/tools.js';
+import { createMessagePublicationApiServer } from '../../../agent/src/lib/message-publication-api.js';
+import { createMessagePublicationStore } from '../../../agent/src/lib/message-publication-store.js';
+import { createProposalPublicationApiServer } from '../../../agent/src/lib/proposal-publication-api.js';
+import { createProposalPublicationStore } from '../../../agent/src/lib/proposal-publication-store.js';
+import {
+    derivePublishedMessageLockKeys,
+    getDeterministicToolCalls,
+    getNodeDeterministicToolCalls,
+    getNodeState,
+    onNodeToolOutput,
+    onToolOutput,
+    resetModuleStateForTest,
+    resetNodeStateForTest,
+    validatePublishedMessage,
+} from './agent.js';
+
+const TEST_AGENT = privateKeyToAccount(`0x${'1'.repeat(64)}`);
+const TEST_NODE = privateKeyToAccount(`0x${'2'.repeat(64)}`);
+const TEST_CHAIN_ID = 137;
+const TEST_COMMITMENT_SAFE = '0x1111111111111111111111111111111111111111';
+const TEST_OG_MODULE = '0x2222222222222222222222222222222222222222';
+const TEST_USER = '0x3333333333333333333333333333333333333333';
+const TEST_TRADING_WALLET = '0x4444444444444444444444444444444444444444';
+const TEST_USDC = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
+const TEST_RULES = `Staked External Polymarket Execution
+---
+The designated agent at address ${TEST_AGENT.address} must deposit a stake of 1000 USDC to be considered the active agent.
+
+To track this external trading, the agent will periodically sign an updated log documenting all of their trades, and send to the node at address ${TEST_NODE.address} for a second signature, and publication to IPFS.
+
+Trades must be logged within 15 minutes of trade execution to be considered valid for reimbursement.
+`;
+const SETTLEMENT_DEPOSIT_TX_HASH = `0x${'d'.repeat(64)}`;
+const REIMBURSEMENT_PROPOSAL_TX_HASH = `0x${'e'.repeat(64)}`;
+const REIMBURSEMENT_PROPOSAL_HASH = `0x${'f'.repeat(64)}`;
+const transferEventAbi = parseAbi(['event Transfer(address indexed from, address indexed to, uint256 value)']);
+
+function getHarnessDefinition() {
+    return {
+        scenario: 'polymarket-staked-external-settlement-smoke',
+        description:
+            'Runs an in-process smoke scenario for the staked external settlement module: trade-log publication, settlement deposit, reimbursement request publication, and node-side reimbursement proposal publication.',
+    };
+}
+
+function buildBaseConfig(tempDir) {
+    return {
+        chainId: TEST_CHAIN_ID,
+        commitmentSafe: TEST_COMMITMENT_SAFE,
+        ogModule: TEST_OG_MODULE,
+        ipfsEnabled: true,
+        proposeEnabled: true,
+        disputeEnabled: true,
+        messagePublishApiEnabled: true,
+        messagePublishApiHost: '127.0.0.1',
+        messagePublishApiPort: 0,
+        messagePublishApiKeys: {
+            ops: 'k_message_publish_ops',
+        },
+        messagePublishApiRequireSignerAllowlist: true,
+        messagePublishApiSignerAllowlist: [TEST_AGENT.address],
+        messagePublishApiSignatureMaxAgeSeconds: 300,
+        proposalPublishApiEnabled: true,
+        proposalPublishApiHost: '127.0.0.1',
+        proposalPublishApiPort: 0,
+        proposalPublishApiMode: 'propose',
+        proposalPublishApiKeys: {
+            ops: 'k_proposal_publish_ops',
+        },
+        proposalPublishApiRequireSignerAllowlist: true,
+        proposalPublishApiSignerAllowlist: [TEST_AGENT.address],
+        proposalPublishApiSignatureMaxAgeSeconds: 300,
+        proposalVerificationMode: 'off',
+        watchAssets: [TEST_USDC],
+        ipfsApiUrl: 'http://ipfs.mock',
+        agentConfig: {
+            polymarketStakedExternalSettlement: {
+                authorizedAgent: TEST_AGENT.address,
+                userAddress: TEST_USER,
+                tradingWallet: TEST_TRADING_WALLET,
+                collateralToken: TEST_USDC,
+                stateFile: path.join(tempDir, 'module-state.json'),
+                nodeStateFile: path.join(tempDir, 'node-state.json'),
+                marketsById: {
+                    'market-1': {
+                        label: 'Smoke market',
+                    },
+                },
+            },
+        },
+    };
+}
+
+function buildSignal({
+    requestId,
+    command,
+    args,
+    text = command,
+    receivedAtMs = Date.now(),
+}) {
+    return {
+        kind: 'userMessage',
+        messageId: `msg-${requestId}`,
+        requestId,
+        chainId: TEST_CHAIN_ID,
+        command,
+        args,
+        text,
+        sender: {
+            authType: 'eip191',
+            address: TEST_AGENT.address,
+            signature: `0x${'a'.repeat(130)}`,
+            signedAtMs: receivedAtMs,
+        },
+        receivedAtMs,
+        expiresAtMs: receivedAtMs + 300_000,
+    };
+}
+
+function parseToolOutput(output) {
+    return JSON.parse(output.output);
+}
+
+function buildTransferLog({ from, to, value }) {
+    return {
+        address: TEST_USDC,
+        topics: [
+            keccak256(stringToHex('Transfer(address,address,uint256)')),
+            padHex(String(from).toLowerCase(), { size: 32 }),
+            padHex(String(to).toLowerCase(), { size: 32 }),
+        ],
+        data: toHex(BigInt(value), { size: 32 }),
+    };
+}
+
+function buildMockPublicClient() {
+    return {
+        async readContract({ functionName }) {
+            assert.equal(functionName, 'rules');
+            return TEST_RULES;
+        },
+        async getTransactionReceipt({ hash }) {
+            if (String(hash).toLowerCase() === SETTLEMENT_DEPOSIT_TX_HASH.toLowerCase()) {
+                return {
+                    transactionHash: hash,
+                    status: 1n,
+                    logs: [
+                        buildTransferLog({
+                            from: TEST_AGENT.address,
+                            to: TEST_COMMITMENT_SAFE,
+                            value: 1_000_000n,
+                        }),
+                    ],
+                };
+            }
+            return {
+                transactionHash: hash,
+                status: 1n,
+                logs: [],
+            };
+        },
+    };
+}
+
+function createIpfsFetchMock() {
+    const originalFetch = globalThis.fetch;
+    const artifactsByCid = new Map();
+
+    globalThis.fetch = async (url, options = {}) => {
+        const urlString = String(url);
+        if (!urlString.startsWith('http://ipfs.mock')) {
+            return originalFetch(url, options);
+        }
+
+        const textResponse = (status, payload) => ({
+            ok: status >= 200 && status < 300,
+            status,
+            statusText: '',
+            async text() {
+                return JSON.stringify(payload);
+            },
+        });
+
+        if (urlString.includes('/api/v0/add')) {
+            const uploaded = options.body.get('file');
+            const uploadedText = await uploaded.text();
+            const artifact = JSON.parse(uploadedText);
+            const cid = `bafy${createHash('sha256').update(uploadedText).digest('hex').slice(0, 24)}`;
+            artifactsByCid.set(cid, artifact);
+            return textResponse(200, {
+                Name: 'artifact.json',
+                Hash: cid,
+                Size: String(uploadedText.length),
+            });
+        }
+
+        if (urlString.includes('/api/v0/pin/add')) {
+            const parsed = new URL(urlString);
+            return textResponse(200, {
+                Pins: [parsed.searchParams.get('arg')],
+            });
+        }
+
+        throw new Error(`Unexpected mock IPFS request: ${urlString}`);
+    };
+
+    return {
+        artifactsByCid,
+        stop() {
+            globalThis.fetch = originalFetch;
+        },
+    };
+}
+
+async function runToolCall({ toolCall, publicClient, walletClient, account, config }) {
+    const outputs = await executeToolCalls({
+        toolCalls: [toolCall],
+        publicClient,
+        walletClient,
+        account,
+        config,
+        ogContext: null,
+    });
+    assert.equal(outputs.length, 1);
+    return parseToolOutput(outputs[0]);
+}
+
+function decodeReimbursementAmount(transaction) {
+    const decoded = decodeFunctionData({
+        abi: erc20Abi,
+        data: transaction.data,
+    });
+    assert.equal(decoded.functionName, 'transfer');
+    return {
+        to: String(decoded.args[0]).toLowerCase(),
+        amountWei: BigInt(decoded.args[1]).toString(),
+    };
+}
+
+function assertPublishedResult(result, label) {
+    if (result?.status !== 'published') {
+        throw new Error(`${label} failed: ${JSON.stringify(result)}`);
+    }
+}
+
+async function runSmokeScenario() {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'poly-settlement-smoke-'));
+    const config = buildBaseConfig(tempDir);
+    const publicClient = buildMockPublicClient();
+    const walletClient = {
+        async signMessage({ message }) {
+            return await TEST_AGENT.signMessage({ message });
+        },
+    };
+    const account = TEST_AGENT;
+    const nodeSigner = {
+        address: TEST_NODE.address,
+        async signMessage(message) {
+            return await TEST_NODE.signMessage({ message });
+        },
+    };
+    const ipfsMock = createIpfsFetchMock();
+    const messageStore = createMessagePublicationStore({
+        stateFile: path.join(tempDir, 'message-publications.json'),
+    });
+    const proposalStore = createProposalPublicationStore({
+        stateFile: path.join(tempDir, 'proposal-publications.json'),
+    });
+    const silentLogger = { log() {}, warn() {}, error() {} };
+
+    const messageApi = createMessagePublicationApiServer({
+        config,
+        store: messageStore,
+        logger: silentLogger,
+        nodeSigner,
+        validateMessagePublication: async (args) =>
+            validatePublishedMessage({
+                ...args,
+                publicClient,
+            }),
+        deriveMessagePublicationLockKeys: derivePublishedMessageLockKeys,
+    });
+    const proposalApi = createProposalPublicationApiServer({
+        config,
+        store: proposalStore,
+        logger: silentLogger,
+        resolveProposalRuntime: async () => ({
+            publicClient,
+            walletClient,
+            account,
+            runtimeConfig: config,
+        }),
+        submitProposal: async () => ({
+            transactionHash: REIMBURSEMENT_PROPOSAL_TX_HASH,
+            ogProposalHash: REIMBURSEMENT_PROPOSAL_HASH,
+            sideEffectsLikelyCommitted: true,
+        }),
+    });
+
+    const firstSeenAtMs = Date.now();
+    let messageServer;
+    let proposalServer;
+    try {
+        messageServer = await messageApi.start();
+        proposalServer = await proposalApi.start();
+        const messageAddress = messageServer.address();
+        const proposalAddress = proposalServer.address();
+        assert.ok(messageAddress && typeof messageAddress === 'object');
+        assert.ok(proposalAddress && typeof proposalAddress === 'object');
+        config.messagePublishApiPort = messageAddress.port;
+        config.proposalPublishApiPort = proposalAddress.port;
+
+        await resetModuleStateForTest({ config });
+        await resetNodeStateForTest({ config });
+
+        let toolCalls = await getDeterministicToolCalls({
+            signals: [
+                buildSignal({
+                    requestId: 'smoke-trade-1',
+                    command: 'polymarket_trade',
+                    receivedAtMs: firstSeenAtMs,
+                    text: 'Smoke timely initiated trade',
+                    args: {
+                        marketId: 'market-1',
+                        tradeId: 'smoke-trade-1',
+                        tradeEntryKind: 'initiated',
+                        executedAtMs: firstSeenAtMs - 5 * 60_000,
+                        principalContributionWei: '1000000',
+                        collateralAmountWei: '1000000',
+                        side: 'BUY',
+                        outcome: 'YES',
+                    },
+                }),
+            ],
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+            agentAddress: TEST_AGENT.address,
+            publicClient,
+            config,
+        });
+        assert.equal(toolCalls.length, 1);
+        assert.equal(toolCalls[0].name, 'publish_signed_message');
+        const initialTradePublication = await runToolCall({
+            toolCall: toolCalls[0],
+            publicClient,
+            walletClient,
+            account,
+            config,
+        });
+        assertPublishedResult(initialTradePublication, 'initial trade publication');
+        assert.equal(
+            initialTradePublication.validation.classifications[0].classification,
+            'reimbursable'
+        );
+        await onToolOutput({
+            name: 'publish_signed_message',
+            parsedOutput: initialTradePublication,
+            config,
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+        });
+
+        toolCalls = await getDeterministicToolCalls({
+            signals: [
+                buildSignal({
+                    requestId: 'smoke-settlement-1',
+                    command: 'polymarket_settlement',
+                    receivedAtMs: firstSeenAtMs + 120_000,
+                    text: 'Smoke market settlement',
+                    args: {
+                        marketId: 'market-1',
+                        finalSettlementValueWei: '1000000',
+                        settledAtMs: firstSeenAtMs + 120_000,
+                        settlementKind: 'resolved',
+                    },
+                }),
+            ],
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+            agentAddress: TEST_AGENT.address,
+            publicClient,
+            config,
+        });
+        assert.equal(toolCalls.length, 1);
+        assert.equal(toolCalls[0].name, 'publish_signed_message');
+        const settlementPublication = await runToolCall({
+            toolCall: toolCalls[0],
+            publicClient,
+            walletClient,
+            account,
+            config,
+        });
+        assertPublishedResult(settlementPublication, 'settlement publication');
+        await onToolOutput({
+            name: 'publish_signed_message',
+            parsedOutput: settlementPublication,
+            config,
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+        });
+
+        toolCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+            agentAddress: TEST_AGENT.address,
+            publicClient,
+            config,
+        });
+        assert.equal(toolCalls.length, 1);
+        assert.equal(toolCalls[0].name, 'make_deposit');
+        await onToolOutput({
+            name: 'make_deposit',
+            parsedOutput: {
+                status: 'confirmed',
+                transactionHash: SETTLEMENT_DEPOSIT_TX_HASH,
+            },
+            config,
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+        });
+
+        toolCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+            agentAddress: TEST_AGENT.address,
+            publicClient,
+            config,
+        });
+        assert.equal(toolCalls.length, 1);
+        assert.equal(toolCalls[0].name, 'publish_signed_message');
+        const postDepositPublication = await runToolCall({
+            toolCall: toolCalls[0],
+            publicClient,
+            walletClient,
+            account,
+            config,
+        });
+        assertPublishedResult(postDepositPublication, 'post-deposit publication');
+        await onToolOutput({
+            name: 'publish_signed_message',
+            parsedOutput: postDepositPublication,
+            config,
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+        });
+
+        toolCalls = await getDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+            agentAddress: TEST_AGENT.address,
+            publicClient,
+            config,
+        });
+        assert.equal(toolCalls.length, 1);
+        assert.equal(toolCalls[0].name, 'publish_signed_message');
+        const reimbursementRequestPublication = await runToolCall({
+            toolCall: toolCalls[0],
+            publicClient,
+            walletClient,
+            account,
+            config,
+        });
+        assertPublishedResult(
+            reimbursementRequestPublication,
+            'reimbursement request publication'
+        );
+        assert.equal(
+            reimbursementRequestPublication.validation.validatorId,
+            'polymarket_reimbursement_request'
+        );
+        await onToolOutput({
+            name: 'publish_signed_message',
+            parsedOutput: reimbursementRequestPublication,
+            config,
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+        });
+
+        toolCalls = await getNodeDeterministicToolCalls({
+            signals: [],
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+            agentAddress: TEST_AGENT.address,
+            publicClient,
+            config,
+            messagePublicationStore: messageStore,
+            onchainPendingProposal: false,
+        });
+        assert.equal(toolCalls.length, 1);
+        assert.equal(toolCalls[0].name, 'publish_signed_proposal');
+        const reimbursementProposalOutput = await runToolCall({
+            toolCall: toolCalls[0],
+            publicClient,
+            walletClient,
+            account,
+            config,
+        });
+        assertPublishedResult(reimbursementProposalOutput, 'reimbursement proposal publication');
+        assert.equal(reimbursementProposalOutput.submission?.status, 'resolved');
+        await onNodeToolOutput({
+            callId: toolCalls[0].callId,
+            name: toolCalls[0].name,
+            parsedOutput: reimbursementProposalOutput,
+            config,
+            commitmentSafe: TEST_COMMITMENT_SAFE,
+        });
+
+        const nodeState = getNodeState();
+        assert.equal(
+            nodeState.markets['market-1'].reimbursement.proposalHash,
+            REIMBURSEMENT_PROPOSAL_HASH
+        );
+        const messageRecords = await messageStore.listRecords();
+        assert.equal(messageRecords.length, 4);
+        const reimbursementTransfer = decodeReimbursementAmount(
+            reimbursementProposalOutput.proposal.transactions[0]
+        );
+        assert.equal(reimbursementTransfer.to, TEST_AGENT.address.toLowerCase());
+        assert.equal(reimbursementTransfer.amountWei, '1000000');
+        const proposalRecord = await proposalStore.getRecord({
+            signer: TEST_AGENT.address,
+            chainId: TEST_CHAIN_ID,
+            requestId: reimbursementProposalOutput.proposal.requestId,
+        });
+        assert.ok(proposalRecord?.cid);
+        assert.ok(proposalRecord?.artifact);
+        assert.ok(ipfsMock.artifactsByCid.get(proposalRecord.cid));
+
+        return {
+            scenario: 'polymarket-staked-external-settlement-smoke',
+            messagePublicationCount: messageRecords.length,
+            tradeLogCid: postDepositPublication.cid,
+            reimbursementRequestCid: reimbursementRequestPublication.cid,
+            proposalCid: proposalRecord.cid,
+            proposalHash: REIMBURSEMENT_PROPOSAL_HASH,
+            proposalRequestId: reimbursementProposalOutput.proposal.requestId,
+            proposalSubmissionStatus: reimbursementProposalOutput.submission.status,
+        };
+    } finally {
+        await proposalApi.stop().catch(() => {});
+        await messageApi.stop().catch(() => {});
+        ipfsMock.stop();
+        await rm(tempDir, { recursive: true, force: true });
+    }
+}
+
+export { getHarnessDefinition, runSmokeScenario };

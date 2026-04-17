@@ -65,7 +65,7 @@ This plan intentionally treats the result as an example module, not a general-pu
 - [x] 2026-04-15 10:28 PDT: Fixed reimbursement proposal delete-retry request IDs. The node now persists a per-market `proposalRetryGeneration`, resets it when a new reimbursement request CID arrives, increments it only when an onchain delete event clears a prior proposal, and appends `:retry:<n>` to proposal-publication request IDs after deletion so replacement proposals get fresh proposal-publication records instead of replaying the old resolved request.
 - [x] 2026-04-15 10:39 PDT: Hardened hashless resolved proposal-publication handling. When `publish_signed_proposal` returns `submission.status = "resolved"` with `skipped: true` and no tx/proposal hash, the control node now treats that as terminal for the current reimbursement request instead of re-arming the dispatch timer and looping forever. A new reimbursement request CID still resets that terminal state so later fresh requests can proceed.
 - [x] 2026-04-16 09:12 PDT: Relaxed agent-side tool scheduling so retrying stuck trade-log publications no longer starve settlement deposits. Newly created trade-log publications still take priority, but if a market is only replaying an existing `pendingPublication`, the module now allows `make_deposit` to run first for any settled market with unpaid settlement. Added a persisted-state regression proving a blocked publication retry no longer prevents settlement repayment dispatch.
-- [ ] Add smoke harness coverage.
+- [x] 2026-04-16 17:13 PDT: Added module-local smoke coverage in `agent-library/agents/polymarket-staked-external-settlement/harness.mjs` plus `test-polymarket-staked-external-settlement-harness.mjs`. The new in-process harness stands up real message/proposal publication API servers on ephemeral local ports with mock IPFS and mocked onchain reads, then drives the full happy-path flow: timely trade-log publication, settlement publication, settlement deposit confirmation, post-deposit trade-log publication, reimbursement-request publication, and node-side reimbursement proposal publication through the standalone proposal node.
 
 ## Surprises & Discoveries
 
@@ -196,7 +196,6 @@ Milestone 2 status after the current implementation pass:
 
 Remaining work is now narrower:
 
-- add a one-command smoke harness under `agent-library/agents/polymarket-staked-external-settlement/harness.mjs`
 - decide whether to replace the current signed-command trade source with direct Polymarket trade discovery/execution, or keep signed commands as the explicit v1 ingress model
 
 ## Context and Orientation
