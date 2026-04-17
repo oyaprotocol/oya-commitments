@@ -673,6 +673,107 @@ async function run() {
             orderSummaryFallbackFetch.stop();
         }
 
+        const failedTradeReconciliationConfig = buildBaseConfig({
+            messagePublishApiPort: 9892,
+            polymarketClobEnabled: true,
+            polymarketClobApiKey: 'clob-key',
+            polymarketClobApiSecret: 'clob-secret',
+            polymarketClobApiPassphrase: 'clob-passphrase',
+            agentConfig: {
+                polymarketStakedExternalSettlement: {
+                    authorizedAgent: TEST_AGENT.address,
+                    userAddress: TEST_USER,
+                    tradingWallet: TEST_TRADING_WALLET,
+                    collateralToken: TEST_USDC,
+                    marketsById: {
+                        'market-1': {
+                            label: 'Failed trade reconciliation market',
+                            sourceUser: TEST_USER,
+                            sourceMarket: 'market-1',
+                            yesTokenId: '11',
+                            noTokenId: '22',
+                            initiatedCollateralAmountWei: '1000000',
+                        },
+                    },
+                },
+            },
+        });
+        const failedTradeReconciliationFetch = createMockDirectExecutionFetch({
+            activity: [directExecutionTrade],
+            orderById: {
+                'direct-order-failed-trades-1': {
+                    order: {
+                        id: 'direct-order-failed-trades-1',
+                        status: 'MATCHED',
+                        original_size: 2.5,
+                        size_matched: 2.5,
+                    },
+                },
+            },
+            tradesByOrderId: {
+                'direct-order-failed-trades-1': [
+                    {
+                        id: 'trade-failed-fill-1',
+                        status: 'FAILED',
+                        taker_order_id: 'direct-order-failed-trades-1',
+                        price: '0.4',
+                        size: '2.5',
+                    },
+                ],
+            },
+        });
+        try {
+            await resetModuleStateForTest({ config: failedTradeReconciliationConfig });
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: failedTradeReconciliationConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'polymarket_clob_build_sign_and_place_order');
+
+            await onToolOutput({
+                name: 'polymarket_clob_build_sign_and_place_order',
+                parsedOutput: {
+                    status: 'submitted',
+                    result: {
+                        order: {
+                            id: 'direct-order-failed-trades-1',
+                            status: 'LIVE',
+                        },
+                    },
+                },
+                config: failedTradeReconciliationConfig,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+            });
+
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: failedTradeReconciliationConfig,
+            });
+            assert.equal(toolCalls.length, 0);
+            const failedTradeReconciliationState = getModuleState();
+            const failedTradeExecution =
+                failedTradeReconciliationState.markets['market-1'].execution;
+            assert.equal(failedTradeExecution.orderId, null);
+            assert.equal(failedTradeExecution.currentSourceTradeId, null);
+            assert.equal(failedTradeExecution.orderSubmittedAtMs, null);
+            assert.equal(failedTradeExecution.pendingOrderArgs, null);
+            assert.equal(failedTradeExecution.observedSourceTradeId, 'source-trade-1');
+            assert.equal(
+                failedTradeReconciliationState.markets['market-1'].trades.length,
+                0
+            );
+            assert.equal(failedTradeExecution.orderError, null);
+        } finally {
+            failedTradeReconciliationFetch.stop();
+        }
+
         const staleDirectOrderConfig = buildBaseConfig({
             polymarketClobEnabled: true,
             polymarketClobApiKey: 'clob-key',
@@ -1241,6 +1342,132 @@ async function run() {
         } finally {
             await resetModuleStateForTest({ config: preservedDepositSettlementConfig });
             preservedDepositSettlementFetch.stop();
+        }
+
+        const manualSettlementPreservedConfig = buildBaseConfig({
+            agentConfig: {
+                polymarketStakedExternalSettlement: {
+                    authorizedAgent: TEST_AGENT.address,
+                    userAddress: TEST_USER,
+                    tradingWallet: TEST_TRADING_WALLET,
+                    collateralToken: TEST_USDC,
+                    stateFile: path.join(scopeTmpDir, 'manual-settlement-preserved-state.json'),
+                    marketsById: {
+                        'market-1': {
+                            label: 'Manual settlement preserved market',
+                            sourceUser: TEST_USER,
+                            sourceMarket: 'market-1',
+                            yesTokenId: '11',
+                            noTokenId: '22',
+                            initiatedCollateralAmountWei: '1000000',
+                        },
+                    },
+                },
+            },
+        });
+        const manualSettlementPreservedFetch = createMockDirectExecutionFetch({
+            marketById: {
+                'market-1': {
+                    id: 'market-1',
+                    outcomePrices: '["1","0"]',
+                    outcomes: '["Yes","No"]',
+                    closed: true,
+                    umaResolutionStatus: 'resolved',
+                    closedTime: new Date(firstSeenAtMs + 200_000).toISOString(),
+                    clobTokenIds: '["11","22"]',
+                },
+            },
+        });
+        let manualSettlementBalanceReadCount = 0;
+        const manualSettlementPreservedPublicClient = {
+            async readContract({ functionName }) {
+                if (functionName === 'balanceOf') {
+                    manualSettlementBalanceReadCount += 1;
+                    return 0n;
+                }
+                throw new Error(`Unsupported readContract function in test: ${functionName}`);
+            },
+            async getTransactionReceipt({ hash }) {
+                return {
+                    transactionHash: hash,
+                    status: 1n,
+                    logs: [],
+                };
+            },
+        };
+        try {
+            await resetModuleStateForTest({ config: manualSettlementPreservedConfig });
+            const manualSettlementPolicy = resolvePolicy(manualSettlementPreservedConfig);
+            const manualSettlementScope = buildStateScope({
+                config: manualSettlementPreservedConfig,
+                policy: manualSettlementPolicy,
+                chainId: manualSettlementPreservedConfig.chainId,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                ogModule: TEST_OG_MODULE,
+            });
+            const manualSettlementState = createEmptyState(manualSettlementScope);
+            const manualSettlementMarket = createEmptyMarketState({
+                policy: manualSettlementPolicy,
+                config: manualSettlementPreservedConfig,
+                marketId: 'market-1',
+            });
+            manualSettlementMarket.revision = 1;
+            manualSettlementMarket.publishedRevision = 1;
+            manualSettlementMarket.lastPublishedSequence = 1;
+            manualSettlementMarket.lastPublishedCid = 'bafy-manual-settlement';
+            manualSettlementMarket.trades = [
+                {
+                    tradeId: 'manual-flat-exit-trade-1',
+                    tradeEntryKind: 'initiated',
+                    executedAtMs: firstSeenAtMs - 60_000,
+                    principalContributionWei: '1000000',
+                    collateralAmountWei: '1000000',
+                    side: 'BUY',
+                    outcome: 'YES',
+                },
+            ];
+            manualSettlementMarket.tradeClassifications['manual-flat-exit-trade-1'] = {
+                classification: 'reimbursable',
+                firstSeenAtMs,
+                reason: null,
+                cid: 'bafy-manual-flat-exit-classification',
+            };
+            manualSettlementMarket.settlement.finalSettlementValueWei = '0';
+            manualSettlementMarket.settlement.settledAtMs = firstSeenAtMs + 110_000;
+            manualSettlementMarket.settlement.settlementKind = 'flat_exit';
+            manualSettlementState.markets['market-1'] = manualSettlementMarket;
+            await setModuleStateForTest({
+                config: manualSettlementPreservedConfig,
+                state: manualSettlementState,
+            });
+
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient: manualSettlementPreservedPublicClient,
+                config: manualSettlementPreservedConfig,
+            });
+            assert.equal(manualSettlementBalanceReadCount, 0);
+            if (toolCalls.length > 0) {
+                assert.equal(toolCalls[0].name, 'publish_signed_message');
+            }
+            const manualSettlementStateAfter = getModuleState();
+            assert.equal(
+                manualSettlementStateAfter.markets['market-1'].settlement.finalSettlementValueWei,
+                '0'
+            );
+            assert.equal(
+                manualSettlementStateAfter.markets['market-1'].settlement.settlementKind,
+                'flat_exit'
+            );
+            assert.equal(
+                manualSettlementStateAfter.markets['market-1'].settlement.settledAtMs,
+                firstSeenAtMs + 110_000
+            );
+        } finally {
+            await resetModuleStateForTest({ config: manualSettlementPreservedConfig });
+            manualSettlementPreservedFetch.stop();
         }
 
         const inFlightSettlementConfig = buildBaseConfig({

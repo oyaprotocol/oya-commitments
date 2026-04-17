@@ -1,5 +1,6 @@
 import { parseUnits } from 'viem';
 import {
+    CLOB_FAILURE_TERMINAL_STATUS,
     CLOB_ORDER_FAILURE_STATUSES,
     CLOB_ORDER_FILLED_STATUSES,
     CLOB_SUCCESS_TERMINAL_STATUS,
@@ -755,8 +756,11 @@ async function refreshDirectExecutionState({
                 relatedTrades.every(
                     (trade) => normalizeClobStatus(trade?.status) === CLOB_SUCCESS_TERMINAL_STATUS
                 );
+            const anyFailedTrades = relatedTrades.some(
+                (trade) => normalizeClobStatus(trade?.status) === CLOB_FAILURE_TERMINAL_STATUS
+            );
 
-            if (orderFailed) {
+            if (orderFailed || anyFailedTrades) {
                 execution.observedSourceTradeId = execution.currentSourceTradeId;
                 execution.orderError = 'Polymarket order failed or was rejected.';
                 clearPendingDirectOrder(execution);

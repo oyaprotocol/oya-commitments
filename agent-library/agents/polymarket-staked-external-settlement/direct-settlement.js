@@ -276,10 +276,7 @@ async function refreshObservedSettlements({
         ) {
             continue;
         }
-        if (
-            market.settlement?.observationSource === RESOLVED_SETTLEMENT_SOURCE &&
-            Number.isInteger(market.settlement?.settledAtMs)
-        ) {
+        if (Number.isInteger(market.settlement?.settledAtMs)) {
             continue;
         }
 
