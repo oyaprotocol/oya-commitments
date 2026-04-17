@@ -417,6 +417,25 @@ function subtractFilledShareFee(grossShareAmount, feeShareAmount) {
     return (BigInt(normalizedGrossShareAmount) - BigInt(normalizedFeeShareAmount)).toString();
 }
 
+function subtractFilledShareFeeBaseUnits(grossShareAmount, feeShareAmountBaseUnits) {
+    const normalizedGrossShareAmount = parseOptionalNonNegativeIntegerString(grossShareAmount);
+    if (!normalizedGrossShareAmount || BigInt(normalizedGrossShareAmount) <= 0n) {
+        return null;
+    }
+
+    const normalizedFeeShareAmount = parseOptionalNonNegativeIntegerString(
+        feeShareAmountBaseUnits
+    );
+    if (!normalizedFeeShareAmount || BigInt(normalizedFeeShareAmount) <= 0n) {
+        return normalizedGrossShareAmount;
+    }
+    if (BigInt(normalizedFeeShareAmount) > BigInt(normalizedGrossShareAmount)) {
+        return null;
+    }
+
+    return (BigInt(normalizedGrossShareAmount) - BigInt(normalizedFeeShareAmount)).toString();
+}
+
 function resolveConfirmedTradeShareAmount(trade) {
     const grossShareAmount = parseOptionalShareAmountString(
         trade?.size ??
@@ -466,7 +485,7 @@ function resolveFilledBuySpendWei({ orderSummary, relatedTrades }) {
 }
 
 function resolveFilledBuyShareAmount({ orderSummary, relatedTrades }) {
-    const netTakerAmountFilled = subtractFilledShareFee(
+    const netTakerAmountFilled = subtractFilledShareFeeBaseUnits(
         orderSummary?.takerAmountFilled,
         orderSummary?.feeAmount
     );
@@ -540,10 +559,6 @@ async function findOrCreateDirectOrderToolCall({
             continue;
         }
 
-        if (preflightError) {
-            throw new Error(preflightError);
-        }
-
         const market = ensureMarketState(state, {
             policy,
             config,
@@ -582,6 +597,9 @@ async function findOrCreateDirectOrderToolCall({
             latestTrade.outcome === 'YES' ? marketConfig.yesTokenId : marketConfig.noTokenId;
         if (!tokenId) {
             continue;
+        }
+        if (preflightError) {
+            throw new Error(preflightError);
         }
         const { makerAmount, takerAmount } = computeBuyOrderAmounts({
             collateralAmountWei: marketConfig.initiatedCollateralAmountWei,

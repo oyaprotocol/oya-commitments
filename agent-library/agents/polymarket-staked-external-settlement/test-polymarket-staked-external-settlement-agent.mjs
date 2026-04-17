@@ -567,6 +567,7 @@ async function run() {
                         size_matched: 2.5,
                         maker_amount_filled: '1000000',
                         taker_amount_filled: '2500000',
+                        fee: '100000',
                     },
                 },
             },
@@ -640,7 +641,7 @@ async function run() {
             );
             assert.equal(
                 orderSummaryFallbackState.markets['market-1'].trades[0].shareAmount,
-                '2500000'
+                '2400000'
             );
         } finally {
             orderSummaryFallbackMockNode.stop();
@@ -1201,6 +1202,116 @@ async function run() {
         } finally {
             fractionalSettlementMockNode.stop();
             fractionalSettlementFetch.stop();
+        }
+
+        const bootstrapSettledConfig = buildBaseConfig({
+            agentConfig: {
+                polymarketStakedExternalSettlement: {
+                    authorizedAgent: TEST_AGENT.address,
+                    userAddress: TEST_USER,
+                    tradingWallet: TEST_TRADING_WALLET,
+                    collateralToken: TEST_USDC,
+                    stateFile: path.join(scopeTmpDir, 'bootstrap-settled-state.json'),
+                    marketsById: {
+                        'market-1': {
+                            label: 'Bootstrap settled market',
+                            sourceUser: TEST_USER,
+                            sourceMarket: 'market-1',
+                            yesTokenId: '11',
+                            noTokenId: '22',
+                            initiatedCollateralAmountWei: '1000000',
+                        },
+                    },
+                },
+            },
+        });
+        const bootstrapSettledFetch = createMockDirectExecutionFetch({});
+        try {
+            await resetModuleStateForTest({ config: bootstrapSettledConfig });
+            const bootstrapSettledPolicy = resolvePolicy(bootstrapSettledConfig);
+            const bootstrapSettledScope = buildStateScope({
+                config: bootstrapSettledConfig,
+                policy: bootstrapSettledPolicy,
+                chainId: bootstrapSettledConfig.chainId,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                ogModule: TEST_OG_MODULE,
+            });
+            const bootstrapSettledState = createEmptyState(bootstrapSettledScope);
+            const bootstrapSettledMarket = createEmptyMarketState({
+                policy: bootstrapSettledPolicy,
+                config: bootstrapSettledConfig,
+                marketId: 'market-1',
+            });
+            bootstrapSettledMarket.revision = 1;
+            bootstrapSettledMarket.publishedRevision = 1;
+            bootstrapSettledMarket.lastPublishedSequence = 1;
+            bootstrapSettledMarket.lastPublishedCid = 'bafy-bootstrap-settled';
+            bootstrapSettledMarket.trades = [
+                {
+                    tradeId: 'bootstrap-settled-trade-1',
+                    tradeEntryKind: 'initiated',
+                    executedAtMs: firstSeenAtMs - 60_000,
+                    principalContributionWei: '1000000',
+                    collateralAmountWei: '1000000',
+                    side: 'BUY',
+                    outcome: 'YES',
+                },
+            ];
+            bootstrapSettledMarket.tradeClassifications['bootstrap-settled-trade-1'] = {
+                classification: 'reimbursable',
+                firstSeenAtMs,
+                reason: null,
+                cid: 'bafy-bootstrap-classification',
+            };
+            bootstrapSettledMarket.settlement.finalSettlementValueWei = '700000';
+            bootstrapSettledMarket.settlement.settledAtMs = firstSeenAtMs + 120_000;
+            bootstrapSettledMarket.settlement.settlementKind = 'resolved';
+            bootstrapSettledMarket.settlement.depositConfirmedAtMs = firstSeenAtMs + 121_000;
+            bootstrapSettledMarket.reimbursement.requestId = 'bootstrap-reimbursement-1';
+            bootstrapSettledMarket.reimbursement.requestDispatchAtMs = firstSeenAtMs + 122_000;
+            bootstrapSettledMarket.reimbursement.pendingMessage = {
+                chainId: TEST_CHAIN_ID,
+                requestId: 'bootstrap-reimbursement-1',
+                commitmentAddresses: [TEST_COMMITMENT_SAFE, TEST_OG_MODULE],
+                agentAddress: TEST_AGENT.address,
+                kind: POLYMARKET_REIMBURSEMENT_REQUEST_KIND,
+                payload: {
+                    stream: bootstrapSettledMarket.stream,
+                    snapshotCid: 'bafy-bootstrap-settled',
+                },
+            };
+            bootstrapSettledState.markets['market-1'] = bootstrapSettledMarket;
+            await writePersistedState(
+                bootstrapSettledConfig.agentConfig.polymarketStakedExternalSettlement.stateFile,
+                bootstrapSettledState
+            );
+            await resetModuleStateForTest({ config });
+
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient,
+                config: bootstrapSettledConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'publish_signed_message');
+            const bootstrapSettledArgs = JSON.parse(toolCalls[0].arguments);
+            assert.equal(
+                bootstrapSettledArgs.message.kind,
+                POLYMARKET_REIMBURSEMENT_REQUEST_KIND
+            );
+            assert.equal(
+                bootstrapSettledArgs.message.requestId,
+                'bootstrap-reimbursement-1'
+            );
+            assert.equal(
+                bootstrapSettledArgs.message.payload.snapshotCid,
+                'bafy-bootstrap-settled'
+            );
+        } finally {
+            await resetModuleStateForTest({ config: bootstrapSettledConfig });
+            bootstrapSettledFetch.stop();
         }
         await resetModuleStateForTest({ config });
 
