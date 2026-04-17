@@ -6,6 +6,7 @@ import {
     findOrCreateDirectOrderToolCall,
     refreshDirectExecutionState,
 } from './direct-trading.js';
+import { refreshObservedSettlements } from './direct-settlement.js';
 import {
     applyDepositToolOutput,
     applyPublicationToolOutput,
@@ -363,6 +364,14 @@ async function getDeterministicToolCalls({
             state: runtimeState,
             policy,
             config,
+            agentAddress: policy.authorizedAgent,
+        })) || changed;
+    changed =
+        (await refreshObservedSettlements({
+            state: runtimeState,
+            policy,
+            config,
+            publicClient,
             agentAddress: policy.authorizedAgent,
         })) || changed;
     changed = ingestSignals(signals, { policy, config }) || changed;

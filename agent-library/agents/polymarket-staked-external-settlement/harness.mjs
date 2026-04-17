@@ -174,9 +174,18 @@ function buildTransferLog({ from, to, value }) {
 
 function buildMockPublicClient() {
     return {
-        async readContract({ functionName }) {
-            assert.equal(functionName, 'rules');
-            return TEST_RULES;
+        async readContract({ functionName, args }) {
+            if (functionName === 'rules') {
+                return TEST_RULES;
+            }
+            if (functionName === 'balanceOf') {
+                const tokenId = BigInt(args?.[1] ?? 0n).toString();
+                if (tokenId === '11') {
+                    return 2_500_000n;
+                }
+                return 0n;
+            }
+            throw new Error(`Unsupported readContract function in smoke harness: ${functionName}`);
         },
         async getTransactionReceipt({ hash }) {
             if (String(hash).toLowerCase() === SETTLEMENT_DEPOSIT_TX_HASH.toLowerCase()) {
@@ -187,7 +196,7 @@ function buildMockPublicClient() {
                         buildTransferLog({
                             from: TEST_AGENT.address,
                             to: TEST_COMMITMENT_SAFE,
-                            value: 1_000_000n,
+                            value: 2_500_000n,
                         }),
                     ],
                 };
@@ -253,11 +262,23 @@ function createIpfsFetchMock() {
 
 function createDirectExecutionFetchMock({
     activity = [],
+    marketById = {},
     placedOrder = { orderID: 'direct-order-1', status: 'LIVE' },
     orderById = {},
     tradesByOrderId = {},
 }) {
     const originalFetch = globalThis.fetch;
+
+    function resolveMockPayload(map, key) {
+        const raw = map[key];
+        if (Array.isArray(raw)) {
+            if (raw.length === 0) {
+                return undefined;
+            }
+            return raw.shift();
+        }
+        return raw;
+    }
 
     globalThis.fetch = async (url, options = {}) => {
         const parsedUrl = new URL(String(url));
@@ -266,6 +287,17 @@ function createDirectExecutionFetchMock({
         }
         if (parsedUrl.hostname === 'clob.polymarket.com' && parsedUrl.pathname === '/order') {
             return textResponse(200, JSON.stringify(placedOrder));
+        }
+        if (
+            parsedUrl.hostname === 'gamma-api.polymarket.com' &&
+            parsedUrl.pathname.startsWith('/markets/')
+        ) {
+            const lookupKey = decodeURIComponent(parsedUrl.pathname.slice('/markets/'.length));
+            const market = resolveMockPayload(marketById, lookupKey);
+            if (!market) {
+                return textResponse(404, JSON.stringify({ error: 'missing market' }), 'Not Found');
+            }
+            return textResponse(200, JSON.stringify(market));
         }
         if (
             parsedUrl.hostname === 'clob.polymarket.com' &&
@@ -358,6 +390,26 @@ async function runSmokeScenario() {
                 title: 'Smoke direct source trade',
             },
         ],
+        marketById: {
+            'market-1': [
+                {
+                    id: 'market-1',
+                    outcomePrices: '["0.4","0.6"]',
+                    outcomes: '["Yes","No"]',
+                    closed: false,
+                    umaResolutionStatus: 'pending',
+                },
+                {
+                    id: 'market-1',
+                    outcomePrices: '["1","0"]',
+                    outcomes: '["Yes","No"]',
+                    closed: true,
+                    umaResolutionStatus: 'resolved',
+                    closedTime: new Date(firstSeenAtMs + 120_000).toISOString(),
+                    clobTokenIds: '["11","22"]',
+                },
+            ],
+        },
         placedOrder: {
             orderID: 'direct-order-1',
             status: 'LIVE',
@@ -489,20 +541,7 @@ async function runSmokeScenario() {
         });
 
         toolCalls = await getDeterministicToolCalls({
-            signals: [
-                buildSignal({
-                    requestId: 'smoke-settlement-1',
-                    command: 'polymarket_settlement',
-                    receivedAtMs: firstSeenAtMs + 120_000,
-                    text: 'Smoke market settlement',
-                    args: {
-                        marketId: 'market-1',
-                        finalSettlementValueWei: '1000000',
-                        settledAtMs: firstSeenAtMs + 120_000,
-                        settlementKind: 'resolved',
-                    },
-                }),
-            ],
+            signals: [],
             commitmentSafe: TEST_COMMITMENT_SAFE,
             agentAddress: TEST_AGENT.address,
             publicClient,
@@ -510,6 +549,9 @@ async function runSmokeScenario() {
         });
         assert.equal(toolCalls.length, 1);
         assert.equal(toolCalls[0].name, 'publish_signed_message');
+        const settlementPublishArgs = JSON.parse(toolCalls[0].arguments);
+        assert.equal(settlementPublishArgs.message.payload.summary.finalSettlementValueWei, '2500000');
+        assert.equal(settlementPublishArgs.message.payload.summary.settlementKind, 'resolved');
         const settlementPublication = await runToolCall({
             toolCall: toolCalls[0],
             publicClient,
@@ -534,6 +576,7 @@ async function runSmokeScenario() {
         });
         assert.equal(toolCalls.length, 1);
         assert.equal(toolCalls[0].name, 'make_deposit');
+        assert.equal(JSON.parse(toolCalls[0].arguments).amountWei, '2500000');
         await onToolOutput({
             name: 'make_deposit',
             parsedOutput: {

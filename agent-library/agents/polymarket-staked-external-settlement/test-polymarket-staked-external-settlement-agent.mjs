@@ -127,10 +127,23 @@ function textResponse(status, text, statusText = '') {
 
 function createMockDirectExecutionFetch({
     activity = [],
+    marketById = {},
     orderById = {},
     tradesByOrderId = {},
 }) {
     const originalFetch = globalThis.fetch;
+
+    function resolveMockPayload(map, key) {
+        const raw = map[key];
+        if (Array.isArray(raw)) {
+            if (raw.length === 0) {
+                return undefined;
+            }
+            const next = raw.shift();
+            return next;
+        }
+        return raw;
+    }
 
     globalThis.fetch = async (url) => {
         const parsedUrl = new URL(String(url));
@@ -147,6 +160,17 @@ function createMockDirectExecutionFetch({
                 return textResponse(404, JSON.stringify({ error: 'missing order' }), 'Not Found');
             }
             return textResponse(200, JSON.stringify(order));
+        }
+        if (
+            parsedUrl.hostname === 'gamma-api.polymarket.com' &&
+            parsedUrl.pathname.startsWith('/markets/')
+        ) {
+            const lookupKey = decodeURIComponent(parsedUrl.pathname.slice('/markets/'.length));
+            const market = resolveMockPayload(marketById, lookupKey);
+            if (!market) {
+                return textResponse(404, JSON.stringify({ error: 'missing market' }), 'Not Found');
+            }
+            return textResponse(200, JSON.stringify(market));
         }
         if (
             parsedUrl.hostname === 'clob.polymarket.com' &&
@@ -278,6 +302,12 @@ async function runPublishCall({ toolCall, publicClient, config }) {
 
 async function run() {
     const publicClient = {
+        async readContract({ functionName }) {
+            if (functionName === 'balanceOf') {
+                return 0n;
+            }
+            throw new Error(`Unsupported readContract function in test: ${functionName}`);
+        },
         async getTransactionReceipt({ hash }) {
             return {
                 transactionHash: hash,
@@ -468,6 +498,207 @@ async function run() {
         } finally {
             directMockNode.stop();
             directExecutionFetch.stop();
+        }
+
+        const directSettlementConfig = buildBaseConfig({
+            messagePublishApiPort: 9892,
+            polymarketClobEnabled: true,
+            polymarketClobApiKey: 'clob-key',
+            polymarketClobApiSecret: 'clob-secret',
+            polymarketClobApiPassphrase: 'clob-passphrase',
+            agentConfig: {
+                polymarketStakedExternalSettlement: {
+                    authorizedAgent: TEST_AGENT.address,
+                    userAddress: TEST_USER,
+                    tradingWallet: TEST_TRADING_WALLET,
+                    collateralToken: TEST_USDC,
+                    marketsById: {
+                        'market-1': {
+                            label: 'Direct settlement market',
+                            sourceUser: TEST_USER,
+                            sourceMarket: 'market-1',
+                            yesTokenId: '11',
+                            noTokenId: '22',
+                            initiatedCollateralAmountWei: '1000000',
+                        },
+                    },
+                },
+            },
+        });
+        const directSettlementPublicClient = {
+            async readContract({ functionName, args }) {
+                if (functionName === 'balanceOf') {
+                    const tokenId = BigInt(args?.[1] ?? 0n).toString();
+                    if (tokenId === '11') {
+                        return 2_500_000n;
+                    }
+                    return 0n;
+                }
+                throw new Error(`Unsupported readContract function in test: ${functionName}`);
+            },
+            async getTransactionReceipt({ hash }) {
+                return {
+                    transactionHash: hash,
+                    status: 1n,
+                    logs: [],
+                };
+            },
+        };
+        const directSettlementFetch = createMockDirectExecutionFetch({
+            activity: [
+                {
+                    id: 'source-settlement-trade-1',
+                    side: 'BUY',
+                    outcome: 'YES',
+                    price: 0.4,
+                    timestamp: new Date(firstSeenAtMs - 30_000).toISOString(),
+                },
+            ],
+            marketById: {
+                'market-1': [
+                    {
+                        id: 'market-1',
+                        outcomePrices: '["0.4","0.6"]',
+                        outcomes: '["Yes","No"]',
+                        closed: false,
+                        umaResolutionStatus: 'pending',
+                    },
+                    {
+                        id: 'market-1',
+                        outcomePrices: '["1","0"]',
+                        outcomes: '["Yes","No"]',
+                        closed: true,
+                        umaResolutionStatus: 'resolved',
+                        closedTime: new Date(firstSeenAtMs + 120_000).toISOString(),
+                        clobTokenIds: '["11","22"]',
+                    },
+                ],
+            },
+            orderById: {
+                'direct-settlement-order-1': {
+                    order: {
+                        id: 'direct-settlement-order-1',
+                        status: 'MATCHED',
+                        original_size: 2.5,
+                        size_matched: 2.5,
+                    },
+                },
+            },
+            tradesByOrderId: {
+                'direct-settlement-order-1': [
+                    {
+                        id: 'trade-settlement-fill-1',
+                        status: 'CONFIRMED',
+                        taker_order_id: 'direct-settlement-order-1',
+                        price: '0.4',
+                        size: '2.5',
+                    },
+                ],
+            },
+        });
+        const directSettlementMockNode = createMockPublicationFetch(directSettlementConfig);
+        try {
+            await resetModuleStateForTest({ config: directSettlementConfig });
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient: directSettlementPublicClient,
+                config: directSettlementConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'polymarket_clob_build_sign_and_place_order');
+
+            await onToolOutput({
+                name: 'polymarket_clob_build_sign_and_place_order',
+                parsedOutput: {
+                    status: 'submitted',
+                    result: {
+                        order: {
+                            id: 'direct-settlement-order-1',
+                            status: 'LIVE',
+                        },
+                    },
+                },
+                config: directSettlementConfig,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+            });
+
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient: directSettlementPublicClient,
+                config: directSettlementConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'publish_signed_message');
+            const firstDirectSettlementPublication = await runPublishCall({
+                toolCall: toolCalls[0],
+                publicClient: directSettlementPublicClient,
+                config: directSettlementConfig,
+            });
+            assert.equal(
+                firstDirectSettlementPublication.status,
+                'published',
+                JSON.stringify(firstDirectSettlementPublication)
+            );
+            await onToolOutput({
+                name: 'publish_signed_message',
+                parsedOutput: firstDirectSettlementPublication,
+                config: directSettlementConfig,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+            });
+
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient: directSettlementPublicClient,
+                config: directSettlementConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'publish_signed_message');
+            const observedSettlementPublication = await runPublishCall({
+                toolCall: toolCalls[0],
+                publicClient: directSettlementPublicClient,
+                config: directSettlementConfig,
+            });
+            assert.equal(
+                observedSettlementPublication.status,
+                'published',
+                JSON.stringify(observedSettlementPublication)
+            );
+            const observedSettlementArgs = JSON.parse(toolCalls[0].arguments);
+            assert.equal(
+                observedSettlementArgs.message.payload.summary.finalSettlementValueWei,
+                '2500000'
+            );
+            assert.equal(
+                observedSettlementArgs.message.payload.summary.settlementKind,
+                'resolved'
+            );
+            await onToolOutput({
+                name: 'publish_signed_message',
+                parsedOutput: observedSettlementPublication,
+                config: directSettlementConfig,
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+            });
+
+            toolCalls = await getDeterministicToolCalls({
+                signals: [],
+                commitmentSafe: TEST_COMMITMENT_SAFE,
+                agentAddress: TEST_AGENT.address,
+                publicClient: directSettlementPublicClient,
+                config: directSettlementConfig,
+            });
+            assert.equal(toolCalls.length, 1);
+            assert.equal(toolCalls[0].name, 'make_deposit');
+            const directSettlementDepositArgs = JSON.parse(toolCalls[0].arguments);
+            assert.equal(directSettlementDepositArgs.amountWei, '2500000');
+        } finally {
+            directSettlementMockNode.stop();
+            directSettlementFetch.stop();
         }
         await resetModuleStateForTest({ config });
 

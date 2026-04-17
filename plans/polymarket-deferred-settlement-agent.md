@@ -68,6 +68,7 @@ This plan intentionally treats the result as an example module, not a general-pu
 - [x] 2026-04-16 17:13 PDT: Added module-local smoke coverage in `agent-library/agents/polymarket-staked-external-settlement/harness.mjs` plus `test-polymarket-staked-external-settlement-harness.mjs`. The new in-process harness stands up real message/proposal publication API servers on ephemeral local ports with mock IPFS and mocked onchain reads, then drives the full happy-path flow: timely trade-log publication, settlement publication, settlement deposit confirmation, post-deposit trade-log publication, reimbursement-request publication, and node-side reimbursement proposal publication through the standalone proposal node.
 - [x] 2026-04-16 17:20 PDT: Reframed the remaining roadmap after user direction to require direct Polymarket trade discovery and execution. The signed `polymarket_trade` / `polymarket_settlement` ingress is now explicitly temporary scaffolding to be replaced by module-local market observation, CLOB order placement, and execution reconciliation using the existing `copy-trading` and `polymarket-intent-trader` code paths as references.
 - [x] 2026-04-16 18:07 PDT: Completed the first direct-execution slice inside `agent-library/agents/polymarket-staked-external-settlement/`. The module now supports direct market observation via configured source-user / token mappings, emits real `polymarket_clob_build_sign_and_place_order` tool calls, reconciles filled CLOB orders back into the existing trade ledger as `initiated` / `continuation` entries, and the smoke harness now opens the market through that direct path before continuing through settlement deposit, reimbursement request publication, and node-side reimbursement proposal publication.
+- [x] 2026-04-16 18:39 PDT: Replaced the primary settlement signal path with direct settlement observation for the current BUY-side flow. The module now reads resolved Polymarket market state from Gamma, reads live Yes/No ERC1155 balances from the configured trading holder via the CTF contract, derives `finalSettlementValueWei` from the resolved payout, publishes that observed settlement through the existing trade-log publication flow, and the smoke harness now reaches reimbursement without any `polymarket_settlement` command.
 
 ## Surprises & Discoveries
 
@@ -206,9 +207,9 @@ Milestone 2 status after the current implementation pass:
 
 Remaining work is now narrower:
 
-- replace the remaining signed-command settlement scaffold in `agent-library/agents/polymarket-staked-external-settlement/agent.js` and `trade-ledger.js` with direct settlement discovery / reconciliation from Polymarket state instead of `polymarket_settlement` signals
 - broaden direct execution beyond the current single-source BUY-copy slice so the module can handle richer trigger policies, additional outcomes / exits, and repeated source-trade observation without relying on manual command ingress
-- decide whether the temporary signed `polymarket_trade` / `polymarket_settlement` ingestion path should stay as test-only scaffolding or be removed entirely once direct settlement observation lands
+- decide whether the temporary signed `polymarket_trade` / `polymarket_settlement` ingestion path should stay as test-only scaffolding or be removed entirely now that both direct trade entry and direct settlement observation exist for the current happy path
+- extend direct settlement observation beyond the current resolved-balance latch so it can handle richer lifecycle cases such as realized flat exits before resolution, explicit redemption / merge flows, and other settlement-changing post-trade actions without falling back to manual signals
 
 ## Context and Orientation
 

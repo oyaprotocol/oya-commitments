@@ -83,6 +83,8 @@ function normalizeMarketConfig(rawMarket, marketId, fallbackUserAddress) {
             label: null,
             sourceUser: null,
             sourceMarket: null,
+            gammaMarketId: null,
+            gammaMarketSlug: null,
             yesTokenId: null,
             noTokenId: null,
             initiatedCollateralAmountWei: null,
@@ -95,6 +97,8 @@ function normalizeMarketConfig(rawMarket, marketId, fallbackUserAddress) {
         label: normalizeOptionalString(rawMarket.label ?? rawMarket.description),
         sourceUser: normalizeOptionalAddress(rawMarket.sourceUser),
         sourceMarket: normalizeOptionalString(rawMarket.sourceMarket),
+        gammaMarketId: normalizeOptionalString(rawMarket.gammaMarketId),
+        gammaMarketSlug: normalizeOptionalString(rawMarket.gammaMarketSlug),
         yesTokenId: normalizeTokenId(rawMarket.yesTokenId),
         noTokenId: normalizeTokenId(rawMarket.noTokenId),
         initiatedCollateralAmountWei:
@@ -142,6 +146,9 @@ function resolvePolicy(config = {}) {
         normalizeOptionalAddress(moduleConfig.collateralToken) ??
         normalizeOptionalAddress(config?.defaultDepositAsset) ??
         normalizeOptionalAddress(Array.isArray(config?.watchAssets) ? config.watchAssets[0] : null);
+    const ctfContract =
+        normalizeOptionalAddress(moduleConfig.ctfContract) ??
+        normalizeOptionalAddress(config?.polymarketCtfContract);
     const marketsById = Object.fromEntries(
         Object.entries(moduleConfig.marketsById ?? {}).map(([marketId, rawMarket]) => [
             String(marketId),
@@ -194,6 +201,7 @@ function resolvePolicy(config = {}) {
         tradingWallet,
         userAddress,
         collateralToken,
+        ctfContract,
         messagePublishApiKeys:
             config?.messagePublishApiKeys &&
             typeof config.messagePublishApiKeys === 'object' &&
@@ -484,6 +492,28 @@ function settlementTermsChanged(currentSettlement, nextSettlement) {
     );
 }
 
+function applyObservedSettlement(market, settlement) {
+    if (!market?.settlement || !settlement || typeof settlement !== 'object') {
+        return false;
+    }
+    const nextSettlement = {
+        ...market.settlement,
+        ...cloneJson(settlement),
+    };
+    if (settlementTermsChanged(market.settlement, nextSettlement)) {
+        nextSettlement.depositDispatchAtMs = null;
+        nextSettlement.depositTxHash = null;
+        nextSettlement.depositSubmittedAtMs = null;
+        nextSettlement.depositConfirmedAtMs = null;
+    }
+    if (stringifyCanonicalJson(nextSettlement) !== stringifyCanonicalJson(market.settlement)) {
+        market.settlement = nextSettlement;
+        markMarketDirty(market);
+        return true;
+    }
+    return false;
+}
+
 function ingestCommand(state, command, { policy, config }) {
     if (!command) {
         return false;
@@ -500,22 +530,11 @@ function ingestCommand(state, command, { policy, config }) {
     if (command.commandType === 'trade') {
         appendTradeToMarket(market, command.trade);
     } else if (command.commandType === 'settlement') {
-        const nextSettlement = {
-            ...market.settlement,
+        applyObservedSettlement(market, {
             ...command.settlement,
             requestId: command.requestId,
             depositError: null,
-        };
-        if (settlementTermsChanged(market.settlement, nextSettlement)) {
-            nextSettlement.depositDispatchAtMs = null;
-            nextSettlement.depositTxHash = null;
-            nextSettlement.depositSubmittedAtMs = null;
-            nextSettlement.depositConfirmedAtMs = null;
-        }
-        if (stringifyCanonicalJson(nextSettlement) !== stringifyCanonicalJson(market.settlement)) {
-            market.settlement = nextSettlement;
-            markMarketDirty(market);
-        }
+        });
     }
 
     state.processedCommands[command.requestId] = {
@@ -780,6 +799,7 @@ function clearStaleDispatches(state, dispatchGraceMs, nowMs = Date.now()) {
 }
 
 export {
+    applyObservedSettlement,
     DEFAULT_DISPATCH_GRACE_MS,
     DEFAULT_PENDING_TX_TIMEOUT_MS,
     ZERO_ADDRESS,
