@@ -1,0 +1,14 @@
+{
+  "name": "@oyaprotocol/publishing",
+  "version": "0.0.0",
+  "description": "Oya data publishing.",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ]
+}

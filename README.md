@@ -65,6 +65,7 @@ The copied `default` module now starts as a minimal standard scaffold using the 
 
 ## Repo Layout
 
+- `packages/` Hardened production-kernel packages
 - `src/` Solidity contracts
 - `script/` Foundry deployment and ops scripts
 - `test/` Foundry tests
