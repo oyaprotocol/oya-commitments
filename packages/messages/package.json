@@ -1,0 +1,14 @@
+{
+  "name": "@oyaprotocol/messages",
+  "version": "0.0.0",
+  "description": "Oya message handling.",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ]
+}
