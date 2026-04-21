@@ -23,6 +23,10 @@ node_modules
 frontend/node_modules
 agent/node_modules
 
+# Kernel package build artifacts
+packages/*/dist/
+*.tsbuildinfo
+
 # Agent-local persisted state
 agent-library/agents/**/.swap-state*.json
 agent-library/agents/**/config.local.json
