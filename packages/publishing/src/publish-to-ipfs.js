@@ -126,12 +126,18 @@ function shouldRetryError(error) {
 
 function createTimeoutSignal(timeoutMs) {
     if (typeof AbortSignal?.timeout === 'function') {
-        return AbortSignal.timeout(timeoutMs);
+        return {
+            signal: AbortSignal.timeout(timeoutMs),
+            cleanup: null,
+        };
     }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error('Request timed out.')), timeoutMs);
     controller.signal.addEventListener('abort', () => clearTimeout(timer), { once: true });
-    return controller.signal;
+    return {
+        signal: controller.signal,
+        cleanup: () => clearTimeout(timer),
+    };
 }
 
 function combineAbortSignals(signals) {
@@ -187,6 +193,7 @@ async function publishToIpfs({
     let lastError = null;
 
     for (let attempt = 1; attempt <= resolvedConfig.maxRetries + 1; attempt += 1) {
+        const timeoutSignal = createTimeoutSignal(resolvedConfig.timeoutMs);
         try {
             const { form, contentByteLength } = buildFormData({
                 content,
@@ -199,7 +206,7 @@ async function publishToIpfs({
                     method: 'POST',
                     headers: resolvedConfig.headers,
                     body: form,
-                    signal: combineAbortSignals([signal, createTimeoutSignal(resolvedConfig.timeoutMs)]),
+                    signal: combineAbortSignals([signal, timeoutSignal.signal]),
                 }
             );
             const responseText = await response.text();
@@ -250,6 +257,8 @@ async function publishToIpfs({
                 continue;
             }
             break;
+        } finally {
+            timeoutSignal.cleanup?.();
         }
     }
 

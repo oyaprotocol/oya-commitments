@@ -195,3 +195,50 @@ test('createIpfsPublishConfig requires explicit transport configuration', () => 
         /config\.headers must not include content-type/
     );
 });
+
+test('publishToIpfs clears the fallback timeout timer after a successful request', async () => {
+    const originalAbortSignalTimeout = AbortSignal.timeout;
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+    const clearedTimers = [];
+
+    Object.defineProperty(AbortSignal, 'timeout', {
+        value: undefined,
+        configurable: true,
+        writable: true,
+    });
+    globalThis.setTimeout = (fn, ms) => ({ fn, ms, kind: 'fallback-timeout' });
+    globalThis.clearTimeout = (timer) => {
+        clearedTimers.push(timer);
+    };
+
+    try {
+        const config = createIpfsPublishConfig({
+            apiUrl: 'http://ipfs.example:5001',
+            headers: {},
+            timeoutMs: 1_000,
+            maxRetries: 0,
+            retryDelayMs: 0,
+        });
+
+        const result = await publishToIpfs({
+            config,
+            fetch: async () => createTextResponse(200, '{"Hash":"bafy-timeout-cleanup","Size":"5"}'),
+            content: 'hello',
+            filename: 'cleanup.txt',
+            mediaType: 'text/plain; charset=utf-8',
+        });
+
+        assert.equal(result.cid, 'bafy-timeout-cleanup');
+        assert.equal(clearedTimers.length, 1);
+        assert.deepEqual(clearedTimers[0], { fn: clearedTimers[0].fn, ms: 1_000, kind: 'fallback-timeout' });
+    } finally {
+        Object.defineProperty(AbortSignal, 'timeout', {
+            value: originalAbortSignalTimeout,
+            configurable: true,
+            writable: true,
+        });
+        globalThis.setTimeout = originalSetTimeout;
+        globalThis.clearTimeout = originalClearTimeout;
+    }
+});
