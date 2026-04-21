@@ -23,6 +23,7 @@ After this phase, a contributor should be able to:
 - [x] 2026-04-20 23:18Z: Added focused tests covering success, retryable HTTP failure, retryable network failure, non-retryable HTTP failure, and missing-CID responses for `publishToIpfs(...)`.
 - [x] 2026-04-20 23:32Z: Tightened the publishing primitive into a strict low-level surface with no implicit defaults, added `createIpfsPublishConfig(...)` for explicit transport settings, and updated the tests to require explicit config, `fetch`, filename, and media type.
 - [x] 2026-04-21 21:46Z: Consolidated tiny helper functions inside `publishToIpfs(...)` and `parseAddResponse(...)` so the file keeps only behavior-bearing top-level helpers while preserving the same external API and test coverage.
+- [x] 2026-04-21 22:36Z: Applied a minimal fallback-timeout cleanup fix so the `createTimeoutSignal(...)` fallback no longer leaves successful-attempt timers running until `timeoutMs` elapses.
 - [ ] Decide the next publishing primitive after raw IPFS add, likely one of pinning, durable indexing, or publication-record recovery.
 
 ## Surprises & Discoveries
@@ -38,6 +39,9 @@ After this phase, a contributor should be able to:
 
 - Observation: Convenience defaults make the publishing primitive harder to audit because they hide transport and content assumptions from the caller.
   Evidence: the initial `publishToIpfs(...)` version included implicit API URL, retry, timeout, filename, media type, and clock behavior, all of which were removed in favor of explicit inputs plus validated config.
+
+- Observation: The timeout fallback path also needs lifecycle cleanup, not just correct abort behavior.
+  Evidence: in runtimes without native `AbortSignal.timeout`, the prior fallback timer was only cleared on abort and remained live after successful requests.
 
 ## Decision Log
 
