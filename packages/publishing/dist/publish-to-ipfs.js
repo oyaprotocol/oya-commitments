@@ -8,7 +8,6 @@ const RETRYABLE_ERROR_CODES = new Set([
     'UND_ERR_HEADERS_TIMEOUT',
     'UND_ERR_SOCKET',
 ]);
-
 function normalizeContent(content) {
     if (typeof content === 'string') {
         return {
@@ -36,23 +35,17 @@ function normalizeContent(content) {
     }
     throw new Error('content must be a string, Uint8Array, ArrayBuffer, or Blob.');
 }
-
-function buildFormData({ content, filename, mediaType }) {
+function buildFormData({ content, filename, mediaType, }) {
     const normalizedContent = normalizeContent(content);
     const form = new FormData();
-    form.append(
-        'file',
-        normalizedContent.blob.type === mediaType
-            ? normalizedContent.blob
-            : new Blob([normalizedContent.blob], { type: mediaType }),
-        filename
-    );
+    form.append('file', normalizedContent.blob.type === mediaType
+        ? normalizedContent.blob
+        : new Blob([normalizedContent.blob], { type: mediaType }), filename);
     return {
         form,
         contentByteLength: normalizedContent.byteLength,
     };
 }
-
 function parseAddResponse(text) {
     const lines = String(text)
         .split(/\r?\n/)
@@ -63,33 +56,34 @@ function parseAddResponse(text) {
     }
     try {
         return JSON.parse(lines[lines.length - 1]);
-    } catch {
+    }
+    catch {
         throw new Error('IPFS add response was not valid JSON.');
     }
 }
-
+function extractNonEmptyString(value) {
+    if (typeof value !== 'string' || !value.trim()) {
+        return null;
+    }
+    return value.trim();
+}
+function extractSlashLink(value) {
+    if (!value || typeof value !== 'object') {
+        return null;
+    }
+    return extractNonEmptyString(value['/']);
+}
 function extractCid(payload) {
     if (!payload || typeof payload !== 'object') {
         return null;
     }
-    if (typeof payload.Hash === 'string' && payload.Hash.trim()) {
-        return payload.Hash.trim();
-    }
-    if (typeof payload.IpfsHash === 'string' && payload.IpfsHash.trim()) {
-        return payload.IpfsHash.trim();
-    }
-    if (typeof payload.cid === 'string' && payload.cid.trim()) {
-        return payload.cid.trim();
-    }
-    if (payload.Cid && typeof payload.Cid === 'object' && typeof payload.Cid['/'] === 'string') {
-        return payload.Cid['/'].trim();
-    }
-    if (payload.cid && typeof payload.cid === 'object' && typeof payload.cid['/'] === 'string') {
-        return payload.cid['/'].trim();
-    }
-    return null;
+    const record = payload;
+    return (extractNonEmptyString(record.Hash) ??
+        extractNonEmptyString(record.IpfsHash) ??
+        extractNonEmptyString(record.cid) ??
+        extractSlashLink(record.Cid) ??
+        extractSlashLink(record.cid));
 }
-
 function extractProviderSize(payload) {
     if (!payload || typeof payload !== 'object') {
         return null;
@@ -101,31 +95,34 @@ function extractProviderSize(payload) {
     const parsed = Number(candidate);
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
-
+function readErrorString(error, key) {
+    if (!error || typeof error !== 'object') {
+        return '';
+    }
+    const value = error[key];
+    return typeof value === 'string' ? value : '';
+}
 function shouldRetryError(error) {
     if (!error) {
         return false;
     }
-    if (error.name === 'TimeoutError' || error.name === 'TypeError') {
+    if (readErrorString(error, 'name') === 'TimeoutError' || readErrorString(error, 'name') === 'TypeError') {
         return true;
     }
-    const code = String(error.code ?? '').toUpperCase();
+    const code = readErrorString(error, 'code').toUpperCase();
     if (RETRYABLE_ERROR_CODES.has(code)) {
         return true;
     }
-    const message = String(error.message ?? '').toLowerCase();
-    return (
-        message.includes('failed to fetch') ||
+    const message = readErrorString(error, 'message').toLowerCase();
+    return (message.includes('failed to fetch') ||
         message.includes('network error') ||
         message.includes('timeout') ||
         message.includes('timed out') ||
         message.includes('connection refused') ||
-        message.includes('connection reset')
-    );
+        message.includes('connection reset'));
 }
-
 function createTimeoutSignal(timeoutMs) {
-    if (typeof AbortSignal?.timeout === 'function') {
+    if (typeof AbortSignal.timeout === 'function') {
         return {
             signal: AbortSignal.timeout(timeoutMs),
             cleanup: null,
@@ -139,40 +136,30 @@ function createTimeoutSignal(timeoutMs) {
         cleanup: () => clearTimeout(timer),
     };
 }
-
 function combineAbortSignals(signals) {
-    const presentSignals = signals.filter(Boolean);
+    const presentSignals = signals.filter((signal) => signal !== undefined);
     if (presentSignals.length === 0) {
         return undefined;
     }
     if (presentSignals.length === 1) {
         return presentSignals[0];
     }
-    if (typeof AbortSignal?.any === 'function') {
+    if (typeof AbortSignal.any === 'function') {
         return AbortSignal.any(presentSignals);
     }
     const controller = new AbortController();
-    const abort = (event) => {
-        controller.abort(event?.target?.reason);
-    };
     for (const signal of presentSignals) {
         if (signal.aborted) {
             controller.abort(signal.reason);
             return controller.signal;
         }
-        signal.addEventListener('abort', abort, { once: true });
+        signal.addEventListener('abort', () => {
+            controller.abort(signal.reason);
+        }, { once: true });
     }
     return controller.signal;
 }
-
-async function publishToIpfs({
-    config,
-    fetch,
-    content,
-    filename,
-    mediaType,
-    signal,
-} = {}) {
+async function publishToIpfs({ config, fetch, content, filename, mediaType, signal, } = {}) {
     if (config === null || typeof config !== 'object' || Array.isArray(config)) {
         throw new Error('config must be an object.');
     }
@@ -204,7 +191,6 @@ async function publishToIpfs({
                 setTimeout(resolve, resolvedConfig.retryDelayMs);
                 return;
             }
-
             let settled = false;
             let timer = null;
             const finish = () => {
@@ -218,7 +204,6 @@ async function publishToIpfs({
                 signal.removeEventListener('abort', finish);
                 resolve();
             };
-
             signal.addEventListener('abort', finish, { once: true });
             if (signal.aborted) {
                 finish();
@@ -228,9 +213,7 @@ async function publishToIpfs({
         });
         throwIfCallerAborted(signal?.reason);
     };
-
     let lastError = null;
-
     for (let attempt = 1; attempt <= resolvedConfig.maxRetries + 1; attempt += 1) {
         const timeoutSignal = createTimeoutSignal(resolvedConfig.timeoutMs);
         try {
@@ -239,39 +222,29 @@ async function publishToIpfs({
                 filename: resolvedFilename,
                 mediaType: resolvedMediaType,
             });
-            const response = await resolvedFetch(
-                `${resolvedConfig.apiUrl}/api/v0/add?cid-version=1&pin=false&progress=false`,
-                {
-                    method: 'POST',
-                    headers: resolvedConfig.headers,
-                    body: form,
-                    signal: combineAbortSignals([signal, timeoutSignal.signal]),
-                }
-            );
+            const response = await resolvedFetch(`${resolvedConfig.apiUrl}/api/v0/add?cid-version=1&pin=false&progress=false`, {
+                method: 'POST',
+                headers: resolvedConfig.headers,
+                body: form,
+                signal: combineAbortSignals([signal, timeoutSignal.signal]),
+            });
             const responseText = await response.text();
-
             if (!response.ok) {
-                const httpError = new Error(
-                    `IPFS add failed with ${response.status} ${response.statusText || 'Unknown Status'}.`
-                );
+                const httpError = new Error(`IPFS add failed with ${response.status} ${response.statusText || 'Unknown Status'}.`);
                 httpError.status = response.status;
                 httpError.responseText = responseText;
-                if (
-                    attempt <= resolvedConfig.maxRetries &&
-                    (response.status === 429 || response.status >= 500)
-                ) {
+                if (attempt <= resolvedConfig.maxRetries &&
+                    (response.status === 429 || response.status >= 500)) {
                     await waitForRetryDelay();
                     continue;
                 }
                 throw httpError;
             }
-
             const providerResponse = parseAddResponse(responseText);
             const cid = extractCid(providerResponse);
             if (!cid) {
                 throw new Error('IPFS add response did not include a CID.');
             }
-
             return {
                 cid,
                 uri: `ipfs://${cid}`,
@@ -282,7 +255,8 @@ async function publishToIpfs({
                 attemptCount: attempt,
                 providerResponse,
             };
-        } catch (error) {
+        }
+        catch (error) {
             lastError = error;
             throwIfCallerAborted(error);
             if (attempt <= resolvedConfig.maxRetries && shouldRetryError(error)) {
@@ -290,12 +264,12 @@ async function publishToIpfs({
                 continue;
             }
             break;
-        } finally {
+        }
+        finally {
             timeoutSignal.cleanup?.();
         }
     }
-
     throw lastError ?? new Error('IPFS publish failed.');
 }
-
 export { publishToIpfs };
+//# sourceMappingURL=publish-to-ipfs.js.map

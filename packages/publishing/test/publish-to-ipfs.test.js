@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createIpfsPublishConfig } from '../src/ipfs-publish-config.js';
-import { publishToIpfs } from '../src/publish-to-ipfs.js';
+import { createIpfsPublishConfig, publishToIpfs } from '../dist/index.js';
 
 function createTextResponse(status, body, statusText = 'OK') {
     return {
