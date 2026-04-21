@@ -27,6 +27,7 @@ After this phase, a contributor should be able to:
 - [x] 2026-04-21 22:38Z: Added fallback-timeout regression coverage and re-ran `node --test packages/publishing/test/publish-to-ipfs.test.js`; all 7 tests passed.
 - [x] 2026-04-21 22:42Z: Made retry backoff abort-aware so caller cancellation interrupts retry delays promptly, added regression coverage for abort-during-backoff, and re-ran `node --test packages/publishing/test/publish-to-ipfs.test.js`; all 8 tests passed.
 - [x] 2026-04-22 05:12Z: Converted the kernel packages to TypeScript source, added a `packages/`-local TypeScript workspace toolchain, switched package manifests to `dist/` exports with declaration files, rebuilt all five packages, and re-ran the publishing tests against built output.
+- [x] 2026-04-22 05:18Z: Tightened the publishing TypeScript signatures so `createIpfsPublishConfig(...)` and `publishToIpfs(...)` require full option objects in the emitted declaration files, then rebuilt and re-ran the publishing tests.
 - [ ] Decide the next publishing primitive after raw IPFS add, likely one of pinning, durable indexing, or publication-record recovery.
 
 ## Surprises & Discoveries
@@ -51,6 +52,9 @@ After this phase, a contributor should be able to:
 
 - Observation: Keeping the kernel in TypeScript does not require a repo-wide workspace migration.
   Evidence: `packages/package.json` now provides a local TypeScript toolchain and workspace links for the five kernel packages without changing the rest of the monorepo package layout.
+
+- Observation: A TypeScript migration only helps if the public declarations are at least as strict as the runtime contract.
+  Evidence: the initial TS conversion still emitted `Partial<...>` option types for the publishing functions, which allowed incomplete calls at compile time until the latest signature fix.
 
 ## Decision Log
 
