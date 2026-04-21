@@ -189,6 +189,45 @@ async function publishToIpfs({
     }
     const resolvedFilename = filename.trim();
     const resolvedMediaType = mediaType.trim();
+    const throwIfCallerAborted = (cause) => {
+        if (signal?.aborted) {
+            throw new Error('publishToIpfs was aborted by the caller.', { cause });
+        }
+    };
+    const waitForRetryDelay = async () => {
+        if (resolvedConfig.retryDelayMs <= 0) {
+            return;
+        }
+        throwIfCallerAborted(signal?.reason);
+        await new Promise((resolve) => {
+            if (!signal) {
+                setTimeout(resolve, resolvedConfig.retryDelayMs);
+                return;
+            }
+
+            let settled = false;
+            let timer = null;
+            const finish = () => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                if (timer !== null) {
+                    clearTimeout(timer);
+                }
+                signal.removeEventListener('abort', finish);
+                resolve();
+            };
+
+            signal.addEventListener('abort', finish, { once: true });
+            if (signal.aborted) {
+                finish();
+                return;
+            }
+            timer = setTimeout(finish, resolvedConfig.retryDelayMs);
+        });
+        throwIfCallerAborted(signal?.reason);
+    };
 
     let lastError = null;
 
@@ -221,9 +260,7 @@ async function publishToIpfs({
                     attempt <= resolvedConfig.maxRetries &&
                     (response.status === 429 || response.status >= 500)
                 ) {
-                    if (resolvedConfig.retryDelayMs > 0) {
-                        await new Promise((resolve) => setTimeout(resolve, resolvedConfig.retryDelayMs));
-                    }
+                    await waitForRetryDelay();
                     continue;
                 }
                 throw httpError;
@@ -247,13 +284,9 @@ async function publishToIpfs({
             };
         } catch (error) {
             lastError = error;
-            if (signal?.aborted) {
-                throw new Error("publishToIpfs was aborted by the caller.", { cause: error });
-            }
+            throwIfCallerAborted(error);
             if (attempt <= resolvedConfig.maxRetries && shouldRetryError(error)) {
-                if (resolvedConfig.retryDelayMs > 0) {
-                    await new Promise((resolve) => setTimeout(resolve, resolvedConfig.retryDelayMs));
-                }
+                await waitForRetryDelay();
                 continue;
             }
             break;

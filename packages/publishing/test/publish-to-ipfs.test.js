@@ -242,3 +242,60 @@ test('publishToIpfs clears the fallback timeout timer after a successful request
         globalThis.clearTimeout = originalClearTimeout;
     }
 });
+
+test('publishToIpfs aborts during retry backoff without making another attempt', async () => {
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+    const scheduledTimers = [];
+    const controller = new AbortController();
+    let attempts = 0;
+
+    globalThis.setTimeout = (fn, ms) => {
+        const timer = { fn, ms, cleared: false };
+        scheduledTimers.push(timer);
+        return timer;
+    };
+    globalThis.clearTimeout = (timer) => {
+        timer.cleared = true;
+    };
+
+    try {
+        const config = createIpfsPublishConfig({
+            apiUrl: 'http://ipfs.example:5001',
+            headers: {},
+            timeoutMs: 10_000,
+            maxRetries: 1,
+            retryDelayMs: 1_000,
+        });
+
+        const publishPromise = publishToIpfs({
+            config,
+            fetch: async () => {
+                attempts += 1;
+                const error = new Error('connect ECONNRESET');
+                error.code = 'ECONNRESET';
+                throw error;
+            },
+            content: 'abort me',
+            filename: 'abort.txt',
+            mediaType: 'text/plain; charset=utf-8',
+            signal: controller.signal,
+        });
+
+        await Promise.resolve();
+        await Promise.resolve();
+
+        assert.equal(attempts, 1);
+        assert.equal(scheduledTimers.length, 1);
+        assert.equal(scheduledTimers[0].ms, 1_000);
+
+        controller.abort(new Error('stop retrying'));
+
+        await assert.rejects(publishPromise, /aborted by the caller/);
+        assert.equal(attempts, 1);
+        assert.equal(scheduledTimers[0].cleared, true);
+    } finally {
+        globalThis.setTimeout = originalSetTimeout;
+        globalThis.clearTimeout = originalClearTimeout;
+    }
+});

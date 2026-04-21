@@ -25,6 +25,7 @@ After this phase, a contributor should be able to:
 - [x] 2026-04-21 21:46Z: Consolidated tiny helper functions inside `publishToIpfs(...)` and `parseAddResponse(...)` so the file keeps only behavior-bearing top-level helpers while preserving the same external API and test coverage.
 - [x] 2026-04-21 22:36Z: Applied a minimal fallback-timeout cleanup fix so the `createTimeoutSignal(...)` fallback no longer leaves successful-attempt timers running until `timeoutMs` elapses.
 - [x] 2026-04-21 22:38Z: Added fallback-timeout regression coverage and re-ran `node --test packages/publishing/test/publish-to-ipfs.test.js`; all 7 tests passed.
+- [x] 2026-04-21 22:42Z: Made retry backoff abort-aware so caller cancellation interrupts retry delays promptly, added regression coverage for abort-during-backoff, and re-ran `node --test packages/publishing/test/publish-to-ipfs.test.js`; all 8 tests passed.
 - [ ] Decide the next publishing primitive after raw IPFS add, likely one of pinning, durable indexing, or publication-record recovery.
 
 ## Surprises & Discoveries
@@ -43,6 +44,9 @@ After this phase, a contributor should be able to:
 
 - Observation: The timeout fallback path also needs lifecycle cleanup, not just correct abort behavior.
   Evidence: in runtimes without native `AbortSignal.timeout`, the prior fallback timer was only cleared on abort and remained live after successful requests.
+
+- Observation: Retry backoff is part of the cancellation contract, not just transport resilience.
+  Evidence: before the latest change, a caller abort during `retryDelayMs` did not take effect until the full backoff completed.
 
 ## Decision Log
 
