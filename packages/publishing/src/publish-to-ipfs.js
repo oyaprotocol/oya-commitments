@@ -106,7 +106,7 @@ function shouldRetryError(error) {
     if (!error) {
         return false;
     }
-    if (error.name === 'AbortError' || error.name === 'TimeoutError' || error.name === 'TypeError') {
+    if (error.name === 'TimeoutError' || error.name === 'TypeError') {
         return true;
     }
     const code = String(error.code ?? '').toUpperCase();
@@ -240,6 +240,9 @@ async function publishToIpfs({
             };
         } catch (error) {
             lastError = error;
+            if (signal?.aborted) {
+                throw new Error("publishToIpfs was aborted by the caller.", { cause: error });
+            }
             if (attempt <= resolvedConfig.maxRetries && shouldRetryError(error)) {
                 if (resolvedConfig.retryDelayMs > 0) {
                     await new Promise((resolve) => setTimeout(resolve, resolvedConfig.retryDelayMs));
