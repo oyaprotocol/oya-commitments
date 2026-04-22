@@ -175,7 +175,7 @@ function shouldRetryError(error: unknown): boolean {
     if (!error) {
         return false;
     }
-    if (readErrorString(error, 'name') === 'TimeoutError' || readErrorString(error, 'name') === 'TypeError') {
+    if (readErrorString(error, 'name') === 'TimeoutError') {
         return true;
     }
     const code = readErrorString(error, 'code').toUpperCase();
