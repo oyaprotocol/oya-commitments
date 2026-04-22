@@ -163,27 +163,36 @@ function extractProviderSize(payload: unknown): number | null {
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
-function readErrorString(error: unknown, key: string): string {
-    if (!error || typeof error !== 'object') {
-        return '';
+function readErrorStringChain(error: unknown, key: string): string[] {
+    const values: string[] = [];
+    let current: unknown = error;
+    while (current && typeof current === 'object') {
+        const value = (current as Record<string, unknown>)[key];
+        if (typeof value === 'string' && value) {
+            values.push(value);
+        }
+        current = (current as Record<string, unknown>).cause;
     }
-    const value = (error as Record<string, unknown>)[key];
-    return typeof value === 'string' ? value : '';
+    return values;
 }
 
 function shouldRetryError(error: unknown): boolean {
     if (!error) {
         return false;
     }
-    if (readErrorString(error, 'name') === 'TimeoutError') {
+    const names = readErrorStringChain(error, 'name');
+    if (names.includes('TimeoutError')) {
         return true;
     }
-    const code = readErrorString(error, 'code').toUpperCase();
-    if (RETRYABLE_ERROR_CODES.has(code)) {
-        return true;
+    const codes = readErrorStringChain(error, 'code');
+    for (const code of codes) {
+        if (RETRYABLE_ERROR_CODES.has(code.toUpperCase())) {
+            return true;
+        }
     }
-    const message = readErrorString(error, 'message').toLowerCase();
+    const message = readErrorStringChain(error, 'message').join(' ').toLowerCase();
     return (
+        message.includes('fetch failed') ||
         message.includes('failed to fetch') ||
         message.includes('network error') ||
         message.includes('timeout') ||

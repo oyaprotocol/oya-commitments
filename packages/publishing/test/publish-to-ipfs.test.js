@@ -123,6 +123,38 @@ test('publishToIpfs retries retryable network errors and succeeds', async () => 
     assert.equal(result.attemptCount, 2);
 });
 
+test('publishToIpfs retries fetch errors when a retryable network code is nested in error.cause', async () => {
+    let attempts = 0;
+    const config = createIpfsPublishConfig({
+        apiUrl: 'http://ipfs.example:5001',
+        headers: {},
+        timeoutMs: 1_000,
+        maxRetries: 2,
+        retryDelayMs: 0,
+    });
+    const result = await publishToIpfs({
+        config,
+        fetch: async () => {
+            attempts += 1;
+            if (attempts === 1) {
+                throw new TypeError('fetch failed', {
+                    cause: Object.assign(new Error('connect ECONNREFUSED'), {
+                        code: 'ECONNREFUSED',
+                    }),
+                });
+            }
+            return createTextResponse(200, '{"Hash":"bafy-cause-ok","Size":"8"}');
+        },
+        content: 'retry me',
+        filename: 'retry-cause.txt',
+        mediaType: 'text/plain; charset=utf-8',
+    });
+
+    assert.equal(attempts, 2);
+    assert.equal(result.cid, 'bafy-cause-ok');
+    assert.equal(result.attemptCount, 2);
+});
+
 test('publishToIpfs does not retry non-retryable HTTP failures', async () => {
     let attempts = 0;
     const config = createIpfsPublishConfig({
