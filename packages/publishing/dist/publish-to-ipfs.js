@@ -131,12 +131,6 @@ function shouldRetryError(error) {
         message.includes('connection reset'));
 }
 function createTimeoutSignal(timeoutMs) {
-    if (typeof AbortSignal.timeout === 'function') {
-        return {
-            signal: AbortSignal.timeout(timeoutMs),
-            cleanup: null,
-        };
-    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error('Request timed out.')), timeoutMs);
     controller.signal.addEventListener('abort', () => clearTimeout(timer), { once: true });
@@ -148,25 +142,79 @@ function createTimeoutSignal(timeoutMs) {
 function combineAbortSignals(signals) {
     const presentSignals = signals.filter((signal) => signal !== undefined);
     if (presentSignals.length === 0) {
-        return undefined;
+        return {
+            signal: undefined,
+            cleanup: null,
+        };
     }
     if (presentSignals.length === 1) {
-        return presentSignals[0];
+        return {
+            signal: presentSignals[0],
+            cleanup: null,
+        };
     }
     if (typeof AbortSignal.any === 'function') {
-        return AbortSignal.any(presentSignals);
+        return {
+            signal: AbortSignal.any(presentSignals),
+            cleanup: null,
+        };
     }
     const controller = new AbortController();
+    const listeners = [];
     for (const signal of presentSignals) {
         if (signal.aborted) {
             controller.abort(signal.reason);
-            return controller.signal;
+            return {
+                signal: controller.signal,
+                cleanup: null,
+            };
         }
-        signal.addEventListener('abort', () => {
+        const listener = () => {
             controller.abort(signal.reason);
-        }, { once: true });
+        };
+        signal.addEventListener('abort', listener, { once: true });
+        listeners.push({ signal, listener });
     }
-    return controller.signal;
+    return {
+        signal: controller.signal,
+        cleanup: () => {
+            for (const { signal, listener } of listeners) {
+                signal.removeEventListener('abort', listener);
+            }
+        },
+    };
+}
+async function awaitWithAbort(promise, signal) {
+    if (!signal) {
+        return await promise;
+    }
+    if (signal.aborted) {
+        throw signal.reason ?? new Error('Operation aborted.');
+    }
+    return await new Promise((resolve, reject) => {
+        let settled = false;
+        const finishResolve = (value) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            signal.removeEventListener('abort', onAbort);
+            resolve(value);
+        };
+        const finishReject = (error) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            signal.removeEventListener('abort', onAbort);
+            reject(error);
+        };
+        const onAbort = () => {
+            finishReject(signal.reason ?? new Error('Operation aborted.'));
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+        promise.then(finishResolve, finishReject);
+    });
 }
 async function publishToIpfs({ config, fetch, content, filename, mediaType, signal, }) {
     if (config === null || typeof config !== 'object' || Array.isArray(config)) {
@@ -225,19 +273,20 @@ async function publishToIpfs({ config, fetch, content, filename, mediaType, sign
     let lastError = null;
     for (let attempt = 1; attempt <= resolvedConfig.maxRetries + 1; attempt += 1) {
         const timeoutSignal = createTimeoutSignal(resolvedConfig.timeoutMs);
+        const requestSignal = combineAbortSignals([signal, timeoutSignal.signal]);
         try {
             const { form, contentByteLength } = buildFormData({
                 content,
                 filename: resolvedFilename,
                 mediaType: resolvedMediaType,
             });
-            const response = await resolvedFetch(`${resolvedConfig.apiUrl}/api/v0/add?cid-version=1&pin=false&progress=false`, {
+            const response = await awaitWithAbort(resolvedFetch(`${resolvedConfig.apiUrl}/api/v0/add?cid-version=1&pin=false&progress=false`, {
                 method: 'POST',
                 headers: resolvedConfig.headers,
                 body: form,
-                signal: combineAbortSignals([signal, timeoutSignal.signal]),
-            });
-            const responseText = await response.text();
+                signal: requestSignal.signal,
+            }), requestSignal.signal);
+            const responseText = await awaitWithAbort(response.text(), requestSignal.signal);
             if (!response.ok) {
                 const httpError = new Error(`IPFS add failed with ${response.status} ${response.statusText || 'Unknown Status'}.`);
                 httpError.status = response.status;
@@ -275,6 +324,7 @@ async function publishToIpfs({ config, fetch, content, filename, mediaType, sign
             break;
         }
         finally {
+            requestSignal.cleanup?.();
             timeoutSignal.cleanup?.();
         }
     }

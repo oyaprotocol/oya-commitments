@@ -29,6 +29,8 @@ After this phase, a contributor should be able to:
 - [x] 2026-04-22 05:12Z: Converted the kernel packages to TypeScript source, added a `packages/`-local TypeScript workspace toolchain, switched package manifests to `dist/` exports with declaration files, rebuilt all five packages, and re-ran the publishing tests against built output.
 - [x] 2026-04-22 05:18Z: Tightened the publishing TypeScript signatures so `createIpfsPublishConfig(...)` and `publishToIpfs(...)` require full option objects in the emitted declaration files, then rebuilt and re-ran the publishing tests.
 - [x] 2026-04-22 05:27Z: Updated the publishing retry classifier to inspect nested `error.cause` codes/messages so Node `fetch` network failures like `TypeError('fetch failed', { cause })` still retry when the nested cause is transient, and added regression coverage for that path.
+- [x] 2026-04-23 00:14Z: Decoupled request timeout enforcement from injected fetch abort support by racing fetch and `response.text()` against a package-owned timeout signal, and added regression coverage for fetch adapters that ignore `options.signal`.
+- [x] 2026-04-23 00:16Z: Updated the combined-abort fallback to return cleanup hooks that remove source-signal listeners after each attempt, and added regression coverage for listener cleanup when `AbortSignal.any` is unavailable.
 - [ ] Decide the next publishing primitive after raw IPFS add, likely one of pinning, durable indexing, or publication-record recovery.
 
 ## Surprises & Discoveries
@@ -59,6 +61,12 @@ After this phase, a contributor should be able to:
 
 - Observation: Native Node `fetch` can hide transient network failure details inside `error.cause` rather than top-level `error.code`.
   Evidence: the latest publishing regression test uses `TypeError('fetch failed', { cause: Error & { code: 'ECONNREFUSED' } })`, which did not retry until the classifier started reading nested cause fields.
+
+- Observation: Timeout behavior should not depend on third-party `fetch` adapters correctly wiring abort signals through to the underlying request.
+  Evidence: a regression test with a fetch-like wrapper that ignores `options.signal` only times out correctly after the explicit race was added around both `fetch(...)` and `response.text()`.
+
+- Observation: The `AbortSignal.any` fallback needs its own listener cleanup because `{ once: true }` only detaches listeners on abort, not on successful completion.
+  Evidence: a regression test with `AbortSignal.any` disabled and a reused caller signal now verifies listener count returns to zero after a successful publish.
 
 ## Decision Log
 

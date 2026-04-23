@@ -51,8 +51,8 @@ export interface PublishToIpfsResult {
     providerResponse: unknown;
 }
 
-interface TimeoutSignalHandle {
-    signal: AbortSignal;
+interface AbortSignalHandle {
+    signal: AbortSignal | undefined;
     cleanup: (() => void) | null;
 }
 
@@ -202,13 +202,7 @@ function shouldRetryError(error: unknown): boolean {
     );
 }
 
-function createTimeoutSignal(timeoutMs: number): TimeoutSignalHandle {
-    if (typeof AbortSignal.timeout === 'function') {
-        return {
-            signal: AbortSignal.timeout(timeoutMs),
-            cleanup: null,
-        };
-    }
+function createTimeoutSignal(timeoutMs: number): AbortSignalHandle {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error('Request timed out.')), timeoutMs);
     controller.signal.addEventListener('abort', () => clearTimeout(timer), { once: true });
@@ -218,32 +212,83 @@ function createTimeoutSignal(timeoutMs: number): TimeoutSignalHandle {
     };
 }
 
-function combineAbortSignals(signals: Array<AbortSignal | undefined>): AbortSignal | undefined {
+function combineAbortSignals(signals: Array<AbortSignal | undefined>): AbortSignalHandle {
     const presentSignals = signals.filter((signal): signal is AbortSignal => signal !== undefined);
     if (presentSignals.length === 0) {
-        return undefined;
+        return {
+            signal: undefined,
+            cleanup: null,
+        };
     }
     if (presentSignals.length === 1) {
-        return presentSignals[0];
+        return {
+            signal: presentSignals[0],
+            cleanup: null,
+        };
     }
     if (typeof AbortSignal.any === 'function') {
-        return AbortSignal.any(presentSignals);
+        return {
+            signal: AbortSignal.any(presentSignals),
+            cleanup: null,
+        };
     }
     const controller = new AbortController();
+    const listeners: Array<{ signal: AbortSignal; listener: EventListener }> = [];
     for (const signal of presentSignals) {
         if (signal.aborted) {
             controller.abort(signal.reason);
-            return controller.signal;
+            return {
+                signal: controller.signal,
+                cleanup: null,
+            };
         }
-        signal.addEventListener(
-            'abort',
-            () => {
-                controller.abort(signal.reason);
-            },
-            { once: true }
-        );
+        const listener = () => {
+            controller.abort(signal.reason);
+        };
+        signal.addEventListener('abort', listener, { once: true });
+        listeners.push({ signal, listener });
     }
-    return controller.signal;
+    return {
+        signal: controller.signal,
+        cleanup: () => {
+            for (const { signal, listener } of listeners) {
+                signal.removeEventListener('abort', listener);
+            }
+        },
+    };
+}
+
+async function awaitWithAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+    if (!signal) {
+        return await promise;
+    }
+    if (signal.aborted) {
+        throw signal.reason ?? new Error('Operation aborted.');
+    }
+    return await new Promise<T>((resolve, reject) => {
+        let settled = false;
+        const finishResolve = (value: T) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            signal.removeEventListener('abort', onAbort);
+            resolve(value);
+        };
+        const finishReject = (error: unknown) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            signal.removeEventListener('abort', onAbort);
+            reject(error);
+        };
+        const onAbort = () => {
+            finishReject(signal.reason ?? new Error('Operation aborted.'));
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+        promise.then(finishResolve, finishReject);
+    });
 }
 
 async function publishToIpfs({
@@ -314,22 +359,23 @@ async function publishToIpfs({
 
     for (let attempt = 1; attempt <= resolvedConfig.maxRetries + 1; attempt += 1) {
         const timeoutSignal = createTimeoutSignal(resolvedConfig.timeoutMs);
+        const requestSignal = combineAbortSignals([signal, timeoutSignal.signal]);
         try {
             const { form, contentByteLength } = buildFormData({
                 content,
                 filename: resolvedFilename,
                 mediaType: resolvedMediaType,
             });
-            const response = await resolvedFetch(
-                `${resolvedConfig.apiUrl}/api/v0/add?cid-version=1&pin=false&progress=false`,
-                {
+            const response = await awaitWithAbort(
+                resolvedFetch(`${resolvedConfig.apiUrl}/api/v0/add?cid-version=1&pin=false&progress=false`, {
                     method: 'POST',
                     headers: resolvedConfig.headers,
                     body: form,
-                    signal: combineAbortSignals([signal, timeoutSignal.signal]),
-                }
+                    signal: requestSignal.signal,
+                }),
+                requestSignal.signal
             );
-            const responseText = await response.text();
+            const responseText = await awaitWithAbort(response.text(), requestSignal.signal);
 
             if (!response.ok) {
                 const httpError = new Error(
@@ -372,6 +418,7 @@ async function publishToIpfs({
             }
             break;
         } finally {
+            requestSignal.cleanup?.();
             timeoutSignal.cleanup?.();
         }
     }

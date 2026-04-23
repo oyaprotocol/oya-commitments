@@ -155,6 +155,27 @@ test('publishToIpfs retries fetch errors when a retryable network code is nested
     assert.equal(result.attemptCount, 2);
 });
 
+test('publishToIpfs enforces timeout even when the injected fetch ignores signal', async () => {
+    const config = createIpfsPublishConfig({
+        apiUrl: 'http://ipfs.example:5001',
+        headers: {},
+        timeoutMs: 10,
+        maxRetries: 0,
+        retryDelayMs: 0,
+    });
+
+    await assert.rejects(
+        publishToIpfs({
+            config,
+            fetch: async () => await new Promise(() => {}),
+            content: 'timeout me',
+            filename: 'timeout.txt',
+            mediaType: 'text/plain; charset=utf-8',
+        }),
+        /timed out/
+    );
+});
+
 test('publishToIpfs does not retry non-retryable HTTP failures', async () => {
     let attempts = 0;
     const config = createIpfsPublishConfig({
@@ -313,20 +334,81 @@ test('publishToIpfs aborts during retry backoff without making another attempt',
             signal: controller.signal,
         });
 
-        await Promise.resolve();
-        await Promise.resolve();
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+            if (scheduledTimers.some((timer) => timer.ms === 1_000)) {
+                break;
+            }
+            await new Promise((resolve) => setImmediate(resolve));
+        }
 
         assert.equal(attempts, 1);
-        assert.equal(scheduledTimers.length, 1);
-        assert.equal(scheduledTimers[0].ms, 1_000);
+        const retryTimer = scheduledTimers.find((timer) => timer.ms === 1_000);
+        assert.ok(retryTimer);
 
         controller.abort(new Error('stop retrying'));
 
         await assert.rejects(publishPromise, /aborted by the caller/);
         assert.equal(attempts, 1);
-        assert.equal(scheduledTimers[0].cleared, true);
+        assert.equal(retryTimer.cleared, true);
     } finally {
         globalThis.setTimeout = originalSetTimeout;
         globalThis.clearTimeout = originalClearTimeout;
+    }
+});
+
+test('publishToIpfs removes fallback combined abort listeners after a successful request', async () => {
+    const originalAbortSignalAny = AbortSignal.any;
+    const controller = new AbortController();
+    const signal = controller.signal;
+    const originalAddEventListener = signal.addEventListener;
+    const originalRemoveEventListener = signal.removeEventListener;
+    let listenerCount = 0;
+
+    Object.defineProperty(AbortSignal, 'any', {
+        value: undefined,
+        configurable: true,
+        writable: true,
+    });
+    signal.addEventListener = function (type, listener, options) {
+        if (type === 'abort') {
+            listenerCount += 1;
+        }
+        return originalAddEventListener.call(this, type, listener, options);
+    };
+    signal.removeEventListener = function (type, listener, options) {
+        if (type === 'abort') {
+            listenerCount -= 1;
+        }
+        return originalRemoveEventListener.call(this, type, listener, options);
+    };
+
+    try {
+        const config = createIpfsPublishConfig({
+            apiUrl: 'http://ipfs.example:5001',
+            headers: {},
+            timeoutMs: 1_000,
+            maxRetries: 0,
+            retryDelayMs: 0,
+        });
+
+        const result = await publishToIpfs({
+            config,
+            fetch: async () => createTextResponse(200, '{"Hash":"bafy-cleanup-ok","Size":"5"}'),
+            content: 'hello',
+            filename: 'cleanup-listeners.txt',
+            mediaType: 'text/plain; charset=utf-8',
+            signal,
+        });
+
+        assert.equal(result.cid, 'bafy-cleanup-ok');
+        assert.equal(listenerCount, 0);
+    } finally {
+        Object.defineProperty(AbortSignal, 'any', {
+            value: originalAbortSignalAny,
+            configurable: true,
+            writable: true,
+        });
+        signal.addEventListener = originalAddEventListener;
+        signal.removeEventListener = originalRemoveEventListener;
     }
 });
