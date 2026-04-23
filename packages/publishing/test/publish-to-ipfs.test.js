@@ -176,6 +176,36 @@ test('publishToIpfs enforces timeout even when the injected fetch ignores signal
     );
 });
 
+test('publishToIpfs does not call fetch when the caller signal is already aborted', async () => {
+    const controller = new AbortController();
+    let attempts = 0;
+    controller.abort(new Error('stop before request'));
+    const config = createIpfsPublishConfig({
+        apiUrl: 'http://ipfs.example:5001',
+        headers: {},
+        timeoutMs: 1_000,
+        maxRetries: 0,
+        retryDelayMs: 0,
+    });
+
+    await assert.rejects(
+        publishToIpfs({
+            config,
+            fetch: async () => {
+                attempts += 1;
+                return createTextResponse(200, '{"Hash":"bafy-never-called","Size":"5"}');
+            },
+            content: 'do not send',
+            filename: 'cancelled.txt',
+            mediaType: 'text/plain; charset=utf-8',
+            signal: controller.signal,
+        }),
+        /aborted by the caller/
+    );
+
+    assert.equal(attempts, 0);
+});
+
 test('publishToIpfs does not retry non-retryable HTTP failures', async () => {
     let attempts = 0;
     const config = createIpfsPublishConfig({

@@ -31,6 +31,7 @@ After this phase, a contributor should be able to:
 - [x] 2026-04-22 05:27Z: Updated the publishing retry classifier to inspect nested `error.cause` codes/messages so Node `fetch` network failures like `TypeError('fetch failed', { cause })` still retry when the nested cause is transient, and added regression coverage for that path.
 - [x] 2026-04-23 00:14Z: Decoupled request timeout enforcement from injected fetch abort support by racing fetch and `response.text()` against a package-owned timeout signal, and added regression coverage for fetch adapters that ignore `options.signal`.
 - [x] 2026-04-23 00:16Z: Updated the combined-abort fallback to return cleanup hooks that remove source-signal listeners after each attempt, and added regression coverage for listener cleanup when `AbortSignal.any` is unavailable.
+- [x] 2026-04-23 00:21Z: Made the abort wrapper lazy so pre-aborted requests do not invoke `fetch(...)` or `response.text()` before cancellation is surfaced, and added regression coverage for the pre-cancelled request path.
 - [ ] Decide the next publishing primitive after raw IPFS add, likely one of pinning, durable indexing, or publication-record recovery.
 
 ## Surprises & Discoveries
@@ -67,6 +68,9 @@ After this phase, a contributor should be able to:
 
 - Observation: The `AbortSignal.any` fallback needs its own listener cleanup because `{ once: true }` only detaches listeners on abort, not on successful completion.
   Evidence: a regression test with `AbortSignal.any` disabled and a reused caller signal now verifies listener count returns to zero after a successful publish.
+
+- Observation: Abort-aware wrapping must be lazy to preserve cancellation semantics; checking `signal.aborted` after constructing the promise is too late for side-effecting operations.
+  Evidence: the pre-cancelled request regression only stopped invoking the injected `fetch` after the helper changed from accepting an already-created promise to accepting a promise factory.
 
 ## Decision Log
 

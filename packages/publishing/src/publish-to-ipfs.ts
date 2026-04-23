@@ -258,9 +258,9 @@ function combineAbortSignals(signals: Array<AbortSignal | undefined>): AbortSign
     };
 }
 
-async function awaitWithAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+async function invokeWithAbort<T>(createPromise: () => Promise<T>, signal: AbortSignal | undefined): Promise<T> {
     if (!signal) {
-        return await promise;
+        return await createPromise();
     }
     if (signal.aborted) {
         throw signal.reason ?? new Error('Operation aborted.');
@@ -287,6 +287,13 @@ async function awaitWithAbort<T>(promise: Promise<T>, signal: AbortSignal | unde
             finishReject(signal.reason ?? new Error('Operation aborted.'));
         };
         signal.addEventListener('abort', onAbort, { once: true });
+        let promise: Promise<T>;
+        try {
+            promise = createPromise();
+        } catch (error) {
+            finishReject(error);
+            return;
+        }
         promise.then(finishResolve, finishReject);
     });
 }
@@ -366,16 +373,17 @@ async function publishToIpfs({
                 filename: resolvedFilename,
                 mediaType: resolvedMediaType,
             });
-            const response = await awaitWithAbort(
-                resolvedFetch(`${resolvedConfig.apiUrl}/api/v0/add?cid-version=1&pin=false&progress=false`, {
-                    method: 'POST',
-                    headers: resolvedConfig.headers,
-                    body: form,
-                    signal: requestSignal.signal,
-                }),
+            const response = await invokeWithAbort(
+                () =>
+                    resolvedFetch(`${resolvedConfig.apiUrl}/api/v0/add?cid-version=1&pin=false&progress=false`, {
+                        method: 'POST',
+                        headers: resolvedConfig.headers,
+                        body: form,
+                        signal: requestSignal.signal,
+                    }),
                 requestSignal.signal
             );
-            const responseText = await awaitWithAbort(response.text(), requestSignal.signal);
+            const responseText = await invokeWithAbort(() => response.text(), requestSignal.signal);
 
             if (!response.ok) {
                 const httpError = new Error(

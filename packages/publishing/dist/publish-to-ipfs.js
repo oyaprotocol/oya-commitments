@@ -184,9 +184,9 @@ function combineAbortSignals(signals) {
         },
     };
 }
-async function awaitWithAbort(promise, signal) {
+async function invokeWithAbort(createPromise, signal) {
     if (!signal) {
-        return await promise;
+        return await createPromise();
     }
     if (signal.aborted) {
         throw signal.reason ?? new Error('Operation aborted.');
@@ -213,6 +213,14 @@ async function awaitWithAbort(promise, signal) {
             finishReject(signal.reason ?? new Error('Operation aborted.'));
         };
         signal.addEventListener('abort', onAbort, { once: true });
+        let promise;
+        try {
+            promise = createPromise();
+        }
+        catch (error) {
+            finishReject(error);
+            return;
+        }
         promise.then(finishResolve, finishReject);
     });
 }
@@ -280,13 +288,13 @@ async function publishToIpfs({ config, fetch, content, filename, mediaType, sign
                 filename: resolvedFilename,
                 mediaType: resolvedMediaType,
             });
-            const response = await awaitWithAbort(resolvedFetch(`${resolvedConfig.apiUrl}/api/v0/add?cid-version=1&pin=false&progress=false`, {
+            const response = await invokeWithAbort(() => resolvedFetch(`${resolvedConfig.apiUrl}/api/v0/add?cid-version=1&pin=false&progress=false`, {
                 method: 'POST',
                 headers: resolvedConfig.headers,
                 body: form,
                 signal: requestSignal.signal,
             }), requestSignal.signal);
-            const responseText = await awaitWithAbort(response.text(), requestSignal.signal);
+            const responseText = await invokeWithAbort(() => response.text(), requestSignal.signal);
             if (!response.ok) {
                 const httpError = new Error(`IPFS add failed with ${response.status} ${response.statusText || 'Unknown Status'}.`);
                 httpError.status = response.status;
