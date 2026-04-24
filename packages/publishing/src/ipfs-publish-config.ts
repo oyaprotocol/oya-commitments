@@ -54,6 +54,10 @@ function assertHeadersObject(headers: unknown, label: string): Readonly<Record<s
     return normalized;
 }
 
+function normalizeApiUrl(apiUrl: string): string {
+    return apiUrl.replace(/\/+$/, '').replace(/\/api\/v0$/, '');
+}
+
 function createIpfsPublishConfig({
     apiUrl,
     headers,
@@ -62,7 +66,7 @@ function createIpfsPublishConfig({
     retryDelayMs,
 }: CreateIpfsPublishConfigOptions): IpfsPublishConfig {
     return Object.freeze({
-        apiUrl: assertNonEmptyString(apiUrl, 'config.apiUrl').replace(/\/+$/, ''),
+        apiUrl: normalizeApiUrl(assertNonEmptyString(apiUrl, 'config.apiUrl')),
         headers: assertHeadersObject(headers, 'config.headers'),
         timeoutMs: assertPositiveInteger(timeoutMs, 'config.timeoutMs'),
         maxRetries: assertNonNegativeInteger(maxRetries, 'config.maxRetries'),

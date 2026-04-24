@@ -278,6 +278,18 @@ test('createIpfsPublishConfig requires explicit transport configuration', () => 
     );
 });
 
+test('createIpfsPublishConfig normalizes a Kubo /api/v0 base URL', () => {
+    const config = createIpfsPublishConfig({
+        apiUrl: 'http://127.0.0.1:5001/api/v0/',
+        headers: {},
+        timeoutMs: 1_000,
+        maxRetries: 1,
+        retryDelayMs: 0,
+    });
+
+    assert.equal(config.apiUrl, 'http://127.0.0.1:5001');
+});
+
 test('publishToIpfs clears the fallback timeout timer after a successful request', async () => {
     const originalAbortSignalTimeout = AbortSignal.timeout;
     const originalSetTimeout = globalThis.setTimeout;
