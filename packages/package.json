@@ -1,0 +1,19 @@
+{
+  "name": "@oyaprotocol/kernel-packages",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "./utils",
+    "./messages",
+    "./publishing",
+    "./transactions",
+    "./verification"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
+}

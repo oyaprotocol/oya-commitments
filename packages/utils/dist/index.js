@@ -1,4 +1,5 @@
 export const packageInfo = Object.freeze({
-    name: '@oyaprotocol/publishing',
+    name: '@oyaprotocol/utils',
     status: 'placeholder',
 });
+//# sourceMappingURL=index.js.map
