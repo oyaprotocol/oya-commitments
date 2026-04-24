@@ -375,7 +375,7 @@ async function publishToIpfs({
             });
             const response = await invokeWithAbort(
                 () =>
-                    resolvedFetch(`${resolvedConfig.apiUrl}/api/v0/add?cid-version=1&pin=false&progress=false`, {
+                    resolvedFetch(`${resolvedConfig.apiUrl}/api/v0/add?cid-version=1&progress=false`, {
                         method: 'POST',
                         headers: resolvedConfig.headers,
                         body: form,

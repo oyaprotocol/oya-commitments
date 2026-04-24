@@ -42,7 +42,7 @@ test('publishToIpfs publishes content and returns normalized details', async () 
     assert.equal(calls.length, 1);
     assert.equal(
         calls[0].url,
-        'http://ipfs.example:5001/api/v0/add?cid-version=1&pin=false&progress=false'
+        'http://ipfs.example:5001/api/v0/add?cid-version=1&progress=false'
     );
     assert.equal(calls[0].options.method, 'POST');
     assert.equal(calls[0].options.headers.Authorization, 'Bearer test-token');
