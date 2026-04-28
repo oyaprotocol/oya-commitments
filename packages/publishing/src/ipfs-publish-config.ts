@@ -1,6 +1,6 @@
 export interface CreateIpfsPublishConfigOptions {
     apiUrl: string;
-    headers: Record<string, unknown>;
+    headers: Record<string, string>;
     timeoutMs: number;
     maxRetries: number;
     retryDelayMs: number;
@@ -43,13 +43,13 @@ function assertHeadersObject(headers: unknown, label: string): Readonly<Record<s
     }
     const normalized: Record<string, string> = {};
     for (const [key, value] of Object.entries(headers)) {
-        if (value === undefined || value === null) {
-            continue;
-        }
         if (String(key).toLowerCase() === 'content-type') {
             throw new Error(`${label} must not include content-type.`);
         }
-        normalized[String(key)] = String(value);
+        if (typeof value !== 'string') {
+            throw new Error(`${label}.${key} must be a string.`);
+        }
+        normalized[key] = value;
     }
     return normalized;
 }

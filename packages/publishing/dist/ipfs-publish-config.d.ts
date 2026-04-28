@@ -1,6 +1,6 @@
 export interface CreateIpfsPublishConfigOptions {
     apiUrl: string;
-    headers: Record<string, unknown>;
+    headers: Record<string, string>;
     timeoutMs: number;
     maxRetries: number;
     retryDelayMs: number;

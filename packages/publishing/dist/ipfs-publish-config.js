@@ -24,13 +24,13 @@ function assertHeadersObject(headers, label) {
     }
     const normalized = {};
     for (const [key, value] of Object.entries(headers)) {
-        if (value === undefined || value === null) {
-            continue;
-        }
         if (String(key).toLowerCase() === 'content-type') {
             throw new Error(`${label} must not include content-type.`);
         }
-        normalized[String(key)] = String(value);
+        if (typeof value !== 'string') {
+            throw new Error(`${label}.${key} must be a string.`);
+        }
+        normalized[key] = value;
     }
     return normalized;
 }

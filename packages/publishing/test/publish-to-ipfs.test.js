@@ -276,6 +276,19 @@ test('createIpfsPublishConfig requires explicit transport configuration', () => 
             }),
         /config\.headers must not include content-type/
     );
+    assert.throws(
+        () =>
+            createIpfsPublishConfig({
+                apiUrl: 'http://ipfs.example:5001',
+                headers: {
+                    Authorization: 123,
+                },
+                timeoutMs: 1_000,
+                maxRetries: 1,
+                retryDelayMs: 0,
+            }),
+        /config\.headers\.Authorization must be a string/
+    );
 });
 
 test('createIpfsPublishConfig normalizes a Kubo /api/v0 base URL', () => {
