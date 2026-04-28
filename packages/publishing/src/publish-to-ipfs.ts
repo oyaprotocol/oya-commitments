@@ -86,12 +86,12 @@ function normalizeContent(content: unknown): { blob: Blob; byteLength: number } 
 
 function buildFormData({
     content,
-    filename,
     mediaType,
+    filename,
 }: {
     content: unknown;
-    filename: string;
     mediaType: string;
+    filename: string;
 }): { form: FormData; contentByteLength: number } {
     const normalizedContent = normalizeContent(content);
     const form = new FormData();

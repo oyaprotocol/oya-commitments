@@ -37,7 +37,7 @@ function normalizeContent(content) {
     }
     throw new Error('content must be a string, Uint8Array, ArrayBuffer, or Blob.');
 }
-function buildFormData({ content, filename, mediaType, }) {
+function buildFormData({ content, mediaType, filename, }) {
     const normalizedContent = normalizeContent(content);
     const form = new FormData();
     form.append('file', normalizedContent.blob.type === mediaType
