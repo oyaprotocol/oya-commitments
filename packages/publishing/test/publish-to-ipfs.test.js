@@ -291,6 +291,55 @@ test('createIpfsPublishConfig requires explicit transport configuration', () => 
     );
 });
 
+test('createIpfsPublishConfig rejects coerced integer values', () => {
+    const baseConfig = {
+        apiUrl: 'http://ipfs.example:5001',
+        headers: {},
+        timeoutMs: 1_000,
+        maxRetries: 1,
+        retryDelayMs: 0,
+    };
+
+    const cases = [
+        {
+            config: { ...baseConfig, timeoutMs: true },
+            expected: /config\.timeoutMs must be a positive integer/,
+        },
+        {
+            config: { ...baseConfig, timeoutMs: '1000' },
+            expected: /config\.timeoutMs must be a positive integer/,
+        },
+        {
+            config: { ...baseConfig, maxRetries: true },
+            expected: /config\.maxRetries must be a non-negative integer/,
+        },
+        {
+            config: { ...baseConfig, retryDelayMs: '' },
+            expected: /config\.retryDelayMs must be a non-negative integer/,
+        },
+    ];
+
+    for (const { config, expected } of cases) {
+        assert.throws(() => createIpfsPublishConfig(config), expected);
+    }
+});
+
+test('createIpfsPublishConfig freezes validated headers', () => {
+    const config = createIpfsPublishConfig({
+        apiUrl: 'http://ipfs.example:5001',
+        headers: {
+            Authorization: 'Bearer test-token',
+        },
+        timeoutMs: 1_000,
+        maxRetries: 1,
+        retryDelayMs: 0,
+    });
+
+    assert.equal(Object.isFrozen(config.headers), true);
+    assert.equal(Reflect.set(config.headers, 'content-type', 'application/json'), false);
+    assert.equal(config.headers['content-type'], undefined);
+});
+
 test('createIpfsPublishConfig normalizes a Kubo /api/v0 base URL', () => {
     const config = createIpfsPublishConfig({
         apiUrl: 'http://127.0.0.1:5001/api/v0/',

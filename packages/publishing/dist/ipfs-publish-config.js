@@ -5,24 +5,22 @@ function assertNonEmptyString(value, label) {
     return value.trim();
 }
 function assertPositiveInteger(value, label) {
-    const parsed = Number(value);
-    if (!Number.isInteger(parsed) || parsed < 1) {
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
         throw new Error(`${label} must be a positive integer.`);
     }
-    return parsed;
+    return value;
 }
 function assertNonNegativeInteger(value, label) {
-    const parsed = Number(value);
-    if (!Number.isInteger(parsed) || parsed < 0) {
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
         throw new Error(`${label} must be a non-negative integer.`);
     }
-    return parsed;
+    return value;
 }
 function assertHeadersObject(headers, label) {
     if (headers === null || typeof headers !== 'object' || Array.isArray(headers)) {
         throw new Error(`${label} must be an object.`);
     }
-    const normalized = {};
+    const validated = {};
     for (const [key, value] of Object.entries(headers)) {
         if (String(key).toLowerCase() === 'content-type') {
             throw new Error(`${label} must not include content-type.`);
@@ -30,9 +28,9 @@ function assertHeadersObject(headers, label) {
         if (typeof value !== 'string') {
             throw new Error(`${label}.${key} must be a string.`);
         }
-        normalized[key] = value;
+        validated[key] = value;
     }
-    return normalized;
+    return Object.freeze(validated);
 }
 function normalizeApiUrl(apiUrl) {
     return apiUrl.replace(/\/+$/, '').replace(/\/api\/v0$/, '');
