@@ -1,4 +1,5 @@
 import type { IpfsPublishConfig } from './ipfs-publish-config.js';
+export type FetchLike = (url: string, options: FetchRequestOptions) => Promise<FetchResponse>;
 export type PublishableContent = string | Uint8Array | ArrayBuffer | Blob;
 export interface FetchRequestOptions {
     method: 'POST';
@@ -11,9 +12,6 @@ export interface FetchResponse {
     status: number;
     statusText: string;
     text(): Promise<string>;
-}
-export interface FetchLike {
-    (url: string, options: FetchRequestOptions): Promise<FetchResponse>;
 }
 export interface PublishToIpfsOptions {
     config: IpfsPublishConfig;

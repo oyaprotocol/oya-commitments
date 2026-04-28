@@ -5,11 +5,15 @@ const RETRYABLE_ERROR_CODES = new Set([
     'ECONNRESET',
     'EAI_AGAIN',
     'ENOTFOUND',
+    'EPIPE',
     'ETIMEDOUT',
+    'UND_ERR_BODY_TIMEOUT',
     'UND_ERR_CONNECT_TIMEOUT',
     'UND_ERR_HEADERS_TIMEOUT',
     'UND_ERR_SOCKET',
 ]);
+
+export type FetchLike = (url: string, options: FetchRequestOptions) => Promise<FetchResponse>;
 
 export type PublishableContent = string | Uint8Array | ArrayBuffer | Blob;
 
@@ -25,10 +29,6 @@ export interface FetchResponse {
     status: number;
     statusText: string;
     text(): Promise<string>;
-}
-
-export interface FetchLike {
-    (url: string, options: FetchRequestOptions): Promise<FetchResponse>;
 }
 
 export interface PublishToIpfsOptions {
