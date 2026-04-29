@@ -322,8 +322,6 @@ async function publishToIpfs({
     if (typeof fetch !== 'function') {
         throw new Error('fetch must be provided as a function.');
     }
-    const resolvedConfig = config;
-    const resolvedFetch = fetch;
     if (typeof filename !== 'string' || !filename.trim()) {
         throw new Error('filename must be a non-empty string.');
     }
@@ -338,13 +336,13 @@ async function publishToIpfs({
         }
     };
     const waitForRetryDelay = async (): Promise<void> => {
-        if (resolvedConfig.retryDelayMs <= 0) {
+        if (config.retryDelayMs <= 0) {
             return;
         }
         throwIfCallerAborted(signal?.reason);
         await new Promise<void>((resolve) => {
             if (!signal) {
-                setTimeout(resolve, resolvedConfig.retryDelayMs);
+                setTimeout(resolve, config.retryDelayMs);
                 return;
             }
 
@@ -367,15 +365,15 @@ async function publishToIpfs({
                 finish();
                 return;
             }
-            timer = setTimeout(finish, resolvedConfig.retryDelayMs);
+            timer = setTimeout(finish, config.retryDelayMs);
         });
         throwIfCallerAborted(signal?.reason);
     };
 
     let lastError: unknown = null;
 
-    for (let attempt = 1; attempt <= resolvedConfig.maxRetries + 1; attempt += 1) {
-        const timeoutSignal = createTimeoutSignal(resolvedConfig.timeoutMs);
+    for (let attempt = 1; attempt <= config.maxRetries + 1; attempt += 1) {
+        const timeoutSignal = createTimeoutSignal(config.timeoutMs);
         const requestSignal = combineAbortSignals([signal, timeoutSignal.signal]);
         try {
             const { form, contentByteLength } = buildFormData({
@@ -385,9 +383,9 @@ async function publishToIpfs({
             });
             const response = await invokeWithAbort(
                 () =>
-                    resolvedFetch(`${resolvedConfig.apiUrl}/api/v0/add?cid-version=1&progress=false`, {
+                    fetch(`${config.apiUrl}/api/v0/add?cid-version=1&progress=false`, {
                         method: 'POST',
-                        headers: resolvedConfig.headers,
+                        headers: config.headers,
                         body: form,
                         signal: requestSignal.signal,
                     }),
@@ -402,7 +400,7 @@ async function publishToIpfs({
                 httpError.status = response.status;
                 httpError.responseText = responseText;
                 if (
-                    attempt <= resolvedConfig.maxRetries &&
+                    attempt <= config.maxRetries &&
                     (response.status === 429 || response.status >= 500)
                 ) {
                     await waitForRetryDelay();
@@ -430,7 +428,7 @@ async function publishToIpfs({
         } catch (error) {
             lastError = error;
             throwIfCallerAborted(error);
-            if (attempt <= resolvedConfig.maxRetries && shouldRetryError(error)) {
+            if (attempt <= config.maxRetries && shouldRetryError(error)) {
                 await waitForRetryDelay();
                 continue;
             }
