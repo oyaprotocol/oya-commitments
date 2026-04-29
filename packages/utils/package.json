@@ -3,12 +3,16 @@
   "version": "0.0.0",
   "description": "Oya utilities package.",
   "type": "module",
-  "main": "./src/index.js",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
   },
   "files": [
-    "src",
+    "dist",
     "README.md"
   ]
 }

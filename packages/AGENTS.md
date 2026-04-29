@@ -23,5 +23,6 @@ If a change only affects one hardened package, keep it local to that package ins
 
 ## Validation
 
-- Smoke-import any changed package entrypoint with Node.
+- Build changed packages from `packages/` with `npm run build`.
+- Smoke-import any changed built package entrypoint with Node.
 - If package metadata changes, verify the package root still exposes the intended `exports` entrypoint.
