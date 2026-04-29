@@ -231,6 +231,39 @@ test('publishToIpfs does not retry non-retryable HTTP failures', async () => {
     assert.equal(attempts, 1);
 });
 
+test('publishToIpfs normalizes empty thrown values to the fallback error', async () => {
+    const emptyThrownValues = [undefined, ''];
+    for (const thrownValue of emptyThrownValues) {
+        let attempts = 0;
+        const config = createIpfsPublishConfig({
+            apiUrl: 'http://ipfs.example:5001',
+            headers: {},
+            timeoutMs: 1_000,
+            maxRetries: 0,
+            retryDelayMs: 0,
+        });
+
+        await assert.rejects(
+            publishToIpfs({
+                config,
+                fetch: async () => {
+                    attempts += 1;
+                    throw thrownValue;
+                },
+                content: 'empty error',
+                filename: 'empty-error.txt',
+                mediaType: 'text/plain; charset=utf-8',
+            }),
+            (error) => {
+                assert.ok(error instanceof Error);
+                assert.equal(error.message, 'IPFS publish failed.');
+                return true;
+            }
+        );
+        assert.equal(attempts, 1);
+    }
+});
+
 test('publishToIpfs fails when the IPFS add response omits the cid', async () => {
     const config = createIpfsPublishConfig({
         apiUrl: 'http://ipfs.example:5001',

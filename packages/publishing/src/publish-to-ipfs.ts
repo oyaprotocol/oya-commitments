@@ -202,6 +202,16 @@ function shouldRetryError(error: unknown): boolean {
     );
 }
 
+function normalizePublishError(error: unknown): Error {
+    if (error instanceof Error) {
+        return error;
+    }
+    if (!error) {
+        return new Error('IPFS publish failed.');
+    }
+    return new Error(`IPFS publish failed: ${String(error)}`);
+}
+
 function createTimeoutSignal(timeoutMs: number): AbortSignalHandle {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error('Request timed out.')), timeoutMs);
@@ -431,7 +441,7 @@ async function publishToIpfs({
         }
     }
 
-    throw lastError ?? new Error('IPFS publish failed.');
+    throw normalizePublishError(lastError);
 }
 
 export { publishToIpfs };

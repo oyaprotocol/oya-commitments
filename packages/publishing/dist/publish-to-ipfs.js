@@ -132,6 +132,15 @@ function shouldRetryError(error) {
         message.includes('connection refused') ||
         message.includes('connection reset'));
 }
+function normalizePublishError(error) {
+    if (error instanceof Error) {
+        return error;
+    }
+    if (!error) {
+        return new Error('IPFS publish failed.');
+    }
+    return new Error(`IPFS publish failed: ${String(error)}`);
+}
 function createTimeoutSignal(timeoutMs) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error('Request timed out.')), timeoutMs);
@@ -338,7 +347,7 @@ async function publishToIpfs({ config, fetch, content, filename, mediaType, sign
             timeoutSignal.cleanup?.();
         }
     }
-    throw lastError ?? new Error('IPFS publish failed.');
+    throw normalizePublishError(lastError);
 }
 export { publishToIpfs };
 //# sourceMappingURL=publish-to-ipfs.js.map
