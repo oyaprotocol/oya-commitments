@@ -328,8 +328,8 @@ async function publishToIpfs({
     if (typeof mediaType !== 'string' || !mediaType.trim()) {
         throw new Error('mediaType must be a non-empty string.');
     }
-    const resolvedFilename = filename.trim();
-    const resolvedMediaType = mediaType.trim();
+    const trimmedFilename = filename.trim();
+    const trimmedMediaType = mediaType.trim();
     const throwIfCallerAborted = (cause: unknown): void => {
         if (signal?.aborted) {
             throw new Error('publishToIpfs was aborted by the caller.', { cause });
@@ -378,8 +378,8 @@ async function publishToIpfs({
         try {
             const { form, contentByteLength } = buildFormData({
                 content,
-                filename: resolvedFilename,
-                mediaType: resolvedMediaType,
+                filename: trimmedFilename,
+                mediaType: trimmedMediaType,
             });
             const response = await invokeWithAbort(
                 () =>
@@ -418,8 +418,8 @@ async function publishToIpfs({
             return {
                 cid,
                 uri: `ipfs://${cid}`,
-                filename: resolvedFilename,
-                mediaType: resolvedMediaType,
+                filename: trimmedFilename,
+                mediaType: trimmedMediaType,
                 contentByteLength,
                 providerSize: extractProviderSize(providerResponse),
                 attemptCount: attempt,
