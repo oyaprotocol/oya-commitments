@@ -141,6 +141,9 @@ function normalizePublishError(error) {
     }
     return new Error(`IPFS publish failed: ${String(error)}`);
 }
+function isHttpPublishError(error) {
+    return error instanceof Error && typeof error.status === 'number';
+}
 function createTimeoutSignal(timeoutMs) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error('Request timed out.')), timeoutMs);
@@ -305,9 +308,10 @@ async function publishToIpfs({ config, fetch, content, filename, mediaType, sign
             }), requestSignal.signal);
             const responseText = await invokeWithAbort(() => response.text(), requestSignal.signal);
             if (!response.ok) {
-                const httpError = new Error(`IPFS add failed with ${response.status} ${response.statusText || 'Unknown Status'}.`);
-                httpError.status = response.status;
-                httpError.responseText = responseText;
+                const httpError = Object.assign(new Error(`IPFS add failed with ${response.status} ${response.statusText || 'Unknown Status'}.`), {
+                    status: response.status,
+                    responseText,
+                });
                 if (attempt <= config.maxRetries &&
                     (response.status === 429 || response.status >= 500)) {
                     await waitForRetryDelay();
@@ -334,7 +338,9 @@ async function publishToIpfs({ config, fetch, content, filename, mediaType, sign
         catch (error) {
             lastError = error;
             throwIfCallerAborted(error);
-            if (attempt <= config.maxRetries && shouldRetryError(error)) {
+            if (attempt <= config.maxRetries &&
+                !isHttpPublishError(error) &&
+                shouldRetryError(error)) {
                 await waitForRetryDelay();
                 continue;
             }

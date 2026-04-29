@@ -56,6 +56,11 @@ interface AbortSignalHandle {
     cleanup: (() => void) | null;
 }
 
+type HttpPublishError = Error & {
+    status: number;
+    responseText: string;
+};
+
 function normalizeContent(content: unknown): { blob: Blob; byteLength: number } {
     if (typeof content === 'string') {
         return {
@@ -210,6 +215,10 @@ function normalizePublishError(error: unknown): Error {
         return new Error('IPFS publish failed.');
     }
     return new Error(`IPFS publish failed: ${String(error)}`);
+}
+
+function isHttpPublishError(error: unknown): error is HttpPublishError {
+    return error instanceof Error && typeof (error as { status?: unknown }).status === 'number';
 }
 
 function createTimeoutSignal(timeoutMs: number): AbortSignalHandle {
@@ -394,11 +403,17 @@ async function publishToIpfs({
             const responseText = await invokeWithAbort(() => response.text(), requestSignal.signal);
 
             if (!response.ok) {
-                const httpError = new Error(
-                    `IPFS add failed with ${response.status} ${response.statusText || 'Unknown Status'}.`
-                ) as Error & { status?: number; responseText?: string };
-                httpError.status = response.status;
-                httpError.responseText = responseText;
+                const httpError: HttpPublishError = Object.assign(
+                    new Error(
+                        `IPFS add failed with ${response.status} ${
+                            response.statusText || 'Unknown Status'
+                        }.`
+                    ),
+                    {
+                        status: response.status,
+                        responseText,
+                    }
+                );
                 if (
                     attempt <= config.maxRetries &&
                     (response.status === 429 || response.status >= 500)
@@ -428,7 +443,11 @@ async function publishToIpfs({
         } catch (error) {
             lastError = error;
             throwIfCallerAborted(error);
-            if (attempt <= config.maxRetries && shouldRetryError(error)) {
+            if (
+                attempt <= config.maxRetries &&
+                !isHttpPublishError(error) &&
+                shouldRetryError(error)
+            ) {
                 await waitForRetryDelay();
                 continue;
             }

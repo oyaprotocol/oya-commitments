@@ -231,6 +231,31 @@ test('publishToIpfs does not retry non-retryable HTTP failures', async () => {
     assert.equal(attempts, 1);
 });
 
+test('publishToIpfs does not retry HTTP 408 based on status text', async () => {
+    let attempts = 0;
+    const config = createIpfsPublishConfig({
+        apiUrl: 'http://ipfs.example:5001',
+        headers: {},
+        timeoutMs: 1_000,
+        maxRetries: 3,
+        retryDelayMs: 0,
+    });
+    await assert.rejects(
+        publishToIpfs({
+            config,
+            fetch: async () => {
+                attempts += 1;
+                return createTextResponse(408, '{"error":"request timed out"}', 'Request Timeout');
+            },
+            content: 'request timeout',
+            filename: 'request-timeout.txt',
+            mediaType: 'text/plain; charset=utf-8',
+        }),
+        /408 Request Timeout/
+    );
+    assert.equal(attempts, 1);
+});
+
 test('publishToIpfs normalizes empty thrown values to the fallback error', async () => {
     const emptyThrownValues = [undefined, ''];
     for (const thrownValue of emptyThrownValues) {
