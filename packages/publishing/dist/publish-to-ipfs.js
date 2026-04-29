@@ -242,29 +242,27 @@ async function publishToIpfs({ config, fetch, content, filename, mediaType, sign
     if (typeof fetch !== 'function') {
         throw new Error('fetch must be provided as a function.');
     }
-    const resolvedConfig = config;
-    const resolvedFetch = fetch;
     if (typeof filename !== 'string' || !filename.trim()) {
         throw new Error('filename must be a non-empty string.');
     }
     if (typeof mediaType !== 'string' || !mediaType.trim()) {
         throw new Error('mediaType must be a non-empty string.');
     }
-    const resolvedFilename = filename.trim();
-    const resolvedMediaType = mediaType.trim();
+    const trimmedFilename = filename.trim();
+    const trimmedMediaType = mediaType.trim();
     const throwIfCallerAborted = (cause) => {
         if (signal?.aborted) {
             throw new Error('publishToIpfs was aborted by the caller.', { cause });
         }
     };
     const waitForRetryDelay = async () => {
-        if (resolvedConfig.retryDelayMs <= 0) {
+        if (config.retryDelayMs <= 0) {
             return;
         }
         throwIfCallerAborted(signal?.reason);
         await new Promise((resolve) => {
             if (!signal) {
-                setTimeout(resolve, resolvedConfig.retryDelayMs);
+                setTimeout(resolve, config.retryDelayMs);
                 return;
             }
             let settled = false;
@@ -285,23 +283,23 @@ async function publishToIpfs({ config, fetch, content, filename, mediaType, sign
                 finish();
                 return;
             }
-            timer = setTimeout(finish, resolvedConfig.retryDelayMs);
+            timer = setTimeout(finish, config.retryDelayMs);
         });
         throwIfCallerAborted(signal?.reason);
     };
     let lastError = null;
-    for (let attempt = 1; attempt <= resolvedConfig.maxRetries + 1; attempt += 1) {
-        const timeoutSignal = createTimeoutSignal(resolvedConfig.timeoutMs);
+    for (let attempt = 1; attempt <= config.maxRetries + 1; attempt += 1) {
+        const timeoutSignal = createTimeoutSignal(config.timeoutMs);
         const requestSignal = combineAbortSignals([signal, timeoutSignal.signal]);
         try {
             const { form, contentByteLength } = buildFormData({
                 content,
-                filename: resolvedFilename,
-                mediaType: resolvedMediaType,
+                filename: trimmedFilename,
+                mediaType: trimmedMediaType,
             });
-            const response = await invokeWithAbort(() => resolvedFetch(`${resolvedConfig.apiUrl}/api/v0/add?cid-version=1&progress=false`, {
+            const response = await invokeWithAbort(() => fetch(`${config.apiUrl}/api/v0/add?cid-version=1&progress=false`, {
                 method: 'POST',
-                headers: resolvedConfig.headers,
+                headers: config.headers,
                 body: form,
                 signal: requestSignal.signal,
             }), requestSignal.signal);
@@ -310,7 +308,7 @@ async function publishToIpfs({ config, fetch, content, filename, mediaType, sign
                 const httpError = new Error(`IPFS add failed with ${response.status} ${response.statusText || 'Unknown Status'}.`);
                 httpError.status = response.status;
                 httpError.responseText = responseText;
-                if (attempt <= resolvedConfig.maxRetries &&
+                if (attempt <= config.maxRetries &&
                     (response.status === 429 || response.status >= 500)) {
                     await waitForRetryDelay();
                     continue;
@@ -325,8 +323,8 @@ async function publishToIpfs({ config, fetch, content, filename, mediaType, sign
             return {
                 cid,
                 uri: `ipfs://${cid}`,
-                filename: resolvedFilename,
-                mediaType: resolvedMediaType,
+                filename: trimmedFilename,
+                mediaType: trimmedMediaType,
                 contentByteLength,
                 providerSize: extractProviderSize(providerResponse),
                 attemptCount: attempt,
@@ -336,7 +334,7 @@ async function publishToIpfs({ config, fetch, content, filename, mediaType, sign
         catch (error) {
             lastError = error;
             throwIfCallerAborted(error);
-            if (attempt <= resolvedConfig.maxRetries && shouldRetryError(error)) {
+            if (attempt <= config.maxRetries && shouldRetryError(error)) {
                 await waitForRetryDelay();
                 continue;
             }
