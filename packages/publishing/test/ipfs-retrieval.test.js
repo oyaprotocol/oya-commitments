@@ -31,6 +31,20 @@ function createStream(chunks) {
     });
 }
 
+function createCancellableStream(chunks, onCancel) {
+    return new ReadableStream({
+        start(controller) {
+            for (const chunk of chunks) {
+                controller.enqueue(typeof chunk === 'string' ? encodeAscii(chunk) : chunk);
+            }
+            controller.close();
+        },
+        cancel(reason) {
+            onCancel(reason);
+        },
+    });
+}
+
 function createStreamResponse(status, chunks, statusText = 'OK') {
     return {
         ok: status >= 200 && status < 300,
@@ -100,6 +114,35 @@ test('readIpfsText retries retryable HTTP failures and succeeds', async () => {
     assert.equal(result.attemptCount, 2);
 });
 
+test('readIpfsText cancels retryable HTTP failure bodies before retrying', async () => {
+    let attempts = 0;
+    const cancellations = [];
+    const result = await readIpfsText({
+        config: createConfig({ maxRetries: 2 }),
+        fetch: async () => {
+            attempts += 1;
+            if (attempts === 1) {
+                return {
+                    ok: false,
+                    status: 503,
+                    statusText: 'Service Unavailable',
+                    body: createCancellableStream(['temporary outage'], (reason) => {
+                        cancellations.push(reason);
+                    }),
+                };
+            }
+            return createStreamResponse(200, ['retry ok']);
+        },
+        cid: 'bafy-retry-cancel',
+        maxBytes: 64,
+    });
+
+    assert.equal(attempts, 2);
+    assert.equal(cancellations.length, 1);
+    assert.match(cancellations[0].message, /503 Service Unavailable/);
+    assert.equal(result.text, 'retry ok');
+});
+
 test('readIpfsText retries retryable network errors and succeeds', async () => {
     let attempts = 0;
     const result = await readIpfsText({
@@ -124,12 +167,20 @@ test('readIpfsText retries retryable network errors and succeeds', async () => {
 
 test('readIpfsText does not retry non-retryable HTTP failures', async () => {
     let attempts = 0;
+    const cancellations = [];
     await assert.rejects(
         readIpfsText({
             config: createConfig({ maxRetries: 3 }),
             fetch: async () => {
                 attempts += 1;
-                return createStreamResponse(404, ['missing'], 'Not Found');
+                return {
+                    ok: false,
+                    status: 404,
+                    statusText: 'Not Found',
+                    body: createCancellableStream(['missing'], (reason) => {
+                        cancellations.push(reason);
+                    }),
+                };
             },
             cid: 'bafy-missing',
             maxBytes: 64,
@@ -137,6 +188,8 @@ test('readIpfsText does not retry non-retryable HTTP failures', async () => {
         /404 Not Found/
     );
     assert.equal(attempts, 1);
+    assert.equal(cancellations.length, 1);
+    assert.match(cancellations[0].message, /404 Not Found/);
 });
 
 test('readIpfsText rejects responses that exceed maxBytes', async () => {

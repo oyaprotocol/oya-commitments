@@ -26,6 +26,9 @@ function isHttpReadError(error) {
 function cancelReader(reader, reason) {
     reader.cancel(reason).catch(() => { });
 }
+function cancelResponseBody(body, reason) {
+    body?.cancel(reason).catch(() => { });
+}
 function assertAsciiChunk(chunk) {
     for (const byte of chunk) {
         if (byte > 0x7f) {
@@ -108,6 +111,7 @@ async function readIpfsText({ config, fetch, cid, maxBytes, signal, }) {
                 const httpError = Object.assign(new Error(`IPFS cat failed with ${response.status} ${response.statusText || 'Unknown Status'}.`), {
                     status: response.status,
                 });
+                cancelResponseBody(response.body, httpError);
                 if (attempt <= config.maxRetries &&
                     (response.status === 429 || response.status >= 500)) {
                     await waitForRetryDelay({

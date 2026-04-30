@@ -81,6 +81,10 @@ function cancelReader(
     reader.cancel(reason).catch(() => {});
 }
 
+function cancelResponseBody(body: ReadableStream<Uint8Array> | null, reason: unknown): void {
+    body?.cancel(reason).catch(() => {});
+}
+
 function assertAsciiChunk(chunk: Uint8Array): void {
     for (const byte of chunk) {
         if (byte > 0x7f) {
@@ -195,6 +199,7 @@ async function readIpfsText({
                         status: response.status,
                     }
                 );
+                cancelResponseBody(response.body, httpError);
                 if (
                     attempt <= config.maxRetries &&
                     (response.status === 429 || response.status >= 500)
