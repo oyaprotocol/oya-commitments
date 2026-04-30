@@ -1,3 +1,9 @@
+import {
+    assertNonEmptyString,
+    assertNonNegativeInteger,
+    assertPositiveInteger,
+} from './validation-utils.js';
+
 export interface CreateIpfsConfigOptions {
     apiUrl: string;
     headers: Record<string, string>;
@@ -12,27 +18,6 @@ export interface IpfsConfig {
     readonly timeoutMs: number;
     readonly maxRetries: number;
     readonly retryDelayMs: number;
-}
-
-function assertNonEmptyString(value: unknown, label: string): string {
-    if (typeof value !== 'string' || !value.trim()) {
-        throw new Error(`${label} must be a non-empty string.`);
-    }
-    return value.trim();
-}
-
-function assertPositiveInteger(value: unknown, label: string): number {
-    if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
-        throw new Error(`${label} must be a positive integer.`);
-    }
-    return value;
-}
-
-function assertNonNegativeInteger(value: unknown, label: string): number {
-    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
-        throw new Error(`${label} must be a non-negative integer.`);
-    }
-    return value;
 }
 
 function assertHeadersObject(headers: unknown, label: string): Readonly<Record<string, string>> {

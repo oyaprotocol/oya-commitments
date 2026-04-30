@@ -1,16 +1,5 @@
 import { combineAbortSignals, createTimeoutSignal, invokeWithAbort, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, } from './ipfs-request-utils.js';
-function assertNonEmptyString(value, label) {
-    if (typeof value !== 'string' || !value.trim()) {
-        throw new Error(`${label} must be a non-empty string.`);
-    }
-    return value.trim();
-}
-function assertPositiveInteger(value, label) {
-    if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
-        throw new Error(`${label} must be a positive integer.`);
-    }
-    return value;
-}
+import { assertNonEmptyString, assertPositiveInteger } from './validation-utils.js';
 function normalizeReadError(error) {
     if (error instanceof Error) {
         return error;

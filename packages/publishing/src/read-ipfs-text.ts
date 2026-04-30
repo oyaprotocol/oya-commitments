@@ -7,6 +7,7 @@ import {
     throwIfSignalAborted,
     waitForRetryDelay,
 } from './ipfs-request-utils.js';
+import { assertNonEmptyString, assertPositiveInteger } from './validation-utils.js';
 
 export type ReadIpfsTextFetchLike = (
     url: string,
@@ -45,20 +46,6 @@ export interface ReadIpfsTextResult {
 type HttpReadError = Error & {
     status: number;
 };
-
-function assertNonEmptyString(value: unknown, label: string): string {
-    if (typeof value !== 'string' || !value.trim()) {
-        throw new Error(`${label} must be a non-empty string.`);
-    }
-    return value.trim();
-}
-
-function assertPositiveInteger(value: unknown, label: string): number {
-    if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
-        throw new Error(`${label} must be a positive integer.`);
-    }
-    return value;
-}
 
 function normalizeReadError(error: unknown): Error {
     if (error instanceof Error) {

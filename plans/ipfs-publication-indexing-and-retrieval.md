@@ -31,6 +31,7 @@ Definitions used in this plan:
 - [x] 2026-04-30 22:02Z: Removed the old publish-specific config names instead of keeping compatibility aliases, per user clarification.
 - [x] 2026-04-30 22:20Z: Consolidated shared IPFS request abort, timeout, retry-delay, and retryable-error helpers in package-internal `ipfs-request-utils.ts`.
 - [x] 2026-04-30 22:34Z: Fixed `readIpfsText(...)` to cancel non-OK `/api/v0/cat` response bodies before retrying or throwing, preventing leaked fetch sockets under repeated failures.
+- [x] 2026-04-30 22:43Z: Moved shared string and integer validators into package-internal `validation-utils.ts`.
 - [ ] Create or update a future plan for onchain CID logging and public indexing when ready.
 
 ## Surprises & Discoveries
@@ -101,6 +102,8 @@ Follow-up request cleanup centralized shared abort, timeout, retry-delay, and re
 
 Review cleanup fixed the non-OK retrieval response path so `readIpfsText(...)` cancels failed `/api/v0/cat` response bodies before retrying or throwing. This keeps Node/Undici-style fetch connections from being held by unconsumed error bodies.
 
+Validation cleanup moved shared string and integer checks into package-internal `validation-utils.ts`; IPFS config keeps only config-specific header validation locally.
+
 Validation evidence for Milestone 2:
 
 - `npm --prefix packages run build`
@@ -118,6 +121,7 @@ Current package files:
 
 - `packages/publishing/src/ipfs-config.ts`: validates explicit IPFS transport settings.
 - `packages/publishing/src/ipfs-request-utils.ts`: contains shared retry, timeout, and abort helpers for IPFS HTTP requests.
+- `packages/publishing/src/validation-utils.ts`: contains shared internal validation helpers.
 - `packages/publishing/src/publish-to-ipfs.ts`: publishes content to Kubo `/api/v0/add` using injected `fetch`.
 - `packages/publishing/src/read-ipfs-text.ts`: reads bounded ASCII text content from Kubo `/api/v0/cat` using injected `fetch`.
 - `packages/publishing/src/index.ts`: exports the public package surface.
