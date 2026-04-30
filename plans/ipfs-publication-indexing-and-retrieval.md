@@ -27,6 +27,8 @@ Definitions used in this plan:
 - [x] 2026-04-30 21:28Z: Completed Milestone 2. Added `readIpfsText(...)`, a bounded ASCII text retrieval primitive backed by Kubo `/api/v0/cat`, with timeout, retry, byte-limit, non-ASCII, and caller-abort coverage.
 - [x] 2026-04-30 19:09Z: Added add-and-pin publication tests and documentation.
 - [x] 2026-04-30 21:28Z: Added bounded ASCII text retrieval tests and README documentation.
+- [x] 2026-04-30 21:45Z: Renamed the shared transport config surface to `createIpfsConfig(...)` / `IpfsConfig` now that it is used by both publication and retrieval.
+- [x] 2026-04-30 22:02Z: Removed the old publish-specific config names instead of keeping compatibility aliases, per user clarification.
 - [ ] Create or update a future plan for onchain CID logging and public indexing when ready.
 
 ## Surprises & Discoveries
@@ -75,6 +77,10 @@ Definitions used in this plan:
   Rationale: The immediate reusable kernel work is add-and-pin plus low-level retrieval. Public discovery and customer-facing access should be designed after the onchain indexing direction is specified.
   Date/Author: 2026-04-30 / Codex.
 
+- Decision: Use `IpfsConfig` as the primary shared transport configuration name.
+  Rationale: The same config now applies to both publish and read paths, so the old publish-specific config name is too narrow. The old publish-specific names are not retained as aliases because this package surface is still early and the user prefers one clear API.
+  Date/Author: 2026-04-30 / Codex.
+
 ## Outcomes & Retrospective
 
 Milestone 1 is complete. `publishToIpfs(...)` now explicitly requests add-and-pin behavior with `/api/v0/add?cid-version=1&pin=true&progress=false`, and `PublishToIpfsResult` reports `pinned: true`. The focused publishing test now proves the explicit URL and normalized pinned result.
@@ -86,6 +92,8 @@ Validation evidence for Milestone 1:
 - `node --input-type=module -e "import('./packages/publishing/dist/index.js').then((m) => console.log(Object.keys(m).sort().join(',')))"`
 
 Milestone 2 is complete. `readIpfsText(...)` reads known CIDs through `/api/v0/cat?arg=<cid>` and returns bounded ASCII text. It requires `maxBytes`, rejects oversized and non-ASCII responses, supports caller cancellation, and uses the same explicit transport config pattern as publication.
+
+Follow-up cleanup renamed the shared transport config to `createIpfsConfig(...)` / `IpfsConfig`. The old publish-specific config names were removed rather than retained as aliases, so new package code and tests use the neutral names exclusively.
 
 Validation evidence for Milestone 2:
 
@@ -102,7 +110,7 @@ The hardened package area lives under `packages/`. The relevant local instructio
 
 Current package files:
 
-- `packages/publishing/src/ipfs-publish-config.ts`: validates explicit IPFS transport settings.
+- `packages/publishing/src/ipfs-config.ts`: validates explicit IPFS transport settings.
 - `packages/publishing/src/publish-to-ipfs.ts`: publishes content to Kubo `/api/v0/add` using injected `fetch`.
 - `packages/publishing/src/read-ipfs-text.ts`: reads bounded ASCII text content from Kubo `/api/v0/cat` using injected `fetch`.
 - `packages/publishing/src/index.ts`: exports the public package surface.
@@ -141,7 +149,7 @@ From `/Users/johnshutt/Code/oya-commitments`:
 2. Inspect the current package surface:
 
        sed -n '1,240p' packages/publishing/src/publish-to-ipfs.ts
-       sed -n '1,160p' packages/publishing/src/ipfs-publish-config.ts
+       sed -n '1,160p' packages/publishing/src/ipfs-config.ts
        sed -n '1,120p' packages/publishing/src/index.ts
 
 3. Update `publishToIpfs(...)` so the Kubo add URL makes add-and-pin behavior explicit. The intended URL is:
@@ -198,7 +206,7 @@ Future onchain logging must be append-only and idempotent at the application lay
 
 Current hardened public surface:
 
-- `createIpfsPublishConfig(options)`
+- `createIpfsConfig(options)`
 - `publishToIpfs(options)`
 
 Likely new public surface:
@@ -215,7 +223,7 @@ Important reference behavior:
 
 Existing package interfaces:
 
-- `IpfsPublishConfig` from `packages/publishing/src/ipfs-publish-config.ts`
+- `IpfsConfig` from `packages/publishing/src/ipfs-config.ts`
 - `FetchLike`, `FetchRequestOptions`, and `FetchResponse` from `packages/publishing/src/publish-to-ipfs.ts`
 - `PublishToIpfsOptions` and `PublishToIpfsResult` from `packages/publishing/src/publish-to-ipfs.ts`
 

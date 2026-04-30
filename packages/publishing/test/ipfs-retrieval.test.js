@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createIpfsPublishConfig, readIpfsText } from '../dist/index.js';
+import { createIpfsConfig, readIpfsText } from '../dist/index.js';
 
 function createConfig(overrides = {}) {
-    return createIpfsPublishConfig({
+    return createIpfsConfig({
         apiUrl: 'http://ipfs.example:5001/',
         headers: {
             Authorization: 'Bearer test-token',

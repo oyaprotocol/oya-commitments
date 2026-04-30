@@ -1,4 +1,4 @@
-export interface CreateIpfsPublishConfigOptions {
+export interface CreateIpfsConfigOptions {
     apiUrl: string;
     headers: Record<string, string>;
     timeoutMs: number;
@@ -6,7 +6,7 @@ export interface CreateIpfsPublishConfigOptions {
     retryDelayMs: number;
 }
 
-export interface IpfsPublishConfig {
+export interface IpfsConfig {
     readonly apiUrl: string;
     readonly headers: Readonly<Record<string, string>>;
     readonly timeoutMs: number;
@@ -56,13 +56,13 @@ function normalizeApiUrl(apiUrl: string): string {
     return apiUrl.replace(/\/+$/, '').replace(/\/api\/v0$/, '');
 }
 
-function createIpfsPublishConfig({
+function createIpfsConfig({
     apiUrl,
     headers,
     timeoutMs,
     maxRetries,
     retryDelayMs,
-}: CreateIpfsPublishConfigOptions): IpfsPublishConfig {
+}: CreateIpfsConfigOptions): IpfsConfig {
     return Object.freeze({
         apiUrl: normalizeApiUrl(assertNonEmptyString(apiUrl, 'config.apiUrl')),
         headers: assertHeadersObject(headers, 'config.headers'),
@@ -72,4 +72,4 @@ function createIpfsPublishConfig({
     });
 }
 
-export { createIpfsPublishConfig };
+export { createIpfsConfig };

@@ -1,4 +1,4 @@
-import type { IpfsPublishConfig } from './ipfs-publish-config.js';
+import type { IpfsConfig } from './ipfs-config.js';
 import { shouldRetryError } from './ipfs-request-utils.js';
 
 export type FetchLike = (url: string, options: FetchRequestOptions) => Promise<FetchResponse>;
@@ -20,7 +20,7 @@ export interface FetchResponse {
 }
 
 export interface PublishToIpfsOptions {
-    config: IpfsPublishConfig;
+    config: IpfsConfig;
     fetch: FetchLike;
     content: PublishableContent;
     filename: string;

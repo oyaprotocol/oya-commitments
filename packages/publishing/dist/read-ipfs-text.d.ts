@@ -1,4 +1,4 @@
-import type { IpfsPublishConfig } from './ipfs-publish-config.js';
+import type { IpfsConfig } from './ipfs-config.js';
 export type ReadIpfsTextFetchLike = (url: string, options: ReadIpfsTextRequestOptions) => Promise<ReadIpfsTextResponse>;
 export interface ReadIpfsTextRequestOptions {
     method: 'POST';
@@ -12,7 +12,7 @@ export interface ReadIpfsTextResponse {
     body: ReadableStream<Uint8Array> | null;
 }
 export interface ReadIpfsTextOptions {
-    config: IpfsPublishConfig;
+    config: IpfsConfig;
     fetch: ReadIpfsTextFetchLike;
     cid: string;
     maxBytes: number;

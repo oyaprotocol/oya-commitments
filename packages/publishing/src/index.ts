@@ -3,11 +3,8 @@ export const packageInfo = Object.freeze({
     status: 'partial',
 });
 
-export { createIpfsPublishConfig } from './ipfs-publish-config.js';
-export type {
-    CreateIpfsPublishConfigOptions,
-    IpfsPublishConfig,
-} from './ipfs-publish-config.js';
+export { createIpfsConfig } from './ipfs-config.js';
+export type { CreateIpfsConfigOptions, IpfsConfig } from './ipfs-config.js';
 export { publishToIpfs } from './publish-to-ipfs.js';
 export type {
     FetchLike,

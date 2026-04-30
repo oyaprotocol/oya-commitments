@@ -1,4 +1,4 @@
-import type { IpfsPublishConfig } from './ipfs-publish-config.js';
+import type { IpfsConfig } from './ipfs-config.js';
 import { shouldRetryError } from './ipfs-request-utils.js';
 
 export type ReadIpfsTextFetchLike = (
@@ -20,7 +20,7 @@ export interface ReadIpfsTextResponse {
 }
 
 export interface ReadIpfsTextOptions {
-    config: IpfsPublishConfig;
+    config: IpfsConfig;
     fetch: ReadIpfsTextFetchLike;
     cid: string;
     maxBytes: number;

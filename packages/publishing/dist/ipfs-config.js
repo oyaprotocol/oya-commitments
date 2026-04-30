@@ -35,7 +35,7 @@ function assertHeadersObject(headers, label) {
 function normalizeApiUrl(apiUrl) {
     return apiUrl.replace(/\/+$/, '').replace(/\/api\/v0$/, '');
 }
-function createIpfsPublishConfig({ apiUrl, headers, timeoutMs, maxRetries, retryDelayMs, }) {
+function createIpfsConfig({ apiUrl, headers, timeoutMs, maxRetries, retryDelayMs, }) {
     return Object.freeze({
         apiUrl: normalizeApiUrl(assertNonEmptyString(apiUrl, 'config.apiUrl')),
         headers: assertHeadersObject(headers, 'config.headers'),
@@ -44,5 +44,5 @@ function createIpfsPublishConfig({ apiUrl, headers, timeoutMs, maxRetries, retry
         retryDelayMs: assertNonNegativeInteger(retryDelayMs, 'config.retryDelayMs'),
     });
 }
-export { createIpfsPublishConfig };
-//# sourceMappingURL=ipfs-publish-config.js.map
+export { createIpfsConfig };
+//# sourceMappingURL=ipfs-config.js.map
