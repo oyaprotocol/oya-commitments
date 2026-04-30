@@ -29,6 +29,7 @@ Definitions used in this plan:
 - [x] 2026-04-30 21:28Z: Added bounded ASCII text retrieval tests and README documentation.
 - [x] 2026-04-30 21:45Z: Renamed the shared transport config surface to `createIpfsConfig(...)` / `IpfsConfig` now that it is used by both publication and retrieval.
 - [x] 2026-04-30 22:02Z: Removed the old publish-specific config names instead of keeping compatibility aliases, per user clarification.
+- [x] 2026-04-30 22:20Z: Consolidated shared IPFS request abort, timeout, retry-delay, and retryable-error helpers in package-internal `ipfs-request-utils.ts`.
 - [ ] Create or update a future plan for onchain CID logging and public indexing when ready.
 
 ## Surprises & Discoveries
@@ -95,6 +96,8 @@ Milestone 2 is complete. `readIpfsText(...)` reads known CIDs through `/api/v0/c
 
 Follow-up cleanup renamed the shared transport config to `createIpfsConfig(...)` / `IpfsConfig`. The old publish-specific config names were removed rather than retained as aliases, so new package code and tests use the neutral names exclusively.
 
+Follow-up request cleanup centralized shared abort, timeout, retry-delay, and retryable-error mechanics in package-internal `ipfs-request-utils.ts`. `publishToIpfs(...)` and `readIpfsText(...)` now keep their operation-specific validation and error messages locally while sharing generic request-control behavior.
+
 Validation evidence for Milestone 2:
 
 - `npm --prefix packages run build`
@@ -111,6 +114,7 @@ The hardened package area lives under `packages/`. The relevant local instructio
 Current package files:
 
 - `packages/publishing/src/ipfs-config.ts`: validates explicit IPFS transport settings.
+- `packages/publishing/src/ipfs-request-utils.ts`: contains shared retry, timeout, and abort helpers for IPFS HTTP requests.
 - `packages/publishing/src/publish-to-ipfs.ts`: publishes content to Kubo `/api/v0/add` using injected `fetch`.
 - `packages/publishing/src/read-ipfs-text.ts`: reads bounded ASCII text content from Kubo `/api/v0/cat` using injected `fetch`.
 - `packages/publishing/src/index.ts`: exports the public package surface.

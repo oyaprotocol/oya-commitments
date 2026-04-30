@@ -1,4 +1,4 @@
-import { shouldRetryError } from './ipfs-request-utils.js';
+import { combineAbortSignals, createTimeoutSignal, invokeWithAbort, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, } from './ipfs-request-utils.js';
 function normalizeContent(content) {
     if (typeof content === 'string') {
         return {
@@ -98,100 +98,6 @@ function normalizePublishError(error) {
 function isHttpPublishError(error) {
     return error instanceof Error && typeof error.status === 'number';
 }
-function createTimeoutSignal(timeoutMs) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(new Error('Request timed out.')), timeoutMs);
-    controller.signal.addEventListener('abort', () => clearTimeout(timer), { once: true });
-    return {
-        signal: controller.signal,
-        cleanup: () => clearTimeout(timer),
-    };
-}
-function combineAbortSignals(signals) {
-    const presentSignals = signals.filter((signal) => signal !== undefined);
-    if (presentSignals.length === 0) {
-        return {
-            signal: undefined,
-            cleanup: null,
-        };
-    }
-    if (presentSignals.length === 1) {
-        return {
-            signal: presentSignals[0],
-            cleanup: null,
-        };
-    }
-    if (typeof AbortSignal.any === 'function') {
-        return {
-            signal: AbortSignal.any(presentSignals),
-            cleanup: null,
-        };
-    }
-    const controller = new AbortController();
-    const listeners = [];
-    for (const signal of presentSignals) {
-        if (signal.aborted) {
-            controller.abort(signal.reason);
-            return {
-                signal: controller.signal,
-                cleanup: null,
-            };
-        }
-        const listener = () => {
-            controller.abort(signal.reason);
-        };
-        signal.addEventListener('abort', listener, { once: true });
-        listeners.push({ signal, listener });
-    }
-    return {
-        signal: controller.signal,
-        cleanup: () => {
-            for (const { signal, listener } of listeners) {
-                signal.removeEventListener('abort', listener);
-            }
-        },
-    };
-}
-async function invokeWithAbort(createPromise, signal) {
-    if (!signal) {
-        return await createPromise();
-    }
-    if (signal.aborted) {
-        throw signal.reason ?? new Error('Operation aborted.');
-    }
-    return await new Promise((resolve, reject) => {
-        let settled = false;
-        const finishResolve = (value) => {
-            if (settled) {
-                return;
-            }
-            settled = true;
-            signal.removeEventListener('abort', onAbort);
-            resolve(value);
-        };
-        const finishReject = (error) => {
-            if (settled) {
-                return;
-            }
-            settled = true;
-            signal.removeEventListener('abort', onAbort);
-            reject(error);
-        };
-        const onAbort = () => {
-            finishReject(signal.reason ?? new Error('Operation aborted.'));
-        };
-        signal.addEventListener('abort', onAbort, { once: true });
-        let promise;
-        try {
-            promise = createPromise();
-        }
-        catch (error) {
-            finishReject(error);
-            return;
-        }
-        promise.then(finishResolve, finishReject);
-    });
-}
 async function publishToIpfs({ config, fetch, content, filename, mediaType, signal, }) {
     if (config === null || typeof config !== 'object' || Array.isArray(config)) {
         throw new Error('config must be an object.');
@@ -207,43 +113,7 @@ async function publishToIpfs({ config, fetch, content, filename, mediaType, sign
     }
     const trimmedFilename = filename.trim();
     const trimmedMediaType = mediaType.trim();
-    const throwIfCallerAborted = (cause) => {
-        if (signal?.aborted) {
-            throw new Error('publishToIpfs was aborted by the caller.', { cause });
-        }
-    };
-    const waitForRetryDelay = async () => {
-        if (config.retryDelayMs <= 0) {
-            return;
-        }
-        throwIfCallerAborted(signal?.reason);
-        await new Promise((resolve) => {
-            if (!signal) {
-                setTimeout(resolve, config.retryDelayMs);
-                return;
-            }
-            let settled = false;
-            let timer = null;
-            const finish = () => {
-                if (settled) {
-                    return;
-                }
-                settled = true;
-                if (timer !== null) {
-                    clearTimeout(timer);
-                }
-                signal.removeEventListener('abort', finish);
-                resolve();
-            };
-            signal.addEventListener('abort', finish, { once: true });
-            if (signal.aborted) {
-                finish();
-                return;
-            }
-            timer = setTimeout(finish, config.retryDelayMs);
-        });
-        throwIfCallerAborted(signal?.reason);
-    };
+    const abortErrorMessage = 'publishToIpfs was aborted by the caller.';
     let lastError = null;
     for (let attempt = 1; attempt <= config.maxRetries + 1; attempt += 1) {
         const timeoutSignal = createTimeoutSignal(config.timeoutMs);
@@ -268,7 +138,11 @@ async function publishToIpfs({ config, fetch, content, filename, mediaType, sign
                 });
                 if (attempt <= config.maxRetries &&
                     (response.status === 429 || response.status >= 500)) {
-                    await waitForRetryDelay();
+                    await waitForRetryDelay({
+                        retryDelayMs: config.retryDelayMs,
+                        signal,
+                        abortErrorMessage,
+                    });
                     continue;
                 }
                 throw httpError;
@@ -292,11 +166,15 @@ async function publishToIpfs({ config, fetch, content, filename, mediaType, sign
         }
         catch (error) {
             lastError = error;
-            throwIfCallerAborted(error);
+            throwIfSignalAborted(signal, abortErrorMessage, error);
             if (attempt <= config.maxRetries &&
                 !isHttpPublishError(error) &&
                 shouldRetryError(error)) {
-                await waitForRetryDelay();
+                await waitForRetryDelay({
+                    retryDelayMs: config.retryDelayMs,
+                    signal,
+                    abortErrorMessage,
+                });
                 continue;
             }
             break;
