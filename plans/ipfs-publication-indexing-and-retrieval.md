@@ -24,9 +24,9 @@ Definitions used in this plan:
 - [x] 2026-04-30 17:43Z: Amended the direction after user clarification: do not add a `pinOnAdd` boolean and do not create a separate pinning track; make the standard Kubo add request explicitly pin by default.
 - [x] 2026-04-30 18:05Z: Simplified the immediate scope after user clarification: implement explicit add-and-pin, add low-level retrieval, and document/test retrieval now; defer index design to a future onchain Logger system.
 - [x] 2026-04-30 19:09Z: Completed Milestone 1. `publishToIpfs(...)` now explicitly calls Kubo add with `pin=true`, returns `pinned: true`, and the package README/test coverage reflects the add-and-pin contract.
-- [ ] Add low-level IPFS retrieval primitives for bounded ASCII text artifact reads.
+- [x] 2026-04-30 21:28Z: Completed Milestone 2. Added `readIpfsText(...)`, a bounded ASCII text retrieval primitive backed by Kubo `/api/v0/cat`, with timeout, retry, byte-limit, non-ASCII, and caller-abort coverage.
 - [x] 2026-04-30 19:09Z: Added add-and-pin publication tests and documentation.
-- [ ] Add tests and documentation for bounded ASCII text retrieval.
+- [x] 2026-04-30 21:28Z: Added bounded ASCII text retrieval tests and README documentation.
 - [ ] Create or update a future plan for onchain CID logging and public indexing when ready.
 
 ## Surprises & Discoveries
@@ -85,7 +85,16 @@ Validation evidence for Milestone 1:
 - `node --test packages/publishing/test/publish-to-ipfs.test.js`
 - `node --input-type=module -e "import('./packages/publishing/dist/index.js').then((m) => console.log(Object.keys(m).sort().join(',')))"`
 
-Remaining near-term work starts at Milestone 2: bounded ASCII text retrieval by CID.
+Milestone 2 is complete. `readIpfsText(...)` reads known CIDs through `/api/v0/cat?arg=<cid>` and returns bounded ASCII text. It requires `maxBytes`, rejects oversized and non-ASCII responses, supports caller cancellation, and uses the same explicit transport config pattern as publication.
+
+Validation evidence for Milestone 2:
+
+- `npm --prefix packages run build`
+- `node --test packages/publishing/test/ipfs-retrieval.test.js`
+- `node --test packages/publishing/test/publish-to-ipfs.test.js`
+- `node --input-type=module -e "import('./packages/publishing/dist/index.js').then((m) => console.log(Object.keys(m).sort().join(',')))"`
+
+Remaining near-term work is documentation polish if reviewers request it. Future public indexing should be handled in a separate onchain Logger plan.
 
 ## Context and Orientation
 
@@ -95,8 +104,10 @@ Current package files:
 
 - `packages/publishing/src/ipfs-publish-config.ts`: validates explicit IPFS transport settings.
 - `packages/publishing/src/publish-to-ipfs.ts`: publishes content to Kubo `/api/v0/add` using injected `fetch`.
+- `packages/publishing/src/read-ipfs-text.ts`: reads bounded ASCII text content from Kubo `/api/v0/cat` using injected `fetch`.
 - `packages/publishing/src/index.ts`: exports the public package surface.
 - `packages/publishing/test/publish-to-ipfs.test.js`: tests the built package entrypoint.
+- `packages/publishing/test/ipfs-retrieval.test.js`: tests the built retrieval entrypoint.
 
 Reference-only legacy files:
 

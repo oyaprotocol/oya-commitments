@@ -1,6 +1,6 @@
 # @oyaprotocol/publishing
 
-Utilities for publishing and indexing Oya-related data.
+Utilities for publishing and retrieving Oya-related data.
 
 ## Public Entrypoint
 
@@ -10,3 +10,4 @@ Utilities for publishing and indexing Oya-related data.
 
 - `createIpfsPublishConfig(options)`: validate explicit transport settings for IPFS publication.
 - `publishToIpfs(options)`: publish and pin content through a Kubo-compatible IPFS HTTP API using explicit config and explicit dependencies. The add request explicitly sets `pin=true`.
+- `readIpfsText(options)`: read bounded ASCII text content by CID from a Kubo-compatible IPFS HTTP API using explicit config and explicit dependencies.

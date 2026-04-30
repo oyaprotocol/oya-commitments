@@ -17,3 +17,11 @@ export type {
     PublishToIpfsResult,
     PublishableContent,
 } from './publish-to-ipfs.js';
+export { readIpfsText } from './read-ipfs-text.js';
+export type {
+    ReadIpfsTextFetchLike,
+    ReadIpfsTextOptions,
+    ReadIpfsTextRequestOptions,
+    ReadIpfsTextResponse,
+    ReadIpfsTextResult,
+} from './read-ipfs-text.js';
