@@ -300,7 +300,7 @@ async function publishToIpfs({ config, fetch, content, filename, mediaType, sign
                 filename: trimmedFilename,
                 mediaType: trimmedMediaType,
             });
-            const response = await invokeWithAbort(() => fetch(`${config.apiUrl}/api/v0/add?cid-version=1&progress=false`, {
+            const response = await invokeWithAbort(() => fetch(`${config.apiUrl}/api/v0/add?cid-version=1&pin=true&progress=false`, {
                 method: 'POST',
                 headers: config.headers,
                 body: form,
@@ -327,6 +327,7 @@ async function publishToIpfs({ config, fetch, content, filename, mediaType, sign
             return {
                 cid,
                 uri: `ipfs://${cid}`,
+                pinned: true,
                 filename: trimmedFilename,
                 mediaType: trimmedMediaType,
                 contentByteLength,

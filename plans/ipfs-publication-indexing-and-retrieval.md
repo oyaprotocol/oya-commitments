@@ -23,9 +23,10 @@ Definitions used in this plan:
 - [x] 2026-04-29 23:12Z: Created this follow-on ExecPlan after resolving the final open decision in `plans/hardened-kernel-packages.md`.
 - [x] 2026-04-30 17:43Z: Amended the direction after user clarification: do not add a `pinOnAdd` boolean and do not create a separate pinning track; make the standard Kubo add request explicitly pin by default.
 - [x] 2026-04-30 18:05Z: Simplified the immediate scope after user clarification: implement explicit add-and-pin, add low-level retrieval, and document/test retrieval now; defer index design to a future onchain Logger system.
-- [ ] Make IPFS add-and-pin behavior explicit in `@oyaprotocol/publishing`.
+- [x] 2026-04-30 19:09Z: Completed Milestone 1. `publishToIpfs(...)` now explicitly calls Kubo add with `pin=true`, returns `pinned: true`, and the package README/test coverage reflects the add-and-pin contract.
 - [ ] Add low-level IPFS retrieval primitives for bounded ASCII text artifact reads.
-- [ ] Add tests and documentation for add-and-pin publication and retrieval.
+- [x] 2026-04-30 19:09Z: Added add-and-pin publication tests and documentation.
+- [ ] Add tests and documentation for bounded ASCII text retrieval.
 - [ ] Create or update a future plan for onchain CID logging and public indexing when ready.
 
 ## Surprises & Discoveries
@@ -76,7 +77,15 @@ Definitions used in this plan:
 
 ## Outcomes & Retrospective
 
-No implementation has landed under this plan yet. This document records the selected direction from the prior package-shell ExecPlan and defines the implementation sequence. The first successful milestone should leave reviewers with package-level tests proving that `publishToIpfs(...)` explicitly requests add-and-pin behavior and a retrieval primitive can safely read bounded ASCII text artifacts by CID.
+Milestone 1 is complete. `publishToIpfs(...)` now explicitly requests add-and-pin behavior with `/api/v0/add?cid-version=1&pin=true&progress=false`, and `PublishToIpfsResult` reports `pinned: true`. The focused publishing test now proves the explicit URL and normalized pinned result.
+
+Validation evidence for Milestone 1:
+
+- `npm --prefix packages run build`
+- `node --test packages/publishing/test/publish-to-ipfs.test.js`
+- `node --input-type=module -e "import('./packages/publishing/dist/index.js').then((m) => console.log(Object.keys(m).sort().join(',')))"`
+
+Remaining near-term work starts at Milestone 2: bounded ASCII text retrieval by CID.
 
 ## Context and Orientation
 
