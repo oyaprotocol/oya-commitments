@@ -32,8 +32,10 @@ After this phase, a contributor should be able to:
 - [x] 2026-04-23 00:14Z: Decoupled request timeout enforcement from injected fetch abort support by racing fetch and `response.text()` against a package-owned timeout signal, and added regression coverage for fetch adapters that ignore `options.signal`.
 - [x] 2026-04-23 00:16Z: Updated the combined-abort fallback to return cleanup hooks that remove source-signal listeners after each attempt, and added regression coverage for listener cleanup when `AbortSignal.any` is unavailable.
 - [x] 2026-04-23 00:21Z: Made the abort wrapper lazy so pre-aborted requests do not invoke `fetch(...)` or `response.text()` before cancellation is surfaced, and added regression coverage for the pre-cancelled request path.
-- [x] 2026-04-29 23:12Z: Decided the next publishing phase should preserve explicit add/pin separation, add a low-level pin primitive, then build durable publication indexing and read-only retrieval surfaces so published Oya data is discoverable and retrievable after publication.
+- [x] 2026-04-29 23:12Z: Decided the next publishing phase should cover explicit pinning behavior, retrieval, and future indexing direction so published Oya data is easier to retrieve and eventually discover.
 - [x] 2026-04-29 23:12Z: Created the follow-on ExecPlan at `plans/ipfs-publication-indexing-and-retrieval.md` and closed this plan's final open decision thread.
+- [x] 2026-04-30 17:43Z: Amended the follow-on plan after user clarification: the standard kernel path should explicitly add-and-pin in one Kubo request, should not add a `pinOnAdd` boolean, and should not create a separate pinning track unless a future concrete need appears.
+- [x] 2026-04-30 18:05Z: Simplified the follow-on plan after user clarification: the immediate package work is explicit add-and-pin plus low-level retrieval, while public indexing is deferred to a future onchain Logger design.
 
 ## Surprises & Discoveries
 
@@ -73,11 +75,11 @@ After this phase, a contributor should be able to:
 - Observation: Abort-aware wrapping must be lazy to preserve cancellation semantics; checking `signal.aborted` after constructing the promise is too late for side-effecting operations.
   Evidence: the pre-cancelled request regression only stopped invoking the injected `fetch` after the helper changed from accepting an already-created promise to accepting a promise factory.
 
-- Observation: Pinning and indexing solve different post-publication problems and both are needed for the next phase.
-  Evidence: pinning protects locally added IPFS blocks from garbage collection, while an index is the node-readable catalog that lets the publisher, customers, verifiers, and interfaces discover which CIDs matter.
+- Observation: Pinning and indexing solve different post-publication problems, but indexing does not need to be a local package primitive in the immediate next phase.
+  Evidence: pinning protects locally added IPFS blocks from garbage collection, while a future onchain Logger contract can provide a public append-only CID index keyed by node address and block history.
 
-- Observation: The current hardened `publishToIpfs(...)` URL does not make pin behavior explicit.
-  Evidence: `packages/publishing/src/publish-to-ipfs.ts` calls `/api/v0/add?cid-version=1&progress=false`, while the legacy runtime deliberately calls `/api/v0/add?cid-version=1&pin=false&progress=false` and then pins the resulting CID in a separate step.
+- Observation: The current hardened `publishToIpfs(...)` URL does not make pin behavior explicit, even though the desired standard behavior is add-and-pin.
+  Evidence: `packages/publishing/src/publish-to-ipfs.ts` calls `/api/v0/add?cid-version=1&progress=false`. The follow-on plan now requires making the existing default explicit with `/api/v0/add?cid-version=1&pin=true&progress=false`.
 
 ## Decision Log
 
@@ -110,8 +112,16 @@ After this phase, a contributor should be able to:
   Date/Author: 2026-04-21 / Codex.
 
 - Decision: Close this plan by moving the next publishing work into a dedicated follow-on ExecPlan.
-  Rationale: The package shell and raw IPFS add milestones are complete, and the next work is no longer just a primitive-selection question. It is a coherent post-publication feature area spanning explicit pinning, durable indexing, retrieval, and eventually node-facing read APIs.
+  Rationale: The package shell and raw IPFS add milestones are complete, and the next work is no longer just a primitive-selection question. It is a coherent post-publication feature area spanning explicit add-and-pin behavior, retrieval, and future public indexing direction.
   Date/Author: 2026-04-29 / Codex.
+
+- Decision: The standard hardened-kernel publication path should add and pin in the same Kubo request, without a `pinOnAdd` option or separate pinning track.
+  Rationale: Oya publication artifacts are expected to be small and recoverable from canonical local bytes. Re-adding on failure is simpler than supporting a second pinning state machine, and explicit `pin=true` avoids relying on Kubo's implicit default.
+  Date/Author: 2026-04-30 / Codex.
+
+- Decision: Defer package-level durable indexing in favor of a future onchain Logger index.
+  Rationale: The user identified a simpler public index direction: nodes can publish to IPFS and log CIDs onchain, letting contract events match node addresses to CIDs and block timestamps. The immediate package milestone should not build a local index abstraction before that design is settled.
+  Date/Author: 2026-04-30 / Codex.
 
 ## Outcomes & Retrospective
 
@@ -139,7 +149,7 @@ Validation evidence for this milestone:
 - `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/publishing/dist/index.js','./packages/transactions/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then((modules) => { console.log(modules.map((module) => module.packageInfo.name).join(',')); })"`
 - `node --test packages/publishing/test/publish-to-ipfs.test.js`
 
-The final open thread in this plan is now closed. The next publishing primitive has been selected as an explicit add/pin split, followed by durable publication indexing and retrieval. Implementation should continue from `plans/ipfs-publication-indexing-and-retrieval.md` rather than extending this package-shell plan.
+The final open thread in this plan is now closed. The next publishing primitive has been selected as explicit add-and-pin publication, followed by low-level retrieval. Public indexing is deferred to a future onchain Logger design. Implementation should continue from `plans/ipfs-publication-indexing-and-retrieval.md` rather than extending this package-shell plan.
 
 ## Context and Orientation
 
@@ -185,7 +195,7 @@ The first phase is structural only. Create the `packages/` directory, add area-l
 
 After the shells exist, future phases proceed function by function. Each function should be assigned to one package deliberately, implemented from scratch, reviewed, and validated before the next function is added.
 
-The first concrete function is now complete in `@oyaprotocol/publishing`. The open decision at the end of this plan has been resolved. The follow-on implementation should start in the same package, then add node-facing integration only after the reusable package interfaces are reviewed and validated.
+The first concrete function is now complete in `@oyaprotocol/publishing`. The open decision at the end of this plan has been resolved. The follow-on implementation should make add-and-pin behavior explicit in the same package, add low-level retrieval, and leave public indexing to a future onchain Logger plan.
 
 ## Concrete Steps
 
