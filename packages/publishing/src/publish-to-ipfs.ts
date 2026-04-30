@@ -43,6 +43,7 @@ export interface PublishToIpfsOptions {
 export interface PublishToIpfsResult {
     cid: string;
     uri: string;
+    pinned: true;
     filename: string;
     mediaType: string;
     contentByteLength: number;
@@ -392,7 +393,7 @@ async function publishToIpfs({
             });
             const response = await invokeWithAbort(
                 () =>
-                    fetch(`${config.apiUrl}/api/v0/add?cid-version=1&progress=false`, {
+                    fetch(`${config.apiUrl}/api/v0/add?cid-version=1&pin=true&progress=false`, {
                         method: 'POST',
                         headers: config.headers,
                         body: form,
@@ -433,6 +434,7 @@ async function publishToIpfs({
             return {
                 cid,
                 uri: `ipfs://${cid}`,
+                pinned: true,
                 filename: trimmedFilename,
                 mediaType: trimmedMediaType,
                 contentByteLength,

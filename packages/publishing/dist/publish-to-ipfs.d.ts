@@ -24,6 +24,7 @@ export interface PublishToIpfsOptions {
 export interface PublishToIpfsResult {
     cid: string;
     uri: string;
+    pinned: true;
     filename: string;
     mediaType: string;
     contentByteLength: number;
