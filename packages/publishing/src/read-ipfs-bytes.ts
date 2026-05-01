@@ -65,17 +65,6 @@ function normalizeReadError(error: unknown, messages: ReadIpfsBytesErrorMessages
     return new Error(`${messages.fallbackErrorBaseMessage}: ${String(error)}`);
 }
 
-function cancelReader(
-    reader: ReadableStreamDefaultReader<Uint8Array>,
-    reason: unknown
-): void {
-    reader.cancel(reason).catch(() => {});
-}
-
-function cancelResponseBody(body: ReadableStream<Uint8Array> | null, reason: unknown): void {
-    body?.cancel(reason).catch(() => {});
-}
-
 function combineChunks(chunks: Uint8Array[], byteLength: number): Uint8Array {
     const combined = new Uint8Array(byteLength);
     let offset = 0;
@@ -122,7 +111,7 @@ async function readBoundedBytes({
             chunks.push(chunk);
         }
     } catch (error) {
-        cancelReader(reader, error);
+        reader.cancel(error).catch(() => {});
         throw error;
     } finally {
         if (completed) {
@@ -177,7 +166,7 @@ async function readIpfsBytesWithMessages(
                         status: response.status,
                     }
                 );
-                cancelResponseBody(response.body, httpError);
+                response.body?.cancel(httpError).catch(() => {});
                 if (
                     attempt <= config.maxRetries &&
                     (response.status === 429 || response.status >= 500)
