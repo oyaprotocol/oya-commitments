@@ -28,7 +28,7 @@ async function readIpfsText(options: ReadIpfsOptions): Promise<ReadIpfsTextResul
     return {
         cid: result.cid,
         uri: result.uri,
-        text: new TextDecoder('utf-8', { fatal: true }).decode(result.bytes),
+        text: new TextDecoder('utf-8').decode(result.bytes),
         byteLength: result.byteLength,
         attemptCount: result.attemptCount,
     };
