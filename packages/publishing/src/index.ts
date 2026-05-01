@@ -7,9 +7,9 @@ export { createIpfsConfig } from './ipfs-config.js';
 export type { CreateIpfsConfigOptions, IpfsConfig } from './ipfs-config.js';
 export { publishToIpfs } from './publish-to-ipfs.js';
 export type {
-    FetchLike,
-    FetchRequestOptions,
-    FetchResponse,
+    PublishIpfsFetchLike,
+    PublishIpfsRequestOptions,
+    PublishIpfsResponse,
     PublishToIpfsOptions,
     PublishToIpfsResult,
     PublishableContent,

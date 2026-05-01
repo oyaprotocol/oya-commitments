@@ -8,18 +8,21 @@ import {
     waitForRetryDelay,
 } from './ipfs-request-utils.js';
 
-export type FetchLike = (url: string, options: FetchRequestOptions) => Promise<FetchResponse>;
+export type PublishIpfsFetchLike = (
+    url: string,
+    options: PublishIpfsRequestOptions
+) => Promise<PublishIpfsResponse>;
 
 export type PublishableContent = string | Uint8Array | ArrayBuffer | Blob;
 
-export interface FetchRequestOptions {
+export interface PublishIpfsRequestOptions {
     method: 'POST';
     headers: Readonly<Record<string, string>>;
     body: FormData;
     signal?: AbortSignal | undefined;
 }
 
-export interface FetchResponse {
+export interface PublishIpfsResponse {
     ok: boolean;
     status: number;
     statusText: string;
@@ -28,7 +31,7 @@ export interface FetchResponse {
 
 export interface PublishToIpfsOptions {
     config: IpfsConfig;
-    fetch: FetchLike;
+    fetch: PublishIpfsFetchLike;
     content: PublishableContent;
     filename: string;
     mediaType: string;
