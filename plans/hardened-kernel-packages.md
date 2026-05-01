@@ -21,13 +21,13 @@ After this phase, a contributor should be able to:
 - [x] 2026-04-20 21:59Z: Validated that each package entrypoint imports with Node and confirmed the new `packages/*/src` files have no legacy repo imports.
 - [x] 2026-04-20 23:18Z: Chose `@oyaprotocol/publishing` for the first concrete function and implemented `publishToIpfs(...)` as a package-local Kubo-compatible IPFS add primitive with normalized return data and transient-failure retries.
 - [x] 2026-04-20 23:18Z: Added focused tests covering success, retryable HTTP failure, retryable network failure, non-retryable HTTP failure, and missing-CID responses for `publishToIpfs(...)`.
-- [x] 2026-04-20 23:32Z: Tightened the publishing primitive into a strict low-level surface with no implicit defaults, added `createIpfsPublishConfig(...)` for explicit transport settings, and updated the tests to require explicit config, `fetch`, filename, and media type.
+- [x] 2026-04-20 23:32Z: Tightened the publishing primitive into a strict low-level surface with no implicit defaults, added explicit IPFS transport config, and updated the tests to require explicit config, `fetch`, filename, and media type.
 - [x] 2026-04-21 21:46Z: Consolidated tiny helper functions inside `publishToIpfs(...)` and `parseAddResponse(...)` so the file keeps only behavior-bearing top-level helpers while preserving the same external API and test coverage.
 - [x] 2026-04-21 22:36Z: Applied a minimal fallback-timeout cleanup fix so the `createTimeoutSignal(...)` fallback no longer leaves successful-attempt timers running until `timeoutMs` elapses.
 - [x] 2026-04-21 22:38Z: Added fallback-timeout regression coverage and re-ran `node --test packages/publishing/test/publish-to-ipfs.test.js`; all 7 tests passed.
 - [x] 2026-04-21 22:42Z: Made retry backoff abort-aware so caller cancellation interrupts retry delays promptly, added regression coverage for abort-during-backoff, and re-ran `node --test packages/publishing/test/publish-to-ipfs.test.js`; all 8 tests passed.
 - [x] 2026-04-22 05:12Z: Converted the kernel packages to TypeScript source, added a `packages/`-local TypeScript workspace toolchain, switched package manifests to `dist/` exports with declaration files, rebuilt all five packages, and re-ran the publishing tests against built output.
-- [x] 2026-04-22 05:18Z: Tightened the publishing TypeScript signatures so `createIpfsPublishConfig(...)` and `publishToIpfs(...)` require full option objects in the emitted declaration files, then rebuilt and re-ran the publishing tests.
+- [x] 2026-04-22 05:18Z: Tightened the publishing TypeScript signatures so IPFS config creation and `publishToIpfs(...)` require full option objects in the emitted declaration files, then rebuilt and re-ran the publishing tests.
 - [x] 2026-04-22 05:27Z: Updated the publishing retry classifier to inspect nested `error.cause` codes/messages so Node `fetch` network failures like `TypeError('fetch failed', { cause })` still retry when the nested cause is transient, and added regression coverage for that path.
 - [x] 2026-04-23 00:14Z: Decoupled request timeout enforcement from injected fetch abort support by racing fetch and `response.text()` against a package-owned timeout signal, and added regression coverage for fetch adapters that ignore `options.signal`.
 - [x] 2026-04-23 00:16Z: Updated the combined-abort fallback to return cleanup hooks that remove source-signal listeners after each attempt, and added regression coverage for listener cleanup when `AbortSignal.any` is unavailable.
@@ -133,12 +133,12 @@ Validation evidence for this milestone:
 - direct Node imports returned `@oyaprotocol/utils`, `@oyaprotocol/messages`, `@oyaprotocol/publishing`, `@oyaprotocol/transactions`, and `@oyaprotocol/verification` from the built `dist/index.js` entrypoints
 - a source-only import scan over `packages/*/src` found no imports from legacy repo areas
 
-The second milestone establishes the first real package primitives in `@oyaprotocol/publishing`: `createIpfsPublishConfig(...)` and `publishToIpfs(...)`. Together they define a strict low-level IPFS add surface: the caller must provide explicit transport settings, explicit content metadata, and an explicit `fetch` implementation. The primitive then publishes text or bytes to a Kubo-compatible `/api/v0/add` endpoint, normalizes the returned publication details, and retries transient failures without adding pinning, indexing, or API-serving behavior yet.
+The second milestone establishes the first real package primitives in `@oyaprotocol/publishing`: explicit IPFS config creation and `publishToIpfs(...)`. Together they define a strict low-level IPFS add surface: the caller must provide explicit transport settings, explicit content metadata, and an explicit `fetch` implementation. The primitive then publishes text or bytes to a Kubo-compatible `/api/v0/add` endpoint, normalizes the returned publication details, and retries transient failures without adding pinning, indexing, or API-serving behavior yet.
 
 Validation evidence for this milestone:
 
 - `node --test packages/publishing/test/publish-to-ipfs.test.js`
-- `node --input-type=module -e "import('./packages/publishing/dist/index.js').then((m) => { console.log(typeof m.createIpfsPublishConfig, typeof m.publishToIpfs, m.packageInfo.status); })"`
+- `node --input-type=module -e "import('./packages/publishing/dist/index.js').then((m) => { console.log(typeof m.createIpfsConfig, typeof m.publishToIpfs, m.packageInfo.status); })"`
 
 The third milestone converts the kernel area to TypeScript while keeping the change local to `packages/`. Package source now lives in `src/*.ts`, package manifests export built `dist/*.js` entrypoints with `.d.ts` declarations, and `packages/package.json` provides a workspace-local TypeScript toolchain that does not change `agent/`, `node/`, or `frontend/`.
 
@@ -182,7 +182,7 @@ The new area also has:
 
 The first implemented function now lives at:
 
-- `packages/publishing/src/ipfs-publish-config.ts`
+- `packages/publishing/src/ipfs-config.ts`
 - `packages/publishing/src/publish-to-ipfs.ts`
 
 The first focused tests now live at:
@@ -226,7 +226,7 @@ From `/Users/johnshutt/Code/oya-commitments`:
    - returns normalized publication details including `cid` and `ipfs://` URI
    - retries transient failures only
 
-7. Add `packages/publishing/src/ipfs-publish-config.ts` so transport settings are explicit and validated instead of implicitly defaulted.
+7. Add `packages/publishing/src/ipfs-config.ts` so transport settings are explicit and validated instead of implicitly defaulted.
 
 8. Add a `packages/`-local TypeScript toolchain and convert package source files to `src/*.ts`, with package manifests exporting built `dist/` entrypoints.
 
@@ -250,7 +250,7 @@ Validation commands from `/Users/johnshutt/Code/oya-commitments`:
 - `node --input-type=module -e "import('./packages/transactions/dist/index.js').then((m) => console.log(m.packageInfo.name))"`
 - `node --input-type=module -e "import('./packages/verification/dist/index.js').then((m) => console.log(m.packageInfo.name))"`
 - `node --test packages/publishing/test/publish-to-ipfs.test.js`
-- `node --input-type=module -e "import('./packages/publishing/dist/index.js').then((m) => { console.log(typeof m.createIpfsPublishConfig, typeof m.publishToIpfs, m.packageInfo.status); })"`
+- `node --input-type=module -e "import('./packages/publishing/dist/index.js').then((m) => { console.log(typeof m.createIpfsConfig, typeof m.publishToIpfs, m.packageInfo.status); })"`
 
 ## Idempotence and Recovery
 
@@ -273,7 +273,7 @@ Initial public surface for each package:
 
 Current additional public surface in `@oyaprotocol/publishing`:
 
-- `createIpfsPublishConfig(options)`
+- `createIpfsConfig(options)`
 - `publishToIpfs(options)`
 
 ## Interfaces and Dependencies
@@ -285,7 +285,7 @@ Interfaces introduced in this phase:
 
 Interfaces introduced after the initial shell milestone:
 
-- `createIpfsPublishConfig(options)` from `@oyaprotocol/publishing`
+- `createIpfsConfig(options)` from `@oyaprotocol/publishing`
 - `publishToIpfs(options)` from `@oyaprotocol/publishing`
 
 Dependencies introduced in this phase:

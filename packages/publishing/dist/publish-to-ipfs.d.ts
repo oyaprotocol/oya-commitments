@@ -1,21 +1,21 @@
-import type { IpfsPublishConfig } from './ipfs-publish-config.js';
-export type FetchLike = (url: string, options: FetchRequestOptions) => Promise<FetchResponse>;
+import type { IpfsConfig } from './ipfs-config.js';
+export type PublishIpfsFetchLike = (url: string, options: PublishIpfsRequestOptions) => Promise<PublishIpfsResponse>;
 export type PublishableContent = string | Uint8Array | ArrayBuffer | Blob;
-export interface FetchRequestOptions {
+export interface PublishIpfsRequestOptions {
     method: 'POST';
     headers: Readonly<Record<string, string>>;
     body: FormData;
     signal?: AbortSignal | undefined;
 }
-export interface FetchResponse {
+export interface PublishIpfsResponse {
     ok: boolean;
     status: number;
     statusText: string;
     text(): Promise<string>;
 }
 export interface PublishToIpfsOptions {
-    config: IpfsPublishConfig;
-    fetch: FetchLike;
+    config: IpfsConfig;
+    fetch: PublishIpfsFetchLike;
     content: PublishableContent;
     filename: string;
     mediaType: string;

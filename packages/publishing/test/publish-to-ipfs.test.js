@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createIpfsPublishConfig, publishToIpfs } from '../dist/index.js';
+import { createIpfsConfig, publishToIpfs } from '../dist/index.js';
 
 function createTextResponse(status, body, statusText = 'OK') {
     return {
@@ -16,7 +16,7 @@ function createTextResponse(status, body, statusText = 'OK') {
 
 test('publishToIpfs publishes content and returns normalized details', async () => {
     const calls = [];
-    const config = createIpfsPublishConfig({
+    const config = createIpfsConfig({
         apiUrl: 'http://ipfs.example:5001/',
         headers: {
             Authorization: 'Bearer test-token',
@@ -67,7 +67,7 @@ test('publishToIpfs publishes content and returns normalized details', async () 
 
 test('publishToIpfs retries retryable HTTP failures and succeeds', async () => {
     let attempts = 0;
-    const config = createIpfsPublishConfig({
+    const config = createIpfsConfig({
         apiUrl: 'http://ipfs.example:5001',
         headers: {},
         timeoutMs: 1_000,
@@ -96,7 +96,7 @@ test('publishToIpfs retries retryable HTTP failures and succeeds', async () => {
 
 test('publishToIpfs retries retryable network errors and succeeds', async () => {
     let attempts = 0;
-    const config = createIpfsPublishConfig({
+    const config = createIpfsConfig({
         apiUrl: 'http://ipfs.example:5001',
         headers: {},
         timeoutMs: 1_000,
@@ -126,7 +126,7 @@ test('publishToIpfs retries retryable network errors and succeeds', async () => 
 
 test('publishToIpfs retries fetch errors when a retryable network code is nested in error.cause', async () => {
     let attempts = 0;
-    const config = createIpfsPublishConfig({
+    const config = createIpfsConfig({
         apiUrl: 'http://ipfs.example:5001',
         headers: {},
         timeoutMs: 1_000,
@@ -157,7 +157,7 @@ test('publishToIpfs retries fetch errors when a retryable network code is nested
 });
 
 test('publishToIpfs enforces timeout even when the injected fetch ignores signal', async () => {
-    const config = createIpfsPublishConfig({
+    const config = createIpfsConfig({
         apiUrl: 'http://ipfs.example:5001',
         headers: {},
         timeoutMs: 10,
@@ -181,7 +181,7 @@ test('publishToIpfs does not call fetch when the caller signal is already aborte
     const controller = new AbortController();
     let attempts = 0;
     controller.abort(new Error('stop before request'));
-    const config = createIpfsPublishConfig({
+    const config = createIpfsConfig({
         apiUrl: 'http://ipfs.example:5001',
         headers: {},
         timeoutMs: 1_000,
@@ -209,7 +209,7 @@ test('publishToIpfs does not call fetch when the caller signal is already aborte
 
 test('publishToIpfs does not retry non-retryable HTTP failures', async () => {
     let attempts = 0;
-    const config = createIpfsPublishConfig({
+    const config = createIpfsConfig({
         apiUrl: 'http://ipfs.example:5001',
         headers: {},
         timeoutMs: 1_000,
@@ -234,7 +234,7 @@ test('publishToIpfs does not retry non-retryable HTTP failures', async () => {
 
 test('publishToIpfs does not retry HTTP 408 based on status text', async () => {
     let attempts = 0;
-    const config = createIpfsPublishConfig({
+    const config = createIpfsConfig({
         apiUrl: 'http://ipfs.example:5001',
         headers: {},
         timeoutMs: 1_000,
@@ -261,7 +261,7 @@ test('publishToIpfs normalizes empty thrown values to the fallback error', async
     const emptyThrownValues = [undefined, ''];
     for (const thrownValue of emptyThrownValues) {
         let attempts = 0;
-        const config = createIpfsPublishConfig({
+        const config = createIpfsConfig({
             apiUrl: 'http://ipfs.example:5001',
             headers: {},
             timeoutMs: 1_000,
@@ -291,7 +291,7 @@ test('publishToIpfs normalizes empty thrown values to the fallback error', async
 });
 
 test('publishToIpfs fails when the IPFS add response omits the cid', async () => {
-    const config = createIpfsPublishConfig({
+    const config = createIpfsConfig({
         apiUrl: 'http://ipfs.example:5001',
         headers: {},
         timeoutMs: 1_000,
@@ -310,10 +310,10 @@ test('publishToIpfs fails when the IPFS add response omits the cid', async () =>
     );
 });
 
-test('createIpfsPublishConfig requires explicit transport configuration', () => {
+test('createIpfsConfig requires explicit transport configuration', () => {
     assert.throws(
         () =>
-            createIpfsPublishConfig({
+            createIpfsConfig({
                 apiUrl: 'http://ipfs.example:5001',
                 headers: {},
                 timeoutMs: 0,
@@ -324,7 +324,7 @@ test('createIpfsPublishConfig requires explicit transport configuration', () => 
     );
     assert.throws(
         () =>
-            createIpfsPublishConfig({
+            createIpfsConfig({
                 apiUrl: 'http://ipfs.example:5001',
                 headers: {
                     'content-type': 'application/json',
@@ -337,7 +337,7 @@ test('createIpfsPublishConfig requires explicit transport configuration', () => 
     );
     assert.throws(
         () =>
-            createIpfsPublishConfig({
+            createIpfsConfig({
                 apiUrl: 'http://ipfs.example:5001',
                 headers: {
                     Authorization: 123,
@@ -350,7 +350,7 @@ test('createIpfsPublishConfig requires explicit transport configuration', () => 
     );
 });
 
-test('createIpfsPublishConfig rejects coerced integer values', () => {
+test('createIpfsConfig rejects coerced integer values', () => {
     const baseConfig = {
         apiUrl: 'http://ipfs.example:5001',
         headers: {},
@@ -379,12 +379,12 @@ test('createIpfsPublishConfig rejects coerced integer values', () => {
     ];
 
     for (const { config, expected } of cases) {
-        assert.throws(() => createIpfsPublishConfig(config), expected);
+        assert.throws(() => createIpfsConfig(config), expected);
     }
 });
 
-test('createIpfsPublishConfig freezes validated headers', () => {
-    const config = createIpfsPublishConfig({
+test('createIpfsConfig freezes validated headers', () => {
+    const config = createIpfsConfig({
         apiUrl: 'http://ipfs.example:5001',
         headers: {
             Authorization: 'Bearer test-token',
@@ -399,8 +399,8 @@ test('createIpfsPublishConfig freezes validated headers', () => {
     assert.equal(config.headers['content-type'], undefined);
 });
 
-test('createIpfsPublishConfig normalizes a Kubo /api/v0 base URL', () => {
-    const config = createIpfsPublishConfig({
+test('createIpfsConfig normalizes a Kubo /api/v0 base URL', () => {
+    const config = createIpfsConfig({
         apiUrl: 'http://127.0.0.1:5001/api/v0/',
         headers: {},
         timeoutMs: 1_000,
@@ -428,7 +428,7 @@ test('publishToIpfs clears the fallback timeout timer after a successful request
     };
 
     try {
-        const config = createIpfsPublishConfig({
+        const config = createIpfsConfig({
             apiUrl: 'http://ipfs.example:5001',
             headers: {},
             timeoutMs: 1_000,
@@ -475,7 +475,7 @@ test('publishToIpfs aborts during retry backoff without making another attempt',
     };
 
     try {
-        const config = createIpfsPublishConfig({
+        const config = createIpfsConfig({
             apiUrl: 'http://ipfs.example:5001',
             headers: {},
             timeoutMs: 10_000,
@@ -546,7 +546,7 @@ test('publishToIpfs removes fallback combined abort listeners after a successful
     };
 
     try {
-        const config = createIpfsPublishConfig({
+        const config = createIpfsConfig({
             apiUrl: 'http://ipfs.example:5001',
             headers: {},
             timeoutMs: 1_000,
