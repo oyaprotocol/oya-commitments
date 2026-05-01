@@ -1,16 +1,8 @@
+import type { ReadIpfsBytesFetchLike, ReadIpfsBytesRequestOptions, ReadIpfsBytesResponse } from './read-ipfs-bytes.js';
 import type { IpfsConfig } from './ipfs-config.js';
-export type ReadIpfsTextFetchLike = (url: string, options: ReadIpfsTextRequestOptions) => Promise<ReadIpfsTextResponse>;
-export interface ReadIpfsTextRequestOptions {
-    method: 'POST';
-    headers: Readonly<Record<string, string>>;
-    signal?: AbortSignal | undefined;
-}
-export interface ReadIpfsTextResponse {
-    ok: boolean;
-    status: number;
-    statusText: string;
-    body: ReadableStream<Uint8Array> | null;
-}
+export type ReadIpfsTextFetchLike = ReadIpfsBytesFetchLike;
+export type ReadIpfsTextRequestOptions = ReadIpfsBytesRequestOptions;
+export type ReadIpfsTextResponse = ReadIpfsBytesResponse;
 export interface ReadIpfsTextOptions {
     config: IpfsConfig;
     fetch: ReadIpfsTextFetchLike;
@@ -25,5 +17,5 @@ export interface ReadIpfsTextResult {
     byteLength: number;
     attemptCount: number;
 }
-declare function readIpfsText({ config, fetch, cid, maxBytes, signal, }: ReadIpfsTextOptions): Promise<ReadIpfsTextResult>;
+declare function readIpfsText(options: ReadIpfsTextOptions): Promise<ReadIpfsTextResult>;
 export { readIpfsText };

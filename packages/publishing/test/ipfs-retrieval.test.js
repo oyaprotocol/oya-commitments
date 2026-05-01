@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createIpfsConfig, readIpfsText } from '../dist/index.js';
+import { createIpfsConfig, readIpfsBytes, readIpfsText } from '../dist/index.js';
 
 function createConfig(overrides = {}) {
     return createIpfsConfig({
@@ -53,6 +53,51 @@ function createStreamResponse(status, chunks, statusText = 'OK') {
         body: createStream(chunks),
     };
 }
+
+test('readIpfsBytes reads bounded arbitrary bytes and returns normalized details', async () => {
+    const calls = [];
+    const result = await readIpfsBytes({
+        config: createConfig(),
+        fetch: async (url, options) => {
+            calls.push({ url, options });
+            return createStreamResponse(200, ['hi', new Uint8Array([0x00, 0xff])]);
+        },
+        cid: 'bafy-bytes-ok',
+        maxBytes: 64,
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'http://ipfs.example:5001/api/v0/cat?arg=bafy-bytes-ok');
+    assert.equal(calls[0].options.method, 'POST');
+    assert.equal(calls[0].options.headers.Authorization, 'Bearer test-token');
+    assert.deepEqual(Array.from(result.bytes), [0x68, 0x69, 0x00, 0xff]);
+    assert.deepEqual(
+        {
+            cid: result.cid,
+            uri: result.uri,
+            byteLength: result.byteLength,
+            attemptCount: result.attemptCount,
+        },
+        {
+            cid: 'bafy-bytes-ok',
+            uri: 'ipfs://bafy-bytes-ok',
+            byteLength: 4,
+            attemptCount: 1,
+        }
+    );
+});
+
+test('readIpfsBytes rejects responses that exceed maxBytes', async () => {
+    await assert.rejects(
+        readIpfsBytes({
+            config: createConfig(),
+            fetch: async () => createStreamResponse(200, [new Uint8Array([0x00, 0x01, 0x02])]),
+            cid: 'bafy-bytes-too-large',
+            maxBytes: 2,
+        }),
+        /exceeded maxBytes \(2\)/
+    );
+});
 
 test('readIpfsText reads bounded ASCII text and returns normalized details', async () => {
     const calls = [];

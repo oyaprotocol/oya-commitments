@@ -32,6 +32,7 @@ Definitions used in this plan:
 - [x] 2026-04-30 22:20Z: Consolidated shared IPFS request abort, timeout, retry-delay, and retryable-error helpers in package-internal `ipfs-request-utils.ts`.
 - [x] 2026-04-30 22:34Z: Fixed `readIpfsText(...)` to cancel non-OK `/api/v0/cat` response bodies before retrying or throwing, preventing leaked fetch sockets under repeated failures.
 - [x] 2026-04-30 22:43Z: Moved shared string and integer validators into package-internal `validation-utils.ts`.
+- [x] 2026-05-01 19:16Z: Added `readIpfsBytes(...)` for bounded arbitrary byte retrieval and made `readIpfsText(...)` a text-specific wrapper over the byte primitive.
 - [ ] Add a separate public gateway text retrieval helper in a future milestone rather than overloading the Kubo RPC `readIpfsText(...)` helper.
 - [ ] Create or update a future plan for onchain CID logging and public indexing when ready.
 
@@ -95,7 +96,7 @@ Validation evidence for Milestone 1:
 - `node --test packages/publishing/test/publish-to-ipfs.test.js`
 - `node --input-type=module -e "import('./packages/publishing/dist/index.js').then((m) => console.log(Object.keys(m).sort().join(',')))"`
 
-Milestone 2 is complete. `readIpfsText(...)` reads known CIDs through `/api/v0/cat?arg=<cid>` and returns bounded ASCII text. It requires `maxBytes`, rejects oversized and non-ASCII responses, supports caller cancellation, and uses the same explicit transport config pattern as publication.
+Milestone 2 is complete. `readIpfsBytes(...)` reads known CIDs through `/api/v0/cat?arg=<cid>` and returns bounded arbitrary bytes. `readIpfsText(...)` wraps that byte primitive and adds ASCII verification plus text decoding for the immediate text-artifact use case. Both require `maxBytes`, support caller cancellation, and use the same explicit transport config pattern as publication.
 
 Follow-up cleanup renamed the shared transport config to `createIpfsConfig(...)` / `IpfsConfig`. The old publish-specific config names were removed rather than retained as aliases, so new package code and tests use the neutral names exclusively.
 
@@ -104,6 +105,8 @@ Follow-up request cleanup centralized shared abort, timeout, retry-delay, and re
 Review cleanup fixed the non-OK retrieval response path so `readIpfsText(...)` cancels failed `/api/v0/cat` response bodies before retrying or throwing. This keeps Node/Undici-style fetch connections from being held by unconsumed error bodies.
 
 Validation cleanup moved shared string and integer checks into package-internal `validation-utils.ts`; IPFS config keeps only config-specific header validation locally.
+
+Retrieval follow-up split the Kubo RPC read path into `readIpfsBytes(...)` for arbitrary bounded bytes and `readIpfsText(...)` for bounded ASCII text verification. This keeps future byte-oriented use cases available without weakening the current text-specific verification path.
 
 Validation evidence for Milestone 2:
 
@@ -124,7 +127,8 @@ Current package files:
 - `packages/publishing/src/ipfs-request-utils.ts`: contains shared retry, timeout, and abort helpers for IPFS HTTP requests.
 - `packages/publishing/src/validation-utils.ts`: contains shared internal validation helpers.
 - `packages/publishing/src/publish-to-ipfs.ts`: publishes content to Kubo `/api/v0/add` using injected `fetch`.
-- `packages/publishing/src/read-ipfs-text.ts`: reads bounded ASCII text content from Kubo `/api/v0/cat` using injected `fetch`.
+- `packages/publishing/src/read-ipfs-bytes.ts`: reads bounded arbitrary byte content from Kubo `/api/v0/cat` using injected `fetch`.
+- `packages/publishing/src/read-ipfs-text.ts`: reads bounded ASCII text content through `readIpfsBytes(...)` and text-specific verification.
 - `packages/publishing/src/index.ts`: exports the public package surface.
 - `packages/publishing/test/publish-to-ipfs.test.js`: tests the built package entrypoint.
 - `packages/publishing/test/ipfs-retrieval.test.js`: tests the built retrieval entrypoint.
@@ -143,7 +147,7 @@ The package-level work should not wire into `node/` yet. Node-facing APIs and on
 
 Milestone 1 makes existing IPFS add-and-pin semantics explicit. `publishToIpfs(...)` should not rely on Kubo defaults. The preferred first change is to call `/api/v0/add?cid-version=1&pin=true&progress=false` and document that the function is the standard add-and-pin primitive.
 
-Milestone 2 adds retrieval primitives for the expected near-term artifact shape: small ASCII text. Add a small read helper for known CIDs, likely `readIpfsText(...)` or `fetchIpfsText(...)`, backed by Kubo `/api/v0/cat`. The helper must require a maximum byte limit, fail clearly if the response exceeds that limit, return text rather than JSON or arbitrary binary, and reject or clearly fail non-ASCII bytes instead of silently mis-decoding them. It should support caller cancellation. Binary, UTF-8-general, and true streaming retrieval are deferred until there is a concrete need.
+Milestone 2 adds retrieval primitives for the expected near-term artifact shape while preserving a byte-capable base. `readIpfsBytes(...)` reads bounded arbitrary bytes for known CIDs through Kubo `/api/v0/cat`. `readIpfsText(...)` wraps the byte primitive for small ASCII text and rejects non-ASCII bytes instead of silently mis-decoding them. Both helpers must require a maximum byte limit, fail clearly if the response exceeds that limit, and support caller cancellation. UTF-8-general text and true streaming retrieval are deferred until there is a concrete need.
 
 Milestone 3 updates tests and package documentation. The README should explain that publication uses explicit add-and-pin, retrieval reads by CID from a configured Kubo-compatible endpoint, and indexing is intentionally deferred to a future onchain Logger design.
 
@@ -194,7 +198,7 @@ The package milestone is accepted when:
 - `publishToIpfs(...)` does not rely on Kubo's implicit pin default and explicitly requests `pin=true`.
 - The package does not add a `pinOnAdd` option or separate pinning track.
 - Failed publication can be retried by re-adding the same canonical bytes with stable import options.
-- A retrieval primitive can read known CIDs as bounded ASCII text with caller cancellation, oversized-response failure, and non-ASCII failure.
+- Retrieval primitives can read known CIDs as bounded bytes and bounded ASCII text with caller cancellation, oversized-response failure, and non-ASCII failure for the text wrapper.
 - Package README documentation explains add-and-pin publication, retrieval, and the future onchain Logger indexing direction.
 
 Minimum validation commands from `/Users/johnshutt/Code/oya-commitments`:
@@ -222,10 +226,8 @@ Current hardened public surface:
 
 - `createIpfsConfig(options)`
 - `publishToIpfs(options)`
-
-Likely new public surface:
-
-- `readIpfsText(options)` or equivalent bounded ASCII text retrieval primitive
+- `readIpfsBytes(options)`
+- `readIpfsText(options)`
 
 Important reference behavior:
 
@@ -240,9 +242,8 @@ Existing package interfaces:
 - `IpfsConfig` from `packages/publishing/src/ipfs-config.ts`
 - `FetchLike`, `FetchRequestOptions`, and `FetchResponse` from `packages/publishing/src/publish-to-ipfs.ts`
 - `PublishToIpfsOptions` and `PublishToIpfsResult` from `packages/publishing/src/publish-to-ipfs.ts`
-
-Proposed new package interfaces:
-
+- `ReadIpfsBytesOptions`
+- `ReadIpfsBytesResult`
 - `ReadIpfsTextOptions`
 - `ReadIpfsTextResult`
 

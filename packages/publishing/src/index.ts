@@ -14,6 +14,14 @@ export type {
     PublishToIpfsResult,
     PublishableContent,
 } from './publish-to-ipfs.js';
+export { readIpfsBytes } from './read-ipfs-bytes.js';
+export type {
+    ReadIpfsBytesFetchLike,
+    ReadIpfsBytesOptions,
+    ReadIpfsBytesRequestOptions,
+    ReadIpfsBytesResponse,
+    ReadIpfsBytesResult,
+} from './read-ipfs-bytes.js';
 export { readIpfsText } from './read-ipfs-text.js';
 export type {
     ReadIpfsTextFetchLike,
