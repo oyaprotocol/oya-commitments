@@ -1,4 +1,4 @@
-import { combineAbortSignals, createTimeoutSignal, invokeWithAbort, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, } from './ipfs-request-utils.js';
+import { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, isIpfsHttpError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, } from './ipfs-request-utils.js';
 import { assertNonEmptyString, assertPositiveInteger } from './validation-utils.js';
 const DEFAULT_READ_BYTES_ERROR_MESSAGES = Object.freeze({
     abortErrorMessage: 'readIpfsBytes was aborted by the caller.',
@@ -13,9 +13,6 @@ function normalizeReadError(error, messages) {
         return new Error(messages.fallbackErrorMessage);
     }
     return new Error(`${messages.fallbackErrorPrefix}: ${String(error)}`);
-}
-function isHttpReadError(error) {
-    return error instanceof Error && typeof error.status === 'number';
 }
 function cancelReader(reader, reason) {
     reader.cancel(reason).catch(() => { });
@@ -89,7 +86,7 @@ async function readIpfsBytesWithMessages({ config, fetch, cid, maxBytes, signal,
                 signal: requestSignal.signal,
             }), requestSignal.signal);
             if (!response.ok) {
-                const httpError = Object.assign(new Error(`IPFS cat failed with ${response.status} ${response.statusText || 'Unknown Status'}.`), {
+                const httpError = new IpfsHttpError(`IPFS cat failed with ${response.status} ${response.statusText || 'Unknown Status'}.`, {
                     status: response.status,
                 });
                 cancelResponseBody(response.body, httpError);
@@ -121,7 +118,7 @@ async function readIpfsBytesWithMessages({ config, fetch, cid, maxBytes, signal,
             lastError = error;
             throwIfSignalAborted(signal, messages.abortErrorMessage, error);
             if (attempt <= config.maxRetries &&
-                !isHttpReadError(error) &&
+                !isIpfsHttpError(error) &&
                 shouldRetryError(error)) {
                 await waitForRetryDelay({
                     retryDelayMs: config.retryDelayMs,

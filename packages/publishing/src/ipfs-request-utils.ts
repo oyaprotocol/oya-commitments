@@ -16,6 +16,27 @@ interface AbortSignalHandle {
     cleanup: (() => void) | null;
 }
 
+interface IpfsHttpErrorOptions {
+    status: number;
+    responseText?: string;
+}
+
+class IpfsHttpError extends Error {
+    readonly status: number;
+    readonly responseText: string | undefined;
+
+    constructor(message: string, { status, responseText }: IpfsHttpErrorOptions) {
+        super(message);
+        this.name = 'IpfsHttpError';
+        this.status = status;
+        this.responseText = responseText;
+    }
+}
+
+function isIpfsHttpError(error: unknown): error is IpfsHttpError {
+    return error instanceof IpfsHttpError;
+}
+
 function readErrorStringChain(error: unknown, key: string): string[] {
     const values: string[] = [];
     let current: unknown = error;
@@ -211,6 +232,8 @@ export {
     combineAbortSignals,
     createTimeoutSignal,
     invokeWithAbort,
+    IpfsHttpError,
+    isIpfsHttpError,
     shouldRetryError,
     throwIfSignalAborted,
     waitForRetryDelay,

@@ -3,6 +3,8 @@ import {
     combineAbortSignals,
     createTimeoutSignal,
     invokeWithAbort,
+    IpfsHttpError,
+    isIpfsHttpError,
     shouldRetryError,
     throwIfSignalAborted,
     waitForRetryDelay,
@@ -49,11 +51,6 @@ export interface PublishToIpfsResult {
     attemptCount: number;
     providerResponse: unknown;
 }
-
-type HttpPublishError = Error & {
-    status: number;
-    responseText: string;
-};
 
 function normalizeContent(content: unknown): { blob: Blob; byteLength: number } {
     if (typeof content === 'string') {
@@ -172,10 +169,6 @@ function normalizePublishError(error: unknown): Error {
     return new Error(`IPFS publish failed: ${String(error)}`);
 }
 
-function isHttpPublishError(error: unknown): error is HttpPublishError {
-    return error instanceof Error && typeof (error as { status?: unknown }).status === 'number';
-}
-
 async function publishToIpfs({
     config,
     fetch,
@@ -224,12 +217,10 @@ async function publishToIpfs({
             const responseText = await invokeWithAbort(() => response.text(), requestSignal.signal);
 
             if (!response.ok) {
-                const httpError: HttpPublishError = Object.assign(
-                    new Error(
-                        `IPFS add failed with ${response.status} ${
-                            response.statusText || 'Unknown Status'
-                        }.`
-                    ),
+                const httpError = new IpfsHttpError(
+                    `IPFS add failed with ${response.status} ${
+                        response.statusText || 'Unknown Status'
+                    }.`,
                     {
                         status: response.status,
                         responseText,
@@ -271,7 +262,7 @@ async function publishToIpfs({
             throwIfSignalAborted(signal, abortErrorMessage, error);
             if (
                 attempt <= config.maxRetries &&
-                !isHttpPublishError(error) &&
+                !isIpfsHttpError(error) &&
                 shouldRetryError(error)
             ) {
                 await waitForRetryDelay({

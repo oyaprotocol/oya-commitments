@@ -3,6 +3,8 @@ import {
     combineAbortSignals,
     createTimeoutSignal,
     invokeWithAbort,
+    IpfsHttpError,
+    isIpfsHttpError,
     shouldRetryError,
     throwIfSignalAborted,
     waitForRetryDelay,
@@ -49,10 +51,6 @@ interface ReadIpfsBytesErrorMessages {
     fallbackErrorPrefix: string;
 }
 
-type HttpReadError = Error & {
-    status: number;
-};
-
 const DEFAULT_READ_BYTES_ERROR_MESSAGES = Object.freeze({
     abortErrorMessage: 'readIpfsBytes was aborted by the caller.',
     fallbackErrorMessage: 'IPFS bytes read failed.',
@@ -67,10 +65,6 @@ function normalizeReadError(error: unknown, messages: ReadIpfsBytesErrorMessages
         return new Error(messages.fallbackErrorMessage);
     }
     return new Error(`${messages.fallbackErrorPrefix}: ${String(error)}`);
-}
-
-function isHttpReadError(error: unknown): error is HttpReadError {
-    return error instanceof Error && typeof (error as { status?: unknown }).status === 'number';
 }
 
 function cancelReader(
@@ -177,12 +171,10 @@ async function readIpfsBytesWithMessages(
             );
 
             if (!response.ok) {
-                const httpError: HttpReadError = Object.assign(
-                    new Error(
-                        `IPFS cat failed with ${response.status} ${
-                            response.statusText || 'Unknown Status'
-                        }.`
-                    ),
+                const httpError = new IpfsHttpError(
+                    `IPFS cat failed with ${response.status} ${
+                        response.statusText || 'Unknown Status'
+                    }.`,
                     {
                         status: response.status,
                     }
@@ -220,7 +212,7 @@ async function readIpfsBytesWithMessages(
             throwIfSignalAborted(signal, messages.abortErrorMessage, error);
             if (
                 attempt <= config.maxRetries &&
-                !isHttpReadError(error) &&
+                !isIpfsHttpError(error) &&
                 shouldRetryError(error)
             ) {
                 await waitForRetryDelay({

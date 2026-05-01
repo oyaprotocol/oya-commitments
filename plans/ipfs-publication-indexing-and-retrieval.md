@@ -36,6 +36,7 @@ Definitions used in this plan:
 - [x] 2026-05-01 19:22Z: Replaced duplicate byte/text fetch type aliases with shared `ReadIpfsFetchLike`, `ReadIpfsRequestOptions`, and `ReadIpfsResponse` transport types.
 - [x] 2026-05-01 19:27Z: Renamed publish transport types from generic `FetchLike` names to publish-scoped `PublishIpfsFetchLike`, `PublishIpfsRequestOptions`, and `PublishIpfsResponse`.
 - [x] 2026-05-01 19:34Z: Replaced duplicate byte/text retrieval options with shared `ReadIpfsOptions`.
+- [x] 2026-05-01 20:04Z: Replaced duplicate read/publish HTTP error marker types with shared internal `IpfsHttpError` request utility.
 - [ ] Add a separate public gateway text retrieval helper in a future milestone rather than overloading the Kubo RPC `readIpfsText(...)` helper.
 - [ ] Create or update a future plan for onchain CID logging and public indexing when ready.
 
@@ -116,6 +117,8 @@ Type cleanup replaced duplicate byte/text fetch aliases with shared read transpo
 Publish type cleanup renamed the publishing fetch contract to `PublishIpfsFetchLike`, `PublishIpfsRequestOptions`, and `PublishIpfsResponse` so it is not confused with the read transport contract.
 
 Read options cleanup replaced duplicate byte/text options with shared `ReadIpfsOptions`; byte and text helpers now differ only in result shape and text-specific ASCII verification.
+
+Request error cleanup moved status-bearing HTTP failures into shared internal `IpfsHttpError` in `ipfs-request-utils.ts`; publish and read use the same marker to keep HTTP failures distinct from retryable network errors.
 
 Validation evidence for Milestone 2:
 

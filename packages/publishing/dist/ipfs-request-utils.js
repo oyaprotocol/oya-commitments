@@ -10,6 +10,19 @@ const RETRYABLE_ERROR_CODES = new Set([
     'UND_ERR_HEADERS_TIMEOUT',
     'UND_ERR_SOCKET',
 ]);
+class IpfsHttpError extends Error {
+    status;
+    responseText;
+    constructor(message, { status, responseText }) {
+        super(message);
+        this.name = 'IpfsHttpError';
+        this.status = status;
+        this.responseText = responseText;
+    }
+}
+function isIpfsHttpError(error) {
+    return error instanceof IpfsHttpError;
+}
 function readErrorStringChain(error, key) {
     const values = [];
     let current = error;
@@ -176,5 +189,5 @@ async function waitForRetryDelay({ retryDelayMs, signal, abortErrorMessage, }) {
     });
     throwIfSignalAborted(signal, abortErrorMessage, signal?.reason);
 }
-export { combineAbortSignals, createTimeoutSignal, invokeWithAbort, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, };
+export { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, isIpfsHttpError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, };
 //# sourceMappingURL=ipfs-request-utils.js.map

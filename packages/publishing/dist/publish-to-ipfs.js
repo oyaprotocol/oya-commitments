@@ -1,4 +1,4 @@
-import { combineAbortSignals, createTimeoutSignal, invokeWithAbort, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, } from './ipfs-request-utils.js';
+import { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, isIpfsHttpError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, } from './ipfs-request-utils.js';
 function normalizeContent(content) {
     if (typeof content === 'string') {
         return {
@@ -95,9 +95,6 @@ function normalizePublishError(error) {
     }
     return new Error(`IPFS publish failed: ${String(error)}`);
 }
-function isHttpPublishError(error) {
-    return error instanceof Error && typeof error.status === 'number';
-}
 async function publishToIpfs({ config, fetch, content, filename, mediaType, signal, }) {
     if (config === null || typeof config !== 'object' || Array.isArray(config)) {
         throw new Error('config must be an object.');
@@ -132,7 +129,7 @@ async function publishToIpfs({ config, fetch, content, filename, mediaType, sign
             }), requestSignal.signal);
             const responseText = await invokeWithAbort(() => response.text(), requestSignal.signal);
             if (!response.ok) {
-                const httpError = Object.assign(new Error(`IPFS add failed with ${response.status} ${response.statusText || 'Unknown Status'}.`), {
+                const httpError = new IpfsHttpError(`IPFS add failed with ${response.status} ${response.statusText || 'Unknown Status'}.`, {
                     status: response.status,
                     responseText,
                 });
@@ -168,7 +165,7 @@ async function publishToIpfs({ config, fetch, content, filename, mediaType, sign
             lastError = error;
             throwIfSignalAborted(signal, abortErrorMessage, error);
             if (attempt <= config.maxRetries &&
-                !isHttpPublishError(error) &&
+                !isIpfsHttpError(error) &&
                 shouldRetryError(error)) {
                 await waitForRetryDelay({
                     retryDelayMs: config.retryDelayMs,
