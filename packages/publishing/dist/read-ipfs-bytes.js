@@ -120,5 +120,5 @@ async function readIpfsBytes(options) {
         fallbackErrorBaseMessage: 'IPFS bytes read failed',
     });
 }
-export { readIpfsBytes, readIpfsBytesWithMessages };
+export { readBoundedBytes, readIpfsBytes, readIpfsBytesWithMessages };
 //# sourceMappingURL=read-ipfs-bytes.js.map

@@ -38,7 +38,8 @@ Definitions used in this plan:
 - [x] 2026-05-01 19:34Z: Replaced duplicate byte/text retrieval options with shared `ReadIpfsOptions`.
 - [x] 2026-05-01 20:04Z: Replaced duplicate read/publish HTTP error marker types with shared internal `IpfsHttpError` request utility.
 - [x] 2026-05-01 22:02Z: Centralized HTTP status and transport retry decisions in shared `shouldRetryError(...)`.
-- [ ] Add a separate public gateway text retrieval helper in a future milestone rather than overloading the Kubo RPC `readIpfsText(...)` helper.
+- [x] 2026-05-01 23:21Z: Added `readIpfsPublicGatewayBytes(...)` for bounded public gateway `GET /ipfs/<cid>` reads while keeping gateway retrieval separate from Kubo RPC helpers.
+- [x] 2026-05-01 23:24Z: Added `readIpfsPublicGatewayText(...)` as an ASCII text wrapper over the public gateway byte reader.
 - [ ] Create or update a future plan for onchain CID logging and public indexing when ready.
 
 ## Surprises & Discoveries
@@ -123,6 +124,10 @@ Request error cleanup moved status-bearing HTTP failures into shared internal `I
 
 Retry cleanup moved both HTTP status retry policy and transport-error retry policy into shared `shouldRetryError(...)`, so publish and read use one retry decision path after errors are created.
 
+Public gateway retrieval follow-up added `readIpfsPublicGatewayBytes(...)`, a bounded byte reader for public gateway-style `GET /ipfs/<cid>` endpoints. It uses explicit gateway URL, headers, timeout, retry, byte-limit, and injected fetch dependencies, while reusing the same bounded stream reading behavior as Kubo retrieval.
+
+Public gateway text retrieval follow-up added `readIpfsPublicGatewayText(...)`, which mirrors the Kubo reader split by wrapping the public gateway byte reader and adding ASCII verification plus text decoding.
+
 Validation evidence for Milestone 2:
 
 - `npm --prefix packages run build`
@@ -143,6 +148,8 @@ Current package files:
 - `packages/publishing/src/validation-utils.ts`: contains shared internal validation helpers.
 - `packages/publishing/src/publish-to-ipfs.ts`: publishes content to Kubo `/api/v0/add` using injected `fetch`.
 - `packages/publishing/src/read-ipfs-bytes.ts`: reads bounded arbitrary byte content from Kubo `/api/v0/cat` using injected `fetch`.
+- `packages/publishing/src/read-ipfs-public-gateway-bytes.ts`: reads bounded arbitrary byte content from public gateway `GET /ipfs/<cid>` endpoints using injected `fetch`.
+- `packages/publishing/src/read-ipfs-public-gateway-text.ts`: reads bounded ASCII text content through `readIpfsPublicGatewayBytes(...)` and text-specific verification.
 - `packages/publishing/src/read-ipfs-text.ts`: reads bounded ASCII text content through `readIpfsBytes(...)` and text-specific verification.
 - `packages/publishing/src/index.ts`: exports the public package surface.
 - `packages/publishing/test/publish-to-ipfs.test.js`: tests the built package entrypoint.
@@ -168,7 +175,7 @@ Milestone 3 updates tests and package documentation. The README should explain t
 
 Milestone 4 captures the future indexing direction without implementing it. Add notes to this plan, or create a dedicated follow-on plan later, for a simple Logger smart contract that emits node-address-to-CID events. That future plan should decide event shape, chain choice, gas strategy, CID encoding, sequence/gap handling, and how offchain consumers scan logs.
 
-A future retrieval milestone should add a separate public gateway helper for reading IPFS data through gateway-style `GET /ipfs/<cid>` endpoints. Keep that distinct from the current Kubo RPC `readIpfsText(...)` helper.
+Public gateway retrieval is intentionally separate from the Kubo RPC read helpers. The byte helper is the public gateway primitive, and the text helper wraps it for ASCII text verification.
 
 ## Concrete Steps
 
@@ -242,6 +249,8 @@ Current hardened public surface:
 - `createIpfsConfig(options)`
 - `publishToIpfs(options)`
 - `readIpfsBytes(options)`
+- `readIpfsPublicGatewayBytes(options)`
+- `readIpfsPublicGatewayText(options)`
 - `readIpfsText(options)`
 
 Important reference behavior:
@@ -262,6 +271,10 @@ Existing package interfaces:
 - `ReadIpfsOptions`
 - `ReadIpfsRequestOptions`
 - `ReadIpfsResponse`
+- `ReadIpfsPublicGatewayFetchLike`
+- `ReadIpfsPublicGatewayOptions`
+- `ReadIpfsPublicGatewayRequestOptions`
+- `ReadIpfsPublicGatewayResponse`
 - `ReadIpfsTextResult`
 
 Future onchain indexing interfaces are intentionally deferred. A later plan should define the Logger contract event shape, package ownership, tests, and deployment assumptions.

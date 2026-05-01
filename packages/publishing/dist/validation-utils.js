@@ -16,5 +16,12 @@ function assertNonNegativeInteger(value, label) {
     }
     return value;
 }
-export { assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger };
+function assertAsciiBytes(bytes, message) {
+    for (const byte of bytes) {
+        if (byte > 0x7f) {
+            throw new Error(message);
+        }
+    }
+}
+export { assertAsciiBytes, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, };
 //# sourceMappingURL=validation-utils.js.map

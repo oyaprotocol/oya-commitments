@@ -205,4 +205,4 @@ async function readIpfsBytes(options: ReadIpfsOptions): Promise<ReadIpfsBytesRes
     });
 }
 
-export { readIpfsBytes, readIpfsBytesWithMessages };
+export { readBoundedBytes, readIpfsBytes, readIpfsBytesWithMessages };

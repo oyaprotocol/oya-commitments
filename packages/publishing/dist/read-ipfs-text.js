@@ -1,17 +1,11 @@
 import { readIpfsBytesWithMessages } from './read-ipfs-bytes.js';
-function assertAsciiBytes(bytes) {
-    for (const byte of bytes) {
-        if (byte > 0x7f) {
-            throw new Error('IPFS cat response contained non-ASCII bytes.');
-        }
-    }
-}
+import { assertAsciiBytes } from './validation-utils.js';
 async function readIpfsText(options) {
     const result = await readIpfsBytesWithMessages(options, {
         abortErrorMessage: 'readIpfsText was aborted by the caller.',
         fallbackErrorBaseMessage: 'IPFS text read failed',
     });
-    assertAsciiBytes(result.bytes);
+    assertAsciiBytes(result.bytes, 'IPFS cat response contained non-ASCII bytes.');
     return {
         cid: result.cid,
         uri: result.uri,

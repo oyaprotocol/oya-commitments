@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createIpfsConfig, readIpfsBytes, readIpfsText } from '../dist/index.js';
+import {
+    createIpfsConfig,
+    readIpfsBytes,
+    readIpfsPublicGatewayBytes,
+    readIpfsPublicGatewayText,
+    readIpfsText,
+} from '../dist/index.js';
 
 function createConfig(overrides = {}) {
     return createIpfsConfig({
@@ -97,6 +103,191 @@ test('readIpfsBytes rejects responses that exceed maxBytes', async () => {
         }),
         /exceeded maxBytes \(2\)/
     );
+});
+
+test('readIpfsPublicGatewayBytes reads bounded bytes with a gateway GET request', async () => {
+    const calls = [];
+    const result = await readIpfsPublicGatewayBytes({
+        gatewayUrl: 'https://gateway.example/ipfs/',
+        headers: {
+            Accept: 'application/octet-stream',
+        },
+        timeoutMs: 1_000,
+        maxRetries: 1,
+        retryDelayMs: 0,
+        fetch: async (url, options) => {
+            calls.push({ url, options });
+            return createStreamResponse(200, ['gw', new Uint8Array([0xff])]);
+        },
+        cid: 'bafy-public-ok',
+        maxBytes: 64,
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://gateway.example/ipfs/bafy-public-ok');
+    assert.equal(calls[0].options.method, 'GET');
+    assert.equal(calls[0].options.headers.Accept, 'application/octet-stream');
+    assert.deepEqual(Array.from(result.bytes), [0x67, 0x77, 0xff]);
+    assert.deepEqual(
+        {
+            cid: result.cid,
+            uri: result.uri,
+            byteLength: result.byteLength,
+            attemptCount: result.attemptCount,
+        },
+        {
+            cid: 'bafy-public-ok',
+            uri: 'ipfs://bafy-public-ok',
+            byteLength: 3,
+            attemptCount: 1,
+        }
+    );
+});
+
+test('readIpfsPublicGatewayBytes retries retryable HTTP failures and cancels bodies', async () => {
+    let attempts = 0;
+    const cancellations = [];
+    const result = await readIpfsPublicGatewayBytes({
+        gatewayUrl: 'https://gateway.example',
+        headers: {},
+        timeoutMs: 1_000,
+        maxRetries: 2,
+        retryDelayMs: 0,
+        fetch: async () => {
+            attempts += 1;
+            if (attempts === 1) {
+                return {
+                    ok: false,
+                    status: 503,
+                    statusText: 'Service Unavailable',
+                    body: createCancellableStream(['temporary outage'], (reason) => {
+                        cancellations.push(reason);
+                    }),
+                };
+            }
+            return createStreamResponse(200, ['gateway retry ok']);
+        },
+        cid: 'bafy-public-retry',
+        maxBytes: 64,
+    });
+
+    assert.equal(attempts, 2);
+    assert.equal(cancellations.length, 1);
+    assert.match(cancellations[0].message, /503 Service Unavailable/);
+    assert.deepEqual(Array.from(result.bytes), Array.from(encodeAscii('gateway retry ok')));
+    assert.equal(result.attemptCount, 2);
+});
+
+test('readIpfsPublicGatewayBytes validates gateway options before calling fetch', async () => {
+    let attempts = 0;
+    const fetch = async () => {
+        attempts += 1;
+        return createStreamResponse(200, ['never']);
+    };
+
+    await assert.rejects(
+        readIpfsPublicGatewayBytes({
+            gatewayUrl: '   ',
+            headers: {},
+            timeoutMs: 1_000,
+            maxRetries: 1,
+            retryDelayMs: 0,
+            fetch,
+            cid: 'bafy-public-invalid',
+            maxBytes: 64,
+        }),
+        /gatewayUrl must be a non-empty string/
+    );
+
+    await assert.rejects(
+        readIpfsPublicGatewayBytes({
+            gatewayUrl: 'https://gateway.example',
+            headers: {
+                Authorization: 123,
+            },
+            timeoutMs: 1_000,
+            maxRetries: 1,
+            retryDelayMs: 0,
+            fetch,
+            cid: 'bafy-public-invalid',
+            maxBytes: 64,
+        }),
+        /headers.Authorization must be a string/
+    );
+
+    assert.equal(attempts, 0);
+});
+
+test('readIpfsPublicGatewayText reads bounded ASCII text through the gateway byte reader', async () => {
+    const calls = [];
+    const result = await readIpfsPublicGatewayText({
+        gatewayUrl: 'https://gateway.example',
+        headers: {
+            Accept: 'text/plain',
+        },
+        timeoutMs: 1_000,
+        maxRetries: 1,
+        retryDelayMs: 0,
+        fetch: async (url, options) => {
+            calls.push({ url, options });
+            return createStreamResponse(200, ['gateway ', 'text\n']);
+        },
+        cid: 'bafy-public-text-ok',
+        maxBytes: 64,
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://gateway.example/ipfs/bafy-public-text-ok');
+    assert.equal(calls[0].options.method, 'GET');
+    assert.equal(calls[0].options.headers.Accept, 'text/plain');
+    assert.deepEqual(result, {
+        cid: 'bafy-public-text-ok',
+        uri: 'ipfs://bafy-public-text-ok',
+        text: 'gateway text\n',
+        byteLength: 13,
+        attemptCount: 1,
+    });
+});
+
+test('readIpfsPublicGatewayText rejects non-ASCII bytes', async () => {
+    await assert.rejects(
+        readIpfsPublicGatewayText({
+            gatewayUrl: 'https://gateway.example',
+            headers: {},
+            timeoutMs: 1_000,
+            maxRetries: 1,
+            retryDelayMs: 0,
+            fetch: async () => createStreamResponse(200, [new Uint8Array([0x68, 0x69, 0x80])]),
+            cid: 'bafy-public-text-non-ascii',
+            maxBytes: 64,
+        }),
+        /public gateway response contained non-ASCII bytes/
+    );
+});
+
+test('readIpfsPublicGatewayText uses text-specific caller abort errors', async () => {
+    const controller = new AbortController();
+    let attempts = 0;
+    controller.abort(new Error('stop before request'));
+
+    await assert.rejects(
+        readIpfsPublicGatewayText({
+            gatewayUrl: 'https://gateway.example',
+            headers: {},
+            timeoutMs: 1_000,
+            maxRetries: 1,
+            retryDelayMs: 0,
+            fetch: async () => {
+                attempts += 1;
+                return createStreamResponse(200, ['never']);
+            },
+            cid: 'bafy-public-text-abort',
+            maxBytes: 64,
+            signal: controller.signal,
+        }),
+        /readIpfsPublicGatewayText was aborted by the caller/
+    );
+    assert.equal(attempts, 0);
 });
 
 test('readIpfsText reads bounded ASCII text and returns normalized details', async () => {

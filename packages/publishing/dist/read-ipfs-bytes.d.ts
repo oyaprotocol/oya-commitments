@@ -29,6 +29,11 @@ interface ReadIpfsErrorMessages {
     abortErrorMessage: string;
     fallbackErrorBaseMessage: string;
 }
+declare function readBoundedBytes({ body, maxBytes, signal, }: {
+    body: ReadableStream<Uint8Array> | null;
+    maxBytes: number;
+    signal: AbortSignal | undefined;
+}): Promise<Uint8Array>;
 declare function readIpfsBytesWithMessages({ config, fetch, cid, maxBytes, signal, }: ReadIpfsOptions, messages: ReadIpfsErrorMessages): Promise<ReadIpfsBytesResult>;
 declare function readIpfsBytes(options: ReadIpfsOptions): Promise<ReadIpfsBytesResult>;
-export { readIpfsBytes, readIpfsBytesWithMessages };
+export { readBoundedBytes, readIpfsBytes, readIpfsBytesWithMessages };
