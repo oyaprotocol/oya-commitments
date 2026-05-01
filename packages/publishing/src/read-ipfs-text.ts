@@ -1,14 +1,5 @@
 import { readIpfsBytesWithMessages } from './read-ipfs-bytes.js';
-import type { IpfsConfig } from './ipfs-config.js';
-import type { ReadIpfsFetchLike } from './read-ipfs-bytes.js';
-
-export interface ReadIpfsTextOptions {
-    config: IpfsConfig;
-    fetch: ReadIpfsFetchLike;
-    cid: string;
-    maxBytes: number;
-    signal?: AbortSignal;
-}
+import type { ReadIpfsOptions } from './read-ipfs-bytes.js';
 
 export interface ReadIpfsTextResult {
     cid: string;
@@ -26,7 +17,7 @@ function assertAsciiBytes(bytes: Uint8Array): void {
     }
 }
 
-async function readIpfsText(options: ReadIpfsTextOptions): Promise<ReadIpfsTextResult> {
+async function readIpfsText(options: ReadIpfsOptions): Promise<ReadIpfsTextResult> {
     const result = await readIpfsBytesWithMessages(options, {
         abortErrorMessage: 'readIpfsText was aborted by the caller.',
         fallbackErrorMessage: 'IPFS text read failed.',

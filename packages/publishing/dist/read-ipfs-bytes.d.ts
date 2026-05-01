@@ -11,7 +11,7 @@ export interface ReadIpfsResponse {
     statusText: string;
     body: ReadableStream<Uint8Array> | null;
 }
-export interface ReadIpfsBytesOptions {
+export interface ReadIpfsOptions {
     config: IpfsConfig;
     fetch: ReadIpfsFetchLike;
     cid: string;
@@ -30,6 +30,6 @@ interface ReadIpfsBytesErrorMessages {
     fallbackErrorMessage: string;
     fallbackErrorPrefix: string;
 }
-declare function readIpfsBytesWithMessages({ config, fetch, cid, maxBytes, signal, }: ReadIpfsBytesOptions, messages: ReadIpfsBytesErrorMessages): Promise<ReadIpfsBytesResult>;
-declare function readIpfsBytes(options: ReadIpfsBytesOptions): Promise<ReadIpfsBytesResult>;
+declare function readIpfsBytesWithMessages({ config, fetch, cid, maxBytes, signal, }: ReadIpfsOptions, messages: ReadIpfsBytesErrorMessages): Promise<ReadIpfsBytesResult>;
+declare function readIpfsBytes(options: ReadIpfsOptions): Promise<ReadIpfsBytesResult>;
 export { readIpfsBytes, readIpfsBytesWithMessages };

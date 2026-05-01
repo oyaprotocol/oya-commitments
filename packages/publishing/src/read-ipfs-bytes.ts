@@ -27,7 +27,7 @@ export interface ReadIpfsResponse {
     body: ReadableStream<Uint8Array> | null;
 }
 
-export interface ReadIpfsBytesOptions {
+export interface ReadIpfsOptions {
     config: IpfsConfig;
     fetch: ReadIpfsFetchLike;
     cid: string;
@@ -148,7 +148,7 @@ async function readIpfsBytesWithMessages(
         cid,
         maxBytes,
         signal,
-    }: ReadIpfsBytesOptions,
+    }: ReadIpfsOptions,
     messages: ReadIpfsBytesErrorMessages
 ): Promise<ReadIpfsBytesResult> {
     if (config === null || typeof config !== 'object' || Array.isArray(config)) {
@@ -240,7 +240,7 @@ async function readIpfsBytesWithMessages(
     throw normalizeReadError(lastError, messages);
 }
 
-async function readIpfsBytes(options: ReadIpfsBytesOptions): Promise<ReadIpfsBytesResult> {
+async function readIpfsBytes(options: ReadIpfsOptions): Promise<ReadIpfsBytesResult> {
     return await readIpfsBytesWithMessages(options, DEFAULT_READ_BYTES_ERROR_MESSAGES);
 }
 

@@ -35,6 +35,7 @@ Definitions used in this plan:
 - [x] 2026-05-01 19:16Z: Added `readIpfsBytes(...)` for bounded arbitrary byte retrieval and made `readIpfsText(...)` a text-specific wrapper over the byte primitive.
 - [x] 2026-05-01 19:22Z: Replaced duplicate byte/text fetch type aliases with shared `ReadIpfsFetchLike`, `ReadIpfsRequestOptions`, and `ReadIpfsResponse` transport types.
 - [x] 2026-05-01 19:27Z: Renamed publish transport types from generic `FetchLike` names to publish-scoped `PublishIpfsFetchLike`, `PublishIpfsRequestOptions`, and `PublishIpfsResponse`.
+- [x] 2026-05-01 19:34Z: Replaced duplicate byte/text retrieval options with shared `ReadIpfsOptions`.
 - [ ] Add a separate public gateway text retrieval helper in a future milestone rather than overloading the Kubo RPC `readIpfsText(...)` helper.
 - [ ] Create or update a future plan for onchain CID logging and public indexing when ready.
 
@@ -113,6 +114,8 @@ Retrieval follow-up split the Kubo RPC read path into `readIpfsBytes(...)` for a
 Type cleanup replaced duplicate byte/text fetch aliases with shared read transport types. The data-specific public types are now the byte/text options and results, while `ReadIpfsFetchLike`, `ReadIpfsRequestOptions`, and `ReadIpfsResponse` describe the common Kubo `/api/v0/cat` fetch contract.
 
 Publish type cleanup renamed the publishing fetch contract to `PublishIpfsFetchLike`, `PublishIpfsRequestOptions`, and `PublishIpfsResponse` so it is not confused with the read transport contract.
+
+Read options cleanup replaced duplicate byte/text options with shared `ReadIpfsOptions`; byte and text helpers now differ only in result shape and text-specific ASCII verification.
 
 Validation evidence for Milestone 2:
 
@@ -248,12 +251,11 @@ Existing package interfaces:
 - `IpfsConfig` from `packages/publishing/src/ipfs-config.ts`
 - `PublishIpfsFetchLike`, `PublishIpfsRequestOptions`, and `PublishIpfsResponse` from `packages/publishing/src/publish-to-ipfs.ts`
 - `PublishToIpfsOptions` and `PublishToIpfsResult` from `packages/publishing/src/publish-to-ipfs.ts`
-- `ReadIpfsBytesOptions`
 - `ReadIpfsBytesResult`
 - `ReadIpfsFetchLike`
+- `ReadIpfsOptions`
 - `ReadIpfsRequestOptions`
 - `ReadIpfsResponse`
-- `ReadIpfsTextOptions`
 - `ReadIpfsTextResult`
 
 Future onchain indexing interfaces are intentionally deferred. A later plan should define the Logger contract event shape, package ownership, tests, and deployment assumptions.
