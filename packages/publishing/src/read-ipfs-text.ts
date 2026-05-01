@@ -9,6 +9,12 @@ export interface ReadIpfsTextResult {
     attemptCount: number;
 }
 
+const READ_TEXT_ERROR_MESSAGES = Object.freeze({
+    abortErrorMessage: 'readIpfsText was aborted by the caller.',
+    fallbackErrorMessage: 'IPFS text read failed.',
+    fallbackErrorPrefix: 'IPFS text read failed',
+});
+
 function assertAsciiBytes(bytes: Uint8Array): void {
     for (const byte of bytes) {
         if (byte > 0x7f) {
@@ -18,11 +24,7 @@ function assertAsciiBytes(bytes: Uint8Array): void {
 }
 
 async function readIpfsText(options: ReadIpfsOptions): Promise<ReadIpfsTextResult> {
-    const result = await readIpfsBytesWithMessages(options, {
-        abortErrorMessage: 'readIpfsText was aborted by the caller.',
-        fallbackErrorMessage: 'IPFS text read failed.',
-        fallbackErrorPrefix: 'IPFS text read failed',
-    });
+    const result = await readIpfsBytesWithMessages(options, READ_TEXT_ERROR_MESSAGES);
     assertAsciiBytes(result.bytes);
 
     return {
