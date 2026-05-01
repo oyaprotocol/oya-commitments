@@ -1,9 +1,5 @@
 import { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, isIpfsHttpError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, } from './ipfs-request-utils.js';
 import { assertNonEmptyString, assertPositiveInteger } from './validation-utils.js';
-const DEFAULT_READ_BYTES_ERROR_MESSAGES = Object.freeze({
-    abortErrorMessage: 'readIpfsBytes was aborted by the caller.',
-    fallbackErrorBaseMessage: 'IPFS bytes read failed',
-});
 function normalizeReadError(error, messages) {
     if (error instanceof Error) {
         return error;
@@ -130,7 +126,10 @@ async function readIpfsBytesWithMessages({ config, fetch, cid, maxBytes, signal,
     throw normalizeReadError(lastError, messages);
 }
 async function readIpfsBytes(options) {
-    return await readIpfsBytesWithMessages(options, DEFAULT_READ_BYTES_ERROR_MESSAGES);
+    return await readIpfsBytesWithMessages(options, {
+        abortErrorMessage: 'readIpfsBytes was aborted by the caller.',
+        fallbackErrorBaseMessage: 'IPFS bytes read failed',
+    });
 }
 export { readIpfsBytes, readIpfsBytesWithMessages };
 //# sourceMappingURL=read-ipfs-bytes.js.map

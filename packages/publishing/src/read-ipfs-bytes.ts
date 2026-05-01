@@ -50,11 +50,6 @@ interface ReadIpfsBytesErrorMessages {
     fallbackErrorBaseMessage: string;
 }
 
-const DEFAULT_READ_BYTES_ERROR_MESSAGES = Object.freeze({
-    abortErrorMessage: 'readIpfsBytes was aborted by the caller.',
-    fallbackErrorBaseMessage: 'IPFS bytes read failed',
-});
-
 function normalizeReadError(error: unknown, messages: ReadIpfsBytesErrorMessages): Error {
     if (error instanceof Error) {
         return error;
@@ -220,7 +215,10 @@ async function readIpfsBytesWithMessages(
 }
 
 async function readIpfsBytes(options: ReadIpfsOptions): Promise<ReadIpfsBytesResult> {
-    return await readIpfsBytesWithMessages(options, DEFAULT_READ_BYTES_ERROR_MESSAGES);
+    return await readIpfsBytesWithMessages(options, {
+        abortErrorMessage: 'readIpfsBytes was aborted by the caller.',
+        fallbackErrorBaseMessage: 'IPFS bytes read failed',
+    });
 }
 
 export { readIpfsBytes, readIpfsBytesWithMessages };
