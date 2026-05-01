@@ -13,12 +13,6 @@ function normalizeReadError(error, messages) {
     }
     return new Error(`${messages.fallbackErrorBaseMessage}: ${String(error)}`);
 }
-function cancelReader(reader, reason) {
-    reader.cancel(reason).catch(() => { });
-}
-function cancelResponseBody(body, reason) {
-    body?.cancel(reason).catch(() => { });
-}
 function combineChunks(chunks, byteLength) {
     const combined = new Uint8Array(byteLength);
     let offset = 0;
@@ -55,7 +49,7 @@ async function readBoundedBytes({ body, maxBytes, signal, }) {
         }
     }
     catch (error) {
-        cancelReader(reader, error);
+        reader.cancel(error).catch(() => { });
         throw error;
     }
     finally {
@@ -88,7 +82,7 @@ async function readIpfsBytesWithMessages({ config, fetch, cid, maxBytes, signal,
                 const httpError = new IpfsHttpError(`IPFS cat failed with ${response.status} ${response.statusText || 'Unknown Status'}.`, {
                     status: response.status,
                 });
-                cancelResponseBody(response.body, httpError);
+                response.body?.cancel(httpError).catch(() => { });
                 if (attempt <= config.maxRetries &&
                     (response.status === 429 || response.status >= 500)) {
                     await waitForRetryDelay({
