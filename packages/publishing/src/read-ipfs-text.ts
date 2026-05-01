@@ -11,8 +11,7 @@ export interface ReadIpfsTextResult {
 
 const READ_TEXT_ERROR_MESSAGES = Object.freeze({
     abortErrorMessage: 'readIpfsText was aborted by the caller.',
-    fallbackErrorMessage: 'IPFS text read failed.',
-    fallbackErrorPrefix: 'IPFS text read failed',
+    fallbackErrorBaseMessage: 'IPFS text read failed',
 });
 
 function assertAsciiBytes(bytes: Uint8Array): void {

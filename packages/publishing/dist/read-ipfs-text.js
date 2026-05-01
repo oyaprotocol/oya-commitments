@@ -1,8 +1,7 @@
 import { readIpfsBytesWithMessages } from './read-ipfs-bytes.js';
 const READ_TEXT_ERROR_MESSAGES = Object.freeze({
     abortErrorMessage: 'readIpfsText was aborted by the caller.',
-    fallbackErrorMessage: 'IPFS text read failed.',
-    fallbackErrorPrefix: 'IPFS text read failed',
+    fallbackErrorBaseMessage: 'IPFS text read failed',
 });
 function assertAsciiBytes(bytes) {
     for (const byte of bytes) {

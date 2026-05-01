@@ -27,8 +27,7 @@ export interface ReadIpfsBytesResult {
 }
 interface ReadIpfsBytesErrorMessages {
     abortErrorMessage: string;
-    fallbackErrorMessage: string;
-    fallbackErrorPrefix: string;
+    fallbackErrorBaseMessage: string;
 }
 declare function readIpfsBytesWithMessages({ config, fetch, cid, maxBytes, signal, }: ReadIpfsOptions, messages: ReadIpfsBytesErrorMessages): Promise<ReadIpfsBytesResult>;
 declare function readIpfsBytes(options: ReadIpfsOptions): Promise<ReadIpfsBytesResult>;

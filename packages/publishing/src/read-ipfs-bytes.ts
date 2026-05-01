@@ -47,14 +47,12 @@ export interface ReadIpfsBytesResult {
 
 interface ReadIpfsBytesErrorMessages {
     abortErrorMessage: string;
-    fallbackErrorMessage: string;
-    fallbackErrorPrefix: string;
+    fallbackErrorBaseMessage: string;
 }
 
 const DEFAULT_READ_BYTES_ERROR_MESSAGES = Object.freeze({
     abortErrorMessage: 'readIpfsBytes was aborted by the caller.',
-    fallbackErrorMessage: 'IPFS bytes read failed.',
-    fallbackErrorPrefix: 'IPFS bytes read failed',
+    fallbackErrorBaseMessage: 'IPFS bytes read failed',
 });
 
 function normalizeReadError(error: unknown, messages: ReadIpfsBytesErrorMessages): Error {
@@ -62,9 +60,9 @@ function normalizeReadError(error: unknown, messages: ReadIpfsBytesErrorMessages
         return error;
     }
     if (!error) {
-        return new Error(messages.fallbackErrorMessage);
+        return new Error(`${messages.fallbackErrorBaseMessage}.`);
     }
-    return new Error(`${messages.fallbackErrorPrefix}: ${String(error)}`);
+    return new Error(`${messages.fallbackErrorBaseMessage}: ${String(error)}`);
 }
 
 function cancelReader(

@@ -2,17 +2,16 @@ import { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpErro
 import { assertNonEmptyString, assertPositiveInteger } from './validation-utils.js';
 const DEFAULT_READ_BYTES_ERROR_MESSAGES = Object.freeze({
     abortErrorMessage: 'readIpfsBytes was aborted by the caller.',
-    fallbackErrorMessage: 'IPFS bytes read failed.',
-    fallbackErrorPrefix: 'IPFS bytes read failed',
+    fallbackErrorBaseMessage: 'IPFS bytes read failed',
 });
 function normalizeReadError(error, messages) {
     if (error instanceof Error) {
         return error;
     }
     if (!error) {
-        return new Error(messages.fallbackErrorMessage);
+        return new Error(`${messages.fallbackErrorBaseMessage}.`);
     }
-    return new Error(`${messages.fallbackErrorPrefix}: ${String(error)}`);
+    return new Error(`${messages.fallbackErrorBaseMessage}: ${String(error)}`);
 }
 function cancelReader(reader, reason) {
     reader.cancel(reason).catch(() => { });
