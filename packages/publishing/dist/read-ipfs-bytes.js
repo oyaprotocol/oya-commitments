@@ -1,4 +1,4 @@
-import { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, isIpfsHttpError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, } from './ipfs-request-utils.js';
+import { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, } from './ipfs-request-utils.js';
 import { assertNonEmptyString, assertPositiveInteger } from './validation-utils.js';
 function normalizeReadError(error, messages) {
     if (error instanceof Error) {
@@ -79,15 +79,6 @@ async function readIpfsBytesWithMessages({ config, fetch, cid, maxBytes, signal,
                     status: response.status,
                 });
                 response.body?.cancel(httpError).catch(() => { });
-                if (attempt <= config.maxRetries &&
-                    (response.status === 429 || response.status >= 500)) {
-                    await waitForRetryDelay({
-                        retryDelayMs: config.retryDelayMs,
-                        signal,
-                        abortErrorMessage: messages.abortErrorMessage,
-                    });
-                    continue;
-                }
                 throw httpError;
             }
             const bytes = await readBoundedBytes({
@@ -106,9 +97,7 @@ async function readIpfsBytesWithMessages({ config, fetch, cid, maxBytes, signal,
         catch (error) {
             lastError = error;
             throwIfSignalAborted(signal, messages.abortErrorMessage, error);
-            if (attempt <= config.maxRetries &&
-                !isIpfsHttpError(error) &&
-                shouldRetryError(error)) {
+            if (attempt <= config.maxRetries && shouldRetryError(error)) {
                 await waitForRetryDelay({
                     retryDelayMs: config.retryDelayMs,
                     signal,

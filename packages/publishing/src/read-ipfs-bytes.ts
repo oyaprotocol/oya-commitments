@@ -4,7 +4,6 @@ import {
     createTimeoutSignal,
     invokeWithAbort,
     IpfsHttpError,
-    isIpfsHttpError,
     shouldRetryError,
     throwIfSignalAborted,
     waitForRetryDelay,
@@ -162,17 +161,6 @@ async function readIpfsBytesWithMessages(
                     }
                 );
                 response.body?.cancel(httpError).catch(() => {});
-                if (
-                    attempt <= config.maxRetries &&
-                    (response.status === 429 || response.status >= 500)
-                ) {
-                    await waitForRetryDelay({
-                        retryDelayMs: config.retryDelayMs,
-                        signal,
-                        abortErrorMessage: messages.abortErrorMessage,
-                    });
-                    continue;
-                }
                 throw httpError;
             }
 
@@ -192,11 +180,7 @@ async function readIpfsBytesWithMessages(
         } catch (error) {
             lastError = error;
             throwIfSignalAborted(signal, messages.abortErrorMessage, error);
-            if (
-                attempt <= config.maxRetries &&
-                !isIpfsHttpError(error) &&
-                shouldRetryError(error)
-            ) {
+            if (attempt <= config.maxRetries && shouldRetryError(error)) {
                 await waitForRetryDelay({
                     retryDelayMs: config.retryDelayMs,
                     signal,

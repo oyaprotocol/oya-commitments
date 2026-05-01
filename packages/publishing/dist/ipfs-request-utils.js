@@ -39,6 +39,9 @@ function shouldRetryError(error) {
     if (!error) {
         return false;
     }
+    if (isIpfsHttpError(error)) {
+        return error.status === 429 || error.status >= 500;
+    }
     const names = readErrorStringChain(error, 'name');
     if (names.includes('TimeoutError')) {
         return true;
@@ -189,5 +192,5 @@ async function waitForRetryDelay({ retryDelayMs, signal, abortErrorMessage, }) {
     });
     throwIfSignalAborted(signal, abortErrorMessage, signal?.reason);
 }
-export { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, isIpfsHttpError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, };
+export { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, };
 //# sourceMappingURL=ipfs-request-utils.js.map

@@ -54,6 +54,9 @@ function shouldRetryError(error: unknown): boolean {
     if (!error) {
         return false;
     }
+    if (isIpfsHttpError(error)) {
+        return error.status === 429 || error.status >= 500;
+    }
     const names = readErrorStringChain(error, 'name');
     if (names.includes('TimeoutError')) {
         return true;
@@ -233,7 +236,6 @@ export {
     createTimeoutSignal,
     invokeWithAbort,
     IpfsHttpError,
-    isIpfsHttpError,
     shouldRetryError,
     throwIfSignalAborted,
     waitForRetryDelay,

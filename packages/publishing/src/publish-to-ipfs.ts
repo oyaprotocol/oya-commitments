@@ -4,7 +4,6 @@ import {
     createTimeoutSignal,
     invokeWithAbort,
     IpfsHttpError,
-    isIpfsHttpError,
     shouldRetryError,
     throwIfSignalAborted,
     waitForRetryDelay,
@@ -226,17 +225,6 @@ async function publishToIpfs({
                         responseText,
                     }
                 );
-                if (
-                    attempt <= config.maxRetries &&
-                    (response.status === 429 || response.status >= 500)
-                ) {
-                    await waitForRetryDelay({
-                        retryDelayMs: config.retryDelayMs,
-                        signal,
-                        abortErrorMessage,
-                    });
-                    continue;
-                }
                 throw httpError;
             }
 
@@ -260,11 +248,7 @@ async function publishToIpfs({
         } catch (error) {
             lastError = error;
             throwIfSignalAborted(signal, abortErrorMessage, error);
-            if (
-                attempt <= config.maxRetries &&
-                !isIpfsHttpError(error) &&
-                shouldRetryError(error)
-            ) {
+            if (attempt <= config.maxRetries && shouldRetryError(error)) {
                 await waitForRetryDelay({
                     retryDelayMs: config.retryDelayMs,
                     signal,

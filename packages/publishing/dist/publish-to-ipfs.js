@@ -1,4 +1,4 @@
-import { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, isIpfsHttpError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, } from './ipfs-request-utils.js';
+import { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, } from './ipfs-request-utils.js';
 function normalizeContent(content) {
     if (typeof content === 'string') {
         return {
@@ -133,15 +133,6 @@ async function publishToIpfs({ config, fetch, content, filename, mediaType, sign
                     status: response.status,
                     responseText,
                 });
-                if (attempt <= config.maxRetries &&
-                    (response.status === 429 || response.status >= 500)) {
-                    await waitForRetryDelay({
-                        retryDelayMs: config.retryDelayMs,
-                        signal,
-                        abortErrorMessage,
-                    });
-                    continue;
-                }
                 throw httpError;
             }
             const providerResponse = parseAddResponse(responseText);
@@ -164,9 +155,7 @@ async function publishToIpfs({ config, fetch, content, filename, mediaType, sign
         catch (error) {
             lastError = error;
             throwIfSignalAborted(signal, abortErrorMessage, error);
-            if (attempt <= config.maxRetries &&
-                !isIpfsHttpError(error) &&
-                shouldRetryError(error)) {
+            if (attempt <= config.maxRetries && shouldRetryError(error)) {
                 await waitForRetryDelay({
                     retryDelayMs: config.retryDelayMs,
                     signal,
