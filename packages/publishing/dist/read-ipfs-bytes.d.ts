@@ -1,11 +1,11 @@
 import type { IpfsConfig } from './ipfs-config.js';
-export type ReadIpfsBytesFetchLike = (url: string, options: ReadIpfsBytesRequestOptions) => Promise<ReadIpfsBytesResponse>;
-export interface ReadIpfsBytesRequestOptions {
+export type ReadIpfsFetchLike = (url: string, options: ReadIpfsRequestOptions) => Promise<ReadIpfsResponse>;
+export interface ReadIpfsRequestOptions {
     method: 'POST';
     headers: Readonly<Record<string, string>>;
     signal?: AbortSignal | undefined;
 }
-export interface ReadIpfsBytesResponse {
+export interface ReadIpfsResponse {
     ok: boolean;
     status: number;
     statusText: string;
@@ -13,7 +13,7 @@ export interface ReadIpfsBytesResponse {
 }
 export interface ReadIpfsBytesOptions {
     config: IpfsConfig;
-    fetch: ReadIpfsBytesFetchLike;
+    fetch: ReadIpfsFetchLike;
     cid: string;
     maxBytes: number;
     signal?: AbortSignal;

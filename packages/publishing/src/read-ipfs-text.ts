@@ -1,18 +1,10 @@
-import type {
-    ReadIpfsBytesFetchLike,
-    ReadIpfsBytesRequestOptions,
-    ReadIpfsBytesResponse,
-} from './read-ipfs-bytes.js';
 import { readIpfsBytesWithMessages } from './read-ipfs-bytes.js';
 import type { IpfsConfig } from './ipfs-config.js';
-
-export type ReadIpfsTextFetchLike = ReadIpfsBytesFetchLike;
-export type ReadIpfsTextRequestOptions = ReadIpfsBytesRequestOptions;
-export type ReadIpfsTextResponse = ReadIpfsBytesResponse;
+import type { ReadIpfsFetchLike } from './read-ipfs-bytes.js';
 
 export interface ReadIpfsTextOptions {
     config: IpfsConfig;
-    fetch: ReadIpfsTextFetchLike;
+    fetch: ReadIpfsFetchLike;
     cid: string;
     maxBytes: number;
     signal?: AbortSignal;

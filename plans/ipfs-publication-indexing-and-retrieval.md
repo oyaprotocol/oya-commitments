@@ -33,6 +33,7 @@ Definitions used in this plan:
 - [x] 2026-04-30 22:34Z: Fixed `readIpfsText(...)` to cancel non-OK `/api/v0/cat` response bodies before retrying or throwing, preventing leaked fetch sockets under repeated failures.
 - [x] 2026-04-30 22:43Z: Moved shared string and integer validators into package-internal `validation-utils.ts`.
 - [x] 2026-05-01 19:16Z: Added `readIpfsBytes(...)` for bounded arbitrary byte retrieval and made `readIpfsText(...)` a text-specific wrapper over the byte primitive.
+- [x] 2026-05-01 19:22Z: Replaced duplicate byte/text fetch type aliases with shared `ReadIpfsFetchLike`, `ReadIpfsRequestOptions`, and `ReadIpfsResponse` transport types.
 - [ ] Add a separate public gateway text retrieval helper in a future milestone rather than overloading the Kubo RPC `readIpfsText(...)` helper.
 - [ ] Create or update a future plan for onchain CID logging and public indexing when ready.
 
@@ -107,6 +108,8 @@ Review cleanup fixed the non-OK retrieval response path so `readIpfsText(...)` c
 Validation cleanup moved shared string and integer checks into package-internal `validation-utils.ts`; IPFS config keeps only config-specific header validation locally.
 
 Retrieval follow-up split the Kubo RPC read path into `readIpfsBytes(...)` for arbitrary bounded bytes and `readIpfsText(...)` for bounded ASCII text verification. This keeps future byte-oriented use cases available without weakening the current text-specific verification path.
+
+Type cleanup replaced duplicate byte/text fetch aliases with shared read transport types. The data-specific public types are now the byte/text options and results, while `ReadIpfsFetchLike`, `ReadIpfsRequestOptions`, and `ReadIpfsResponse` describe the common Kubo `/api/v0/cat` fetch contract.
 
 Validation evidence for Milestone 2:
 
@@ -244,6 +247,9 @@ Existing package interfaces:
 - `PublishToIpfsOptions` and `PublishToIpfsResult` from `packages/publishing/src/publish-to-ipfs.ts`
 - `ReadIpfsBytesOptions`
 - `ReadIpfsBytesResult`
+- `ReadIpfsFetchLike`
+- `ReadIpfsRequestOptions`
+- `ReadIpfsResponse`
 - `ReadIpfsTextOptions`
 - `ReadIpfsTextResult`
 

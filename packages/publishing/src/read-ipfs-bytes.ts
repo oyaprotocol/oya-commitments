@@ -9,18 +9,18 @@ import {
 } from './ipfs-request-utils.js';
 import { assertNonEmptyString, assertPositiveInteger } from './validation-utils.js';
 
-export type ReadIpfsBytesFetchLike = (
+export type ReadIpfsFetchLike = (
     url: string,
-    options: ReadIpfsBytesRequestOptions
-) => Promise<ReadIpfsBytesResponse>;
+    options: ReadIpfsRequestOptions
+) => Promise<ReadIpfsResponse>;
 
-export interface ReadIpfsBytesRequestOptions {
+export interface ReadIpfsRequestOptions {
     method: 'POST';
     headers: Readonly<Record<string, string>>;
     signal?: AbortSignal | undefined;
 }
 
-export interface ReadIpfsBytesResponse {
+export interface ReadIpfsResponse {
     ok: boolean;
     status: number;
     statusText: string;
@@ -29,7 +29,7 @@ export interface ReadIpfsBytesResponse {
 
 export interface ReadIpfsBytesOptions {
     config: IpfsConfig;
-    fetch: ReadIpfsBytesFetchLike;
+    fetch: ReadIpfsFetchLike;
     cid: string;
     maxBytes: number;
     signal?: AbortSignal;
