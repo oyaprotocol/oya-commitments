@@ -32,6 +32,7 @@ Definitions used in this plan:
 - [x] 2026-04-30 22:20Z: Consolidated shared IPFS request abort, timeout, retry-delay, and retryable-error helpers in package-internal `ipfs-request-utils.ts`.
 - [x] 2026-04-30 22:34Z: Fixed `readIpfsText(...)` to cancel non-OK `/api/v0/cat` response bodies before retrying or throwing, preventing leaked fetch sockets under repeated failures.
 - [x] 2026-04-30 22:43Z: Moved shared string and integer validators into package-internal `validation-utils.ts`.
+- [ ] Add a separate public gateway text retrieval helper in a future milestone rather than overloading the Kubo RPC `readIpfsText(...)` helper.
 - [ ] Create or update a future plan for onchain CID logging and public indexing when ready.
 
 ## Surprises & Discoveries
@@ -147,6 +148,8 @@ Milestone 2 adds retrieval primitives for the expected near-term artifact shape:
 Milestone 3 updates tests and package documentation. The README should explain that publication uses explicit add-and-pin, retrieval reads by CID from a configured Kubo-compatible endpoint, and indexing is intentionally deferred to a future onchain Logger design.
 
 Milestone 4 captures the future indexing direction without implementing it. Add notes to this plan, or create a dedicated follow-on plan later, for a simple Logger smart contract that emits node-address-to-CID events. That future plan should decide event shape, chain choice, gas strategy, CID encoding, sequence/gap handling, and how offchain consumers scan logs.
+
+A future retrieval milestone should add a separate public gateway helper for reading IPFS data through gateway-style `GET /ipfs/<cid>` endpoints. Keep that distinct from the current Kubo RPC `readIpfsText(...)` helper.
 
 ## Concrete Steps
 
