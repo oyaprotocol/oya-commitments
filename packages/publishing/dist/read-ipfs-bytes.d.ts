@@ -25,10 +25,10 @@ export interface ReadIpfsBytesResult {
     byteLength: number;
     attemptCount: number;
 }
-interface ReadIpfsBytesErrorMessages {
+interface ReadIpfsErrorMessages {
     abortErrorMessage: string;
     fallbackErrorBaseMessage: string;
 }
-declare function readIpfsBytesWithMessages({ config, fetch, cid, maxBytes, signal, }: ReadIpfsOptions, messages: ReadIpfsBytesErrorMessages): Promise<ReadIpfsBytesResult>;
+declare function readIpfsBytesWithMessages({ config, fetch, cid, maxBytes, signal, }: ReadIpfsOptions, messages: ReadIpfsErrorMessages): Promise<ReadIpfsBytesResult>;
 declare function readIpfsBytes(options: ReadIpfsOptions): Promise<ReadIpfsBytesResult>;
 export { readIpfsBytes, readIpfsBytesWithMessages };

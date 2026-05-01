@@ -45,12 +45,12 @@ export interface ReadIpfsBytesResult {
     attemptCount: number;
 }
 
-interface ReadIpfsBytesErrorMessages {
+interface ReadIpfsErrorMessages {
     abortErrorMessage: string;
     fallbackErrorBaseMessage: string;
 }
 
-function normalizeReadError(error: unknown, messages: ReadIpfsBytesErrorMessages): Error {
+function normalizeReadError(error: unknown, messages: ReadIpfsErrorMessages): Error {
     if (error instanceof Error) {
         return error;
     }
@@ -125,7 +125,7 @@ async function readIpfsBytesWithMessages(
         maxBytes,
         signal,
     }: ReadIpfsOptions,
-    messages: ReadIpfsBytesErrorMessages
+    messages: ReadIpfsErrorMessages
 ): Promise<ReadIpfsBytesResult> {
     if (config === null || typeof config !== 'object' || Array.isArray(config)) {
         throw new Error('config must be an object.');
