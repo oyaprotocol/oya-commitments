@@ -17,16 +17,16 @@ export type {
 export { readIpfsBytes } from './read-ipfs-bytes.js';
 export type {
     ReadIpfsBytesResult,
+    ReadIpfsFetchOptions,
     ReadIpfsFetchLike,
     ReadIpfsOptions,
-    ReadIpfsRequestOptions,
     ReadIpfsResponse,
 } from './read-ipfs-bytes.js';
 export { readIpfsPublicGatewayBytes } from './read-ipfs-public-gateway-bytes.js';
 export type {
+    ReadIpfsPublicGatewayFetchOptions,
     ReadIpfsPublicGatewayFetchLike,
     ReadIpfsPublicGatewayOptions,
-    ReadIpfsPublicGatewayRequestOptions,
     ReadIpfsPublicGatewayResponse,
 } from './read-ipfs-public-gateway-bytes.js';
 export { readIpfsPublicGatewayText } from './read-ipfs-public-gateway-text.js';

@@ -1,6 +1,6 @@
 import { type ReadIpfsBytesResult } from './read-ipfs-bytes.js';
-export type ReadIpfsPublicGatewayFetchLike = (url: string, options: ReadIpfsPublicGatewayRequestOptions) => Promise<ReadIpfsPublicGatewayResponse>;
-export interface ReadIpfsPublicGatewayRequestOptions {
+export type ReadIpfsPublicGatewayFetchLike = (url: string, options: ReadIpfsPublicGatewayFetchOptions) => Promise<ReadIpfsPublicGatewayResponse>;
+export interface ReadIpfsPublicGatewayFetchOptions {
     method: 'GET';
     headers: Readonly<Record<string, string>>;
     signal?: AbortSignal | undefined;

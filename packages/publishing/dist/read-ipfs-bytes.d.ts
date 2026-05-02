@@ -1,6 +1,6 @@
 import type { IpfsConfig } from './ipfs-config.js';
-export type ReadIpfsFetchLike = (url: string, options: ReadIpfsRequestOptions) => Promise<ReadIpfsResponse>;
-export interface ReadIpfsRequestOptions {
+export type ReadIpfsFetchLike = (url: string, options: ReadIpfsFetchOptions) => Promise<ReadIpfsResponse>;
+export interface ReadIpfsFetchOptions {
     method: 'POST';
     headers: Readonly<Record<string, string>>;
     signal?: AbortSignal | undefined;

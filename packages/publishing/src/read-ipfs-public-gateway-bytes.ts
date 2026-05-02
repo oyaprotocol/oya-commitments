@@ -16,10 +16,10 @@ import {
 
 export type ReadIpfsPublicGatewayFetchLike = (
     url: string,
-    options: ReadIpfsPublicGatewayRequestOptions
+    options: ReadIpfsPublicGatewayFetchOptions
 ) => Promise<ReadIpfsPublicGatewayResponse>;
 
-export interface ReadIpfsPublicGatewayRequestOptions {
+export interface ReadIpfsPublicGatewayFetchOptions {
     method: 'GET';
     headers: Readonly<Record<string, string>>;
     signal?: AbortSignal | undefined;

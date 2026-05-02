@@ -33,13 +33,14 @@ Definitions used in this plan:
 - [x] 2026-04-30 22:34Z: Fixed `readIpfsText(...)` to cancel non-OK `/api/v0/cat` response bodies before retrying or throwing, preventing leaked fetch sockets under repeated failures.
 - [x] 2026-04-30 22:43Z: Moved shared string and integer validators into package-internal `validation-utils.ts`.
 - [x] 2026-05-01 19:16Z: Added `readIpfsBytes(...)` for bounded arbitrary byte retrieval and made `readIpfsText(...)` a text-specific wrapper over the byte primitive.
-- [x] 2026-05-01 19:22Z: Replaced duplicate byte/text fetch type aliases with shared `ReadIpfsFetchLike`, `ReadIpfsRequestOptions`, and `ReadIpfsResponse` transport types.
+- [x] 2026-05-01 19:22Z: Replaced duplicate byte/text fetch type aliases with shared `ReadIpfsFetchLike`, `ReadIpfsFetchOptions`, and `ReadIpfsResponse` transport types.
 - [x] 2026-05-01 19:27Z: Renamed publish transport types from generic `FetchLike` names to publish-scoped `PublishIpfsFetchLike`, `PublishIpfsRequestOptions`, and `PublishIpfsResponse`.
 - [x] 2026-05-01 19:34Z: Replaced duplicate byte/text retrieval options with shared `ReadIpfsOptions`.
 - [x] 2026-05-01 20:04Z: Replaced duplicate read/publish HTTP error marker types with shared internal `IpfsHttpError` request utility.
 - [x] 2026-05-01 22:02Z: Centralized HTTP status and transport retry decisions in shared `shouldRetryError(...)`.
 - [x] 2026-05-01 23:21Z: Added `readIpfsPublicGatewayBytes(...)` for bounded public gateway `GET /ipfs/<cid>` reads while keeping gateway retrieval separate from Kubo RPC helpers.
 - [x] 2026-05-01 23:24Z: Added `readIpfsPublicGatewayText(...)` as an ASCII text wrapper over the public gateway byte reader.
+- [x] 2026-05-02 20:56Z: Renamed read fetch-contract option types from request-oriented names to `ReadIpfsFetchOptions` and `ReadIpfsPublicGatewayFetchOptions`.
 - [ ] Create or update a future plan for onchain CID logging and public indexing when ready.
 
 ## Surprises & Discoveries
@@ -114,7 +115,7 @@ Validation cleanup moved shared string and integer checks into package-internal 
 
 Retrieval follow-up split the Kubo RPC read path into `readIpfsBytes(...)` for arbitrary bounded bytes and `readIpfsText(...)` for bounded ASCII text verification. This keeps future byte-oriented use cases available without weakening the current text-specific verification path.
 
-Type cleanup replaced duplicate byte/text fetch aliases with shared read transport types. The data-specific public types are now the byte/text options and results, while `ReadIpfsFetchLike`, `ReadIpfsRequestOptions`, and `ReadIpfsResponse` describe the common Kubo `/api/v0/cat` fetch contract.
+Type cleanup replaced duplicate byte/text fetch aliases with shared read transport types. The data-specific public types are now the byte/text options and results, while `ReadIpfsFetchLike`, `ReadIpfsFetchOptions`, and `ReadIpfsResponse` describe the common Kubo `/api/v0/cat` fetch contract.
 
 Publish type cleanup renamed the publishing fetch contract to `PublishIpfsFetchLike`, `PublishIpfsRequestOptions`, and `PublishIpfsResponse` so it is not confused with the read transport contract.
 
@@ -267,13 +268,13 @@ Existing package interfaces:
 - `PublishIpfsFetchLike`, `PublishIpfsRequestOptions`, and `PublishIpfsResponse` from `packages/publishing/src/publish-to-ipfs.ts`
 - `PublishToIpfsOptions` and `PublishToIpfsResult` from `packages/publishing/src/publish-to-ipfs.ts`
 - `ReadIpfsBytesResult`
+- `ReadIpfsFetchOptions`
 - `ReadIpfsFetchLike`
 - `ReadIpfsOptions`
-- `ReadIpfsRequestOptions`
 - `ReadIpfsResponse`
+- `ReadIpfsPublicGatewayFetchOptions`
 - `ReadIpfsPublicGatewayFetchLike`
 - `ReadIpfsPublicGatewayOptions`
-- `ReadIpfsPublicGatewayRequestOptions`
 - `ReadIpfsPublicGatewayResponse`
 - `ReadIpfsTextResult`
 

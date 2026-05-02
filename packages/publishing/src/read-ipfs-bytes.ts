@@ -12,10 +12,10 @@ import { assertNonEmptyString, assertPositiveInteger } from './validation-utils.
 
 export type ReadIpfsFetchLike = (
     url: string,
-    options: ReadIpfsRequestOptions
+    options: ReadIpfsFetchOptions
 ) => Promise<ReadIpfsResponse>;
 
-export interface ReadIpfsRequestOptions {
+export interface ReadIpfsFetchOptions {
     method: 'POST';
     headers: Readonly<Record<string, string>>;
     signal?: AbortSignal | undefined;
