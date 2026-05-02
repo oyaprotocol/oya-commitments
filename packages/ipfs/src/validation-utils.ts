@@ -19,13 +19,21 @@ function assertNonNegativeInteger(value: unknown, label: string): number {
     return value;
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+        return false;
+    }
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+}
+
 function assertHeadersObject(
     headers: unknown,
     label: string,
     options: { disallowedNames?: string[] } = {}
 ): Readonly<Record<string, string>> {
-    if (headers === null || typeof headers !== 'object' || Array.isArray(headers)) {
-        throw new Error(`${label} must be an object.`);
+    if (!isPlainObject(headers)) {
+        throw new Error(`${label} must be a plain object.`);
     }
     const disallowedNames = new Set(
         (options.disallowedNames ?? []).map((name) => name.toLowerCase())

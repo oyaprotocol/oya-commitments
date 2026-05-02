@@ -16,9 +16,16 @@ function assertNonNegativeInteger(value, label) {
     }
     return value;
 }
+function isPlainObject(value) {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+        return false;
+    }
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+}
 function assertHeadersObject(headers, label, options = {}) {
-    if (headers === null || typeof headers !== 'object' || Array.isArray(headers)) {
-        throw new Error(`${label} must be an object.`);
+    if (!isPlainObject(headers)) {
+        throw new Error(`${label} must be a plain object.`);
     }
     const disallowedNames = new Set((options.disallowedNames ?? []).map((name) => name.toLowerCase()));
     const validated = {};

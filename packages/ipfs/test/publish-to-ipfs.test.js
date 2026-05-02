@@ -348,6 +348,19 @@ test('createIpfsConfig requires explicit transport configuration', () => {
             }),
         /config\.headers\.Authorization must be a string/
     );
+    assert.throws(
+        () =>
+            createIpfsConfig({
+                apiUrl: 'http://ipfs.example:5001',
+                headers: new Headers({
+                    Authorization: 'Bearer test-token',
+                }),
+                timeoutMs: 1_000,
+                maxRetries: 1,
+                retryDelayMs: 0,
+            }),
+        /config\.headers must be a plain object/
+    );
 });
 
 test('createIpfsConfig rejects coerced integer values', () => {

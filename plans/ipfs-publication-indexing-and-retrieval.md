@@ -45,6 +45,7 @@ Definitions used in this plan:
 - [x] 2026-05-02 21:04Z: Consolidated header object validation into shared internal `assertHeadersObject(...)` while preserving Kubo config's `content-type` restriction and gateway read pass-through behavior.
 - [x] 2026-05-02 21:10Z: Fixed public gateway read URL construction to use URL parsing, preserve query strings, reject fragments, and avoid duplicate `/ipfs/<cid>` path appends.
 - [x] 2026-05-02 21:52Z: Renamed the package from `@oyaprotocol/publishing` in `packages/publishing` to `@oyaprotocol/ipfs` in `packages/ipfs`.
+- [x] 2026-05-02 21:54Z: Tightened shared header validation to reject non-plain objects, preventing `Headers` instances from silently dropping entries via `Object.entries(...)`.
 - [ ] Create or update a future plan for onchain CID logging and public indexing when ready.
 
 ## Surprises & Discoveries
@@ -140,6 +141,8 @@ Header validation cleanup moved duplicate header shape checking into package-int
 Public gateway URL cleanup replaced string concatenation with URL parsing in `buildGatewayReadUrl(...)`. Gateway query strings are preserved for signed/authenticated endpoints, fragments are rejected because they are not sent to servers, and the fetch call now uses the final URL directly.
 
 Package rename cleanup moved the hardened IPFS package from `packages/publishing` to `packages/ipfs` and renamed the package entrypoint from `@oyaprotocol/publishing` to `@oyaprotocol/ipfs`. This matches the package's current responsibility: IPFS add-and-pin plus Kubo and public-gateway retrieval.
+
+Header safety cleanup made `assertHeadersObject(...)` reject non-plain objects such as native `Headers` instances. The public API continues to require `Record<string, string>` headers, and JavaScript callers now get an explicit validation error instead of silently sending requests with dropped headers.
 
 Validation evidence for Milestone 2:
 
