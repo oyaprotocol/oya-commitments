@@ -17,11 +17,11 @@ Utilities for publishing and retrieving Oya-related data through IPFS. This pack
 
 ## Behavior
 
-`publishToIpfs(...)` is the standard add-and-pin primitive. It sends a Kubo `/api/v0/add` request with `cid-version=1`, `pin=true`, and `progress=false`, then returns normalized CID, URI, byte length, and pin metadata. The package intentionally does not expose a `pinOnAdd` option or a separate pinning track.
+`publishToIpfs(...)` is the standard add-and-pin primitive. It sends a Kubo `/api/v0/add` request with `cid-version=1`, `pin=true`, and `progress=false`, then returns normalized CID, URI, byte length, and pin metadata.
 
 Kubo reads and public gateway reads are separate because they target different interfaces. `readIpfsBytes(...)` and `readIpfsText(...)` use Kubo RPC with `POST /api/v0/cat`; `readIpfsPublicGatewayBytes(...)` and `readIpfsPublicGatewayText(...)` use public gateway HTTP with `GET /ipfs/<cid>`.
 
-All read helpers require `maxBytes`. This keeps unexpectedly large content from consuming unbounded memory when the helper combines streamed chunks into a single `Uint8Array`. Text helpers are intentionally ASCII-specific wrappers over byte reads so signed text artifacts can be validated narrowly.
+All read helpers require `maxBytes`. This keeps unexpectedly large content from consuming unbounded memory when the helper combines streamed chunks into a single `Uint8Array`. Text helpers are intentionally ASCII-specific wrappers over byte reads so text artifacts can be validated narrowly.
 
 ## Indexing
 
