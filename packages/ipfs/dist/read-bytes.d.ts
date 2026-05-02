@@ -1,5 +1,5 @@
-import type { IpfsConfig } from './ipfs-config.js';
-import type { IpfsOperationErrorMessages } from './ipfs-request-utils.js';
+import type { IpfsConfig } from './config.js';
+import type { IpfsOperationErrorMessages } from './request-utils.js';
 export type ReadIpfsFetchLike = (url: string, options: ReadIpfsFetchOptions) => Promise<ReadIpfsResponse>;
 export interface ReadIpfsFetchOptions {
     method: 'POST';

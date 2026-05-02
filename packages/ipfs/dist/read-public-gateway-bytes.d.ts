@@ -1,5 +1,5 @@
-import type { IpfsOperationErrorMessages } from './ipfs-request-utils.js';
-import { type ReadIpfsBytesResult } from './read-ipfs-bytes.js';
+import type { IpfsOperationErrorMessages } from './request-utils.js';
+import { type ReadIpfsBytesResult } from './read-bytes.js';
 export type ReadIpfsPublicGatewayFetchLike = (url: string, options: ReadIpfsPublicGatewayFetchOptions) => Promise<ReadIpfsPublicGatewayResponse>;
 export interface ReadIpfsPublicGatewayFetchOptions {
     method: 'GET';

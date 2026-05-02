@@ -3,9 +3,9 @@ export const packageInfo = Object.freeze({
     status: 'partial',
 });
 
-export { createIpfsConfig } from './ipfs-config.js';
-export type { CreateIpfsConfigOptions, IpfsConfig } from './ipfs-config.js';
-export { publishToIpfs } from './publish-to-ipfs.js';
+export { createIpfsConfig } from './config.js';
+export type { CreateIpfsConfigOptions, IpfsConfig } from './config.js';
+export { publishToIpfs } from './publish.js';
 export type {
     PublishIpfsFetchLike,
     PublishIpfsRequestOptions,
@@ -13,22 +13,22 @@ export type {
     PublishToIpfsOptions,
     PublishToIpfsResult,
     PublishableContent,
-} from './publish-to-ipfs.js';
-export { readIpfsBytes } from './read-ipfs-bytes.js';
+} from './publish.js';
+export { readIpfsBytes } from './read-bytes.js';
 export type {
     ReadIpfsBytesResult,
     ReadIpfsFetchOptions,
     ReadIpfsFetchLike,
     ReadIpfsOptions,
     ReadIpfsResponse,
-} from './read-ipfs-bytes.js';
-export { readIpfsPublicGatewayBytes } from './read-ipfs-public-gateway-bytes.js';
+} from './read-bytes.js';
+export { readIpfsPublicGatewayBytes } from './read-public-gateway-bytes.js';
 export type {
     ReadIpfsPublicGatewayFetchOptions,
     ReadIpfsPublicGatewayFetchLike,
     ReadIpfsPublicGatewayOptions,
     ReadIpfsPublicGatewayResponse,
-} from './read-ipfs-public-gateway-bytes.js';
-export { readIpfsPublicGatewayText } from './read-ipfs-public-gateway-text.js';
-export { readIpfsText } from './read-ipfs-text.js';
-export type { ReadIpfsTextResult } from './read-ipfs-text.js';
+} from './read-public-gateway-bytes.js';
+export { readIpfsPublicGatewayText } from './read-public-gateway-text.js';
+export { readIpfsText } from './read-text.js';
+export type { ReadIpfsTextResult } from './read-text.js';

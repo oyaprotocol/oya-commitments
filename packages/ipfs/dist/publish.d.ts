@@ -1,4 +1,4 @@
-import type { IpfsConfig } from './ipfs-config.js';
+import type { IpfsConfig } from './config.js';
 export type PublishIpfsFetchLike = (url: string, options: PublishIpfsRequestOptions) => Promise<PublishIpfsResponse>;
 export type PublishableContent = string | Uint8Array | ArrayBuffer | Blob;
 export interface PublishIpfsRequestOptions {

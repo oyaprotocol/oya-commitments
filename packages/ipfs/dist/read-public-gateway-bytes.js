@@ -1,5 +1,5 @@
-import { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, normalizeIpfsOperationError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, } from './ipfs-request-utils.js';
-import { readBoundedBytes } from './read-ipfs-bytes.js';
+import { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, normalizeIpfsOperationError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, } from './request-utils.js';
+import { readBoundedBytes } from './read-bytes.js';
 import { assertHeadersObject, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, } from './validation-utils.js';
 function buildGatewayReadUrl(gatewayUrl, cid) {
     const url = new URL(gatewayUrl);
@@ -78,4 +78,4 @@ async function readIpfsPublicGatewayBytes(options) {
     });
 }
 export { readIpfsPublicGatewayBytes, readIpfsPublicGatewayBytesWithMessages };
-//# sourceMappingURL=read-ipfs-public-gateway-bytes.js.map
+//# sourceMappingURL=read-public-gateway-bytes.js.map

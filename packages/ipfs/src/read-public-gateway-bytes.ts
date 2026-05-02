@@ -7,9 +7,9 @@ import {
     shouldRetryError,
     throwIfSignalAborted,
     waitForRetryDelay,
-} from './ipfs-request-utils.js';
-import type { IpfsOperationErrorMessages } from './ipfs-request-utils.js';
-import { readBoundedBytes, type ReadIpfsBytesResult } from './read-ipfs-bytes.js';
+} from './request-utils.js';
+import type { IpfsOperationErrorMessages } from './request-utils.js';
+import { readBoundedBytes, type ReadIpfsBytesResult } from './read-bytes.js';
 import {
     assertHeadersObject,
     assertNonEmptyString,

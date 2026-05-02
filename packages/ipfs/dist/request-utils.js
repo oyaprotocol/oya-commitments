@@ -202,4 +202,4 @@ async function waitForRetryDelay({ retryDelayMs, signal, abortErrorMessage, }) {
     throwIfSignalAborted(signal, abortErrorMessage, signal?.reason);
 }
 export { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, normalizeIpfsOperationError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, };
-//# sourceMappingURL=ipfs-request-utils.js.map
+//# sourceMappingURL=request-utils.js.map

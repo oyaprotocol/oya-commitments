@@ -24,8 +24,8 @@ After this phase, a contributor should be able to:
 - [x] 2026-04-20 23:32Z: Tightened the publishing primitive into a strict low-level surface with no implicit defaults, added explicit IPFS transport config, and updated the tests to require explicit config, `fetch`, filename, and media type.
 - [x] 2026-04-21 21:46Z: Consolidated tiny helper functions inside `publishToIpfs(...)` and `parseAddResponse(...)` so the file keeps only behavior-bearing top-level helpers while preserving the same external API and test coverage.
 - [x] 2026-04-21 22:36Z: Applied a minimal fallback-timeout cleanup fix so the `createTimeoutSignal(...)` fallback no longer leaves successful-attempt timers running until `timeoutMs` elapses.
-- [x] 2026-04-21 22:38Z: Added fallback-timeout regression coverage and re-ran `node --test packages/ipfs/test/publish-to-ipfs.test.js`; all 7 tests passed.
-- [x] 2026-04-21 22:42Z: Made retry backoff abort-aware so caller cancellation interrupts retry delays promptly, added regression coverage for abort-during-backoff, and re-ran `node --test packages/ipfs/test/publish-to-ipfs.test.js`; all 8 tests passed.
+- [x] 2026-04-21 22:38Z: Added fallback-timeout regression coverage and re-ran the focused publish test; all 7 tests passed.
+- [x] 2026-04-21 22:42Z: Made retry backoff abort-aware so caller cancellation interrupts retry delays promptly, added regression coverage for abort-during-backoff, and re-ran the focused publish test; all 8 tests passed.
 - [x] 2026-04-22 05:12Z: Converted the kernel packages to TypeScript source, added a `packages/`-local TypeScript workspace toolchain, switched package manifests to `dist/` exports with declaration files, rebuilt all five packages, and re-ran the publishing tests against built output.
 - [x] 2026-04-22 05:18Z: Tightened the publishing TypeScript signatures so IPFS config creation and `publishToIpfs(...)` require full option objects in the emitted declaration files, then rebuilt and re-ran the publishing tests.
 - [x] 2026-04-22 05:27Z: Updated the publishing retry classifier to inspect nested `error.cause` codes/messages so Node `fetch` network failures like `TypeError('fetch failed', { cause })` still retry when the nested cause is transient, and added regression coverage for that path.
@@ -37,6 +37,7 @@ After this phase, a contributor should be able to:
 - [x] 2026-04-30 17:43Z: Amended the follow-on plan after user clarification: the standard kernel path should explicitly add-and-pin in one Kubo request, should not add a `pinOnAdd` boolean, and should not create a separate pinning track unless a future concrete need appears.
 - [x] 2026-04-30 18:05Z: Simplified the follow-on plan after user clarification: the immediate package work is explicit add-and-pin plus low-level retrieval, while public indexing is deferred to a future onchain Logger design.
 - [x] 2026-05-02 21:52Z: Renamed the initial IPFS work package from `@oyaprotocol/publishing` / `packages/publishing` to `@oyaprotocol/ipfs` / `packages/ipfs` after the package scope expanded from publication to general IPFS retrieval.
+- [x] 2026-05-02 22:01Z: Simplified the IPFS package's internal filenames after the package rename; the follow-on plan now owns the current `config.ts`, `publish.ts`, read helpers, and focused test filenames.
 
 ## Surprises & Discoveries
 
@@ -80,7 +81,7 @@ After this phase, a contributor should be able to:
   Evidence: pinning protects locally added IPFS blocks from garbage collection, while a future onchain Logger contract can provide a public append-only CID index keyed by node address and block history.
 
 - Observation: The current hardened `publishToIpfs(...)` URL does not make pin behavior explicit, even though the desired standard behavior is add-and-pin.
-  Evidence: `packages/ipfs/src/publish-to-ipfs.ts` calls `/api/v0/add?cid-version=1&progress=false`. The follow-on plan now requires making the existing default explicit with `/api/v0/add?cid-version=1&pin=true&progress=false`.
+  Evidence: before the follow-on plan's Milestone 1, `packages/ipfs/src/publish.ts` called `/api/v0/add?cid-version=1&progress=false`. The follow-on plan now requires making the existing default explicit with `/api/v0/add?cid-version=1&pin=true&progress=false`.
 
 ## Decision Log
 
@@ -138,7 +139,7 @@ The second milestone establishes the first real package primitives in `@oyaproto
 
 Validation evidence for this milestone:
 
-- `node --test packages/ipfs/test/publish-to-ipfs.test.js`
+- `node --test packages/ipfs/test/publish.test.js`
 - `node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => { console.log(typeof m.createIpfsConfig, typeof m.publishToIpfs, m.packageInfo.status); })"`
 
 The third milestone converts the kernel area to TypeScript while keeping the change local to `packages/`. Package source now lives in `src/*.ts`, package manifests export built `dist/*.js` entrypoints with `.d.ts` declarations, and `packages/package.json` provides a workspace-local TypeScript toolchain that does not change `agent/`, `node/`, or `frontend/`.
@@ -148,9 +149,11 @@ Validation evidence for this milestone:
 - `npm --prefix packages install`
 - `npm --prefix packages run build`
 - `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/transactions/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then((modules) => { console.log(modules.map((module) => module.packageInfo.name).join(',')); })"`
-- `node --test packages/ipfs/test/publish-to-ipfs.test.js`
+- `node --test packages/ipfs/test/publish.test.js`
 
 The final open thread in this plan is now closed. The next publishing primitive has been selected as explicit add-and-pin publication, followed by low-level retrieval. Public indexing is deferred to a future onchain Logger design. Implementation should continue from `plans/ipfs-publication-indexing-and-retrieval.md` rather than extending this package-shell plan.
+
+Follow-on cleanup renamed redundant IPFS package filenames after the package moved to `packages/ipfs`: the current source files are `config.ts`, `publish.ts`, `request-utils.ts`, and the read helpers under `packages/ipfs/src/`; the focused tests are `packages/ipfs/test/publish.test.js` and `packages/ipfs/test/retrieval.test.js`.
 
 ## Context and Orientation
 
@@ -183,12 +186,12 @@ The new area also has:
 
 The first implemented function now lives at:
 
-- `packages/ipfs/src/ipfs-config.ts`
-- `packages/ipfs/src/publish-to-ipfs.ts`
+- `packages/ipfs/src/config.ts`
+- `packages/ipfs/src/publish.ts`
 
 The first focused tests now live at:
 
-- `packages/ipfs/test/publish-to-ipfs.test.js`
+- `packages/ipfs/test/publish.test.js`
 
 ## Plan of Work
 
@@ -220,14 +223,14 @@ From `/Users/johnshutt/Code/oya-commitments`:
 
 5. Record the work in this ExecPlan before moving on to functional implementation.
 
-6. Implement `packages/ipfs/src/publish-to-ipfs.ts` as a package-local primitive that:
+6. Implement `packages/ipfs/src/publish.ts` as a package-local primitive that:
 
    - accepts bytes or text content
    - targets a Kubo-compatible `/api/v0/add` HTTP endpoint
    - returns normalized publication details including `cid` and `ipfs://` URI
    - retries transient failures only
 
-7. Add `packages/ipfs/src/ipfs-config.ts` so transport settings are explicit and validated instead of implicitly defaulted.
+7. Add `packages/ipfs/src/config.ts` so transport settings are explicit and validated instead of implicitly defaulted.
 
 8. Add a `packages/`-local TypeScript toolchain and convert package source files to `src/*.ts`, with package manifests exporting built `dist/` entrypoints.
 
@@ -250,7 +253,7 @@ Validation commands from `/Users/johnshutt/Code/oya-commitments`:
 - `node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => console.log(m.packageInfo.name))"`
 - `node --input-type=module -e "import('./packages/transactions/dist/index.js').then((m) => console.log(m.packageInfo.name))"`
 - `node --input-type=module -e "import('./packages/verification/dist/index.js').then((m) => console.log(m.packageInfo.name))"`
-- `node --test packages/ipfs/test/publish-to-ipfs.test.js`
+- `node --test packages/ipfs/test/publish.test.js`
 - `node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => { console.log(typeof m.createIpfsConfig, typeof m.publishToIpfs, m.packageInfo.status); })"`
 
 ## Idempotence and Recovery

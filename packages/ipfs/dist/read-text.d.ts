@@ -1,4 +1,4 @@
-import type { ReadIpfsOptions } from './read-ipfs-bytes.js';
+import type { ReadIpfsOptions } from './read-bytes.js';
 export interface ReadIpfsTextResult {
     cid: string;
     uri: string;

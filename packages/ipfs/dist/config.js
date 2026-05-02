@@ -14,4 +14,4 @@ function createIpfsConfig({ apiUrl, headers, timeoutMs, maxRetries, retryDelayMs
     });
 }
 export { createIpfsConfig };
-//# sourceMappingURL=ipfs-config.js.map
+//# sourceMappingURL=config.js.map
