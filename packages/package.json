@@ -5,7 +5,7 @@
   "workspaces": [
     "./utils",
     "./messages",
-    "./publishing",
+    "./ipfs",
     "./transactions",
     "./verification"
   ],

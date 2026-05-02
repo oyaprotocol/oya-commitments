@@ -6,7 +6,7 @@
 
 - `packages/utils` -> `@oyaprotocol/utils`
 - `packages/messages` -> `@oyaprotocol/messages`
-- `packages/publishing` -> `@oyaprotocol/publishing`
+- `packages/ipfs` -> `@oyaprotocol/ipfs`
 - `packages/transactions` -> `@oyaprotocol/transactions`
 - `packages/verification` -> `@oyaprotocol/verification`
 

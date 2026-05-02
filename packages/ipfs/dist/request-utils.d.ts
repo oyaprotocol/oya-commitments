@@ -1,0 +1,30 @@
+interface AbortSignalHandle {
+    signal: AbortSignal | undefined;
+    cleanup: (() => void) | null;
+}
+interface IpfsHttpErrorOptions {
+    status: number;
+    responseText?: string;
+}
+interface IpfsOperationErrorMessages {
+    abortErrorMessage: string;
+    fallbackErrorBaseMessage: string;
+}
+declare class IpfsHttpError extends Error {
+    readonly status: number;
+    readonly responseText: string | undefined;
+    constructor(message: string, { status, responseText }: IpfsHttpErrorOptions);
+}
+declare function shouldRetryError(error: unknown): boolean;
+declare function normalizeIpfsOperationError(error: unknown, messages: IpfsOperationErrorMessages): Error;
+declare function createTimeoutSignal(timeoutMs: number): AbortSignalHandle;
+declare function combineAbortSignals(signals: Array<AbortSignal | undefined>): AbortSignalHandle;
+declare function invokeWithAbort<T>(createPromise: () => Promise<T>, signal: AbortSignal | undefined): Promise<T>;
+declare function throwIfSignalAborted(signal: AbortSignal | undefined, message: string, cause: unknown): void;
+declare function waitForRetryDelay({ retryDelayMs, signal, abortErrorMessage, }: {
+    retryDelayMs: number;
+    signal: AbortSignal | undefined;
+    abortErrorMessage: string;
+}): Promise<void>;
+export { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, normalizeIpfsOperationError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, };
+export type { AbortSignalHandle, IpfsOperationErrorMessages };
