@@ -47,7 +47,7 @@ Definitions used in this plan:
 - [x] 2026-05-02 21:52Z: Renamed the package from `@oyaprotocol/publishing` in `packages/publishing` to `@oyaprotocol/ipfs` in `packages/ipfs`.
 - [x] 2026-05-02 21:54Z: Tightened shared header validation to reject non-plain objects, preventing `Headers` instances from silently dropping entries via `Object.entries(...)`.
 - [x] 2026-05-02 22:01Z: Simplified package-internal filenames after the package rename. Source files now use `config.ts`, `request-utils.ts`, `publish.ts`, `read-bytes.ts`, `read-text.ts`, `read-public-gateway-bytes.ts`, and `read-public-gateway-text.ts`; focused tests were renamed to `publish.test.js` and `retrieval.test.js`.
-- [ ] Create or update a future plan for onchain CID logging and public indexing when ready.
+- [x] 2026-05-02 22:29Z: Polished `packages/ipfs/README.md` with add-and-pin, retrieval, byte-bound, text-validation, and indexing notes; closed this ExecPlan with all immediate IPFS package work complete. Future onchain CID logging remains a separate follow-on plan when the user starts that work.
 
 ## Surprises & Discoveries
 
@@ -147,7 +147,9 @@ Header safety cleanup made `assertHeadersObject(...)` reject non-plain objects s
 
 Filename cleanup simplified package-internal module names after the package rename. The public export names remain `publishToIpfs(...)`, `readIpfsBytes(...)`, `readIpfsText(...)`, `readIpfsPublicGatewayBytes(...)`, and `readIpfsPublicGatewayText(...)`; only source, dist, and focused test filenames were shortened.
 
-Validation evidence after filename cleanup:
+Documentation polish completed the package README for this milestone. It now explains the explicit add-and-pin contract, why Kubo reads and public gateway reads are separate, why read helpers require `maxBytes`, why text helpers are ASCII-specific, and why pinning does not replace a future public CID index.
+
+Validation evidence after filename cleanup and final documentation polish:
 
 - `npm --prefix packages run build`
 - `node --test packages/ipfs/test/retrieval.test.js`
@@ -164,7 +166,7 @@ Validation evidence for Milestone 2:
 - `node --test packages/ipfs/test/publish.test.js`
 - `node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => console.log(Object.keys(m).sort().join(',')))"`
 
-Remaining near-term work is documentation polish if reviewers request it. Future public indexing should be handled in a separate onchain Logger plan.
+This ExecPlan is complete for the IPFS package scope. Future public indexing should be handled in a separate onchain Logger plan when that work begins.
 
 ## Context and Orientation
 
@@ -196,13 +198,13 @@ The package-level work should not wire into `node/` yet. Node-facing APIs and on
 
 ## Plan of Work
 
-Milestone 1 makes existing IPFS add-and-pin semantics explicit. `publishToIpfs(...)` should not rely on Kubo defaults. The preferred first change is to call `/api/v0/add?cid-version=1&pin=true&progress=false` and document that the function is the standard add-and-pin primitive.
+Milestone 1 is complete. `publishToIpfs(...)` does not rely on Kubo defaults; it calls `/api/v0/add?cid-version=1&pin=true&progress=false` and is documented as the standard add-and-pin primitive.
 
-Milestone 2 adds retrieval primitives for the expected near-term artifact shape while preserving a byte-capable base. `readIpfsBytes(...)` reads bounded arbitrary bytes for known CIDs through Kubo `/api/v0/cat`. `readIpfsText(...)` wraps the byte primitive for small ASCII text and rejects non-ASCII bytes instead of silently mis-decoding them. Both helpers must require a maximum byte limit, fail clearly if the response exceeds that limit, and support caller cancellation. UTF-8-general text and true streaming retrieval are deferred until there is a concrete need.
+Milestone 2 is complete. `readIpfsBytes(...)` reads bounded arbitrary bytes for known CIDs through Kubo `/api/v0/cat`. `readIpfsText(...)` wraps the byte primitive for small ASCII text and rejects non-ASCII bytes instead of silently mis-decoding them. Both helpers require a maximum byte limit, fail clearly if the response exceeds that limit, and support caller cancellation. UTF-8-general text and true streaming retrieval are deferred until there is a concrete need.
 
-Milestone 3 updates tests and package documentation. The README should explain that publication uses explicit add-and-pin, retrieval reads by CID from a configured Kubo-compatible endpoint, and indexing is intentionally deferred to a future onchain Logger design.
+Milestone 3 is complete. Tests and package documentation cover explicit add-and-pin publication, CID retrieval from Kubo-compatible endpoints, public gateway retrieval, byte bounds, ASCII text verification, and the fact that indexing is intentionally deferred to a future onchain Logger design.
 
-Milestone 4 captures the future indexing direction without implementing it. Add notes to this plan, or create a dedicated follow-on plan later, for a simple Logger smart contract that emits node-address-to-CID events. That future plan should decide event shape, chain choice, gas strategy, CID encoding, sequence/gap handling, and how offchain consumers scan logs.
+Milestone 4 is complete for this plan. The future indexing direction is captured without implementing it: a later dedicated plan should cover a simple Logger smart contract that emits node-address-to-CID events, including event shape, chain choice, gas strategy, CID encoding, sequence/gap handling, and how offchain consumers scan logs.
 
 Public gateway retrieval is intentionally separate from the Kubo RPC read helpers. The byte helper is the public gateway primitive, and the text helper wraps it for ASCII text verification.
 
