@@ -158,6 +158,47 @@ test('readIpfsPublicGatewayBytes reads bounded bytes with a gateway GET request'
     );
 });
 
+test('readIpfsPublicGatewayBytes preserves gateway query strings', async () => {
+    const calls = [];
+    await readIpfsPublicGatewayBytes({
+        gatewayUrl: 'https://gateway.example/ipfs?token=abc',
+        headers: {},
+        timeoutMs: 1_000,
+        maxRetries: 1,
+        retryDelayMs: 0,
+        fetch: async (url, options) => {
+            calls.push({ url, options });
+            return createStreamResponse(200, ['ok']);
+        },
+        cid: 'bafy-public-signed-url',
+        maxBytes: 64,
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://gateway.example/ipfs/bafy-public-signed-url?token=abc');
+});
+
+test('readIpfsPublicGatewayBytes rejects gateway fragments before calling fetch', async () => {
+    let attempts = 0;
+    await assert.rejects(
+        readIpfsPublicGatewayBytes({
+            gatewayUrl: 'https://gateway.example/#fragment',
+            headers: {},
+            timeoutMs: 1_000,
+            maxRetries: 1,
+            retryDelayMs: 0,
+            fetch: async () => {
+                attempts += 1;
+                return createStreamResponse(200, ['never']);
+            },
+            cid: 'bafy-public-fragment',
+            maxBytes: 64,
+        }),
+        /gatewayUrl must not include a fragment/
+    );
+    assert.equal(attempts, 0);
+});
+
 test('readIpfsPublicGatewayBytes retries retryable HTTP failures and cancels bodies', async () => {
     let attempts = 0;
     const cancellations = [];

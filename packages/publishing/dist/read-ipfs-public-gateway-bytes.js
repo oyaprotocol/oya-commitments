@@ -1,11 +1,18 @@
 import { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, normalizeIpfsOperationError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, } from './ipfs-request-utils.js';
 import { readBoundedBytes } from './read-ipfs-bytes.js';
 import { assertHeadersObject, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, } from './validation-utils.js';
-function normalizeGatewayUrl(gatewayUrl) {
-    return gatewayUrl.replace(/\/+$/, '').replace(/\/ipfs$/, '');
+function buildGatewayReadUrl(gatewayUrl, cid) {
+    const url = new URL(gatewayUrl);
+    if (url.hash) {
+        throw new Error('gatewayUrl must not include a fragment.');
+    }
+    const basePath = url.pathname.replace(/\/+$/, '').replace(/\/ipfs$/, '');
+    url.pathname = `${basePath}/ipfs/${encodeURIComponent(cid)}`;
+    return url.toString();
 }
 async function readIpfsPublicGatewayBytesWithMessages({ gatewayUrl, headers, timeoutMs, maxRetries, retryDelayMs, fetch, cid, maxBytes, signal, }, messages) {
-    const normalizedGatewayUrl = normalizeGatewayUrl(assertNonEmptyString(gatewayUrl, 'gatewayUrl'));
+    const trimmedCid = assertNonEmptyString(cid, 'cid');
+    const gatewayReadUrl = buildGatewayReadUrl(assertNonEmptyString(gatewayUrl, 'gatewayUrl'), trimmedCid);
     const validatedHeaders = assertHeadersObject(headers, 'headers');
     const requestTimeoutMs = assertPositiveInteger(timeoutMs, 'timeoutMs');
     const retryLimit = assertNonNegativeInteger(maxRetries, 'maxRetries');
@@ -13,14 +20,13 @@ async function readIpfsPublicGatewayBytesWithMessages({ gatewayUrl, headers, tim
     if (typeof fetch !== 'function') {
         throw new Error('fetch must be provided as a function.');
     }
-    const trimmedCid = assertNonEmptyString(cid, 'cid');
     const byteLimit = assertPositiveInteger(maxBytes, 'maxBytes');
     let lastError = null;
     for (let attempt = 1; attempt <= retryLimit + 1; attempt += 1) {
         const timeoutSignal = createTimeoutSignal(requestTimeoutMs);
         const requestSignal = combineAbortSignals([signal, timeoutSignal.signal]);
         try {
-            const response = await invokeWithAbort(() => fetch(`${normalizedGatewayUrl}/ipfs/${encodeURIComponent(trimmedCid)}`, {
+            const response = await invokeWithAbort(() => fetch(gatewayReadUrl, {
                 method: 'GET',
                 headers: validatedHeaders,
                 signal: requestSignal.signal,

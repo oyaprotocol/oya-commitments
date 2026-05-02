@@ -43,6 +43,7 @@ Definitions used in this plan:
 - [x] 2026-05-02 20:56Z: Renamed read fetch-contract option types from request-oriented names to `ReadIpfsFetchOptions` and `ReadIpfsPublicGatewayFetchOptions`.
 - [x] 2026-05-02 21:00Z: Consolidated duplicate read fallback-error normalization into shared internal `normalizeIpfsOperationError(...)`.
 - [x] 2026-05-02 21:04Z: Consolidated header object validation into shared internal `assertHeadersObject(...)` while preserving Kubo config's `content-type` restriction and gateway read pass-through behavior.
+- [x] 2026-05-02 21:10Z: Fixed public gateway read URL construction to use URL parsing, preserve query strings, reject fragments, and avoid duplicate `/ipfs/<cid>` path appends.
 - [ ] Create or update a future plan for onchain CID logging and public indexing when ready.
 
 ## Surprises & Discoveries
@@ -134,6 +135,8 @@ Public gateway text retrieval follow-up added `readIpfsPublicGatewayText(...)`, 
 Read error cleanup moved duplicate fallback error-message handling from the Kubo and public gateway byte readers into package-internal `normalizeIpfsOperationError(...)` and `IpfsOperationErrorMessages` in `ipfs-request-utils.ts`.
 
 Header validation cleanup moved duplicate header shape checking into package-internal `assertHeadersObject(...)` in `validation-utils.ts`. `createIpfsConfig(...)` passes `content-type` as a disallowed header for Kubo/FormData safety, while public gateway reads use the shared shape check without that restriction.
+
+Public gateway URL cleanup replaced string concatenation with URL parsing in `buildGatewayReadUrl(...)`. Gateway query strings are preserved for signed/authenticated endpoints, fragments are rejected because they are not sent to servers, and the fetch call now uses the final URL directly.
 
 Validation evidence for Milestone 2:
 

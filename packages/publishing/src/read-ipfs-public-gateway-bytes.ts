@@ -47,8 +47,15 @@ export interface ReadIpfsPublicGatewayOptions {
     signal?: AbortSignal;
 }
 
-function normalizeGatewayUrl(gatewayUrl: string): string {
-    return gatewayUrl.replace(/\/+$/, '').replace(/\/ipfs$/, '');
+function buildGatewayReadUrl(gatewayUrl: string, cid: string): string {
+    const url = new URL(gatewayUrl);
+    if (url.hash) {
+        throw new Error('gatewayUrl must not include a fragment.');
+    }
+
+    const basePath = url.pathname.replace(/\/+$/, '').replace(/\/ipfs$/, '');
+    url.pathname = `${basePath}/ipfs/${encodeURIComponent(cid)}`;
+    return url.toString();
 }
 
 async function readIpfsPublicGatewayBytesWithMessages(
@@ -65,8 +72,10 @@ async function readIpfsPublicGatewayBytesWithMessages(
     }: ReadIpfsPublicGatewayOptions,
     messages: IpfsOperationErrorMessages
 ): Promise<ReadIpfsBytesResult> {
-    const normalizedGatewayUrl = normalizeGatewayUrl(
-        assertNonEmptyString(gatewayUrl, 'gatewayUrl')
+    const trimmedCid = assertNonEmptyString(cid, 'cid');
+    const gatewayReadUrl = buildGatewayReadUrl(
+        assertNonEmptyString(gatewayUrl, 'gatewayUrl'),
+        trimmedCid
     );
     const validatedHeaders = assertHeadersObject(headers, 'headers');
     const requestTimeoutMs = assertPositiveInteger(timeoutMs, 'timeoutMs');
@@ -75,7 +84,6 @@ async function readIpfsPublicGatewayBytesWithMessages(
     if (typeof fetch !== 'function') {
         throw new Error('fetch must be provided as a function.');
     }
-    const trimmedCid = assertNonEmptyString(cid, 'cid');
     const byteLimit = assertPositiveInteger(maxBytes, 'maxBytes');
 
     let lastError: unknown = null;
@@ -86,14 +94,11 @@ async function readIpfsPublicGatewayBytesWithMessages(
         try {
             const response = await invokeWithAbort(
                 () =>
-                    fetch(
-                        `${normalizedGatewayUrl}/ipfs/${encodeURIComponent(trimmedCid)}`,
-                        {
-                            method: 'GET',
-                            headers: validatedHeaders,
-                            signal: requestSignal.signal,
-                        }
-                    ),
+                    fetch(gatewayReadUrl, {
+                        method: 'GET',
+                        headers: validatedHeaders,
+                        signal: requestSignal.signal,
+                    }),
                 requestSignal.signal
             );
 
