@@ -42,6 +42,7 @@ Definitions used in this plan:
 - [x] 2026-05-01 23:24Z: Added `readIpfsPublicGatewayText(...)` as an ASCII text wrapper over the public gateway byte reader.
 - [x] 2026-05-02 20:56Z: Renamed read fetch-contract option types from request-oriented names to `ReadIpfsFetchOptions` and `ReadIpfsPublicGatewayFetchOptions`.
 - [x] 2026-05-02 21:00Z: Consolidated duplicate read fallback-error normalization into shared internal `normalizeIpfsOperationError(...)`.
+- [x] 2026-05-02 21:04Z: Consolidated header object validation into shared internal `assertHeadersObject(...)` while preserving Kubo config's `content-type` restriction and gateway read pass-through behavior.
 - [ ] Create or update a future plan for onchain CID logging and public indexing when ready.
 
 ## Surprises & Discoveries
@@ -132,6 +133,8 @@ Public gateway text retrieval follow-up added `readIpfsPublicGatewayText(...)`, 
 
 Read error cleanup moved duplicate fallback error-message handling from the Kubo and public gateway byte readers into package-internal `normalizeIpfsOperationError(...)` and `IpfsOperationErrorMessages` in `ipfs-request-utils.ts`.
 
+Header validation cleanup moved duplicate header shape checking into package-internal `assertHeadersObject(...)` in `validation-utils.ts`. `createIpfsConfig(...)` passes `content-type` as a disallowed header for Kubo/FormData safety, while public gateway reads use the shared shape check without that restriction.
+
 Validation evidence for Milestone 2:
 
 - `npm --prefix packages run build`
@@ -149,7 +152,7 @@ Current package files:
 
 - `packages/publishing/src/ipfs-config.ts`: validates explicit IPFS transport settings.
 - `packages/publishing/src/ipfs-request-utils.ts`: contains shared retry, timeout, abort, HTTP error, and operation-error normalization helpers for IPFS HTTP requests.
-- `packages/publishing/src/validation-utils.ts`: contains shared internal validation helpers.
+- `packages/publishing/src/validation-utils.ts`: contains shared internal validation helpers, including header object validation.
 - `packages/publishing/src/publish-to-ipfs.ts`: publishes content to Kubo `/api/v0/add` using injected `fetch`.
 - `packages/publishing/src/read-ipfs-bytes.ts`: reads bounded arbitrary byte content from Kubo `/api/v0/cat` using injected `fetch`.
 - `packages/publishing/src/read-ipfs-public-gateway-bytes.ts`: reads bounded arbitrary byte content from public gateway `GET /ipfs/<cid>` endpoints using injected `fetch`.

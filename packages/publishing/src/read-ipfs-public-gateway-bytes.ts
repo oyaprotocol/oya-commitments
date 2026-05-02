@@ -11,6 +11,7 @@ import {
 import type { IpfsOperationErrorMessages } from './ipfs-request-utils.js';
 import { readBoundedBytes, type ReadIpfsBytesResult } from './read-ipfs-bytes.js';
 import {
+    assertHeadersObject,
     assertNonEmptyString,
     assertNonNegativeInteger,
     assertPositiveInteger,
@@ -44,20 +45,6 @@ export interface ReadIpfsPublicGatewayOptions {
     cid: string;
     maxBytes: number;
     signal?: AbortSignal;
-}
-
-function assertHeadersObject(headers: unknown, label: string): Readonly<Record<string, string>> {
-    if (headers === null || typeof headers !== 'object' || Array.isArray(headers)) {
-        throw new Error(`${label} must be an object.`);
-    }
-    const validated: Record<string, string> = {};
-    for (const [key, value] of Object.entries(headers)) {
-        if (typeof value !== 'string') {
-            throw new Error(`${label}.${key} must be a string.`);
-        }
-        validated[key] = value;
-    }
-    return Object.freeze(validated);
 }
 
 function normalizeGatewayUrl(gatewayUrl: string): string {

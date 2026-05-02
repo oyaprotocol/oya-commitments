@@ -19,6 +19,30 @@ function assertNonNegativeInteger(value: unknown, label: string): number {
     return value;
 }
 
+function assertHeadersObject(
+    headers: unknown,
+    label: string,
+    options: { disallowedNames?: string[] } = {}
+): Readonly<Record<string, string>> {
+    if (headers === null || typeof headers !== 'object' || Array.isArray(headers)) {
+        throw new Error(`${label} must be an object.`);
+    }
+    const disallowedNames = new Set(
+        (options.disallowedNames ?? []).map((name) => name.toLowerCase())
+    );
+    const validated: Record<string, string> = {};
+    for (const [key, value] of Object.entries(headers)) {
+        if (disallowedNames.has(key.toLowerCase())) {
+            throw new Error(`${label} must not include ${key.toLowerCase()}.`);
+        }
+        if (typeof value !== 'string') {
+            throw new Error(`${label}.${key} must be a string.`);
+        }
+        validated[key] = value;
+    }
+    return Object.freeze(validated);
+}
+
 function assertAsciiBytes(bytes: Uint8Array, message: string): void {
     for (const byte of bytes) {
         if (byte > 0x7f) {
@@ -29,6 +53,7 @@ function assertAsciiBytes(bytes: Uint8Array, message: string): void {
 
 export {
     assertAsciiBytes,
+    assertHeadersObject,
     assertNonEmptyString,
     assertNonNegativeInteger,
     assertPositiveInteger,

@@ -1,19 +1,6 @@
 import { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, normalizeIpfsOperationError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, } from './ipfs-request-utils.js';
 import { readBoundedBytes } from './read-ipfs-bytes.js';
-import { assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, } from './validation-utils.js';
-function assertHeadersObject(headers, label) {
-    if (headers === null || typeof headers !== 'object' || Array.isArray(headers)) {
-        throw new Error(`${label} must be an object.`);
-    }
-    const validated = {};
-    for (const [key, value] of Object.entries(headers)) {
-        if (typeof value !== 'string') {
-            throw new Error(`${label}.${key} must be a string.`);
-        }
-        validated[key] = value;
-    }
-    return Object.freeze(validated);
-}
+import { assertHeadersObject, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, } from './validation-utils.js';
 function normalizeGatewayUrl(gatewayUrl) {
     return gatewayUrl.replace(/\/+$/, '').replace(/\/ipfs$/, '');
 }

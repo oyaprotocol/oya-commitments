@@ -232,6 +232,28 @@ test('readIpfsPublicGatewayBytes validates gateway options before calling fetch'
     assert.equal(attempts, 0);
 });
 
+test('readIpfsPublicGatewayBytes allows content-type gateway headers', async () => {
+    const calls = [];
+    await readIpfsPublicGatewayBytes({
+        gatewayUrl: 'https://gateway.example',
+        headers: {
+            'content-type': 'text/plain',
+        },
+        timeoutMs: 1_000,
+        maxRetries: 1,
+        retryDelayMs: 0,
+        fetch: async (url, options) => {
+            calls.push({ url, options });
+            return createStreamResponse(200, ['ok']);
+        },
+        cid: 'bafy-public-content-type',
+        maxBytes: 64,
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].options.headers['content-type'], 'text/plain');
+});
+
 test('readIpfsPublicGatewayBytes normalizes empty thrown values to the fallback error', async () => {
     await assert.rejects(
         readIpfsPublicGatewayBytes({

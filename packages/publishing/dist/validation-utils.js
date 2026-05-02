@@ -16,6 +16,23 @@ function assertNonNegativeInteger(value, label) {
     }
     return value;
 }
+function assertHeadersObject(headers, label, options = {}) {
+    if (headers === null || typeof headers !== 'object' || Array.isArray(headers)) {
+        throw new Error(`${label} must be an object.`);
+    }
+    const disallowedNames = new Set((options.disallowedNames ?? []).map((name) => name.toLowerCase()));
+    const validated = {};
+    for (const [key, value] of Object.entries(headers)) {
+        if (disallowedNames.has(key.toLowerCase())) {
+            throw new Error(`${label} must not include ${key.toLowerCase()}.`);
+        }
+        if (typeof value !== 'string') {
+            throw new Error(`${label}.${key} must be a string.`);
+        }
+        validated[key] = value;
+    }
+    return Object.freeze(validated);
+}
 function assertAsciiBytes(bytes, message) {
     for (const byte of bytes) {
         if (byte > 0x7f) {
@@ -23,5 +40,5 @@ function assertAsciiBytes(bytes, message) {
         }
     }
 }
-export { assertAsciiBytes, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, };
+export { assertAsciiBytes, assertHeadersObject, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, };
 //# sourceMappingURL=validation-utils.js.map
