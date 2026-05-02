@@ -6,7 +6,7 @@ This ExecPlan is a living document and must be maintained according to `PLANS.md
 
 Oya nodes already have the beginning of a hardened kernel primitive for publishing bytes or text to IPFS. The next immediate goal is post-publication retrieval: any data an Oya node publishes should be pinned by the node and easy to retrieve later by CID.
 
-This plan keeps the near-term package work intentionally small. First, IPFS add-and-pin behavior becomes explicit while staying simple: the standard Oya path adds and pins in one Kubo request. Then the publishing package gets a low-level retrieval primitive for safe artifact reads from a Kubo-compatible node. Tests and documentation should cover both behaviors.
+This plan keeps the near-term package work intentionally small. First, IPFS add-and-pin behavior becomes explicit while staying simple: the standard Oya path adds and pins in one Kubo request. Then the IPFS package gets a low-level retrieval primitive for safe artifact reads from a Kubo-compatible node. Tests and documentation should cover both behaviors.
 
 Public indexing is still important, but it is not part of the immediate package milestone. The likely future direction is an onchain Logger contract: nodes publish data to IPFS, then log CIDs onchain so the chain serves as a public append-only index linking node addresses to published CIDs and block timestamps. That future indexing design should get its own plan or a later section after the add-and-pin and retrieval primitives are complete.
 
@@ -44,6 +44,7 @@ Definitions used in this plan:
 - [x] 2026-05-02 21:00Z: Consolidated duplicate read fallback-error normalization into shared internal `normalizeIpfsOperationError(...)`.
 - [x] 2026-05-02 21:04Z: Consolidated header object validation into shared internal `assertHeadersObject(...)` while preserving Kubo config's `content-type` restriction and gateway read pass-through behavior.
 - [x] 2026-05-02 21:10Z: Fixed public gateway read URL construction to use URL parsing, preserve query strings, reject fragments, and avoid duplicate `/ipfs/<cid>` path appends.
+- [x] 2026-05-02 21:52Z: Renamed the package from `@oyaprotocol/publishing` in `packages/publishing` to `@oyaprotocol/ipfs` in `packages/ipfs`.
 - [ ] Create or update a future plan for onchain CID logging and public indexing when ready.
 
 ## Surprises & Discoveries
@@ -55,7 +56,7 @@ Definitions used in this plan:
   Evidence: a simple Logger contract can emit events that match a node address to a series of CIDs with block ordering and timestamps. Offchain consumers can scan those logs to discover the node's public publication history.
 
 - Observation: The hardened `publishToIpfs(...)` primitive currently omits explicit pin behavior.
-  Evidence: `packages/publishing/src/publish-to-ipfs.ts` currently calls `/api/v0/add?cid-version=1&progress=false`. Kubo's add endpoint defaults to pinning, but the hardened kernel should not rely on an implicit provider default.
+  Evidence: `packages/ipfs/src/publish-to-ipfs.ts` currently calls `/api/v0/add?cid-version=1&progress=false`. Kubo's add endpoint defaults to pinning, but the hardened kernel should not rely on an implicit provider default.
 
 - Observation: A separate add-then-pin track is unnecessarily complex for the expected Oya artifact shape.
   Evidence: the expected artifacts are small text or JSON records, and the node can keep canonical local bytes. Retrying by re-adding the same canonical bytes is simpler than maintaining a second pinning state machine.
@@ -68,7 +69,7 @@ Definitions used in this plan:
 
 ## Decision Log
 
-- Decision: Start the next implementation inside `@oyaprotocol/publishing`.
+- Decision: Start the next implementation inside `@oyaprotocol/ipfs`.
   Rationale: The existing raw IPFS add primitive already lives there, and pinning, indexing, and retrieval are publishing-domain concerns. Starting in the package keeps the next diff reviewable and avoids premature node wiring.
   Date/Author: 2026-04-29 / Codex.
 
@@ -103,8 +104,8 @@ Milestone 1 is complete. `publishToIpfs(...)` now explicitly requests add-and-pi
 Validation evidence for Milestone 1:
 
 - `npm --prefix packages run build`
-- `node --test packages/publishing/test/publish-to-ipfs.test.js`
-- `node --input-type=module -e "import('./packages/publishing/dist/index.js').then((m) => console.log(Object.keys(m).sort().join(',')))"`
+- `node --test packages/ipfs/test/publish-to-ipfs.test.js`
+- `node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => console.log(Object.keys(m).sort().join(',')))"`
 
 Milestone 2 is complete. `readIpfsBytes(...)` reads known CIDs through `/api/v0/cat?arg=<cid>` and returns bounded arbitrary bytes. `readIpfsText(...)` wraps that byte primitive and adds ASCII verification plus text decoding for the immediate text-artifact use case. Both require `maxBytes`, support caller cancellation, and use the same explicit transport config pattern as publication.
 
@@ -138,12 +139,14 @@ Header validation cleanup moved duplicate header shape checking into package-int
 
 Public gateway URL cleanup replaced string concatenation with URL parsing in `buildGatewayReadUrl(...)`. Gateway query strings are preserved for signed/authenticated endpoints, fragments are rejected because they are not sent to servers, and the fetch call now uses the final URL directly.
 
+Package rename cleanup moved the hardened IPFS package from `packages/publishing` to `packages/ipfs` and renamed the package entrypoint from `@oyaprotocol/publishing` to `@oyaprotocol/ipfs`. This matches the package's current responsibility: IPFS add-and-pin plus Kubo and public-gateway retrieval.
+
 Validation evidence for Milestone 2:
 
 - `npm --prefix packages run build`
-- `node --test packages/publishing/test/ipfs-retrieval.test.js`
-- `node --test packages/publishing/test/publish-to-ipfs.test.js`
-- `node --input-type=module -e "import('./packages/publishing/dist/index.js').then((m) => console.log(Object.keys(m).sort().join(',')))"`
+- `node --test packages/ipfs/test/ipfs-retrieval.test.js`
+- `node --test packages/ipfs/test/publish-to-ipfs.test.js`
+- `node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => console.log(Object.keys(m).sort().join(',')))"`
 
 Remaining near-term work is documentation polish if reviewers request it. Future public indexing should be handled in a separate onchain Logger plan.
 
@@ -153,17 +156,17 @@ The hardened package area lives under `packages/`. The relevant local instructio
 
 Current package files:
 
-- `packages/publishing/src/ipfs-config.ts`: validates explicit IPFS transport settings.
-- `packages/publishing/src/ipfs-request-utils.ts`: contains shared retry, timeout, abort, HTTP error, and operation-error normalization helpers for IPFS HTTP requests.
-- `packages/publishing/src/validation-utils.ts`: contains shared internal validation helpers, including header object validation.
-- `packages/publishing/src/publish-to-ipfs.ts`: publishes content to Kubo `/api/v0/add` using injected `fetch`.
-- `packages/publishing/src/read-ipfs-bytes.ts`: reads bounded arbitrary byte content from Kubo `/api/v0/cat` using injected `fetch`.
-- `packages/publishing/src/read-ipfs-public-gateway-bytes.ts`: reads bounded arbitrary byte content from public gateway `GET /ipfs/<cid>` endpoints using injected `fetch`.
-- `packages/publishing/src/read-ipfs-public-gateway-text.ts`: reads bounded ASCII text content through `readIpfsPublicGatewayBytes(...)` and text-specific verification.
-- `packages/publishing/src/read-ipfs-text.ts`: reads bounded ASCII text content through `readIpfsBytes(...)` and text-specific verification.
-- `packages/publishing/src/index.ts`: exports the public package surface.
-- `packages/publishing/test/publish-to-ipfs.test.js`: tests the built package entrypoint.
-- `packages/publishing/test/ipfs-retrieval.test.js`: tests the built retrieval entrypoint.
+- `packages/ipfs/src/ipfs-config.ts`: validates explicit IPFS transport settings.
+- `packages/ipfs/src/ipfs-request-utils.ts`: contains shared retry, timeout, abort, HTTP error, and operation-error normalization helpers for IPFS HTTP requests.
+- `packages/ipfs/src/validation-utils.ts`: contains shared internal validation helpers, including header object validation.
+- `packages/ipfs/src/publish-to-ipfs.ts`: publishes content to Kubo `/api/v0/add` using injected `fetch`.
+- `packages/ipfs/src/read-ipfs-bytes.ts`: reads bounded arbitrary byte content from Kubo `/api/v0/cat` using injected `fetch`.
+- `packages/ipfs/src/read-ipfs-public-gateway-bytes.ts`: reads bounded arbitrary byte content from public gateway `GET /ipfs/<cid>` endpoints using injected `fetch`.
+- `packages/ipfs/src/read-ipfs-public-gateway-text.ts`: reads bounded ASCII text content through `readIpfsPublicGatewayBytes(...)` and text-specific verification.
+- `packages/ipfs/src/read-ipfs-text.ts`: reads bounded ASCII text content through `readIpfsBytes(...)` and text-specific verification.
+- `packages/ipfs/src/index.ts`: exports the public package surface.
+- `packages/ipfs/test/publish-to-ipfs.test.js`: tests the built package entrypoint.
+- `packages/ipfs/test/ipfs-retrieval.test.js`: tests the built retrieval entrypoint.
 
 Reference-only legacy files:
 
@@ -198,28 +201,28 @@ From `/Users/johnshutt/Code/oya-commitments`:
 
 2. Inspect the current package surface:
 
-       sed -n '1,240p' packages/publishing/src/publish-to-ipfs.ts
-       sed -n '1,160p' packages/publishing/src/ipfs-config.ts
-       sed -n '1,120p' packages/publishing/src/index.ts
+       sed -n '1,240p' packages/ipfs/src/publish-to-ipfs.ts
+       sed -n '1,160p' packages/ipfs/src/ipfs-config.ts
+       sed -n '1,120p' packages/ipfs/src/index.ts
 
 3. Update `publishToIpfs(...)` so the Kubo add URL makes add-and-pin behavior explicit. The intended URL is:
 
        /api/v0/add?cid-version=1&pin=true&progress=false
 
-4. Add or update tests in `packages/publishing/test/publish-to-ipfs.test.js` proving the add request includes `pin=true` and existing retry, timeout, and abort behavior remains unchanged.
+4. Add or update tests in `packages/ipfs/test/publish-to-ipfs.test.js` proving the add request includes `pin=true` and existing retry, timeout, and abort behavior remains unchanged.
 
 5. Ensure `PublishToIpfsResult` can make the pinning outcome explicit enough for downstream consumers, likely by adding `pinned: true` or equivalent normalized metadata if that keeps the API clearer.
 
-6. Add retrieval after add-and-pin behavior is explicit. Create a small ASCII text retrieval file under `packages/publishing/src/` and a matching test file. Include byte-limit enforcement, oversized-response failure, non-ASCII failure, and caller cancellation coverage before public API integration.
+6. Add retrieval after add-and-pin behavior is explicit. Create a small ASCII text retrieval file under `packages/ipfs/src/` and a matching test file. Include byte-limit enforcement, oversized-response failure, non-ASCII failure, and caller cancellation coverage before public API integration.
 
-7. Add package documentation in `packages/publishing/README.md` explaining add-and-pin publication, local retrieval by CID, and the future onchain Logger indexing direction.
+7. Add package documentation in `packages/ipfs/README.md` explaining add-and-pin publication, local retrieval by CID, and the future onchain Logger indexing direction.
 
 8. Build and test the package area:
 
        npm --prefix packages run build
-       node --test packages/publishing/test/publish-to-ipfs.test.js
-       node --test packages/publishing/test/ipfs-retrieval.test.js
-       node --input-type=module -e "import('./packages/publishing/dist/index.js').then((m) => console.log(Object.keys(m).sort().join(',')))"
+       node --test packages/ipfs/test/publish-to-ipfs.test.js
+       node --test packages/ipfs/test/ipfs-retrieval.test.js
+       node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => console.log(Object.keys(m).sort().join(',')))"
 
 9. Do not implement the onchain Logger in this immediate pass. If the user asks to proceed with indexing, create or revise a dedicated ExecPlan first.
 
@@ -236,9 +239,9 @@ The package milestone is accepted when:
 Minimum validation commands from `/Users/johnshutt/Code/oya-commitments`:
 
 - `npm --prefix packages run build`
-- `node --test packages/publishing/test/publish-to-ipfs.test.js`
-- `node --test packages/publishing/test/ipfs-retrieval.test.js`
-- `node --input-type=module -e "import('./packages/publishing/dist/index.js').then((m) => console.log(Object.keys(m).sort().join(',')))"`
+- `node --test packages/ipfs/test/publish-to-ipfs.test.js`
+- `node --test packages/ipfs/test/ipfs-retrieval.test.js`
+- `node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => console.log(Object.keys(m).sort().join(',')))"`
 
 When onchain indexing work starts, create or update a separate ExecPlan with Solidity tests and deployment/chain assumptions before writing contract code.
 
@@ -273,9 +276,9 @@ Important reference behavior:
 
 Existing package interfaces:
 
-- `IpfsConfig` from `packages/publishing/src/ipfs-config.ts`
-- `PublishIpfsFetchLike`, `PublishIpfsRequestOptions`, and `PublishIpfsResponse` from `packages/publishing/src/publish-to-ipfs.ts`
-- `PublishToIpfsOptions` and `PublishToIpfsResult` from `packages/publishing/src/publish-to-ipfs.ts`
+- `IpfsConfig` from `packages/ipfs/src/ipfs-config.ts`
+- `PublishIpfsFetchLike`, `PublishIpfsRequestOptions`, and `PublishIpfsResponse` from `packages/ipfs/src/publish-to-ipfs.ts`
+- `PublishToIpfsOptions` and `PublishToIpfsResult` from `packages/ipfs/src/publish-to-ipfs.ts`
 - `ReadIpfsBytesResult`
 - `ReadIpfsFetchOptions`
 - `ReadIpfsFetchLike`

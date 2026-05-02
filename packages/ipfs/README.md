@@ -1,10 +1,10 @@
-# @oyaprotocol/publishing
+# @oyaprotocol/ipfs
 
-Utilities for publishing and retrieving Oya-related data.
+Utilities for publishing and retrieving Oya-related data through IPFS.
 
 ## Public Entrypoint
 
-- `@oyaprotocol/publishing`
+- `@oyaprotocol/ipfs`
 
 ## Current Surface
 

@@ -1,5 +1,5 @@
 export const packageInfo = Object.freeze({
-    name: '@oyaprotocol/publishing',
+    name: '@oyaprotocol/ipfs',
     status: 'partial',
 });
 

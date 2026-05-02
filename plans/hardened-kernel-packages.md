@@ -17,15 +17,15 @@ After this phase, a contributor should be able to:
 
 - [x] 2026-04-20 21:58Z: Reviewed root `AGENTS.md` and `PLANS.md` and confirmed this rewrite warrants an ExecPlan because it is the start of a multi-step, cross-area production-kernel effort.
 - [x] 2026-04-20 21:58Z: Audited the current repo layout and existing Node package manifests to keep the first package-shell step minimal and non-disruptive.
-- [x] 2026-04-20 21:58Z: Created `packages/` area documentation plus importable shells for `@oyaprotocol/utils`, `@oyaprotocol/messages`, `@oyaprotocol/publishing`, `@oyaprotocol/transactions`, and `@oyaprotocol/verification`.
+- [x] 2026-04-20 21:58Z: Created `packages/` area documentation plus importable shells for `@oyaprotocol/utils`, `@oyaprotocol/messages`, `@oyaprotocol/ipfs`, `@oyaprotocol/transactions`, and `@oyaprotocol/verification`.
 - [x] 2026-04-20 21:59Z: Validated that each package entrypoint imports with Node and confirmed the new `packages/*/src` files have no legacy repo imports.
-- [x] 2026-04-20 23:18Z: Chose `@oyaprotocol/publishing` for the first concrete function and implemented `publishToIpfs(...)` as a package-local Kubo-compatible IPFS add primitive with normalized return data and transient-failure retries.
+- [x] 2026-04-20 23:18Z: Chose `@oyaprotocol/ipfs` for the first concrete function and implemented `publishToIpfs(...)` as a package-local Kubo-compatible IPFS add primitive with normalized return data and transient-failure retries.
 - [x] 2026-04-20 23:18Z: Added focused tests covering success, retryable HTTP failure, retryable network failure, non-retryable HTTP failure, and missing-CID responses for `publishToIpfs(...)`.
 - [x] 2026-04-20 23:32Z: Tightened the publishing primitive into a strict low-level surface with no implicit defaults, added explicit IPFS transport config, and updated the tests to require explicit config, `fetch`, filename, and media type.
 - [x] 2026-04-21 21:46Z: Consolidated tiny helper functions inside `publishToIpfs(...)` and `parseAddResponse(...)` so the file keeps only behavior-bearing top-level helpers while preserving the same external API and test coverage.
 - [x] 2026-04-21 22:36Z: Applied a minimal fallback-timeout cleanup fix so the `createTimeoutSignal(...)` fallback no longer leaves successful-attempt timers running until `timeoutMs` elapses.
-- [x] 2026-04-21 22:38Z: Added fallback-timeout regression coverage and re-ran `node --test packages/publishing/test/publish-to-ipfs.test.js`; all 7 tests passed.
-- [x] 2026-04-21 22:42Z: Made retry backoff abort-aware so caller cancellation interrupts retry delays promptly, added regression coverage for abort-during-backoff, and re-ran `node --test packages/publishing/test/publish-to-ipfs.test.js`; all 8 tests passed.
+- [x] 2026-04-21 22:38Z: Added fallback-timeout regression coverage and re-ran `node --test packages/ipfs/test/publish-to-ipfs.test.js`; all 7 tests passed.
+- [x] 2026-04-21 22:42Z: Made retry backoff abort-aware so caller cancellation interrupts retry delays promptly, added regression coverage for abort-during-backoff, and re-ran `node --test packages/ipfs/test/publish-to-ipfs.test.js`; all 8 tests passed.
 - [x] 2026-04-22 05:12Z: Converted the kernel packages to TypeScript source, added a `packages/`-local TypeScript workspace toolchain, switched package manifests to `dist/` exports with declaration files, rebuilt all five packages, and re-ran the publishing tests against built output.
 - [x] 2026-04-22 05:18Z: Tightened the publishing TypeScript signatures so IPFS config creation and `publishToIpfs(...)` require full option objects in the emitted declaration files, then rebuilt and re-ran the publishing tests.
 - [x] 2026-04-22 05:27Z: Updated the publishing retry classifier to inspect nested `error.cause` codes/messages so Node `fetch` network failures like `TypeError('fetch failed', { cause })` still retry when the nested cause is transient, and added regression coverage for that path.
@@ -36,6 +36,7 @@ After this phase, a contributor should be able to:
 - [x] 2026-04-29 23:12Z: Created the follow-on ExecPlan at `plans/ipfs-publication-indexing-and-retrieval.md` and closed this plan's final open decision thread.
 - [x] 2026-04-30 17:43Z: Amended the follow-on plan after user clarification: the standard kernel path should explicitly add-and-pin in one Kubo request, should not add a `pinOnAdd` boolean, and should not create a separate pinning track unless a future concrete need appears.
 - [x] 2026-04-30 18:05Z: Simplified the follow-on plan after user clarification: the immediate package work is explicit add-and-pin plus low-level retrieval, while public indexing is deferred to a future onchain Logger design.
+- [x] 2026-05-02 21:52Z: Renamed the initial IPFS work package from `@oyaprotocol/publishing` / `packages/publishing` to `@oyaprotocol/ipfs` / `packages/ipfs` after the package scope expanded from publication to general IPFS retrieval.
 
 ## Surprises & Discoveries
 
@@ -79,7 +80,7 @@ After this phase, a contributor should be able to:
   Evidence: pinning protects locally added IPFS blocks from garbage collection, while a future onchain Logger contract can provide a public append-only CID index keyed by node address and block history.
 
 - Observation: The current hardened `publishToIpfs(...)` URL does not make pin behavior explicit, even though the desired standard behavior is add-and-pin.
-  Evidence: `packages/publishing/src/publish-to-ipfs.ts` calls `/api/v0/add?cid-version=1&progress=false`. The follow-on plan now requires making the existing default explicit with `/api/v0/add?cid-version=1&pin=true&progress=false`.
+  Evidence: `packages/ipfs/src/publish-to-ipfs.ts` calls `/api/v0/add?cid-version=1&progress=false`. The follow-on plan now requires making the existing default explicit with `/api/v0/add?cid-version=1&pin=true&progress=false`.
 
 ## Decision Log
 
@@ -95,7 +96,7 @@ After this phase, a contributor should be able to:
   Rationale: Package shells and package-root imports are enough for the current milestone, while a repo-wide workspace decision would broaden the change unnecessarily.
   Date/Author: 2026-04-20 / Codex.
 
-- Decision: Make the first concrete package function `publishToIpfs(...)` in `@oyaprotocol/publishing`.
+- Decision: Make the first concrete package function `publishToIpfs(...)` in `@oyaprotocol/ipfs`.
   Rationale: The user identified raw publication as the smallest publishing surface, and IPFS add with retries can be implemented and reviewed independently before adding pinning, indexing, or API layers.
   Date/Author: 2026-04-20 / Codex.
 
@@ -103,7 +104,7 @@ After this phase, a contributor should be able to:
   Rationale: This creates a useful primitive without prematurely introducing app wiring, config loaders, or broader publication-record abstractions.
   Date/Author: 2026-04-20 / Codex.
 
-- Decision: The first concrete primitives in `@oyaprotocol/publishing` should be strict low-level surfaces with no implicit defaults.
+- Decision: The first concrete primitives in `@oyaprotocol/ipfs` should be strict low-level surfaces with no implicit defaults.
   Rationale: The user wants audited primitives where all important transport and content assumptions are passed in explicitly by the caller.
   Date/Author: 2026-04-20 / Codex.
 
@@ -130,15 +131,15 @@ The first milestone is complete. The repo now has a dedicated `packages/` area, 
 Validation evidence for this milestone:
 
 - `npm --prefix packages run build`
-- direct Node imports returned `@oyaprotocol/utils`, `@oyaprotocol/messages`, `@oyaprotocol/publishing`, `@oyaprotocol/transactions`, and `@oyaprotocol/verification` from the built `dist/index.js` entrypoints
+- direct Node imports returned `@oyaprotocol/utils`, `@oyaprotocol/messages`, `@oyaprotocol/ipfs`, `@oyaprotocol/transactions`, and `@oyaprotocol/verification` from the built `dist/index.js` entrypoints
 - a source-only import scan over `packages/*/src` found no imports from legacy repo areas
 
-The second milestone establishes the first real package primitives in `@oyaprotocol/publishing`: explicit IPFS config creation and `publishToIpfs(...)`. Together they define a strict low-level IPFS add surface: the caller must provide explicit transport settings, explicit content metadata, and an explicit `fetch` implementation. The primitive then publishes text or bytes to a Kubo-compatible `/api/v0/add` endpoint, normalizes the returned publication details, and retries transient failures without adding pinning, indexing, or API-serving behavior yet.
+The second milestone establishes the first real package primitives in `@oyaprotocol/ipfs`: explicit IPFS config creation and `publishToIpfs(...)`. Together they define a strict low-level IPFS add surface: the caller must provide explicit transport settings, explicit content metadata, and an explicit `fetch` implementation. The primitive then publishes text or bytes to a Kubo-compatible `/api/v0/add` endpoint, normalizes the returned publication details, and retries transient failures without adding pinning, indexing, or API-serving behavior yet.
 
 Validation evidence for this milestone:
 
-- `node --test packages/publishing/test/publish-to-ipfs.test.js`
-- `node --input-type=module -e "import('./packages/publishing/dist/index.js').then((m) => { console.log(typeof m.createIpfsConfig, typeof m.publishToIpfs, m.packageInfo.status); })"`
+- `node --test packages/ipfs/test/publish-to-ipfs.test.js`
+- `node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => { console.log(typeof m.createIpfsConfig, typeof m.publishToIpfs, m.packageInfo.status); })"`
 
 The third milestone converts the kernel area to TypeScript while keeping the change local to `packages/`. Package source now lives in `src/*.ts`, package manifests export built `dist/*.js` entrypoints with `.d.ts` declarations, and `packages/package.json` provides a workspace-local TypeScript toolchain that does not change `agent/`, `node/`, or `frontend/`.
 
@@ -146,8 +147,8 @@ Validation evidence for this milestone:
 
 - `npm --prefix packages install`
 - `npm --prefix packages run build`
-- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/publishing/dist/index.js','./packages/transactions/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then((modules) => { console.log(modules.map((module) => module.packageInfo.name).join(',')); })"`
-- `node --test packages/publishing/test/publish-to-ipfs.test.js`
+- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/transactions/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then((modules) => { console.log(modules.map((module) => module.packageInfo.name).join(',')); })"`
+- `node --test packages/ipfs/test/publish-to-ipfs.test.js`
 
 The final open thread in this plan is now closed. The next publishing primitive has been selected as explicit add-and-pin publication, followed by low-level retrieval. Public indexing is deferred to a future onchain Logger design. Implementation should continue from `plans/ipfs-publication-indexing-and-retrieval.md` rather than extending this package-shell plan.
 
@@ -159,7 +160,7 @@ The new package shells introduced in this phase are:
 
 - `packages/utils` for `@oyaprotocol/utils`
 - `packages/messages` for `@oyaprotocol/messages`
-- `packages/publishing` for `@oyaprotocol/publishing`
+- `packages/ipfs` for `@oyaprotocol/ipfs`
 - `packages/transactions` for `@oyaprotocol/transactions`
 - `packages/verification` for `@oyaprotocol/verification`
 
@@ -182,12 +183,12 @@ The new area also has:
 
 The first implemented function now lives at:
 
-- `packages/publishing/src/ipfs-config.ts`
-- `packages/publishing/src/publish-to-ipfs.ts`
+- `packages/ipfs/src/ipfs-config.ts`
+- `packages/ipfs/src/publish-to-ipfs.ts`
 
 The first focused tests now live at:
 
-- `packages/publishing/test/publish-to-ipfs.test.js`
+- `packages/ipfs/test/publish-to-ipfs.test.js`
 
 ## Plan of Work
 
@@ -195,13 +196,13 @@ The first phase is structural only. Create the `packages/` directory, add area-l
 
 After the shells exist, future phases proceed function by function. Each function should be assigned to one package deliberately, implemented from scratch, reviewed, and validated before the next function is added.
 
-The first concrete function is now complete in `@oyaprotocol/publishing`. The open decision at the end of this plan has been resolved. The follow-on implementation should make add-and-pin behavior explicit in the same package, add low-level retrieval, and leave public indexing to a future onchain Logger plan.
+The first concrete function is now complete in `@oyaprotocol/ipfs`. The open decision at the end of this plan has been resolved. The follow-on implementation should make add-and-pin behavior explicit in the same package, add low-level retrieval, and leave public indexing to a future onchain Logger plan.
 
 ## Concrete Steps
 
 From `/Users/johnshutt/Code/oya-commitments`:
 
-1. Create package directories under `packages/` for `utils`, `messages`, `publishing`, `transactions`, and `verification`.
+1. Create package directories under `packages/` for `utils`, `messages`, `ipfs`, `transactions`, and `verification`.
 
 2. Add `package.json` to each package with:
 
@@ -219,14 +220,14 @@ From `/Users/johnshutt/Code/oya-commitments`:
 
 5. Record the work in this ExecPlan before moving on to functional implementation.
 
-6. Implement `packages/publishing/src/publish-to-ipfs.ts` as a package-local primitive that:
+6. Implement `packages/ipfs/src/publish-to-ipfs.ts` as a package-local primitive that:
 
    - accepts bytes or text content
    - targets a Kubo-compatible `/api/v0/add` HTTP endpoint
    - returns normalized publication details including `cid` and `ipfs://` URI
    - retries transient failures only
 
-7. Add `packages/publishing/src/ipfs-config.ts` so transport settings are explicit and validated instead of implicitly defaulted.
+7. Add `packages/ipfs/src/ipfs-config.ts` so transport settings are explicit and validated instead of implicitly defaulted.
 
 8. Add a `packages/`-local TypeScript toolchain and convert package source files to `src/*.ts`, with package manifests exporting built `dist/` entrypoints.
 
@@ -246,11 +247,11 @@ Validation commands from `/Users/johnshutt/Code/oya-commitments`:
 - `npm --prefix packages run build`
 - `node --input-type=module -e "import('./packages/utils/dist/index.js').then((m) => console.log(m.packageInfo.name))"`
 - `node --input-type=module -e "import('./packages/messages/dist/index.js').then((m) => console.log(m.packageInfo.name))"`
-- `node --input-type=module -e "import('./packages/publishing/dist/index.js').then((m) => console.log(m.packageInfo.name))"`
+- `node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => console.log(m.packageInfo.name))"`
 - `node --input-type=module -e "import('./packages/transactions/dist/index.js').then((m) => console.log(m.packageInfo.name))"`
 - `node --input-type=module -e "import('./packages/verification/dist/index.js').then((m) => console.log(m.packageInfo.name))"`
-- `node --test packages/publishing/test/publish-to-ipfs.test.js`
-- `node --input-type=module -e "import('./packages/publishing/dist/index.js').then((m) => { console.log(typeof m.createIpfsConfig, typeof m.publishToIpfs, m.packageInfo.status); })"`
+- `node --test packages/ipfs/test/publish-to-ipfs.test.js`
+- `node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => { console.log(typeof m.createIpfsConfig, typeof m.publishToIpfs, m.packageInfo.status); })"`
 
 ## Idempotence and Recovery
 
@@ -262,7 +263,7 @@ Initial package names:
 
 - `@oyaprotocol/utils`
 - `@oyaprotocol/messages`
-- `@oyaprotocol/publishing`
+- `@oyaprotocol/ipfs`
 - `@oyaprotocol/transactions`
 - `@oyaprotocol/verification`
 
@@ -271,7 +272,7 @@ Initial public surface for each package:
 - `src/index.ts` exporting `packageInfo`
 - compiled `dist/index.js` entrypoint with `dist/index.d.ts`
 
-Current additional public surface in `@oyaprotocol/publishing`:
+Current additional public surface in `@oyaprotocol/ipfs`:
 
 - `createIpfsConfig(options)`
 - `publishToIpfs(options)`
@@ -285,8 +286,8 @@ Interfaces introduced in this phase:
 
 Interfaces introduced after the initial shell milestone:
 
-- `createIpfsConfig(options)` from `@oyaprotocol/publishing`
-- `publishToIpfs(options)` from `@oyaprotocol/publishing`
+- `createIpfsConfig(options)` from `@oyaprotocol/ipfs`
+- `publishToIpfs(options)` from `@oyaprotocol/ipfs`
 
 Dependencies introduced in this phase:
 

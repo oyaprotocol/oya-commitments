@@ -8,7 +8,7 @@
       "path": "./messages"
     },
     {
-      "path": "./publishing"
+      "path": "./ipfs"
     },
     {
       "path": "./transactions"
