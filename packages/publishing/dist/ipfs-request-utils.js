@@ -61,6 +61,15 @@ function shouldRetryError(error) {
         message.includes('connection refused') ||
         message.includes('connection reset'));
 }
+function normalizeIpfsOperationError(error, messages) {
+    if (error instanceof Error) {
+        return error;
+    }
+    if (!error) {
+        return new Error(`${messages.fallbackErrorBaseMessage}.`);
+    }
+    return new Error(`${messages.fallbackErrorBaseMessage}: ${String(error)}`);
+}
 function createTimeoutSignal(timeoutMs) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error('Request timed out.')), timeoutMs);
@@ -192,5 +201,5 @@ async function waitForRetryDelay({ retryDelayMs, signal, abortErrorMessage, }) {
     });
     throwIfSignalAborted(signal, abortErrorMessage, signal?.reason);
 }
-export { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, };
+export { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, normalizeIpfsOperationError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, };
 //# sourceMappingURL=ipfs-request-utils.js.map

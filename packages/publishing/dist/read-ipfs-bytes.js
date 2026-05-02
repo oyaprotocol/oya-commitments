@@ -1,14 +1,5 @@
-import { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, } from './ipfs-request-utils.js';
+import { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, normalizeIpfsOperationError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, } from './ipfs-request-utils.js';
 import { assertNonEmptyString, assertPositiveInteger } from './validation-utils.js';
-function normalizeReadError(error, messages) {
-    if (error instanceof Error) {
-        return error;
-    }
-    if (!error) {
-        return new Error(`${messages.fallbackErrorBaseMessage}.`);
-    }
-    return new Error(`${messages.fallbackErrorBaseMessage}: ${String(error)}`);
-}
 function combineChunks(chunks, byteLength) {
     const combined = new Uint8Array(byteLength);
     let offset = 0;
@@ -112,7 +103,7 @@ async function readIpfsBytesWithMessages({ config, fetch, cid, maxBytes, signal,
             timeoutSignal.cleanup?.();
         }
     }
-    throw normalizeReadError(lastError, messages);
+    throw normalizeIpfsOperationError(lastError, messages);
 }
 async function readIpfsBytes(options) {
     return await readIpfsBytesWithMessages(options, {

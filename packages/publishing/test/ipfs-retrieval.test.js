@@ -105,6 +105,20 @@ test('readIpfsBytes rejects responses that exceed maxBytes', async () => {
     );
 });
 
+test('readIpfsBytes normalizes empty thrown values to the fallback error', async () => {
+    await assert.rejects(
+        readIpfsBytes({
+            config: createConfig({ maxRetries: 0 }),
+            fetch: async () => {
+                throw null;
+            },
+            cid: 'bafy-bytes-null-error',
+            maxBytes: 64,
+        }),
+        /IPFS bytes read failed\./
+    );
+});
+
 test('readIpfsPublicGatewayBytes reads bounded bytes with a gateway GET request', async () => {
     const calls = [];
     const result = await readIpfsPublicGatewayBytes({
@@ -216,6 +230,24 @@ test('readIpfsPublicGatewayBytes validates gateway options before calling fetch'
     );
 
     assert.equal(attempts, 0);
+});
+
+test('readIpfsPublicGatewayBytes normalizes empty thrown values to the fallback error', async () => {
+    await assert.rejects(
+        readIpfsPublicGatewayBytes({
+            gatewayUrl: 'https://gateway.example',
+            headers: {},
+            timeoutMs: 1_000,
+            maxRetries: 0,
+            retryDelayMs: 0,
+            fetch: async () => {
+                throw null;
+            },
+            cid: 'bafy-public-null-error',
+            maxBytes: 64,
+        }),
+        /IPFS public gateway bytes read failed\./
+    );
 });
 
 test('readIpfsPublicGatewayText reads bounded ASCII text through the gateway byte reader', async () => {

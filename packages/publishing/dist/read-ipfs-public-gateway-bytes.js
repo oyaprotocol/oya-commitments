@@ -1,4 +1,4 @@
-import { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, } from './ipfs-request-utils.js';
+import { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, normalizeIpfsOperationError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, } from './ipfs-request-utils.js';
 import { readBoundedBytes } from './read-ipfs-bytes.js';
 import { assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, } from './validation-utils.js';
 function assertHeadersObject(headers, label) {
@@ -16,15 +16,6 @@ function assertHeadersObject(headers, label) {
 }
 function normalizeGatewayUrl(gatewayUrl) {
     return gatewayUrl.replace(/\/+$/, '').replace(/\/ipfs$/, '');
-}
-function normalizeGatewayReadError(error, messages) {
-    if (error instanceof Error) {
-        return error;
-    }
-    if (!error) {
-        return new Error(`${messages.fallbackErrorBaseMessage}.`);
-    }
-    return new Error(`${messages.fallbackErrorBaseMessage}: ${String(error)}`);
 }
 async function readIpfsPublicGatewayBytesWithMessages({ gatewayUrl, headers, timeoutMs, maxRetries, retryDelayMs, fetch, cid, maxBytes, signal, }, messages) {
     const normalizedGatewayUrl = normalizeGatewayUrl(assertNonEmptyString(gatewayUrl, 'gatewayUrl'));
@@ -85,7 +76,7 @@ async function readIpfsPublicGatewayBytesWithMessages({ gatewayUrl, headers, tim
             timeoutSignal.cleanup?.();
         }
     }
-    throw normalizeGatewayReadError(lastError, messages);
+    throw normalizeIpfsOperationError(lastError, messages);
 }
 async function readIpfsPublicGatewayBytes(options) {
     return await readIpfsPublicGatewayBytesWithMessages(options, {

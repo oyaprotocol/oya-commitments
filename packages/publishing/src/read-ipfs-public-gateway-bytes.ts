@@ -3,10 +3,12 @@ import {
     createTimeoutSignal,
     invokeWithAbort,
     IpfsHttpError,
+    normalizeIpfsOperationError,
     shouldRetryError,
     throwIfSignalAborted,
     waitForRetryDelay,
 } from './ipfs-request-utils.js';
+import type { IpfsOperationErrorMessages } from './ipfs-request-utils.js';
 import { readBoundedBytes, type ReadIpfsBytesResult } from './read-ipfs-bytes.js';
 import {
     assertNonEmptyString,
@@ -44,11 +46,6 @@ export interface ReadIpfsPublicGatewayOptions {
     signal?: AbortSignal;
 }
 
-interface ReadIpfsPublicGatewayErrorMessages {
-    abortErrorMessage: string;
-    fallbackErrorBaseMessage: string;
-}
-
 function assertHeadersObject(headers: unknown, label: string): Readonly<Record<string, string>> {
     if (headers === null || typeof headers !== 'object' || Array.isArray(headers)) {
         throw new Error(`${label} must be an object.`);
@@ -67,19 +64,6 @@ function normalizeGatewayUrl(gatewayUrl: string): string {
     return gatewayUrl.replace(/\/+$/, '').replace(/\/ipfs$/, '');
 }
 
-function normalizeGatewayReadError(
-    error: unknown,
-    messages: ReadIpfsPublicGatewayErrorMessages
-): Error {
-    if (error instanceof Error) {
-        return error;
-    }
-    if (!error) {
-        return new Error(`${messages.fallbackErrorBaseMessage}.`);
-    }
-    return new Error(`${messages.fallbackErrorBaseMessage}: ${String(error)}`);
-}
-
 async function readIpfsPublicGatewayBytesWithMessages(
     {
         gatewayUrl,
@@ -92,7 +76,7 @@ async function readIpfsPublicGatewayBytesWithMessages(
         maxBytes,
         signal,
     }: ReadIpfsPublicGatewayOptions,
-    messages: ReadIpfsPublicGatewayErrorMessages
+    messages: IpfsOperationErrorMessages
 ): Promise<ReadIpfsBytesResult> {
     const normalizedGatewayUrl = normalizeGatewayUrl(
         assertNonEmptyString(gatewayUrl, 'gatewayUrl')
@@ -170,7 +154,7 @@ async function readIpfsPublicGatewayBytesWithMessages(
         }
     }
 
-    throw normalizeGatewayReadError(lastError, messages);
+    throw normalizeIpfsOperationError(lastError, messages);
 }
 
 async function readIpfsPublicGatewayBytes(

@@ -4,10 +4,12 @@ import {
     createTimeoutSignal,
     invokeWithAbort,
     IpfsHttpError,
+    normalizeIpfsOperationError,
     shouldRetryError,
     throwIfSignalAborted,
     waitForRetryDelay,
 } from './ipfs-request-utils.js';
+import type { IpfsOperationErrorMessages } from './ipfs-request-utils.js';
 import { assertNonEmptyString, assertPositiveInteger } from './validation-utils.js';
 
 export type ReadIpfsFetchLike = (
@@ -42,21 +44,6 @@ export interface ReadIpfsBytesResult {
     bytes: Uint8Array;
     byteLength: number;
     attemptCount: number;
-}
-
-interface ReadIpfsErrorMessages {
-    abortErrorMessage: string;
-    fallbackErrorBaseMessage: string;
-}
-
-function normalizeReadError(error: unknown, messages: ReadIpfsErrorMessages): Error {
-    if (error instanceof Error) {
-        return error;
-    }
-    if (!error) {
-        return new Error(`${messages.fallbackErrorBaseMessage}.`);
-    }
-    return new Error(`${messages.fallbackErrorBaseMessage}: ${String(error)}`);
 }
 
 function combineChunks(chunks: Uint8Array[], byteLength: number): Uint8Array {
@@ -124,7 +111,7 @@ async function readIpfsBytesWithMessages(
         maxBytes,
         signal,
     }: ReadIpfsOptions,
-    messages: ReadIpfsErrorMessages
+    messages: IpfsOperationErrorMessages
 ): Promise<ReadIpfsBytesResult> {
     if (config === null || typeof config !== 'object' || Array.isArray(config)) {
         throw new Error('config must be an object.');
@@ -195,7 +182,7 @@ async function readIpfsBytesWithMessages(
         }
     }
 
-    throw normalizeReadError(lastError, messages);
+    throw normalizeIpfsOperationError(lastError, messages);
 }
 
 async function readIpfsBytes(options: ReadIpfsOptions): Promise<ReadIpfsBytesResult> {

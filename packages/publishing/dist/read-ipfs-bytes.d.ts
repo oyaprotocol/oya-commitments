@@ -1,4 +1,5 @@
 import type { IpfsConfig } from './ipfs-config.js';
+import type { IpfsOperationErrorMessages } from './ipfs-request-utils.js';
 export type ReadIpfsFetchLike = (url: string, options: ReadIpfsFetchOptions) => Promise<ReadIpfsResponse>;
 export interface ReadIpfsFetchOptions {
     method: 'POST';
@@ -25,15 +26,11 @@ export interface ReadIpfsBytesResult {
     byteLength: number;
     attemptCount: number;
 }
-interface ReadIpfsErrorMessages {
-    abortErrorMessage: string;
-    fallbackErrorBaseMessage: string;
-}
 declare function readBoundedBytes({ body, maxBytes, signal, }: {
     body: ReadableStream<Uint8Array> | null;
     maxBytes: number;
     signal: AbortSignal | undefined;
 }): Promise<Uint8Array>;
-declare function readIpfsBytesWithMessages({ config, fetch, cid, maxBytes, signal, }: ReadIpfsOptions, messages: ReadIpfsErrorMessages): Promise<ReadIpfsBytesResult>;
+declare function readIpfsBytesWithMessages({ config, fetch, cid, maxBytes, signal, }: ReadIpfsOptions, messages: IpfsOperationErrorMessages): Promise<ReadIpfsBytesResult>;
 declare function readIpfsBytes(options: ReadIpfsOptions): Promise<ReadIpfsBytesResult>;
 export { readBoundedBytes, readIpfsBytes, readIpfsBytesWithMessages };

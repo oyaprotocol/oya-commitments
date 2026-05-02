@@ -41,6 +41,7 @@ Definitions used in this plan:
 - [x] 2026-05-01 23:21Z: Added `readIpfsPublicGatewayBytes(...)` for bounded public gateway `GET /ipfs/<cid>` reads while keeping gateway retrieval separate from Kubo RPC helpers.
 - [x] 2026-05-01 23:24Z: Added `readIpfsPublicGatewayText(...)` as an ASCII text wrapper over the public gateway byte reader.
 - [x] 2026-05-02 20:56Z: Renamed read fetch-contract option types from request-oriented names to `ReadIpfsFetchOptions` and `ReadIpfsPublicGatewayFetchOptions`.
+- [x] 2026-05-02 21:00Z: Consolidated duplicate read fallback-error normalization into shared internal `normalizeIpfsOperationError(...)`.
 - [ ] Create or update a future plan for onchain CID logging and public indexing when ready.
 
 ## Surprises & Discoveries
@@ -129,6 +130,8 @@ Public gateway retrieval follow-up added `readIpfsPublicGatewayBytes(...)`, a bo
 
 Public gateway text retrieval follow-up added `readIpfsPublicGatewayText(...)`, which mirrors the Kubo reader split by wrapping the public gateway byte reader and adding ASCII verification plus text decoding.
 
+Read error cleanup moved duplicate fallback error-message handling from the Kubo and public gateway byte readers into package-internal `normalizeIpfsOperationError(...)` and `IpfsOperationErrorMessages` in `ipfs-request-utils.ts`.
+
 Validation evidence for Milestone 2:
 
 - `npm --prefix packages run build`
@@ -145,7 +148,7 @@ The hardened package area lives under `packages/`. The relevant local instructio
 Current package files:
 
 - `packages/publishing/src/ipfs-config.ts`: validates explicit IPFS transport settings.
-- `packages/publishing/src/ipfs-request-utils.ts`: contains shared retry, timeout, and abort helpers for IPFS HTTP requests.
+- `packages/publishing/src/ipfs-request-utils.ts`: contains shared retry, timeout, abort, HTTP error, and operation-error normalization helpers for IPFS HTTP requests.
 - `packages/publishing/src/validation-utils.ts`: contains shared internal validation helpers.
 - `packages/publishing/src/publish-to-ipfs.ts`: publishes content to Kubo `/api/v0/add` using injected `fetch`.
 - `packages/publishing/src/read-ipfs-bytes.ts`: reads bounded arbitrary byte content from Kubo `/api/v0/cat` using injected `fetch`.

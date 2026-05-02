@@ -21,6 +21,11 @@ interface IpfsHttpErrorOptions {
     responseText?: string;
 }
 
+interface IpfsOperationErrorMessages {
+    abortErrorMessage: string;
+    fallbackErrorBaseMessage: string;
+}
+
 class IpfsHttpError extends Error {
     readonly status: number;
     readonly responseText: string | undefined;
@@ -77,6 +82,19 @@ function shouldRetryError(error: unknown): boolean {
         message.includes('connection refused') ||
         message.includes('connection reset')
     );
+}
+
+function normalizeIpfsOperationError(
+    error: unknown,
+    messages: IpfsOperationErrorMessages
+): Error {
+    if (error instanceof Error) {
+        return error;
+    }
+    if (!error) {
+        return new Error(`${messages.fallbackErrorBaseMessage}.`);
+    }
+    return new Error(`${messages.fallbackErrorBaseMessage}: ${String(error)}`);
 }
 
 function createTimeoutSignal(timeoutMs: number): AbortSignalHandle {
@@ -236,8 +254,9 @@ export {
     createTimeoutSignal,
     invokeWithAbort,
     IpfsHttpError,
+    normalizeIpfsOperationError,
     shouldRetryError,
     throwIfSignalAborted,
     waitForRetryDelay,
 };
-export type { AbortSignalHandle };
+export type { AbortSignalHandle, IpfsOperationErrorMessages };

@@ -1,3 +1,4 @@
+import type { IpfsOperationErrorMessages } from './ipfs-request-utils.js';
 import { type ReadIpfsBytesResult } from './read-ipfs-bytes.js';
 export type ReadIpfsPublicGatewayFetchLike = (url: string, options: ReadIpfsPublicGatewayFetchOptions) => Promise<ReadIpfsPublicGatewayResponse>;
 export interface ReadIpfsPublicGatewayFetchOptions {
@@ -22,10 +23,6 @@ export interface ReadIpfsPublicGatewayOptions {
     maxBytes: number;
     signal?: AbortSignal;
 }
-interface ReadIpfsPublicGatewayErrorMessages {
-    abortErrorMessage: string;
-    fallbackErrorBaseMessage: string;
-}
-declare function readIpfsPublicGatewayBytesWithMessages({ gatewayUrl, headers, timeoutMs, maxRetries, retryDelayMs, fetch, cid, maxBytes, signal, }: ReadIpfsPublicGatewayOptions, messages: ReadIpfsPublicGatewayErrorMessages): Promise<ReadIpfsBytesResult>;
+declare function readIpfsPublicGatewayBytesWithMessages({ gatewayUrl, headers, timeoutMs, maxRetries, retryDelayMs, fetch, cid, maxBytes, signal, }: ReadIpfsPublicGatewayOptions, messages: IpfsOperationErrorMessages): Promise<ReadIpfsBytesResult>;
 declare function readIpfsPublicGatewayBytes(options: ReadIpfsPublicGatewayOptions): Promise<ReadIpfsBytesResult>;
 export { readIpfsPublicGatewayBytes, readIpfsPublicGatewayBytesWithMessages };
