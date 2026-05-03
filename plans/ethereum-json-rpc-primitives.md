@@ -206,7 +206,7 @@ The current package layout relevant to this work is:
 - `packages/ethereum/package.json`: package manifest for `@oyaprotocol/ethereum`, exporting `./dist/index.js`.
 - `packages/ethereum/src/index.ts`: exports the current config/request public surface.
 - `packages/ethereum/src/config.ts`: validates explicit Ethereum JSON-RPC transport settings.
-- `packages/ethereum/src/raw-transactions.ts`: contains raw transaction submission helpers including `ethSendRawTransaction(...)`.
+- `packages/ethereum/src/transactions.ts`: contains transaction submission helpers including `ethSendRawTransaction(...)`.
 - `packages/ethereum/src/hex.ts`: contains small local hex/hash validators for Ethereum method wrappers.
 - `packages/ethereum/src/request-utils.ts`: contains the raw JSON-RPC request primitive, JSON-RPC error classes, timeout/abort/retry handling, and fetch-like types.
 - `packages/utils/src/validation-utils.ts`: contains shared validation helpers used by Ethereum and IPFS.
@@ -234,7 +234,7 @@ Add `packages/ethereum/src/config.ts`, `packages/ethereum/src/request-utils.ts`,
 
 Milestone 2: Add Ethereum method wrappers and hex validation.
 
-Add `packages/ethereum/src/raw-transactions.ts` and other equivalent package-local modules for method wrappers. Export:
+Add `packages/ethereum/src/transactions.ts` and other equivalent package-local modules for method wrappers. Export:
 
 - `ethChainId(...)`
 - `ethBlockNumber(...)`
@@ -341,7 +341,7 @@ All commands below assume they are run from the repository root, the directory t
 
 6. Implement Milestone 2 method wrappers and validators:
 
-       packages/ethereum/src/raw-transactions.ts
+       packages/ethereum/src/transactions.ts
        packages/ethereum/src/hex.ts
        packages/ethereum/src/index.ts
 

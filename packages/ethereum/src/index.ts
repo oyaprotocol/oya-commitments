@@ -3,11 +3,11 @@ export type { CreateHttpConfigOptions, HttpConfig } from '@oyaprotocol/utils';
 export {
     EthereumRawTransactionRecoveryError,
     ethSendRawTransaction,
-} from './raw-transactions.js';
+} from './transactions.js';
 export type {
     EthSendRawTransactionOptions,
     EthSendRawTransactionResult,
-} from './raw-transactions.js';
+} from './transactions.js';
 export {
     EthereumJsonRpcError,
     EthereumJsonRpcHttpError,

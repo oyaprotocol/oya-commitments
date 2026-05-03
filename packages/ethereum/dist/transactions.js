@@ -133,4 +133,4 @@ async function ethSendRawTransaction({ config, fetch, rawTransaction, transactio
     }
 }
 export { EthereumRawTransactionRecoveryError, ethSendRawTransaction, };
-//# sourceMappingURL=raw-transactions.js.map
+//# sourceMappingURL=transactions.js.map
