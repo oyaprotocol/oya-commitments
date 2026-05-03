@@ -23,16 +23,18 @@ Definitions used in this plan:
 - [x] 2026-05-02 23:17Z: Created this ExecPlan after reviewing `PLANS.md`, `packages/AGENTS.md`, the completed IPFS kernel package, the placeholder Ethereum package, and reference-only legacy transaction code.
 - [x] 2026-05-03 00:11Z: Updated command instructions to use the repository root rather than a machine-specific absolute clone path.
 - [x] 2026-05-03 00:18Z: Renamed the package shell from `@oyaprotocol/transactions` in `packages/transactions` to `@oyaprotocol/ethereum` in `packages/ethereum`, and updated this ExecPlan to match.
-- [ ] Implement the package-local Ethereum RPC transport config and request primitive.
+- [x] 2026-05-03 02:01Z: Implemented the package-local Ethereum RPC transport config and raw JSON-RPC request primitive.
 - [ ] Add Ethereum method wrappers for calls, gas estimation, raw transaction submission, receipts, receipt waiting, chain/block metadata, and logs.
-- [ ] Add focused tests against fake `fetch` implementations with no external RPC calls.
+- [x] 2026-05-03 02:01Z: Added focused Milestone 1 tests against fake `fetch` implementations with no external RPC calls.
+- [ ] Add focused method-wrapper tests after Milestone 2 exists.
+- [x] 2026-05-03 02:01Z: Documented the current Milestone 1 package surface in `packages/ethereum/README.md`.
 - [ ] Document the public package surface and future Logger compatibility boundaries.
-- [ ] Validate the package build, package-root import, focused tests, and diff hygiene.
+- [x] 2026-05-03 02:01Z: Validated the Milestone 1 package build, package-root import, package-name import, focused tests, and diff hygiene.
 
 ## Surprises & Discoveries
 
-- Observation: The Ethereum kernel package is currently only a placeholder.
-  Evidence: `packages/ethereum/src/index.ts` exports only `packageInfo`, and `packages/ethereum/README.md` says the package is a placeholder shell.
+- Observation: The Ethereum kernel package started as a placeholder and now has its first partial surface.
+  Evidence: before Milestone 1, `packages/ethereum/src/index.ts` exported only `packageInfo`; after Milestone 1, it exports `createEthereumRpcConfig(...)`, `requestEthereumJsonRpc(...)`, and JSON-RPC error classes.
 
 - Observation: The hardened package area must treat existing runtime code as reference material only.
   Evidence: `packages/AGENTS.md` says production-kernel code must not import from `agent/`, `agent-library/`, `node/`, or `frontend/`.
@@ -42,6 +44,9 @@ Definitions used in this plan:
 
 - Observation: The completed IPFS package is the best local model for this work.
   Evidence: `packages/ipfs` uses explicit config, injected `fetch`, timeout/retry handling, package-root exports, built TypeScript declarations, and focused tests against fake transports.
+
+- Observation: The raw JSON-RPC primitive should reject `bigint` params before calling `fetch`.
+  Evidence: JSON cannot encode `bigint`, and `packages/ethereum/test/rpc.test.js` now verifies callers get a clear error instructing them to convert bigint values to Ethereum quantity hex first.
 
 ## Decision Log
 
@@ -69,6 +74,10 @@ Definitions used in this plan:
   Rationale: The package is intended to hold Ethereum JSON-RPC primitives rather than all transaction-domain behavior, and this follows the package naming convention used by `@oyaprotocol/ipfs`.
   Date/Author: 2026-05-03 / Codex.
 
+- Decision: Keep Ethereum validation and request helpers package-local for Milestone 1, even where they resemble IPFS helpers.
+  Rationale: The second package should prove the common shape before `@oyaprotocol/utils` gains public utility APIs. This keeps the first Ethereum diff local and avoids premature cross-package coupling.
+  Date/Author: 2026-05-03 / Codex.
+
 ## Outcomes & Retrospective
 
 This section starts empty except for the initial planning outcome. Update it after each milestone with what changed, which commands were run, and what evidence proves the package works.
@@ -84,6 +93,18 @@ Validation evidence for the rename:
 - From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ethereum').then((m) => console.log(m.packageInfo.name, m.packageInfo.status))"` printed `@oyaprotocol/ethereum placeholder`.
 - `git diff --check`
 
+Milestone 1 is complete. `@oyaprotocol/ethereum` now exposes `createEthereumRpcConfig(...)`, `requestEthereumJsonRpc(...)`, `EthereumJsonRpcError`, and `EthereumJsonRpcHttpError` through the package root. The implementation lives in `packages/ethereum/src/config.ts`, `packages/ethereum/src/request-utils.ts`, and package-local `packages/ethereum/src/validation-utils.ts`. The package remains zero-runtime-dependency and does not import from legacy runtime areas.
+
+The request primitive sends one JSON-RPC POST with explicit config and injected `fetch`, owns the `content-type: application/json` header, enforces timeouts even when fetch ignores abort signals, retries transient HTTP/network failures, surfaces JSON-RPC error payloads as inspectable non-retryable errors, and returns the raw `result` plus attempt metadata. It expects callers to pass JSON-serializable params; future wrappers should convert bigint values to Ethereum quantity hex before calling it.
+
+Validation evidence for Milestone 1:
+
+- `npm --prefix packages run build`
+- `node --test packages/ethereum/test/rpc.test.js` passed 11 tests.
+- `node --input-type=module -e "import('./packages/ethereum/dist/index.js').then((m) => console.log(m.packageInfo.name, m.packageInfo.status, typeof m.createEthereumRpcConfig, typeof m.requestEthereumJsonRpc, typeof m.EthereumJsonRpcError))"` printed `@oyaprotocol/ethereum partial function function function`.
+- From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ethereum').then((m) => console.log(m.packageInfo.name, m.packageInfo.status, typeof m.requestEthereumJsonRpc))"` printed `@oyaprotocol/ethereum partial function`.
+- `git diff --check`
+
 ## Context and Orientation
 
 The repository has a newer hardened-kernel area under `packages/`. Local instructions for this area live in `packages/AGENTS.md`. Those instructions require package-root public exports, small reviewable package shells, no imports from legacy runtime areas, and validation with `npm run build` from `packages/`.
@@ -93,8 +114,12 @@ The current package layout relevant to this work is:
 - `packages/package.json`: workspace manifest and TypeScript build scripts for kernel packages.
 - `packages/tsconfig.json` and `packages/tsconfig.base.json`: TypeScript project configuration for all kernel packages.
 - `packages/ethereum/package.json`: package manifest for `@oyaprotocol/ethereum`, exporting `./dist/index.js`.
-- `packages/ethereum/src/index.ts`: currently only exports placeholder `packageInfo`.
-- `packages/ethereum/README.md`: currently documents the package as a placeholder.
+- `packages/ethereum/src/index.ts`: exports package metadata plus the current config/request public surface.
+- `packages/ethereum/src/config.ts`: validates explicit Ethereum JSON-RPC transport settings.
+- `packages/ethereum/src/request-utils.ts`: contains the raw JSON-RPC request primitive, JSON-RPC error classes, timeout/abort/retry handling, and fetch-like types.
+- `packages/ethereum/src/validation-utils.ts`: contains package-local validation helpers for Milestone 1.
+- `packages/ethereum/test/rpc.test.js`: tests the built JSON-RPC request surface against fake `fetch` implementations.
+- `packages/ethereum/README.md`: documents the current Milestone 1 surface.
 - `packages/ipfs/src/config.ts`, `packages/ipfs/src/request-utils.ts`, and `packages/ipfs/test/*.test.js`: reference patterns for strict config, injected fetch, timeout/retry behavior, abort handling, and focused tests.
 
 Reference-only runtime code:
@@ -107,7 +132,7 @@ This plan does not require Solidity changes. It does not touch `src/`, `script/`
 
 ## Plan of Work
 
-Milestone 1: Create the package-local RPC transport surface.
+Milestone 1: Create the package-local RPC transport surface. This milestone is complete.
 
 Add `packages/ethereum/src/config.ts`, `packages/ethereum/src/request-utils.ts`, and any small validation helpers needed locally. Export `createEthereumRpcConfig(...)`, `requestEthereumJsonRpc(...)`, and related types from `packages/ethereum/src/index.ts`.
 
@@ -149,7 +174,7 @@ Do not implement checksum validation in this milestone because that requires Kec
 
 `ethGetLogs(...)` should accept a filter with optional `fromBlock`, `toBlock`, `address`, and `topics`. It should validate the shape but not impose application-specific chunking. Documentation must tell callers to chunk large ranges at the runtime layer.
 
-Milestone 3: Add focused tests.
+Milestone 3: Add focused tests. The Milestone 1 request/config tests are complete; wrapper, receipt, and log tests remain for Milestone 2.
 
 Add tests under `packages/ethereum/test/`, modeled after the IPFS package tests. Tests should import from `../dist/index.js`, so they validate the package build output rather than TypeScript source.
 
@@ -191,7 +216,7 @@ All commands below assume they are run from the repository root, the directory t
        sed -n '1,120p' packages/AGENTS.md
        git status --short
 
-2. Inspect the current placeholder package and IPFS patterns:
+2. Inspect the current package and IPFS patterns:
 
        sed -n '1,160p' packages/ethereum/src/index.ts
        sed -n '1,160p' packages/ethereum/README.md
@@ -303,10 +328,11 @@ If unrelated local changes appear in the worktree, leave them alone. Only modify
 
 ## Artifacts and Notes
 
-Current evidence from planning:
+Current package evidence:
 
-- `packages/ethereum/src/index.ts` is a placeholder package entrypoint.
-- `packages/ethereum/README.md` is a placeholder README.
+- `packages/ethereum/src/index.ts` exports `packageInfo`, `createEthereumRpcConfig(...)`, `requestEthereumJsonRpc(...)`, `EthereumJsonRpcError`, `EthereumJsonRpcHttpError`, and public transport/request types.
+- `packages/ethereum/README.md` documents the current JSON-RPC config/request surface.
+- `packages/ethereum/test/rpc.test.js` validates the Milestone 1 surface against fake fetch implementations with no network access.
 - `packages/ipfs` demonstrates the current hardened package style: strict config, explicit injected dependencies, timeout/retry helpers, built TypeScript output, and Node tests against `dist`.
 - `agent/src/lib/tx.js` has existing app-layer `viem` usage for reference only; it should not be imported by the package.
 
