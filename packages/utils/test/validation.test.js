@@ -7,7 +7,9 @@ import {
     assertNonNegativeInteger,
     assertPositiveInteger,
     createHttpConfig,
+    hasRetryableNetworkErrorCode,
     isPlainObject,
+    RETRYABLE_HTTP_NETWORK_ERROR_CODES,
 } from '../dist/index.js';
 
 test('string and integer validators normalize and reject invalid values', () => {
@@ -118,4 +120,31 @@ test('createHttpConfig validates and freezes HTTP transport configuration', () =
             }),
         /config\.headers must not include content-type/
     );
+});
+
+test('hasRetryableNetworkErrorCode detects retryable HTTP network codes', () => {
+    assert.equal(RETRYABLE_HTTP_NETWORK_ERROR_CODES.has('ECONNRESET'), true);
+    assert.equal(
+        hasRetryableNetworkErrorCode({
+            code: 'econnreset',
+        }),
+        true
+    );
+    assert.equal(
+        hasRetryableNetworkErrorCode(
+            new Error('fetch failed', {
+                cause: {
+                    code: 'UND_ERR_SOCKET',
+                },
+            })
+        ),
+        true
+    );
+    assert.equal(
+        hasRetryableNetworkErrorCode({
+            code: 'ERR_INVALID_URL',
+        }),
+        false
+    );
+    assert.equal(hasRetryableNetworkErrorCode(null), false);
 });

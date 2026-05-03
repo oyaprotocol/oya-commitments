@@ -35,6 +35,7 @@ Definitions used in this plan:
 - [x] 2026-05-03 21:35Z: Replaced the package-branded `EthereumRpcConfig` type with shared `HttpConfig` / `CreateHttpConfigOptions` from `@oyaprotocol/utils`; `createEthereumRpcConfig(...)` now accepts and returns the generic `url`-based HTTP config shape.
 - [x] 2026-05-03 21:42Z: Gated JSON-RPC retries to read-only Ethereum methods and `eth_sendRawTransaction`, preventing retry replays for arbitrary state-changing methods.
 - [x] 2026-05-03 21:51Z: Moved shared HTTP config validation/freezing into `@oyaprotocol/utils` as `createHttpConfig(...)`; Ethereum and IPFS now keep only their public creator names and package-specific URL normalization.
+- [x] 2026-05-03 21:59Z: Moved shared retryable HTTP network error codes into `@oyaprotocol/utils` as `RETRYABLE_HTTP_NETWORK_ERROR_CODES` plus `hasRetryableNetworkErrorCode(...)`; Ethereum and IPFS now import the shared helper.
 
 ## Surprises & Discoveries
 
@@ -89,6 +90,10 @@ Definitions used in this plan:
 
 - Decision: Move shared HTTP config creation into `@oyaprotocol/utils`.
   Rationale: After both IPFS and Ethereum adopted the same `HttpConfig` / `CreateHttpConfigOptions` shape, their creator functions duplicated all validation and freezing behavior. A small `createHttpConfig(...)` helper centralizes the common policy while preserving `createIpfsConfig(...)` and `createEthereumRpcConfig(...)` as package-root APIs with package-specific URL normalization.
+  Date/Author: 2026-05-03 / Codex.
+
+- Decision: Move shared retryable HTTP network error code detection into `@oyaprotocol/utils`.
+  Rationale: IPFS and Ethereum used the same network error code allowlist and cause-chain code inspection. Sharing `RETRYABLE_HTTP_NETWORK_ERROR_CODES` and `hasRetryableNetworkErrorCode(...)` removes duplication while preserving package-local retry policy decisions such as Ethereum JSON-RPC method gating.
   Date/Author: 2026-05-03 / Codex.
 
 ## Outcomes & Retrospective
@@ -154,6 +159,16 @@ Validation evidence for shared HTTP config creator cleanup:
 - `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
 - From `packages/`, package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` printed `function function false`.
 - `git diff --check`
+
+Shared retryable network code cleanup added `RETRYABLE_HTTP_NETWORK_ERROR_CODES` and `hasRetryableNetworkErrorCode(...)` to `@oyaprotocol/utils`. IPFS and Ethereum now use the shared helper for network error code detection while keeping HTTP status handling, message fallback handling, and Ethereum JSON-RPC error/method policy local.
+
+Validation evidence for shared retryable network code cleanup:
+
+- `npm run build` from `packages/`
+- `node --test packages/utils/test/validation.test.js` passed 5 tests.
+- `node --test packages/ipfs/test/publish.test.js packages/ipfs/test/retrieval.test.js` passed 44 tests.
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- From `packages/`, package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` passed.
 
 ## Context and Orientation
 

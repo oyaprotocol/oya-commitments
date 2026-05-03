@@ -22,3 +22,8 @@ Small shared utilities for hardened Oya kernel packages.
 ## HTTP Config Helpers
 
 - `createHttpConfig(options, normalizeUrl?)`
+
+## HTTP Network Retry Helpers
+
+- `RETRYABLE_HTTP_NETWORK_ERROR_CODES`
+- `hasRetryableNetworkErrorCode(error)`

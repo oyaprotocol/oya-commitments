@@ -1,18 +1,5 @@
 import type { HttpConfig } from '@oyaprotocol/utils';
-import { isPlainObject } from '@oyaprotocol/utils';
-
-const RETRYABLE_ERROR_CODES = new Set([
-    'ECONNREFUSED',
-    'ECONNRESET',
-    'EAI_AGAIN',
-    'ENOTFOUND',
-    'EPIPE',
-    'ETIMEDOUT',
-    'UND_ERR_BODY_TIMEOUT',
-    'UND_ERR_CONNECT_TIMEOUT',
-    'UND_ERR_HEADERS_TIMEOUT',
-    'UND_ERR_SOCKET',
-]);
+import { hasRetryableNetworkErrorCode, isPlainObject } from '@oyaprotocol/utils';
 
 const RETRYABLE_JSON_RPC_METHODS = new Set([
     'eth_accounts',
@@ -178,11 +165,8 @@ function shouldRetryError(error: unknown): boolean {
     if (names.includes('TimeoutError')) {
         return true;
     }
-    const codes = readErrorStringChain(error, 'code');
-    for (const code of codes) {
-        if (RETRYABLE_ERROR_CODES.has(code.toUpperCase())) {
-            return true;
-        }
+    if (hasRetryableNetworkErrorCode(error)) {
+        return true;
     }
     const message = readErrorStringChain(error, 'message').join(' ').toLowerCase();
     return (
