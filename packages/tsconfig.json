@@ -11,7 +11,7 @@
       "path": "./ipfs"
     },
     {
-      "path": "./transactions"
+      "path": "./ethereum"
     },
     {
       "path": "./verification"
