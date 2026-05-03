@@ -21,6 +21,7 @@ Definitions used in this plan:
 ## Progress
 
 - [x] 2026-05-02 23:17Z: Created this ExecPlan after reviewing `PLANS.md`, `packages/AGENTS.md`, the completed IPFS kernel package, the placeholder transactions package, and reference-only legacy transaction code.
+- [x] 2026-05-03 00:11Z: Updated command instructions to use the repository root rather than a machine-specific absolute clone path.
 - [ ] Implement the package-local Ethereum RPC transport config and request primitive.
 - [ ] Add Ethereum method wrappers for calls, gas estimation, raw transaction submission, receipts, receipt waiting, chain/block metadata, and logs.
 - [ ] Add focused tests against fake `fetch` implementations with no external RPC calls.
@@ -169,7 +170,7 @@ After the package primitives are validated, update this ExecPlan with a follow-o
 
 ## Concrete Steps
 
-All commands below assume the working directory is `/Users/johnshutt/Code/oya-commitments` unless otherwise stated.
+All commands below assume they are run from the repository root, the directory that contains `AGENTS.md`, `PLANS.md`, and `packages/`, unless otherwise stated.
 
 1. Reconfirm local instructions and current state:
 
