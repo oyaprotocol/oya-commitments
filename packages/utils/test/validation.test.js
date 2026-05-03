@@ -120,6 +120,17 @@ test('createHttpConfig validates and freezes HTTP transport configuration', () =
             }),
         /config\.headers must not include content-type/
     );
+    assert.throws(
+        () =>
+            createHttpConfig({
+                url: '/',
+                headers: {},
+                timeoutMs: 1000,
+                maxRetries: 2,
+                retryDelayMs: 50,
+            }),
+        /config\.url must be a non-empty string/
+    );
 });
 
 test('hasRetryableNetworkErrorCode detects retryable HTTP network codes', () => {

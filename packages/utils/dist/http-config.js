@@ -3,8 +3,9 @@ function normalizeUrl(url) {
     return url.replace(/\/+$/, '');
 }
 function createHttpConfig({ url, headers, timeoutMs, maxRetries, retryDelayMs }, normalizeConfigUrl = normalizeUrl) {
+    const normalizedUrl = assertNonEmptyString(normalizeConfigUrl(assertNonEmptyString(url, 'config.url')), 'config.url');
     return Object.freeze({
-        url: normalizeConfigUrl(assertNonEmptyString(url, 'config.url')),
+        url: normalizedUrl,
         headers: assertHeadersObject(headers, 'config.headers', {
             disallowedNames: ['content-type'],
         }),

@@ -29,8 +29,13 @@ function createHttpConfig(
     { url, headers, timeoutMs, maxRetries, retryDelayMs }: CreateHttpConfigOptions,
     normalizeConfigUrl: (url: string) => string = normalizeUrl
 ): HttpConfig {
+    const normalizedUrl = assertNonEmptyString(
+        normalizeConfigUrl(assertNonEmptyString(url, 'config.url')),
+        'config.url'
+    );
+
     return Object.freeze({
-        url: normalizeConfigUrl(assertNonEmptyString(url, 'config.url')),
+        url: normalizedUrl,
         headers: assertHeadersObject(headers, 'config.headers', {
             disallowedNames: ['content-type'],
         }),

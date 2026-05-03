@@ -36,6 +36,7 @@ Definitions used in this plan:
 - [x] 2026-05-03 21:42Z: Gated JSON-RPC retries to read-only Ethereum methods and `eth_sendRawTransaction`, preventing retry replays for arbitrary state-changing methods.
 - [x] 2026-05-03 21:51Z: Moved shared HTTP config validation/freezing into `@oyaprotocol/utils` as `createHttpConfig(...)`; Ethereum and IPFS now keep only their public creator names and package-specific URL normalization.
 - [x] 2026-05-03 21:59Z: Moved shared retryable HTTP network error codes into `@oyaprotocol/utils` as `RETRYABLE_HTTP_NETWORK_ERROR_CODES` plus `hasRetryableNetworkErrorCode(...)`; Ethereum and IPFS now import the shared helper.
+- [x] 2026-05-03 22:11Z: Tightened `createHttpConfig(...)` to reject URLs that normalize to an empty string, including generic `/` and IPFS `/api/v0/` inputs.
 
 ## Surprises & Discoveries
 
@@ -167,6 +168,16 @@ Validation evidence for shared retryable network code cleanup:
 - `npm run build` from `packages/`
 - `node --test packages/utils/test/validation.test.js` passed 5 tests.
 - `node --test packages/ipfs/test/publish.test.js packages/ipfs/test/retrieval.test.js` passed 44 tests.
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- From `packages/`, package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` passed.
+
+Normalized URL validation cleanup made `createHttpConfig(...)` validate the URL after package-specific normalization, so inputs such as `/` or IPFS `/api/v0/` cannot create an empty `config.url`. The fix keeps the existing `config.url must be a non-empty string` error path.
+
+Validation evidence for normalized URL validation cleanup:
+
+- `npm run build` from `packages/`
+- `node --test packages/utils/test/validation.test.js` passed 5 tests.
+- `node --test packages/ipfs/test/publish.test.js packages/ipfs/test/retrieval.test.js` passed 45 tests.
 - `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
 - From `packages/`, package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` passed.
 

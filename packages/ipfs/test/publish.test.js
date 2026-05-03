@@ -424,6 +424,20 @@ test('createIpfsConfig normalizes a Kubo /api/v0 base URL', () => {
     assert.equal(config.url, 'http://127.0.0.1:5001');
 });
 
+test('createIpfsConfig rejects a Kubo API path that normalizes to an empty URL', () => {
+    assert.throws(
+        () =>
+            createIpfsConfig({
+                url: '/api/v0/',
+                headers: {},
+                timeoutMs: 1_000,
+                maxRetries: 1,
+                retryDelayMs: 0,
+            }),
+        /config\.url must be a non-empty string/
+    );
+});
+
 test('publishToIpfs clears the fallback timeout timer after a successful request', async () => {
     const originalAbortSignalTimeout = AbortSignal.timeout;
     const originalSetTimeout = globalThis.setTimeout;
