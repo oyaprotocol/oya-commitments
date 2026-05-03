@@ -92,6 +92,7 @@ interface EthereumJsonRpcHttpErrorOptions {
 interface EthereumJsonRpcErrorOptions {
     method: string;
     response: unknown;
+    attemptCount?: number;
 }
 
 interface JsonRpcErrorPayload {
@@ -113,18 +114,23 @@ class EthereumJsonRpcHttpError extends Error {
 }
 
 class EthereumJsonRpcError extends Error {
+    readonly attemptCount: number;
     readonly code: number | null;
     readonly data?: unknown;
     readonly method: string;
     readonly response: unknown;
 
-    constructor(error: JsonRpcErrorPayload, { method, response }: EthereumJsonRpcErrorOptions) {
+    constructor(
+        error: JsonRpcErrorPayload,
+        { method, response, attemptCount = 1 }: EthereumJsonRpcErrorOptions
+    ) {
         const message =
             typeof error.message === 'string' && error.message.trim()
                 ? error.message.trim()
                 : `Ethereum JSON-RPC ${method} failed.`;
         super(message);
         this.name = 'EthereumJsonRpcError';
+        this.attemptCount = attemptCount;
         this.code = typeof error.code === 'number' ? error.code : null;
         if ('data' in error) {
             this.data = error.data;
@@ -377,10 +383,12 @@ function parseJsonRpcResponse({
     text,
     method,
     id,
+    attemptCount,
 }: {
     text: string;
     method: string;
     id: string | number;
+    attemptCount: number;
 }): { result: unknown; response: unknown } {
     let response: unknown;
     try {
@@ -396,7 +404,11 @@ function parseJsonRpcResponse({
     }
     if ('error' in response) {
         const errorPayload = isPlainObject(response.error) ? response.error : {};
-        throw new EthereumJsonRpcError(errorPayload, { method, response });
+        throw new EthereumJsonRpcError(errorPayload, {
+            method,
+            response,
+            attemptCount,
+        });
     }
     if (!('result' in response)) {
         throw new Error('Ethereum JSON-RPC response did not include a result.');
@@ -486,6 +498,7 @@ async function requestEthereumJsonRpc<TResult = unknown>({
                 text: responseText,
                 method: normalizedMethod,
                 id: normalizedId,
+                attemptCount: attempt,
             });
 
             return {

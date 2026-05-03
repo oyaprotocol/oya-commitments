@@ -52,16 +52,18 @@ class EthereumJsonRpcHttpError extends Error {
     }
 }
 class EthereumJsonRpcError extends Error {
+    attemptCount;
     code;
     data;
     method;
     response;
-    constructor(error, { method, response }) {
+    constructor(error, { method, response, attemptCount = 1 }) {
         const message = typeof error.message === 'string' && error.message.trim()
             ? error.message.trim()
             : `Ethereum JSON-RPC ${method} failed.`;
         super(message);
         this.name = 'EthereumJsonRpcError';
+        this.attemptCount = attemptCount;
         this.code = typeof error.code === 'number' ? error.code : null;
         if ('data' in error) {
             this.data = error.data;
@@ -270,7 +272,7 @@ function buildJsonRpcBody({ id, method, params, }) {
         throw new Error('Ethereum JSON-RPC params must be JSON-serializable; convert bigint values to quantity hex strings before calling requestEthereumJsonRpc.', { cause: error });
     }
 }
-function parseJsonRpcResponse({ text, method, id, }) {
+function parseJsonRpcResponse({ text, method, id, attemptCount, }) {
     let response;
     try {
         response = JSON.parse(text);
@@ -286,7 +288,11 @@ function parseJsonRpcResponse({ text, method, id, }) {
     }
     if ('error' in response) {
         const errorPayload = isPlainObject(response.error) ? response.error : {};
-        throw new EthereumJsonRpcError(errorPayload, { method, response });
+        throw new EthereumJsonRpcError(errorPayload, {
+            method,
+            response,
+            attemptCount,
+        });
     }
     if (!('result' in response)) {
         throw new Error('Ethereum JSON-RPC response did not include a result.');
@@ -354,6 +360,7 @@ async function requestEthereumJsonRpc({ config, fetch, method, params = [], id, 
                 text: responseText,
                 method: normalizedMethod,
                 id: normalizedId,
+                attemptCount: attempt,
             });
             return {
                 result: parsed.result,

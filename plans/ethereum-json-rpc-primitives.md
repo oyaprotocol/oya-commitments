@@ -37,6 +37,7 @@ Definitions used in this plan:
 - [x] 2026-05-03 21:51Z: Moved shared HTTP config validation/freezing into `@oyaprotocol/utils` as `createHttpConfig(...)`; Ethereum and IPFS now keep only their public creator names and package-specific URL normalization.
 - [x] 2026-05-03 21:59Z: Moved shared retryable HTTP network error codes into `@oyaprotocol/utils` as `RETRYABLE_HTTP_NETWORK_ERROR_CODES` plus `hasRetryableNetworkErrorCode(...)`; Ethereum and IPFS now import the shared helper.
 - [x] 2026-05-03 22:11Z: Tightened `createHttpConfig(...)` to reject URLs that normalize to an empty string, including generic `/` and IPFS `/api/v0/` inputs.
+- [x] 2026-05-03 22:31Z: Added `ethSendRawTransaction(...)` with optional caller-supplied `transactionHash` recovery for duplicate-style retry errors, plus local hex validators and focused wrapper tests.
 
 ## Surprises & Discoveries
 
@@ -95,6 +96,10 @@ Definitions used in this plan:
 
 - Decision: Move shared retryable HTTP network error code detection into `@oyaprotocol/utils`.
   Rationale: IPFS and Ethereum used the same network error code allowlist and cause-chain code inspection. Sharing `RETRYABLE_HTTP_NETWORK_ERROR_CODES` and `hasRetryableNetworkErrorCode(...)` removes duplication while preserving package-local retry policy decisions such as Ethereum JSON-RPC method gating.
+  Date/Author: 2026-05-03 / Codex.
+
+- Decision: Add raw transaction retry recovery through an optional caller-supplied transaction hash instead of package-owned Keccak hashing.
+  Rationale: Signing code outside this package is the natural place to compute a raw transaction hash. `ethSendRawTransaction(...)` can use that hash to verify duplicate-style retry errors with `eth_getTransactionByHash(...)` without adding a Keccak dependency or hashing implementation to the network-adapter package.
   Date/Author: 2026-05-03 / Codex.
 
 ## Outcomes & Retrospective
@@ -181,6 +186,15 @@ Validation evidence for normalized URL validation cleanup:
 - `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
 - From `packages/`, package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` passed.
 
+Raw transaction wrapper cleanup added `ethSendRawTransaction(...)`, `EthereumRawTransactionRecoveryError`, local raw-transaction/hash validators, and JSON-RPC error attempt metadata. The wrapper submits already signed raw transactions and returns normalized hash/attempt metadata. If a retry of `eth_sendRawTransaction` returns duplicate-style errors such as `already known` or `nonce too low`, a supplied `transactionHash` lets the wrapper confirm exact acceptance through `eth_getTransactionByHash(...)`; without a hash, it throws an inspectable recovery error instead of presenting a definite failure.
+
+Validation evidence for raw transaction wrapper cleanup:
+
+- `npm run build` from `packages/`
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- `node --test packages/ethereum/test/ethereum.test.js` passed 6 tests.
+- From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ethereum').then((m) => console.log(typeof m.createEthereumRpcConfig, typeof m.requestEthereumJsonRpc, typeof m.ethSendRawTransaction, typeof m.EthereumRawTransactionRecoveryError, Object.hasOwn(m, 'packageInfo')))"` printed `function function function function false`.
+
 ## Context and Orientation
 
 The repository has a newer hardened-kernel area under `packages/`. Local instructions for this area live in `packages/AGENTS.md`. Those instructions require package-root public exports, small reviewable package shells, no imports from legacy runtime areas, and validation with `npm run build` from `packages/`.
@@ -192,6 +206,8 @@ The current package layout relevant to this work is:
 - `packages/ethereum/package.json`: package manifest for `@oyaprotocol/ethereum`, exporting `./dist/index.js`.
 - `packages/ethereum/src/index.ts`: exports the current config/request public surface.
 - `packages/ethereum/src/config.ts`: validates explicit Ethereum JSON-RPC transport settings.
+- `packages/ethereum/src/ethereum.ts`: contains the first Ethereum method wrapper, `ethSendRawTransaction(...)`.
+- `packages/ethereum/src/hex.ts`: contains small local hex/hash validators for Ethereum method wrappers.
 - `packages/ethereum/src/request-utils.ts`: contains the raw JSON-RPC request primitive, JSON-RPC error classes, timeout/abort/retry handling, and fetch-like types.
 - `packages/utils/src/validation-utils.ts`: contains shared validation helpers used by Ethereum and IPFS.
 - `packages/ethereum/test/rpc.test.js`: tests the built JSON-RPC request surface against fake `fetch` implementations.

@@ -1,6 +1,14 @@
 export { createEthereumRpcConfig } from './config.js';
 export type { CreateHttpConfigOptions, HttpConfig } from '@oyaprotocol/utils';
 export {
+    EthereumRawTransactionRecoveryError,
+    ethSendRawTransaction,
+} from './ethereum.js';
+export type {
+    EthSendRawTransactionOptions,
+    EthSendRawTransactionResult,
+} from './ethereum.js';
+export {
     EthereumJsonRpcError,
     EthereumJsonRpcHttpError,
     requestEthereumJsonRpc,

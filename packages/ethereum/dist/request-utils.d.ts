@@ -33,6 +33,7 @@ interface EthereumJsonRpcHttpErrorOptions {
 interface EthereumJsonRpcErrorOptions {
     method: string;
     response: unknown;
+    attemptCount?: number;
 }
 interface JsonRpcErrorPayload {
     code?: unknown;
@@ -45,11 +46,12 @@ declare class EthereumJsonRpcHttpError extends Error {
     constructor(message: string, { status, responseText }: EthereumJsonRpcHttpErrorOptions);
 }
 declare class EthereumJsonRpcError extends Error {
+    readonly attemptCount: number;
     readonly code: number | null;
     readonly data?: unknown;
     readonly method: string;
     readonly response: unknown;
-    constructor(error: JsonRpcErrorPayload, { method, response }: EthereumJsonRpcErrorOptions);
+    constructor(error: JsonRpcErrorPayload, { method, response, attemptCount }: EthereumJsonRpcErrorOptions);
 }
 declare function requestEthereumJsonRpc<TResult = unknown>({ config, fetch, method, params, id, signal, }: RequestEthereumJsonRpcOptions): Promise<RequestEthereumJsonRpcResult<TResult>>;
 export { EthereumJsonRpcError, EthereumJsonRpcHttpError, requestEthereumJsonRpc, };
