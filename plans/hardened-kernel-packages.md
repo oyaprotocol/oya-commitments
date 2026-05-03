@@ -38,6 +38,7 @@ After this phase, a contributor should be able to:
 - [x] 2026-04-30 18:05Z: Simplified the follow-on plan after user clarification: the immediate package work is explicit add-and-pin plus low-level retrieval, while public indexing is deferred to a future onchain Logger design.
 - [x] 2026-05-02 21:52Z: Renamed the initial IPFS work package from `@oyaprotocol/publishing` / `packages/publishing` to `@oyaprotocol/ipfs` / `packages/ipfs` after the package scope expanded from publication to general IPFS retrieval.
 - [x] 2026-05-02 22:01Z: Simplified the IPFS package's internal filenames after the package rename; the follow-on plan now owns the current `config.ts`, `publish.ts`, read helpers, and focused test filenames.
+- [x] 2026-05-03 21:25Z: Removed the placeholder `@oyaprotocol/verification` TypeScript package because future verification work is likely to live in a lower-level language package, while TypeScript kernel packages focus on network interactions.
 
 ## Surprises & Discoveries
 
@@ -148,16 +149,18 @@ Validation evidence for this milestone:
 
 - `npm --prefix packages install`
 - `npm --prefix packages run build`
-- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum, verification]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig, typeof verification.packageInfo); })"`
+- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig); })"`
 - `node --test packages/ipfs/test/publish.test.js`
 
 The final open thread in this plan is now closed. The next publishing primitive has been selected as explicit add-and-pin publication, followed by low-level retrieval. Public indexing is deferred to a future onchain Logger design. Implementation should continue from `plans/ipfs-publication-indexing-and-retrieval.md` rather than extending this package-shell plan.
 
 Follow-on cleanup renamed redundant IPFS package filenames after the package moved to `packages/ipfs`: the current source files are `config.ts`, `publish.ts`, `request-utils.ts`, and the read helpers under `packages/ipfs/src/`; the focused tests are `packages/ipfs/test/publish.test.js` and `packages/ipfs/test/retrieval.test.js`.
 
-Later package export cleanup removed `packageInfo` from non-placeholder packages. `@oyaprotocol/ipfs`, `@oyaprotocol/ethereum`, and `@oyaprotocol/utils` now use real public functions for smoke imports, while `@oyaprotocol/messages` and `@oyaprotocol/verification` keep `packageInfo` because they are still placeholders.
+Later package export cleanup removed `packageInfo` from non-placeholder packages. `@oyaprotocol/ipfs`, `@oyaprotocol/ethereum`, and `@oyaprotocol/utils` now use real public functions for smoke imports, while `@oyaprotocol/messages` keeps `packageInfo` because it is still a placeholder.
 
 Shared validation cleanup moved duplicated IPFS/Ethereum helpers into `@oyaprotocol/utils`: `assertHeadersObject(...)`, `assertNonEmptyString(...)`, `assertNonNegativeInteger(...)`, `assertPositiveInteger(...)`, and `isPlainObject(...)`. IPFS and Ethereum now declare workspace dependencies on `@oyaprotocol/utils` and import through the package root.
+
+Placeholder package cleanup removed `@oyaprotocol/verification` from the TypeScript workspace. Future verification packages can be reintroduced deliberately when the target language/runtime is decided.
 
 ## Context and Orientation
 
@@ -169,7 +172,6 @@ The new package shells introduced in this phase are:
 - `packages/messages` for `@oyaprotocol/messages`
 - `packages/ipfs` for `@oyaprotocol/ipfs`
 - `packages/ethereum` for `@oyaprotocol/ethereum`
-- `packages/verification` for `@oyaprotocol/verification`
 
 Each package currently contains:
 
@@ -209,7 +211,7 @@ The first concrete function is now complete in `@oyaprotocol/ipfs`. The open dec
 
 From the repository root:
 
-1. Create package directories under `packages/` for `utils`, `messages`, `ipfs`, `ethereum`, and `verification`.
+1. Create package directories under `packages/` for `utils`, `messages`, `ipfs`, and `ethereum`.
 
 2. Add `package.json` to each package with:
 
@@ -256,7 +258,6 @@ Validation commands from the repository root:
 - `node --input-type=module -e "import('./packages/messages/dist/index.js').then((m) => console.log(m.packageInfo.name))"`
 - `node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => console.log(typeof m.publishToIpfs, typeof m.readIpfsPublicGatewayText, Object.hasOwn(m, 'packageInfo')))"`
 - `node --input-type=module -e "import('./packages/ethereum/dist/index.js').then((m) => console.log(typeof m.createEthereumRpcConfig, typeof m.requestEthereumJsonRpc, Object.hasOwn(m, 'packageInfo')))"`
-- `node --input-type=module -e "import('./packages/verification/dist/index.js').then((m) => console.log(m.packageInfo.name))"`
 - `node --test packages/utils/test/validation.test.js`
 - `node --test packages/ipfs/test/publish.test.js`
 - `node --test packages/ipfs/test/retrieval.test.js`
@@ -273,7 +274,6 @@ Current package names:
 - `@oyaprotocol/messages`
 - `@oyaprotocol/ipfs`
 - `@oyaprotocol/ethereum`
-- `@oyaprotocol/verification`
 
 Placeholder public surface:
 

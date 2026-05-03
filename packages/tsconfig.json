@@ -12,9 +12,6 @@
     },
     {
       "path": "./ethereum"
-    },
-    {
-      "path": "./verification"
     }
   ]
 }

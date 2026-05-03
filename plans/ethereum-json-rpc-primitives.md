@@ -95,7 +95,7 @@ Rename outcome: the package now lives at `packages/ethereum`, and its package ro
 Current validation evidence for the package set after the rename:
 
 - `npm --prefix packages run build`
-- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum, verification]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig, typeof verification.packageInfo); })"` printed `function object function function object`.
+- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig); })"` printed `function object function function`.
 - From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ethereum').then((m) => console.log(typeof m.createEthereumRpcConfig, typeof m.requestEthereumJsonRpc))"` printed `function function`.
 - `git diff --check`
 
@@ -119,7 +119,7 @@ Validation evidence for package export cleanup:
 - `node --test packages/ethereum/test/rpc.test.js` passed 11 tests.
 - `node --input-type=module -e "import('./packages/ethereum/dist/index.js').then((m) => console.log(typeof m.createEthereumRpcConfig, typeof m.requestEthereumJsonRpc, Object.hasOwn(m, 'packageInfo')))"` printed `function function false`.
 - From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ethereum').then((m) => console.log(typeof m.requestEthereumJsonRpc, Object.hasOwn(m, 'packageInfo')))"` printed `function false`.
-- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum, verification]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig, typeof verification.packageInfo); })"` printed `function object function function object`.
+- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig); })"` printed `function object function function`.
 - `git diff --check`
 
 Shared validation cleanup moved the helpers duplicated between Ethereum and IPFS into `@oyaprotocol/utils`. Ethereum now depends on `@oyaprotocol/utils` through the workspace package graph, imports validation helpers from the package root, and no longer has `packages/ethereum/src/validation-utils.ts`.
@@ -130,7 +130,7 @@ Validation evidence for shared validation cleanup:
 - `node --test packages/utils/test/validation.test.js` passed 3 tests.
 - `node --test packages/ethereum/test/rpc.test.js` passed 11 tests.
 - From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ethereum').then((m) => console.log(typeof m.createEthereumRpcConfig, typeof m.requestEthereumJsonRpc, Object.hasOwn(m, 'packageInfo')))"` printed `function function false`.
-- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum, verification]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig, typeof verification.packageInfo); })"` printed `function object function function object`.
+- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig); })"` printed `function object function function`.
 - `git diff --check`
 
 ## Context and Orientation

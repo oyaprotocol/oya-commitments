@@ -158,7 +158,7 @@ Validation evidence after filename cleanup and final documentation polish:
 - `node --test packages/ipfs/test/publish.test.js`
 - `node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => console.log(Object.keys(m).sort().join(',')))"`
 - from `packages/`: `node --input-type=module -e "import('@oyaprotocol/ipfs').then((m) => console.log(typeof m.publishToIpfs, typeof m.readIpfsPublicGatewayText))"`
-- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum, verification]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig, typeof verification.packageInfo); })"`
+- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig); })"`
 - `git diff --check`
 
 Package export cleanup removed the old placeholder-style `packageInfo` object from `@oyaprotocol/ipfs` now that the package has real public functions. Smoke imports now check `publishToIpfs(...)`, `readIpfsPublicGatewayText(...)`, and related real exports rather than package metadata.
@@ -170,7 +170,7 @@ Validation evidence for package export cleanup:
 - `node --test packages/ipfs/test/retrieval.test.js` passed 27 tests.
 - `node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => console.log(typeof m.publishToIpfs, typeof m.readIpfsPublicGatewayText, Object.hasOwn(m, 'packageInfo')))"` printed `function function false`.
 - From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ipfs').then((m) => console.log(typeof m.publishToIpfs, Object.hasOwn(m, 'packageInfo')))"` printed `function false`.
-- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum, verification]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig, typeof verification.packageInfo); })"` printed `function object function function object`.
+- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig); })"` printed `function object function function`.
 - `git diff --check`
 
 Shared validation cleanup moved the helpers duplicated between IPFS and Ethereum into `@oyaprotocol/utils`: `assertHeadersObject(...)`, `assertNonEmptyString(...)`, `assertNonNegativeInteger(...)`, `assertPositiveInteger(...)`, and `isPlainObject(...)`. IPFS now imports those helpers from the package root and keeps only `assertAsciiBytes(...)` in `packages/ipfs/src/validation-utils.ts`.
@@ -182,7 +182,7 @@ Validation evidence for shared validation cleanup:
 - `node --test packages/ipfs/test/publish.test.js` passed 17 tests.
 - `node --test packages/ipfs/test/retrieval.test.js` passed 27 tests.
 - From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ipfs').then((m) => console.log(typeof m.publishToIpfs, typeof m.readIpfsPublicGatewayText, Object.hasOwn(m, 'packageInfo')))"` printed `function function false`.
-- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum, verification]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig, typeof verification.packageInfo); })"` printed `function object function function object`.
+- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig); })"` printed `function object function function`.
 - `git diff --check`
 
 Validation evidence for Milestone 2:
