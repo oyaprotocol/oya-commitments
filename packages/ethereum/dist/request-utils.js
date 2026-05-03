@@ -11,6 +11,48 @@ const RETRYABLE_ERROR_CODES = new Set([
     'UND_ERR_HEADERS_TIMEOUT',
     'UND_ERR_SOCKET',
 ]);
+const RETRYABLE_JSON_RPC_METHODS = new Set([
+    'eth_accounts',
+    'eth_blobBaseFee',
+    'eth_blockNumber',
+    'eth_call',
+    'eth_chainId',
+    'eth_coinbase',
+    'eth_createAccessList',
+    'eth_estimateGas',
+    'eth_feeHistory',
+    'eth_gasPrice',
+    'eth_getBalance',
+    'eth_getBlockByHash',
+    'eth_getBlockByNumber',
+    'eth_getBlockReceipts',
+    'eth_getBlockTransactionCountByHash',
+    'eth_getBlockTransactionCountByNumber',
+    'eth_getCode',
+    'eth_getLogs',
+    'eth_getProof',
+    'eth_getStorageAt',
+    'eth_getTransactionByBlockHashAndIndex',
+    'eth_getTransactionByBlockNumberAndIndex',
+    'eth_getTransactionByHash',
+    'eth_getTransactionCount',
+    'eth_getTransactionReceipt',
+    'eth_getUncleByBlockHashAndIndex',
+    'eth_getUncleByBlockNumberAndIndex',
+    'eth_getUncleCountByBlockHash',
+    'eth_getUncleCountByBlockNumber',
+    'eth_hashrate',
+    'eth_maxPriorityFeePerGas',
+    'eth_mining',
+    'eth_protocolVersion',
+    'eth_sendRawTransaction',
+    'eth_syncing',
+    'net_listening',
+    'net_peerCount',
+    'net_version',
+    'web3_clientVersion',
+    'web3_sha3',
+]);
 class EthereumJsonRpcHttpError extends Error {
     status;
     responseText;
@@ -83,6 +125,9 @@ function shouldRetryError(error) {
         message.includes('timed out') ||
         message.includes('connection refused') ||
         message.includes('connection reset'));
+}
+function shouldRetryMethod(method) {
+    return RETRYABLE_JSON_RPC_METHODS.has(method);
 }
 function createTimeoutSignal(timeoutMs) {
     const controller = new AbortController();
@@ -335,7 +380,9 @@ async function requestEthereumJsonRpc({ config, fetch, method, params = [], id, 
         catch (error) {
             lastError = error;
             throwIfSignalAborted(signal, abortErrorMessage, error);
-            if (attempt <= config.maxRetries && shouldRetryError(error)) {
+            if (attempt <= config.maxRetries &&
+                shouldRetryMethod(normalizedMethod) &&
+                shouldRetryError(error)) {
                 await waitForRetryDelay({
                     retryDelayMs: config.retryDelayMs,
                     signal,

@@ -33,6 +33,7 @@ Definitions used in this plan:
 - [x] 2026-05-03 20:48Z: Removed `packageInfo` from the non-placeholder Ethereum package export and updated smoke imports to check real package functions instead.
 - [x] 2026-05-03 21:15Z: Moved validation helpers shared with IPFS into `@oyaprotocol/utils` and made Ethereum import them through the package root.
 - [x] 2026-05-03 21:35Z: Replaced the package-branded `EthereumRpcConfig` type with shared `HttpConfig` / `CreateHttpConfigOptions` from `@oyaprotocol/utils`; `createEthereumRpcConfig(...)` now accepts and returns the generic `url`-based HTTP config shape.
+- [x] 2026-05-03 21:42Z: Gated JSON-RPC retries to read-only Ethereum methods and `eth_sendRawTransaction`, preventing retry replays for arbitrary state-changing methods.
 
 ## Surprises & Discoveries
 
@@ -102,7 +103,7 @@ Current validation evidence for the package set after the rename:
 
 Milestone 1 is complete. `@oyaprotocol/ethereum` now exposes `createEthereumRpcConfig(...)`, `requestEthereumJsonRpc(...)`, `EthereumJsonRpcError`, and `EthereumJsonRpcHttpError` through the package root. The implementation lives in `packages/ethereum/src/config.ts` and `packages/ethereum/src/request-utils.ts`, with shared validation imported from `@oyaprotocol/utils`. The package remains dependency-light and does not import from legacy runtime areas.
 
-The request primitive sends one JSON-RPC POST with explicit config and injected `fetch`, owns the `content-type: application/json` header, enforces timeouts even when fetch ignores abort signals, retries transient HTTP/network failures, surfaces JSON-RPC error payloads as inspectable non-retryable errors, and returns the raw `result` plus attempt metadata. It expects callers to pass JSON-serializable params; future wrappers should convert bigint values to Ethereum quantity hex before calling it.
+The request primitive sends one JSON-RPC POST with explicit config and injected `fetch`, owns the `content-type: application/json` header, enforces timeouts even when fetch ignores abort signals, retries transient HTTP/network failures only for read-only Ethereum methods and `eth_sendRawTransaction`, surfaces JSON-RPC error payloads as inspectable non-retryable errors, and returns the raw `result` plus attempt metadata. It expects callers to pass JSON-serializable params; future wrappers should convert bigint values to Ethereum quantity hex before calling it.
 
 Validation evidence for Milestone 1:
 
@@ -135,6 +136,8 @@ Validation evidence for shared validation cleanup:
 - `git diff --check`
 
 HTTP config cleanup moved the public config interfaces to `@oyaprotocol/utils` as `HttpConfig` and `CreateHttpConfigOptions`. Ethereum now uses the generic `url` field, while `createEthereumRpcConfig(...)` still owns Ethereum-specific normalization by trimming trailing slashes before JSON-RPC requests are sent.
+
+Retry safety cleanup added a fixed method allowlist to the raw JSON-RPC request primitive. The helper retries read-only Ethereum JSON-RPC methods and `eth_sendRawTransaction`, but it does not retry arbitrary methods such as `evm_*`, `anvil_*`, `personal_*`, `admin_*`, `miner_*`, or `eth_sendTransaction`.
 
 ## Context and Orientation
 
@@ -213,7 +216,7 @@ Required test coverage:
 
 - Config creation requires explicit fields, normalizes RPC URLs, freezes headers, and rejects caller-provided `content-type`.
 - The raw request primitive sends POST JSON-RPC with injected headers and returns result plus attempt count.
-- Retry occurs on HTTP 429 or 5xx, timeout, and retryable network errors.
+- Retry occurs on HTTP 429 or 5xx, timeout, and retryable network errors only when the JSON-RPC method is in the package's retry allowlist.
 - Retry does not occur on HTTP 400 or JSON-RPC contract errors.
 - Timeout still works when injected fetch ignores `options.signal`.
 - Caller abort prevents the first request when already aborted and interrupts retry backoff.

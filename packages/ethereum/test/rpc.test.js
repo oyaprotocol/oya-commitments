@@ -186,6 +186,74 @@ test('requestEthereumJsonRpc retries retryable network errors and succeeds', asy
     assert.equal(result.result, '0x3');
 });
 
+test('requestEthereumJsonRpc retries eth_sendRawTransaction submissions', async () => {
+    let attempts = 0;
+    const result = await requestEthereumJsonRpc({
+        config: createConfig({ maxRetries: 2 }),
+        fetch: async () => {
+            attempts += 1;
+            if (attempts === 1) {
+                return createTextResponse(503, '{"error":"temporary outage"}', 'Service Unavailable');
+            }
+            return createTextResponse(
+                200,
+                '{"jsonrpc":"2.0","id":1,"result":"0xabc123"}'
+            );
+        },
+        method: 'eth_sendRawTransaction',
+        params: ['0x02f86c01'],
+    });
+
+    assert.equal(attempts, 2);
+    assert.equal(result.result, '0xabc123');
+});
+
+test('requestEthereumJsonRpc does not retry methods outside the retry allowlist', async () => {
+    let attempts = 0;
+    await assert.rejects(
+        requestEthereumJsonRpc({
+            config: createConfig({ maxRetries: 3 }),
+            fetch: async () => {
+                attempts += 1;
+                return createTextResponse(503, '{"error":"temporary outage"}', 'Service Unavailable');
+            },
+            method: 'evm_mine',
+        }),
+        (error) => {
+            assert.ok(error instanceof EthereumJsonRpcHttpError);
+            assert.equal(error.status, 503);
+            return true;
+        }
+    );
+    assert.equal(attempts, 1);
+});
+
+test('requestEthereumJsonRpc does not retry non-raw transaction submission methods', async () => {
+    let attempts = 0;
+    await assert.rejects(
+        requestEthereumJsonRpc({
+            config: createConfig({ maxRetries: 3 }),
+            fetch: async () => {
+                attempts += 1;
+                throw new TypeError('fetch failed', {
+                    cause: Object.assign(new Error('connect ECONNRESET'), {
+                        code: 'ECONNRESET',
+                    }),
+                });
+            },
+            method: 'eth_sendTransaction',
+            params: [
+                {
+                    from: '0x0000000000000000000000000000000000000000',
+                    to: '0x0000000000000000000000000000000000000000',
+                },
+            ],
+        }),
+        /fetch failed/
+    );
+    assert.equal(attempts, 1);
+});
+
 test('requestEthereumJsonRpc does not retry non-retryable HTTP failures', async () => {
     let attempts = 0;
     await assert.rejects(
