@@ -6,10 +6,15 @@ import {
     assertNonEmptyString,
     assertNonNegativeInteger,
     assertPositiveInteger,
+    combineAbortSignals,
     createHttpConfig,
+    createTimeoutSignal,
     hasRetryableNetworkErrorCode,
+    invokeWithAbort,
     isPlainObject,
     RETRYABLE_HTTP_NETWORK_ERROR_CODES,
+    throwIfSignalAborted,
+    waitForRetryDelay,
 } from '../dist/index.js';
 
 test('string and integer validators normalize and reject invalid values', () => {
@@ -158,4 +163,48 @@ test('hasRetryableNetworkErrorCode detects retryable HTTP network codes', () => 
         false
     );
     assert.equal(hasRetryableNetworkErrorCode(null), false);
+});
+
+test('abort utilities compose signals and reject aborted operations', async () => {
+    const first = new AbortController();
+    const second = new AbortController();
+    const combined = combineAbortSignals([first.signal, second.signal]);
+    assert.ok(combined.signal instanceof AbortSignal);
+    second.abort(new Error('stop combined operation'));
+    assert.equal(combined.signal.aborted, true);
+    assert.match(String(combined.signal.reason), /stop combined operation/);
+    combined.cleanup?.();
+
+    const timeout = createTimeoutSignal(1_000);
+    assert.ok(timeout.signal instanceof AbortSignal);
+    timeout.cleanup?.();
+
+    await assert.rejects(
+        invokeWithAbort(async () => await new Promise(() => {}), second.signal),
+        /stop combined operation/
+    );
+    assert.throws(
+        () => throwIfSignalAborted(second.signal, 'operation aborted', second.signal.reason),
+        /operation aborted/
+    );
+});
+
+test('waitForRetryDelay resolves immediately for zero delay and rejects aborted waits', async () => {
+    await waitForRetryDelay({
+        retryDelayMs: 0,
+        signal: undefined,
+        abortErrorMessage: 'retry aborted',
+    });
+
+    const controller = new AbortController();
+    controller.abort(new Error('stop retry'));
+
+    await assert.rejects(
+        waitForRetryDelay({
+            retryDelayMs: 1_000,
+            signal: controller.signal,
+            abortErrorMessage: 'retry aborted',
+        }),
+        /retry aborted/
+    );
 });

@@ -27,3 +27,15 @@ Small shared utilities for hardened Oya kernel packages.
 
 - `RETRYABLE_HTTP_NETWORK_ERROR_CODES`
 - `hasRetryableNetworkErrorCode(error)`
+
+## Abort Helpers
+
+- `AbortSignalHandle`
+- `createTimeoutSignal(timeoutMs)`
+- `combineAbortSignals(signals)`
+- `invokeWithAbort(createPromise, signal)`
+- `throwIfSignalAborted(signal, message, cause)`
+
+## Retry Helpers
+
+- `waitForRetryDelay(options)`

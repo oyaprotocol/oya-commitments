@@ -39,6 +39,7 @@ Definitions used in this plan:
 - [x] 2026-05-03 22:11Z: Tightened `createHttpConfig(...)` to reject URLs that normalize to an empty string, including generic `/` and IPFS `/api/v0/` inputs.
 - [x] 2026-05-03 22:31Z: Added `ethSendRawTransaction(...)` with optional caller-supplied `transactionHash` recovery for duplicate-style retry errors, plus local hex validators and focused wrapper tests.
 - [x] 2026-05-03 23:05Z: Changed Ethereum hex/hash validators to preserve caller and RPC casing, using case-insensitive comparison only for internal hash equality checks.
+- [x] 2026-05-03 23:31Z: Moved shared abort/timeout helpers into `@oyaprotocol/utils/abort-utils` and shared retry delay handling into `@oyaprotocol/utils/retry-utils`; IPFS and Ethereum now import the shared helpers.
 
 ## Surprises & Discoveries
 
@@ -101,6 +102,10 @@ Definitions used in this plan:
 
 - Decision: Add raw transaction retry recovery through an optional caller-supplied transaction hash instead of package-owned Keccak hashing.
   Rationale: Signing code outside this package is the natural place to compute a raw transaction hash. `ethSendRawTransaction(...)` can use that hash to verify duplicate-style retry errors with `eth_getTransactionByHash(...)` without adding a Keccak dependency or hashing implementation to the network-adapter package.
+  Date/Author: 2026-05-03 / Codex.
+
+- Decision: Move shared abort/timeout and retry-delay helpers into `@oyaprotocol/utils`.
+  Rationale: IPFS and Ethereum had exact duplicates of the abort-composition, timeout-signal, abortable-promise, caller-abort, and retry-delay helpers. Sharing the generic mechanics removes duplication while keeping protocol-specific retry policy and error classes in each package.
   Date/Author: 2026-05-03 / Codex.
 
 ## Outcomes & Retrospective
@@ -204,6 +209,16 @@ Validation evidence for hex casing cleanup:
 - `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
 - `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
 - From `packages/`, package-root smoke import for `@oyaprotocol/ethereum` passed.
+
+Shared abort/retry utility cleanup added `abort-utils.ts` and `retry-utils.ts` to `@oyaprotocol/utils`, exporting `AbortSignalHandle`, `createTimeoutSignal(...)`, `combineAbortSignals(...)`, `invokeWithAbort(...)`, `throwIfSignalAborted(...)`, and `waitForRetryDelay(...)`. IPFS continues to re-export the shared helpers from its package-local request utility module for its internal modules, while Ethereum imports the shared helpers directly.
+
+Validation evidence for shared abort/retry utility cleanup:
+
+- `npm run build` from `packages/`
+- `node --test packages/utils/test/validation.test.js` passed 7 tests.
+- `node --test packages/ipfs/test/publish.test.js packages/ipfs/test/retrieval.test.js` passed 45 tests.
+- `node --test packages/ethereum/test/rpc.test.js packages/ethereum/test/transactions.test.js` passed 20 tests.
+- From `packages/`, package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` passed.
 
 ## Context and Orientation
 
