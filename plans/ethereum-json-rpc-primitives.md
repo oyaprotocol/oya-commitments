@@ -41,6 +41,7 @@ Definitions used in this plan:
 - [x] 2026-05-03 23:05Z: Changed Ethereum hex/hash validators to preserve caller and RPC casing, using case-insensitive comparison only for internal hash equality checks.
 - [x] 2026-05-03 23:31Z: Moved shared abort/timeout helpers into `@oyaprotocol/utils/abort-utils` and shared retry delay handling into `@oyaprotocol/utils/retry-utils`; IPFS and Ethereum now import the shared helpers.
 - [x] 2026-05-03 23:49Z: Removed `eth_sendRawTransaction` from the generic JSON-RPC retry allowlist; raw transaction retries now live only in `ethSendRawTransaction(...)`, which has duplicate-error recovery semantics.
+- [x] 2026-05-03 23:57Z: Fixed `combineAbortSignals(...)` fallback behavior to detect already-aborted signals before attaching listeners, avoiding leaked listeners on earlier live signals.
 
 ## Surprises & Discoveries
 
@@ -229,6 +230,15 @@ Validation evidence for shared abort/retry utility cleanup:
 - `node --test packages/ipfs/test/publish.test.js packages/ipfs/test/retrieval.test.js` passed 45 tests.
 - `node --test packages/ethereum/test/rpc.test.js packages/ethereum/test/transactions.test.js` passed 20 tests.
 - From `packages/`, package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` passed.
+
+Abort listener cleanup fixed the manual `combineAbortSignals(...)` fallback path so it checks for already-aborted signals before attaching listeners. This avoids leaking listeners when a later input signal is already aborted.
+
+Validation evidence for abort listener cleanup:
+
+- `npm run build` from `packages/`
+- `node --test packages/utils/test/validation.test.js` passed 7 tests.
+- `node --test packages/ipfs/test/publish.test.js packages/ipfs/test/retrieval.test.js` passed 45 tests.
+- `node --test packages/ethereum/test/rpc.test.js packages/ethereum/test/transactions.test.js` passed 20 tests.
 
 ## Context and Orientation
 

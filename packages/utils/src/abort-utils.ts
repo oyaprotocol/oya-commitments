@@ -34,15 +34,17 @@ function combineAbortSignals(signals: Array<AbortSignal | undefined>): AbortSign
         };
     }
     const controller = new AbortController();
+    const abortedSignal = presentSignals.find((signal) => signal.aborted);
+    if (abortedSignal) {
+        controller.abort(abortedSignal.reason);
+        return {
+            signal: controller.signal,
+            cleanup: null,
+        };
+    }
+
     const listeners: Array<{ signal: AbortSignal; listener: EventListener }> = [];
     for (const signal of presentSignals) {
-        if (signal.aborted) {
-            controller.abort(signal.reason);
-            return {
-                signal: controller.signal,
-                cleanup: null,
-            };
-        }
         const listener = () => {
             controller.abort(signal.reason);
         };
