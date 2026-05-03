@@ -1,6 +1,6 @@
 import { isPlainObject } from '@oyaprotocol/utils';
 import { normalizeHash, normalizeHexData } from './hex.js';
-import { EthereumJsonRpcError, requestEthereumJsonRpc, } from './request-utils.js';
+import { EthereumJsonRpcError, requestEthereumJsonRpc, requestEthereumJsonRpcWithRetryPolicy, } from './request-utils.js';
 const RAW_TRANSACTION_RECOVERY_MESSAGES = [
     'already known',
     'known transaction',
@@ -53,6 +53,9 @@ function createJsonRpcOptions({ config, fetch, method, params, id, signal, }) {
         ...(signal === undefined ? {} : { signal }),
     };
 }
+function shouldRetryRawTransactionMethod(method) {
+    return method === 'eth_sendRawTransaction';
+}
 async function recoverRawTransactionSubmission({ config, fetch, transactionHash, id, signal, originalError, }) {
     if (transactionHash === null) {
         throw new EthereumRawTransactionRecoveryError('eth_sendRawTransaction may have been accepted before a retry returned a duplicate transaction error; provide transactionHash to verify acceptance.', {
@@ -99,14 +102,14 @@ async function ethSendRawTransaction({ config, fetch, rawTransaction, transactio
     const normalizedRawTransaction = normalizeHexData(rawTransaction, 'rawTransaction');
     const normalizedTransactionHash = transactionHash === undefined ? null : normalizeHash(transactionHash, 'transactionHash');
     try {
-        const result = await requestEthereumJsonRpc(createJsonRpcOptions({
+        const result = await requestEthereumJsonRpcWithRetryPolicy(createJsonRpcOptions({
             config,
             fetch,
             method: 'eth_sendRawTransaction',
             params: [normalizedRawTransaction],
             id,
             signal,
-        }));
+        }), shouldRetryRawTransactionMethod);
         const returnedTransactionHash = normalizeHash(result.result, 'result');
         if (normalizedTransactionHash !== null &&
             returnedTransactionHash.toLowerCase() !== normalizedTransactionHash.toLowerCase()) {

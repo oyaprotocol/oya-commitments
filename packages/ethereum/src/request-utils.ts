@@ -43,7 +43,6 @@ const RETRYABLE_JSON_RPC_METHODS = new Set([
     'eth_maxPriorityFeePerGas',
     'eth_mining',
     'eth_protocolVersion',
-    'eth_sendRawTransaction',
     'eth_syncing',
     'net_listening',
     'net_peerCount',
@@ -283,14 +282,17 @@ function normalizeEthereumJsonRpcError(error: unknown): Error {
     return new Error(`Ethereum JSON-RPC request failed: ${String(error)}`);
 }
 
-async function requestEthereumJsonRpc<TResult = unknown>({
-    config,
-    fetch,
-    method,
-    params = [],
-    id,
-    signal,
-}: RequestEthereumJsonRpcOptions): Promise<RequestEthereumJsonRpcResult<TResult>> {
+async function requestEthereumJsonRpcWithRetryPolicy<TResult = unknown>(
+    {
+        config,
+        fetch,
+        method,
+        params = [],
+        id,
+        signal,
+    }: RequestEthereumJsonRpcOptions,
+    shouldRetryJsonRpcMethod: (method: string) => boolean
+): Promise<RequestEthereumJsonRpcResult<TResult>> {
     if (config === null || typeof config !== 'object' || Array.isArray(config)) {
         throw new Error('config must be an object.');
     }
@@ -363,7 +365,7 @@ async function requestEthereumJsonRpc<TResult = unknown>({
             throwIfSignalAborted(signal, abortErrorMessage, error);
             if (
                 attempt <= config.maxRetries &&
-                shouldRetryMethod(normalizedMethod) &&
+                shouldRetryJsonRpcMethod(normalizedMethod) &&
                 shouldRetryError(error)
             ) {
                 await waitForRetryDelay({
@@ -383,8 +385,15 @@ async function requestEthereumJsonRpc<TResult = unknown>({
     throw normalizeEthereumJsonRpcError(lastError);
 }
 
+async function requestEthereumJsonRpc<TResult = unknown>(
+    options: RequestEthereumJsonRpcOptions
+): Promise<RequestEthereumJsonRpcResult<TResult>> {
+    return await requestEthereumJsonRpcWithRetryPolicy(options, shouldRetryMethod);
+}
+
 export {
     EthereumJsonRpcError,
     EthereumJsonRpcHttpError,
     requestEthereumJsonRpc,
+    requestEthereumJsonRpcWithRetryPolicy,
 };

@@ -186,26 +186,25 @@ test('requestEthereumJsonRpc retries retryable network errors and succeeds', asy
     assert.equal(result.result, '0x3');
 });
 
-test('requestEthereumJsonRpc retries eth_sendRawTransaction submissions', async () => {
+test('requestEthereumJsonRpc does not retry eth_sendRawTransaction submissions', async () => {
     let attempts = 0;
-    const result = await requestEthereumJsonRpc({
-        config: createConfig({ maxRetries: 2 }),
-        fetch: async () => {
-            attempts += 1;
-            if (attempts === 1) {
+    await assert.rejects(
+        requestEthereumJsonRpc({
+            config: createConfig({ maxRetries: 2 }),
+            fetch: async () => {
+                attempts += 1;
                 return createTextResponse(503, '{"error":"temporary outage"}', 'Service Unavailable');
-            }
-            return createTextResponse(
-                200,
-                '{"jsonrpc":"2.0","id":1,"result":"0xabc123"}'
-            );
-        },
-        method: 'eth_sendRawTransaction',
-        params: ['0x02f86c01'],
-    });
-
-    assert.equal(attempts, 2);
-    assert.equal(result.result, '0xabc123');
+            },
+            method: 'eth_sendRawTransaction',
+            params: ['0x02f86c01'],
+        }),
+        (error) => {
+            assert.ok(error instanceof EthereumJsonRpcHttpError);
+            assert.equal(error.status, 503);
+            return true;
+        }
+    );
+    assert.equal(attempts, 1);
 });
 
 test('requestEthereumJsonRpc does not retry methods outside the retry allowlist', async () => {

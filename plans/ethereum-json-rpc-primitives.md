@@ -33,13 +33,14 @@ Definitions used in this plan:
 - [x] 2026-05-03 20:48Z: Removed `packageInfo` from the non-placeholder Ethereum package export and updated smoke imports to check real package functions instead.
 - [x] 2026-05-03 21:15Z: Moved validation helpers shared with IPFS into `@oyaprotocol/utils` and made Ethereum import them through the package root.
 - [x] 2026-05-03 21:35Z: Replaced the package-branded `EthereumRpcConfig` type with shared `HttpConfig` / `CreateHttpConfigOptions` from `@oyaprotocol/utils`; `createEthereumRpcConfig(...)` now accepts and returns the generic `url`-based HTTP config shape.
-- [x] 2026-05-03 21:42Z: Gated JSON-RPC retries to read-only Ethereum methods and `eth_sendRawTransaction`, preventing retry replays for arbitrary state-changing methods.
+- [x] 2026-05-03 21:42Z: Gated JSON-RPC retries to read-only Ethereum methods and initially `eth_sendRawTransaction`, preventing retry replays for arbitrary state-changing methods.
 - [x] 2026-05-03 21:51Z: Moved shared HTTP config validation/freezing into `@oyaprotocol/utils` as `createHttpConfig(...)`; Ethereum and IPFS now keep only their public creator names and package-specific URL normalization.
 - [x] 2026-05-03 21:59Z: Moved shared retryable HTTP network error codes into `@oyaprotocol/utils` as `RETRYABLE_HTTP_NETWORK_ERROR_CODES` plus `hasRetryableNetworkErrorCode(...)`; Ethereum and IPFS now import the shared helper.
 - [x] 2026-05-03 22:11Z: Tightened `createHttpConfig(...)` to reject URLs that normalize to an empty string, including generic `/` and IPFS `/api/v0/` inputs.
 - [x] 2026-05-03 22:31Z: Added `ethSendRawTransaction(...)` with optional caller-supplied `transactionHash` recovery for duplicate-style retry errors, plus local hex validators and focused wrapper tests.
 - [x] 2026-05-03 23:05Z: Changed Ethereum hex/hash validators to preserve caller and RPC casing, using case-insensitive comparison only for internal hash equality checks.
 - [x] 2026-05-03 23:31Z: Moved shared abort/timeout helpers into `@oyaprotocol/utils/abort-utils` and shared retry delay handling into `@oyaprotocol/utils/retry-utils`; IPFS and Ethereum now import the shared helpers.
+- [x] 2026-05-03 23:49Z: Removed `eth_sendRawTransaction` from the generic JSON-RPC retry allowlist; raw transaction retries now live only in `ethSendRawTransaction(...)`, which has duplicate-error recovery semantics.
 
 ## Surprises & Discoveries
 
@@ -125,7 +126,7 @@ Current validation evidence for the package set after the rename:
 
 Milestone 1 is complete. `@oyaprotocol/ethereum` now exposes `createEthereumRpcConfig(...)`, `requestEthereumJsonRpc(...)`, `EthereumJsonRpcError`, and `EthereumJsonRpcHttpError` through the package root. The implementation lives in `packages/ethereum/src/config.ts` and `packages/ethereum/src/request-utils.ts`, with shared validation imported from `@oyaprotocol/utils`. The package remains dependency-light and does not import from legacy runtime areas.
 
-The request primitive sends one JSON-RPC POST with explicit config and injected `fetch`, owns the `content-type: application/json` header, enforces timeouts even when fetch ignores abort signals, retries transient HTTP/network failures only for read-only Ethereum methods and `eth_sendRawTransaction`, surfaces JSON-RPC error payloads as inspectable non-retryable errors, and returns the raw `result` plus attempt metadata. It expects callers to pass JSON-serializable params; future wrappers should convert bigint values to Ethereum quantity hex before calling it.
+The request primitive sends one JSON-RPC POST with explicit config and injected `fetch`, owns the `content-type: application/json` header, enforces timeouts even when fetch ignores abort signals, retries transient HTTP/network failures only for read-only Ethereum methods, surfaces JSON-RPC error payloads as inspectable non-retryable errors, and returns the raw `result` plus attempt metadata. It expects callers to pass JSON-serializable params; future wrappers should convert bigint values to Ethereum quantity hex before calling it.
 
 Validation evidence for Milestone 1:
 
@@ -159,7 +160,7 @@ Validation evidence for shared validation cleanup:
 
 HTTP config cleanup moved the public config interfaces to `@oyaprotocol/utils` as `HttpConfig` and `CreateHttpConfigOptions`. Ethereum now uses the generic `url` field, while `createEthereumRpcConfig(...)` still owns Ethereum-specific normalization by trimming trailing slashes before JSON-RPC requests are sent.
 
-Retry safety cleanup added a fixed method allowlist to the raw JSON-RPC request primitive. The helper retries read-only Ethereum JSON-RPC methods and `eth_sendRawTransaction`, but it does not retry arbitrary methods such as `evm_*`, `anvil_*`, `personal_*`, `admin_*`, `miner_*`, or `eth_sendTransaction`.
+Retry safety cleanup added a fixed method allowlist to the raw JSON-RPC request primitive. The helper retries read-only Ethereum JSON-RPC methods, but it does not retry arbitrary methods such as `evm_*`, `anvil_*`, `personal_*`, `admin_*`, `miner_*`, `eth_sendTransaction`, or `eth_sendRawTransaction`.
 
 Shared HTTP config creator cleanup added `createHttpConfig(...)` to `@oyaprotocol/utils`. `createEthereumRpcConfig(...)` now delegates directly to it, while `createIpfsConfig(...)` delegates with its Kubo `/api/v0` base URL normalizer. The public package creators remain unchanged.
 
@@ -200,6 +201,15 @@ Validation evidence for raw transaction wrapper cleanup:
 - `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
 - `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
 - From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ethereum').then((m) => console.log(typeof m.createEthereumRpcConfig, typeof m.requestEthereumJsonRpc, typeof m.ethSendRawTransaction, typeof m.EthereumRawTransactionRecoveryError, Object.hasOwn(m, 'packageInfo')))"` printed `function function function function false`.
+
+Raw transaction retry ownership cleanup removed `eth_sendRawTransaction` from the generic `requestEthereumJsonRpc(...)` retry allowlist. `ethSendRawTransaction(...)` now calls an internal package-local retry-policy path so raw transaction retries remain available only with wrapper-level duplicate-error recovery.
+
+Validation evidence for raw transaction retry ownership cleanup:
+
+- `npm run build` from `packages/`
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
+- From `packages/`, package-root smoke import for `@oyaprotocol/ethereum` passed.
 
 Hex casing cleanup changed the Ethereum hex/hash validators to validate and trim values without lowercasing them. `ethSendRawTransaction(...)` now sends caller-provided raw transaction casing and returns the RPC-provided hash casing. Hash matching still uses inline lowercase comparison internally.
 

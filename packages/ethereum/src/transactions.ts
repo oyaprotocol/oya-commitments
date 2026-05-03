@@ -5,6 +5,7 @@ import { normalizeHash, normalizeHexData } from './hex.js';
 import {
     EthereumJsonRpcError,
     requestEthereumJsonRpc,
+    requestEthereumJsonRpcWithRetryPolicy,
 } from './request-utils.js';
 import type {
     EthereumJsonRpcFetchLike,
@@ -116,6 +117,10 @@ function createJsonRpcOptions({
     };
 }
 
+function shouldRetryRawTransactionMethod(method: string): boolean {
+    return method === 'eth_sendRawTransaction';
+}
+
 async function recoverRawTransactionSubmission({
     config,
     fetch,
@@ -199,7 +204,7 @@ async function ethSendRawTransaction({
         transactionHash === undefined ? null : normalizeHash(transactionHash, 'transactionHash');
 
     try {
-        const result = await requestEthereumJsonRpc<string>(
+        const result = await requestEthereumJsonRpcWithRetryPolicy<string>(
             createJsonRpcOptions({
                 config,
                 fetch,
@@ -207,7 +212,8 @@ async function ethSendRawTransaction({
                 params: [normalizedRawTransaction],
                 id,
                 signal,
-            })
+            }),
+            shouldRetryRawTransactionMethod
         );
         const returnedTransactionHash = normalizeHash(result.result, 'result');
 

@@ -19,7 +19,7 @@ Ethereum JSON-RPC utilities for Oya kernel code. This package is a hardened kern
 
 `createEthereumRpcConfig(...)` accepts the shared `CreateHttpConfigOptions` shape from `@oyaprotocol/utils`. The `url` value is normalized by trimming trailing slashes before JSON-RPC requests are sent.
 
-`requestEthereumJsonRpc(...)` owns the JSON-RPC envelope and request headers. It sends `content-type: application/json`, rejects caller-provided `content-type` config headers, enforces a request timeout, retries transient HTTP/network failures only for read-only Ethereum methods and `eth_sendRawTransaction`, and treats JSON-RPC error payloads as non-retryable semantic errors.
+`requestEthereumJsonRpc(...)` owns the JSON-RPC envelope and request headers. It sends `content-type: application/json`, rejects caller-provided `content-type` config headers, enforces a request timeout, retries transient HTTP/network failures only for read-only Ethereum methods, and treats JSON-RPC error payloads as non-retryable semantic errors.
 
 `ethSendRawTransaction(...)` does not sign transactions and does not compute transaction hashes. It expects callers to provide a signed raw transaction. If `transactionHash` is supplied and a retry of `eth_sendRawTransaction` returns duplicate-style JSON-RPC errors such as `already known` or `nonce too low`, the wrapper checks `eth_getTransactionByHash(transactionHash)` before returning a recovered result. Without `transactionHash`, those cases are surfaced as `EthereumRawTransactionRecoveryError` because the package cannot verify acceptance without Keccak hashing.
 

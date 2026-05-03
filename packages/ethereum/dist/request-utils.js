@@ -33,7 +33,6 @@ const RETRYABLE_JSON_RPC_METHODS = new Set([
     'eth_maxPriorityFeePerGas',
     'eth_mining',
     'eth_protocolVersion',
-    'eth_sendRawTransaction',
     'eth_syncing',
     'net_listening',
     'net_peerCount',
@@ -183,7 +182,7 @@ function normalizeEthereumJsonRpcError(error) {
     }
     return new Error(`Ethereum JSON-RPC request failed: ${String(error)}`);
 }
-async function requestEthereumJsonRpc({ config, fetch, method, params = [], id, signal, }) {
+async function requestEthereumJsonRpcWithRetryPolicy({ config, fetch, method, params = [], id, signal, }, shouldRetryJsonRpcMethod) {
     if (config === null || typeof config !== 'object' || Array.isArray(config)) {
         throw new Error('config must be an object.');
     }
@@ -242,7 +241,7 @@ async function requestEthereumJsonRpc({ config, fetch, method, params = [], id, 
             lastError = error;
             throwIfSignalAborted(signal, abortErrorMessage, error);
             if (attempt <= config.maxRetries &&
-                shouldRetryMethod(normalizedMethod) &&
+                shouldRetryJsonRpcMethod(normalizedMethod) &&
                 shouldRetryError(error)) {
                 await waitForRetryDelay({
                     retryDelayMs: config.retryDelayMs,
@@ -260,5 +259,8 @@ async function requestEthereumJsonRpc({ config, fetch, method, params = [], id, 
     }
     throw normalizeEthereumJsonRpcError(lastError);
 }
-export { EthereumJsonRpcError, EthereumJsonRpcHttpError, requestEthereumJsonRpc, };
+async function requestEthereumJsonRpc(options) {
+    return await requestEthereumJsonRpcWithRetryPolicy(options, shouldRetryMethod);
+}
+export { EthereumJsonRpcError, EthereumJsonRpcHttpError, requestEthereumJsonRpc, requestEthereumJsonRpcWithRetryPolicy, };
 //# sourceMappingURL=request-utils.js.map

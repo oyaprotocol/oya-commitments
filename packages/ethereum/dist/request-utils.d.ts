@@ -53,5 +53,6 @@ declare class EthereumJsonRpcError extends Error {
     readonly response: unknown;
     constructor(error: JsonRpcErrorPayload, { method, response, attemptCount }: EthereumJsonRpcErrorOptions);
 }
-declare function requestEthereumJsonRpc<TResult = unknown>({ config, fetch, method, params, id, signal, }: RequestEthereumJsonRpcOptions): Promise<RequestEthereumJsonRpcResult<TResult>>;
-export { EthereumJsonRpcError, EthereumJsonRpcHttpError, requestEthereumJsonRpc, };
+declare function requestEthereumJsonRpcWithRetryPolicy<TResult = unknown>({ config, fetch, method, params, id, signal, }: RequestEthereumJsonRpcOptions, shouldRetryJsonRpcMethod: (method: string) => boolean): Promise<RequestEthereumJsonRpcResult<TResult>>;
+declare function requestEthereumJsonRpc<TResult = unknown>(options: RequestEthereumJsonRpcOptions): Promise<RequestEthereumJsonRpcResult<TResult>>;
+export { EthereumJsonRpcError, EthereumJsonRpcHttpError, requestEthereumJsonRpc, requestEthereumJsonRpcWithRetryPolicy, };
