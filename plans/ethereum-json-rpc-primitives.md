@@ -30,6 +30,7 @@ Definitions used in this plan:
 - [x] 2026-05-03 02:01Z: Documented the current Milestone 1 package surface in `packages/ethereum/README.md`.
 - [ ] Document the public package surface and future Logger compatibility boundaries.
 - [x] 2026-05-03 02:01Z: Validated the Milestone 1 package build, package-root import, package-name import, focused tests, and diff hygiene.
+- [x] 2026-05-03 20:48Z: Removed `packageInfo` from the non-placeholder Ethereum package export and updated smoke imports to check real package functions instead.
 
 ## Surprises & Discoveries
 
@@ -84,13 +85,13 @@ This section starts empty except for the initial planning outcome. Update it aft
 
 Initial planning outcome: the scope is limited to dependency-light Ethereum JSON-RPC primitives in `@oyaprotocol/ethereum`. Future Oya Logger contract design, generic ABI encoding, private-key signing, node runtime wiring, and agent-specific behavior are explicitly out of scope for the first implementation pass.
 
-Rename outcome: the placeholder package shell now lives at `packages/ethereum`, and its package root is `@oyaprotocol/ethereum`. The workspace manifest, TypeScript project references, package lockfile, package README, source entrypoint, generated `dist/` files, and local npm workspace link were updated to match.
+Rename outcome: the package now lives at `packages/ethereum`, and its package root is `@oyaprotocol/ethereum`. The workspace manifest, TypeScript project references, package lockfile, package README, source entrypoint, generated `dist/` files, and local npm workspace link were updated to match.
 
-Validation evidence for the rename:
+Current validation evidence for the package set after the rename:
 
 - `npm --prefix packages run build`
-- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then((modules) => { console.log(modules.map((module) => module.packageInfo.name).join(',')); })"` printed `@oyaprotocol/utils,@oyaprotocol/messages,@oyaprotocol/ipfs,@oyaprotocol/ethereum,@oyaprotocol/verification`.
-- From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ethereum').then((m) => console.log(m.packageInfo.name))"` printed `@oyaprotocol/ethereum`.
+- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum, verification]) => { console.log(typeof utils.packageInfo, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig, typeof verification.packageInfo); })"` printed `object object function function object`.
+- From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ethereum').then((m) => console.log(typeof m.createEthereumRpcConfig, typeof m.requestEthereumJsonRpc))"` printed `function function`.
 - `git diff --check`
 
 Milestone 1 is complete. `@oyaprotocol/ethereum` now exposes `createEthereumRpcConfig(...)`, `requestEthereumJsonRpc(...)`, `EthereumJsonRpcError`, and `EthereumJsonRpcHttpError` through the package root. The implementation lives in `packages/ethereum/src/config.ts`, `packages/ethereum/src/request-utils.ts`, and package-local `packages/ethereum/src/validation-utils.ts`. The package remains zero-runtime-dependency and does not import from legacy runtime areas.
@@ -101,8 +102,19 @@ Validation evidence for Milestone 1:
 
 - `npm --prefix packages run build`
 - `node --test packages/ethereum/test/rpc.test.js` passed 11 tests.
-- `node --input-type=module -e "import('./packages/ethereum/dist/index.js').then((m) => console.log(m.packageInfo.name, typeof m.createEthereumRpcConfig, typeof m.requestEthereumJsonRpc, typeof m.EthereumJsonRpcError))"` printed `@oyaprotocol/ethereum function function function`.
-- From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ethereum').then((m) => console.log(m.packageInfo.name, typeof m.requestEthereumJsonRpc))"` printed `@oyaprotocol/ethereum function`.
+- `node --input-type=module -e "import('./packages/ethereum/dist/index.js').then((m) => console.log(typeof m.createEthereumRpcConfig, typeof m.requestEthereumJsonRpc, typeof m.EthereumJsonRpcError))"` printed `function function function`.
+- From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ethereum').then((m) => console.log(typeof m.requestEthereumJsonRpc))"` printed `function`.
+- `git diff --check`
+
+Package export cleanup removed the old placeholder-style `packageInfo` object from `@oyaprotocol/ethereum` now that the package has real public functions. Smoke imports now check `createEthereumRpcConfig(...)`, `requestEthereumJsonRpc(...)`, and related real exports rather than package metadata.
+
+Validation evidence for package export cleanup:
+
+- `npm --prefix packages run build`
+- `node --test packages/ethereum/test/rpc.test.js` passed 11 tests.
+- `node --input-type=module -e "import('./packages/ethereum/dist/index.js').then((m) => console.log(typeof m.createEthereumRpcConfig, typeof m.requestEthereumJsonRpc, Object.hasOwn(m, 'packageInfo')))"` printed `function function false`.
+- From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ethereum').then((m) => console.log(typeof m.requestEthereumJsonRpc, Object.hasOwn(m, 'packageInfo')))"` printed `function false`.
+- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum, verification]) => { console.log(typeof utils.packageInfo, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig, typeof verification.packageInfo); })"` printed `object object function function object`.
 - `git diff --check`
 
 ## Context and Orientation
@@ -114,7 +126,7 @@ The current package layout relevant to this work is:
 - `packages/package.json`: workspace manifest and TypeScript build scripts for kernel packages.
 - `packages/tsconfig.json` and `packages/tsconfig.base.json`: TypeScript project configuration for all kernel packages.
 - `packages/ethereum/package.json`: package manifest for `@oyaprotocol/ethereum`, exporting `./dist/index.js`.
-- `packages/ethereum/src/index.ts`: exports package metadata plus the current config/request public surface.
+- `packages/ethereum/src/index.ts`: exports the current config/request public surface.
 - `packages/ethereum/src/config.ts`: validates explicit Ethereum JSON-RPC transport settings.
 - `packages/ethereum/src/request-utils.ts`: contains the raw JSON-RPC request primitive, JSON-RPC error classes, timeout/abort/retry handling, and fetch-like types.
 - `packages/ethereum/src/validation-utils.ts`: contains package-local validation helpers for Milestone 1.
@@ -266,7 +278,7 @@ All commands below assume they are run from the repository root, the directory t
 
        node --input-type=module -e "import('./packages/ethereum/dist/index.js').then((m) => console.log(Object.keys(m).sort().join(',')))"
 
-   Expected behavior: the output includes `packageInfo`, `createEthereumRpcConfig`, `requestEthereumJsonRpc`, and the exported `eth*` wrappers.
+   Expected behavior: the output includes `createEthereumRpcConfig`, `requestEthereumJsonRpc`, and the exported `eth*` wrappers.
 
 9. Update package documentation:
 
@@ -277,7 +289,7 @@ All commands below assume they are run from the repository root, the directory t
        npm --prefix packages run build
        node --test packages/ethereum/test/rpc.test.js
        node --test packages/ethereum/test/ethereum.test.js
-       node --input-type=module -e "import('./packages/ethereum/dist/index.js').then((m) => console.log(m.packageInfo.name, typeof m.createEthereumRpcConfig, typeof m.ethCall))"
+       node --input-type=module -e "import('./packages/ethereum/dist/index.js').then((m) => console.log(typeof m.createEthereumRpcConfig, typeof m.ethCall))"
        git diff --check
 
 11. Update this ExecPlan before yielding control:
@@ -305,7 +317,7 @@ Required validation commands:
     npm --prefix packages run build
     node --test packages/ethereum/test/rpc.test.js
     node --test packages/ethereum/test/ethereum.test.js
-    node --input-type=module -e "import('./packages/ethereum/dist/index.js').then((m) => console.log(m.packageInfo.name, typeof m.createEthereumRpcConfig, typeof m.ethCall))"
+    node --input-type=module -e "import('./packages/ethereum/dist/index.js').then((m) => console.log(typeof m.createEthereumRpcConfig, typeof m.ethCall))"
     git diff --check
 
 Optional later integration validation, not part of the first package milestone:
@@ -330,7 +342,7 @@ If unrelated local changes appear in the worktree, leave them alone. Only modify
 
 Current package evidence:
 
-- `packages/ethereum/src/index.ts` exports `packageInfo`, `createEthereumRpcConfig(...)`, `requestEthereumJsonRpc(...)`, `EthereumJsonRpcError`, `EthereumJsonRpcHttpError`, and public transport/request types.
+- `packages/ethereum/src/index.ts` exports `createEthereumRpcConfig(...)`, `requestEthereumJsonRpc(...)`, `EthereumJsonRpcError`, `EthereumJsonRpcHttpError`, and public transport/request types.
 - `packages/ethereum/README.md` documents the current JSON-RPC config/request surface.
 - `packages/ethereum/test/rpc.test.js` validates the Milestone 1 surface against fake fetch implementations with no network access.
 - `packages/ipfs` demonstrates the current hardened package style: strict config, explicit injected dependencies, timeout/retry helpers, built TypeScript output, and Node tests against `dist`.

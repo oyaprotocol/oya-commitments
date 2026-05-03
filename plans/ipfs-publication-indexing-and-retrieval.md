@@ -48,6 +48,7 @@ Definitions used in this plan:
 - [x] 2026-05-02 21:54Z: Tightened shared header validation to reject non-plain objects, preventing `Headers` instances from silently dropping entries via `Object.entries(...)`.
 - [x] 2026-05-02 22:01Z: Simplified package-internal filenames after the package rename. Source files now use `config.ts`, `request-utils.ts`, `publish.ts`, `read-bytes.ts`, `read-text.ts`, `read-public-gateway-bytes.ts`, and `read-public-gateway-text.ts`; focused tests were renamed to `publish.test.js` and `retrieval.test.js`.
 - [x] 2026-05-02 22:29Z: Polished `packages/ipfs/README.md` with add-and-pin, retrieval, byte-bound, text-validation, and indexing notes; closed this ExecPlan with all immediate IPFS package work complete. Future onchain CID logging remains a separate follow-on plan when the user starts that work.
+- [x] 2026-05-03 20:48Z: Removed `packageInfo` from the non-placeholder IPFS package export and updated smoke imports to check real package functions instead.
 
 ## Surprises & Discoveries
 
@@ -155,8 +156,20 @@ Validation evidence after filename cleanup and final documentation polish:
 - `node --test packages/ipfs/test/retrieval.test.js`
 - `node --test packages/ipfs/test/publish.test.js`
 - `node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => console.log(Object.keys(m).sort().join(',')))"`
-- from `packages/`: `node --input-type=module -e "import('@oyaprotocol/ipfs').then((m) => console.log(m.packageInfo.name, typeof m.publishToIpfs, typeof m.readIpfsPublicGatewayText))"`
-- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/transactions/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then((modules) => { console.log(modules.map((module) => module.packageInfo.name).join(',')); })"`
+- from `packages/`: `node --input-type=module -e "import('@oyaprotocol/ipfs').then((m) => console.log(typeof m.publishToIpfs, typeof m.readIpfsPublicGatewayText))"`
+- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum, verification]) => { console.log(typeof utils.packageInfo, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig, typeof verification.packageInfo); })"`
+- `git diff --check`
+
+Package export cleanup removed the old placeholder-style `packageInfo` object from `@oyaprotocol/ipfs` now that the package has real public functions. Smoke imports now check `publishToIpfs(...)`, `readIpfsPublicGatewayText(...)`, and related real exports rather than package metadata.
+
+Validation evidence for package export cleanup:
+
+- `npm --prefix packages run build`
+- `node --test packages/ipfs/test/publish.test.js` passed 17 tests.
+- `node --test packages/ipfs/test/retrieval.test.js` passed 27 tests.
+- `node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => console.log(typeof m.publishToIpfs, typeof m.readIpfsPublicGatewayText, Object.hasOwn(m, 'packageInfo')))"` printed `function function false`.
+- From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ipfs').then((m) => console.log(typeof m.publishToIpfs, Object.hasOwn(m, 'packageInfo')))"` printed `function false`.
+- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum, verification]) => { console.log(typeof utils.packageInfo, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig, typeof verification.packageInfo); })"` printed `object object function function object`.
 - `git diff --check`
 
 Validation evidence for Milestone 2:
@@ -210,7 +223,7 @@ Public gateway retrieval is intentionally separate from the Kubo RPC read helper
 
 ## Concrete Steps
 
-From `/Users/johnshutt/Code/oya-commitments`:
+From the repository root:
 
 1. Reconfirm local instructions and clean state:
 
@@ -240,7 +253,7 @@ From `/Users/johnshutt/Code/oya-commitments`:
        npm --prefix packages run build
        node --test packages/ipfs/test/publish.test.js
        node --test packages/ipfs/test/retrieval.test.js
-       node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => console.log(Object.keys(m).sort().join(',')))"
+       node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => console.log(typeof m.publishToIpfs, typeof m.readIpfsPublicGatewayText, Object.hasOwn(m, 'packageInfo')))"
 
 9. Do not implement the onchain Logger in this immediate pass. If the user asks to proceed with indexing, create or revise a dedicated ExecPlan first.
 
@@ -254,12 +267,12 @@ The package milestone is accepted when:
 - Retrieval primitives can read known CIDs as bounded bytes and bounded ASCII text with caller cancellation, oversized-response failure, and non-ASCII failure for the text wrapper.
 - Package README documentation explains add-and-pin publication, retrieval, and the future onchain Logger indexing direction.
 
-Minimum validation commands from `/Users/johnshutt/Code/oya-commitments`:
+Minimum validation commands from the repository root:
 
 - `npm --prefix packages run build`
 - `node --test packages/ipfs/test/publish.test.js`
 - `node --test packages/ipfs/test/retrieval.test.js`
-- `node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => console.log(Object.keys(m).sort().join(',')))"`
+- `node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => console.log(typeof m.publishToIpfs, typeof m.readIpfsPublicGatewayText, Object.hasOwn(m, 'packageInfo')))"`
 
 When onchain indexing work starts, create or update a separate ExecPlan with Solidity tests and deployment/chain assumptions before writing contract code.
 

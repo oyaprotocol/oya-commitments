@@ -1,6 +1,3 @@
-export const packageInfo = Object.freeze({
-    name: '@oyaprotocol/ipfs',
-});
 export { createIpfsConfig } from './config.js';
 export { publishToIpfs } from './publish.js';
 export { readIpfsBytes } from './read-bytes.js';
