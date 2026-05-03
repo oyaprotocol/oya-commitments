@@ -240,7 +240,7 @@ function buildJsonRpcBody({ id, method, params, }) {
         throw new Error('Ethereum JSON-RPC params must be JSON-serializable; convert bigint values to quantity hex strings before calling requestEthereumJsonRpc.', { cause: error });
     }
 }
-function parseJsonRpcResponse({ text, method, }) {
+function parseJsonRpcResponse({ text, method, id, }) {
     let response;
     try {
         response = JSON.parse(text);
@@ -251,12 +251,18 @@ function parseJsonRpcResponse({ text, method, }) {
     if (!isPlainObject(response)) {
         throw new Error('Ethereum JSON-RPC response must be an object.');
     }
+    if (response.jsonrpc !== '2.0') {
+        throw new Error('Ethereum JSON-RPC response must use jsonrpc "2.0".');
+    }
     if ('error' in response) {
         const errorPayload = isPlainObject(response.error) ? response.error : {};
         throw new EthereumJsonRpcError(errorPayload, { method, response });
     }
     if (!('result' in response)) {
         throw new Error('Ethereum JSON-RPC response did not include a result.');
+    }
+    if (response.id !== id) {
+        throw new Error('Ethereum JSON-RPC response id did not match request id.');
     }
     return {
         result: response.result,
@@ -317,6 +323,7 @@ async function requestEthereumJsonRpc({ config, fetch, method, params = [], id, 
             const parsed = parseJsonRpcResponse({
                 text: responseText,
                 method: normalizedMethod,
+                id: normalizedId,
             });
             return {
                 result: parsed.result,

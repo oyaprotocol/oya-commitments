@@ -304,11 +304,33 @@ test('requestEthereumJsonRpc rejects invalid responses and non-serializable para
 
     await assert.rejects(
         requestEthereumJsonRpc({
+            config: createConfig(),
+            fetch: async () =>
+                createTextResponse(200, '{"id":1,"result":"0x1"}'),
+            method: 'eth_chainId',
+            id: 1,
+        }),
+        /jsonrpc "2\.0"/
+    );
+
+    await assert.rejects(
+        requestEthereumJsonRpc({
             config: createConfig({ maxRetries: 0 }),
             fetch: async () => createTextResponse(200, '{"jsonrpc":"2.0","id":1}'),
             method: 'eth_chainId',
         }),
         /did not include a result/
+    );
+
+    await assert.rejects(
+        requestEthereumJsonRpc({
+            config: createConfig(),
+            fetch: async () =>
+                createTextResponse(200, '{"jsonrpc":"2.0","id":2,"result":"0x1"}'),
+            method: 'eth_chainId',
+            id: 1,
+        }),
+        /response id did not match request id/
     );
 
     let attempts = 0;
