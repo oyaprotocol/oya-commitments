@@ -10,7 +10,7 @@ import {
     waitForRetryDelay,
 } from './request-utils.js';
 import type { IpfsOperationErrorMessages } from './request-utils.js';
-import { assertNonEmptyString, assertPositiveInteger } from './validation-utils.js';
+import { assertNonEmptyString, assertPositiveInteger } from '@oyaprotocol/utils';
 
 export type ReadIpfsFetchLike = (
     url: string,

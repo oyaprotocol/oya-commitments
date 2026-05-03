@@ -1,7 +1,15 @@
 # @oyaprotocol/utils
 
-Placeholder shell for the hardened Oya utilities package.
+Small shared utilities for hardened Oya kernel packages.
 
 ## Public Entrypoint
 
 - `@oyaprotocol/utils`
+
+## Validation Helpers
+
+- `assertNonEmptyString(value, label)`
+- `assertPositiveInteger(value, label)`
+- `assertNonNegativeInteger(value, label)`
+- `assertHeadersObject(headers, label, options)`
+- `isPlainObject(value)`

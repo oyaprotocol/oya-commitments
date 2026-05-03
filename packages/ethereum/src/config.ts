@@ -3,7 +3,7 @@ import {
     assertNonEmptyString,
     assertNonNegativeInteger,
     assertPositiveInteger,
-} from './validation-utils.js';
+} from '@oyaprotocol/utils';
 
 export interface CreateEthereumRpcConfigOptions {
     rpcUrl: string;

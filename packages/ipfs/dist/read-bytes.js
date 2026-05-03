@@ -1,5 +1,5 @@
 import { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, normalizeIpfsOperationError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, } from './request-utils.js';
-import { assertNonEmptyString, assertPositiveInteger } from './validation-utils.js';
+import { assertNonEmptyString, assertPositiveInteger } from '@oyaprotocol/utils';
 function combineChunks(chunks, byteLength) {
     const combined = new Uint8Array(byteLength);
     let offset = 0;

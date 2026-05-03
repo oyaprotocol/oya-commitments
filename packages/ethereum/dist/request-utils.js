@@ -1,4 +1,4 @@
-import { isPlainObject } from './validation-utils.js';
+import { isPlainObject } from '@oyaprotocol/utils';
 const RETRYABLE_ERROR_CODES = new Set([
     'ECONNREFUSED',
     'ECONNRESET',

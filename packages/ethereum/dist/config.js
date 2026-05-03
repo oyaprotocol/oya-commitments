@@ -1,4 +1,4 @@
-import { assertHeadersObject, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, } from './validation-utils.js';
+import { assertHeadersObject, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, } from '@oyaprotocol/utils';
 function normalizeRpcUrl(rpcUrl) {
     return rpcUrl.replace(/\/+$/, '');
 }

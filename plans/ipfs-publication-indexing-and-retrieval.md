@@ -49,6 +49,7 @@ Definitions used in this plan:
 - [x] 2026-05-02 22:01Z: Simplified package-internal filenames after the package rename. Source files now use `config.ts`, `request-utils.ts`, `publish.ts`, `read-bytes.ts`, `read-text.ts`, `read-public-gateway-bytes.ts`, and `read-public-gateway-text.ts`; focused tests were renamed to `publish.test.js` and `retrieval.test.js`.
 - [x] 2026-05-02 22:29Z: Polished `packages/ipfs/README.md` with add-and-pin, retrieval, byte-bound, text-validation, and indexing notes; closed this ExecPlan with all immediate IPFS package work complete. Future onchain CID logging remains a separate follow-on plan when the user starts that work.
 - [x] 2026-05-03 20:48Z: Removed `packageInfo` from the non-placeholder IPFS package export and updated smoke imports to check real package functions instead.
+- [x] 2026-05-03 21:15Z: Moved validation helpers shared with Ethereum into `@oyaprotocol/utils`; IPFS now keeps only IPFS-specific ASCII byte validation locally.
 
 ## Surprises & Discoveries
 
@@ -157,7 +158,7 @@ Validation evidence after filename cleanup and final documentation polish:
 - `node --test packages/ipfs/test/publish.test.js`
 - `node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => console.log(Object.keys(m).sort().join(',')))"`
 - from `packages/`: `node --input-type=module -e "import('@oyaprotocol/ipfs').then((m) => console.log(typeof m.publishToIpfs, typeof m.readIpfsPublicGatewayText))"`
-- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum, verification]) => { console.log(typeof utils.packageInfo, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig, typeof verification.packageInfo); })"`
+- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum, verification]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig, typeof verification.packageInfo); })"`
 - `git diff --check`
 
 Package export cleanup removed the old placeholder-style `packageInfo` object from `@oyaprotocol/ipfs` now that the package has real public functions. Smoke imports now check `publishToIpfs(...)`, `readIpfsPublicGatewayText(...)`, and related real exports rather than package metadata.
@@ -169,7 +170,19 @@ Validation evidence for package export cleanup:
 - `node --test packages/ipfs/test/retrieval.test.js` passed 27 tests.
 - `node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => console.log(typeof m.publishToIpfs, typeof m.readIpfsPublicGatewayText, Object.hasOwn(m, 'packageInfo')))"` printed `function function false`.
 - From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ipfs').then((m) => console.log(typeof m.publishToIpfs, Object.hasOwn(m, 'packageInfo')))"` printed `function false`.
-- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum, verification]) => { console.log(typeof utils.packageInfo, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig, typeof verification.packageInfo); })"` printed `object object function function object`.
+- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum, verification]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig, typeof verification.packageInfo); })"` printed `function object function function object`.
+- `git diff --check`
+
+Shared validation cleanup moved the helpers duplicated between IPFS and Ethereum into `@oyaprotocol/utils`: `assertHeadersObject(...)`, `assertNonEmptyString(...)`, `assertNonNegativeInteger(...)`, `assertPositiveInteger(...)`, and `isPlainObject(...)`. IPFS now imports those helpers from the package root and keeps only `assertAsciiBytes(...)` in `packages/ipfs/src/validation-utils.ts`.
+
+Validation evidence for shared validation cleanup:
+
+- `npm --prefix packages run build`
+- `node --test packages/utils/test/validation.test.js` passed 3 tests.
+- `node --test packages/ipfs/test/publish.test.js` passed 17 tests.
+- `node --test packages/ipfs/test/retrieval.test.js` passed 27 tests.
+- From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ipfs').then((m) => console.log(typeof m.publishToIpfs, typeof m.readIpfsPublicGatewayText, Object.hasOwn(m, 'packageInfo')))"` printed `function function false`.
+- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum, verification]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig, typeof verification.packageInfo); })"` printed `function object function function object`.
 - `git diff --check`
 
 Validation evidence for Milestone 2:
@@ -189,7 +202,8 @@ Current package files:
 
 - `packages/ipfs/src/config.ts`: validates explicit IPFS transport settings.
 - `packages/ipfs/src/request-utils.ts`: contains shared retry, timeout, abort, HTTP error, and operation-error normalization helpers for IPFS HTTP requests.
-- `packages/ipfs/src/validation-utils.ts`: contains shared internal validation helpers, including header object validation.
+- `packages/ipfs/src/validation-utils.ts`: contains IPFS-specific ASCII byte validation.
+- `packages/utils/src/validation-utils.ts`: contains shared validation helpers used by IPFS and Ethereum.
 - `packages/ipfs/src/publish.ts`: publishes content to Kubo `/api/v0/add` using injected `fetch`.
 - `packages/ipfs/src/read-bytes.ts`: reads bounded arbitrary byte content from Kubo `/api/v0/cat` using injected `fetch`.
 - `packages/ipfs/src/read-public-gateway-bytes.ts`: reads bounded arbitrary byte content from public gateway `GET /ipfs/<cid>` endpoints using injected `fetch`.

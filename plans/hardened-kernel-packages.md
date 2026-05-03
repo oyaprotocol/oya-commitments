@@ -148,14 +148,16 @@ Validation evidence for this milestone:
 
 - `npm --prefix packages install`
 - `npm --prefix packages run build`
-- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum, verification]) => { console.log(typeof utils.packageInfo, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig, typeof verification.packageInfo); })"`
+- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum, verification]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig, typeof verification.packageInfo); })"`
 - `node --test packages/ipfs/test/publish.test.js`
 
 The final open thread in this plan is now closed. The next publishing primitive has been selected as explicit add-and-pin publication, followed by low-level retrieval. Public indexing is deferred to a future onchain Logger design. Implementation should continue from `plans/ipfs-publication-indexing-and-retrieval.md` rather than extending this package-shell plan.
 
 Follow-on cleanup renamed redundant IPFS package filenames after the package moved to `packages/ipfs`: the current source files are `config.ts`, `publish.ts`, `request-utils.ts`, and the read helpers under `packages/ipfs/src/`; the focused tests are `packages/ipfs/test/publish.test.js` and `packages/ipfs/test/retrieval.test.js`.
 
-Later package export cleanup removed `packageInfo` from non-placeholder packages. `@oyaprotocol/ipfs` and `@oyaprotocol/ethereum` now use real public functions for smoke imports, while `@oyaprotocol/utils`, `@oyaprotocol/messages`, and `@oyaprotocol/verification` keep `packageInfo` because they are still placeholders.
+Later package export cleanup removed `packageInfo` from non-placeholder packages. `@oyaprotocol/ipfs`, `@oyaprotocol/ethereum`, and `@oyaprotocol/utils` now use real public functions for smoke imports, while `@oyaprotocol/messages` and `@oyaprotocol/verification` keep `packageInfo` because they are still placeholders.
+
+Shared validation cleanup moved duplicated IPFS/Ethereum helpers into `@oyaprotocol/utils`: `assertHeadersObject(...)`, `assertNonEmptyString(...)`, `assertNonNegativeInteger(...)`, `assertPositiveInteger(...)`, and `isPlainObject(...)`. IPFS and Ethereum now declare workspace dependencies on `@oyaprotocol/utils` and import through the package root.
 
 ## Context and Orientation
 
@@ -250,11 +252,12 @@ This milestone is accepted when:
 Validation commands from the repository root:
 
 - `npm --prefix packages run build`
-- `node --input-type=module -e "import('./packages/utils/dist/index.js').then((m) => console.log(m.packageInfo.name))"`
+- `node --input-type=module -e "import('./packages/utils/dist/index.js').then((m) => console.log(typeof m.assertNonEmptyString, typeof m.assertHeadersObject, Object.hasOwn(m, 'packageInfo')))"`
 - `node --input-type=module -e "import('./packages/messages/dist/index.js').then((m) => console.log(m.packageInfo.name))"`
 - `node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => console.log(typeof m.publishToIpfs, typeof m.readIpfsPublicGatewayText, Object.hasOwn(m, 'packageInfo')))"`
 - `node --input-type=module -e "import('./packages/ethereum/dist/index.js').then((m) => console.log(typeof m.createEthereumRpcConfig, typeof m.requestEthereumJsonRpc, Object.hasOwn(m, 'packageInfo')))"`
 - `node --input-type=module -e "import('./packages/verification/dist/index.js').then((m) => console.log(m.packageInfo.name))"`
+- `node --test packages/utils/test/validation.test.js`
 - `node --test packages/ipfs/test/publish.test.js`
 - `node --test packages/ipfs/test/retrieval.test.js`
 
@@ -276,6 +279,14 @@ Placeholder public surface:
 
 - `src/index.ts` exporting `packageInfo` for packages without real public functions yet
 - compiled `dist/index.js` entrypoint with `dist/index.d.ts`
+
+Current public surface in `@oyaprotocol/utils`:
+
+- `assertHeadersObject(value, label, options)`
+- `assertNonEmptyString(value, label)`
+- `assertNonNegativeInteger(value, label)`
+- `assertPositiveInteger(value, label)`
+- `isPlainObject(value)`
 
 Current additional public surface in `@oyaprotocol/ipfs`:
 
@@ -302,10 +313,11 @@ Interfaces introduced in this phase:
 
 Interfaces introduced after the initial shell milestone:
 
+- validation helpers from `@oyaprotocol/utils`
 - `createIpfsConfig(options)` from `@oyaprotocol/ipfs`
 - `publishToIpfs(options)` from `@oyaprotocol/ipfs`
 
 Dependencies introduced in this phase:
 
-- none between the new packages
+- `@oyaprotocol/ipfs` and `@oyaprotocol/ethereum` depend on `@oyaprotocol/utils`
 - no imports from legacy repo areas into `packages/`

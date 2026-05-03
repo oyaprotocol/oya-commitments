@@ -1,6 +1,6 @@
 import { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, normalizeIpfsOperationError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, } from './request-utils.js';
 import { readBoundedBytes } from './read-bytes.js';
-import { assertHeadersObject, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, } from './validation-utils.js';
+import { assertHeadersObject, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, } from '@oyaprotocol/utils';
 function buildGatewayReadUrl(gatewayUrl, cid) {
     const url = new URL(gatewayUrl);
     if (url.hash) {

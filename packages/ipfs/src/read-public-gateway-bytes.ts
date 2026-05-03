@@ -15,7 +15,7 @@ import {
     assertNonEmptyString,
     assertNonNegativeInteger,
     assertPositiveInteger,
-} from './validation-utils.js';
+} from '@oyaprotocol/utils';
 
 export type ReadIpfsPublicGatewayFetchLike = (
     url: string,

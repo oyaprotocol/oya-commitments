@@ -25,4 +25,5 @@
 
 ## Current Constraints
 
-- These package shells do not define functional ownership yet.
+- `@oyaprotocol/ipfs`, `@oyaprotocol/ethereum`, and `@oyaprotocol/utils` expose functional kernel APIs.
+- `@oyaprotocol/messages` and `@oyaprotocol/verification` are still placeholder package shells.

@@ -14,5 +14,8 @@
   "files": [
     "dist",
     "README.md"
-  ]
+  ],
+  "dependencies": {
+    "@oyaprotocol/utils": "0.0.0"
+  }
 }

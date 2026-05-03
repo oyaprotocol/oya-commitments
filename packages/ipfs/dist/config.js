@@ -1,4 +1,4 @@
-import { assertHeadersObject, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, } from './validation-utils.js';
+import { assertHeadersObject, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, } from '@oyaprotocol/utils';
 function normalizeApiUrl(apiUrl) {
     return apiUrl.replace(/\/+$/, '').replace(/\/api\/v0$/, '');
 }
