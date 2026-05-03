@@ -18,3 +18,7 @@ Small shared utilities for hardened Oya kernel packages.
 
 - `CreateHttpConfigOptions`
 - `HttpConfig`
+
+## HTTP Config Helpers
+
+- `createHttpConfig(options, normalizeUrl?)`

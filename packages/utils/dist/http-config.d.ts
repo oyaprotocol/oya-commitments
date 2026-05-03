@@ -12,4 +12,6 @@ interface HttpConfig {
     readonly maxRetries: number;
     readonly retryDelayMs: number;
 }
+declare function createHttpConfig({ url, headers, timeoutMs, maxRetries, retryDelayMs }: CreateHttpConfigOptions, normalizeConfigUrl?: (url: string) => string): HttpConfig;
+export { createHttpConfig };
 export type { CreateHttpConfigOptions, HttpConfig };

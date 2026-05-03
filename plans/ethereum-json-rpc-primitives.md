@@ -34,6 +34,7 @@ Definitions used in this plan:
 - [x] 2026-05-03 21:15Z: Moved validation helpers shared with IPFS into `@oyaprotocol/utils` and made Ethereum import them through the package root.
 - [x] 2026-05-03 21:35Z: Replaced the package-branded `EthereumRpcConfig` type with shared `HttpConfig` / `CreateHttpConfigOptions` from `@oyaprotocol/utils`; `createEthereumRpcConfig(...)` now accepts and returns the generic `url`-based HTTP config shape.
 - [x] 2026-05-03 21:42Z: Gated JSON-RPC retries to read-only Ethereum methods and `eth_sendRawTransaction`, preventing retry replays for arbitrary state-changing methods.
+- [x] 2026-05-03 21:51Z: Moved shared HTTP config validation/freezing into `@oyaprotocol/utils` as `createHttpConfig(...)`; Ethereum and IPFS now keep only their public creator names and package-specific URL normalization.
 
 ## Surprises & Discoveries
 
@@ -84,6 +85,10 @@ Definitions used in this plan:
 
 - Decision: Move shared validation helpers into `@oyaprotocol/utils`.
   Rationale: `assertHeadersObject(...)`, `assertNonEmptyString(...)`, `assertNonNegativeInteger(...)`, `assertPositiveInteger(...)`, and `isPlainObject(...)` were identical across IPFS and Ethereum after the second package proved the common shape. A package-root `@oyaprotocol/utils` import now removes duplication without importing from legacy runtime areas.
+  Date/Author: 2026-05-03 / Codex.
+
+- Decision: Move shared HTTP config creation into `@oyaprotocol/utils`.
+  Rationale: After both IPFS and Ethereum adopted the same `HttpConfig` / `CreateHttpConfigOptions` shape, their creator functions duplicated all validation and freezing behavior. A small `createHttpConfig(...)` helper centralizes the common policy while preserving `createIpfsConfig(...)` and `createEthereumRpcConfig(...)` as package-root APIs with package-specific URL normalization.
   Date/Author: 2026-05-03 / Codex.
 
 ## Outcomes & Retrospective
@@ -138,6 +143,17 @@ Validation evidence for shared validation cleanup:
 HTTP config cleanup moved the public config interfaces to `@oyaprotocol/utils` as `HttpConfig` and `CreateHttpConfigOptions`. Ethereum now uses the generic `url` field, while `createEthereumRpcConfig(...)` still owns Ethereum-specific normalization by trimming trailing slashes before JSON-RPC requests are sent.
 
 Retry safety cleanup added a fixed method allowlist to the raw JSON-RPC request primitive. The helper retries read-only Ethereum JSON-RPC methods and `eth_sendRawTransaction`, but it does not retry arbitrary methods such as `evm_*`, `anvil_*`, `personal_*`, `admin_*`, `miner_*`, or `eth_sendTransaction`.
+
+Shared HTTP config creator cleanup added `createHttpConfig(...)` to `@oyaprotocol/utils`. `createEthereumRpcConfig(...)` now delegates directly to it, while `createIpfsConfig(...)` delegates with its Kubo `/api/v0` base URL normalizer. The public package creators remain unchanged.
+
+Validation evidence for shared HTTP config creator cleanup:
+
+- `npm run build` from `packages/`
+- `node --test packages/utils/test/validation.test.js` passed 4 tests.
+- `node --test packages/ipfs/test/publish.test.js packages/ipfs/test/retrieval.test.js` passed 44 tests.
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- From `packages/`, package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` printed `function function false`.
+- `git diff --check`
 
 ## Context and Orientation
 

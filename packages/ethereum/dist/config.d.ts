@@ -1,3 +1,3 @@
 import type { CreateHttpConfigOptions, HttpConfig } from '@oyaprotocol/utils';
-declare function createEthereumRpcConfig({ url, headers, timeoutMs, maxRetries, retryDelayMs, }: CreateHttpConfigOptions): HttpConfig;
+declare function createEthereumRpcConfig(options: CreateHttpConfigOptions): HttpConfig;
 export { createEthereumRpcConfig };

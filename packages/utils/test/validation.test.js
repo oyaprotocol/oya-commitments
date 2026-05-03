@@ -6,6 +6,7 @@ import {
     assertNonEmptyString,
     assertNonNegativeInteger,
     assertPositiveInteger,
+    createHttpConfig,
     isPlainObject,
 } from '../dist/index.js';
 
@@ -79,4 +80,42 @@ test('isPlainObject accepts plain records and rejects non-record objects', () =>
     assert.equal(isPlainObject([]), false);
     assert.equal(isPlainObject(null), false);
     assert.equal(isPlainObject(new Map()), false);
+});
+
+test('createHttpConfig validates and freezes HTTP transport configuration', () => {
+    const config = createHttpConfig({
+        url: '  https://rpc.example///  ',
+        headers: {
+            Authorization: 'Bearer token',
+        },
+        timeoutMs: 1000,
+        maxRetries: 2,
+        retryDelayMs: 50,
+    });
+
+    assert.deepEqual(config, {
+        url: 'https://rpc.example',
+        headers: {
+            Authorization: 'Bearer token',
+        },
+        timeoutMs: 1000,
+        maxRetries: 2,
+        retryDelayMs: 50,
+    });
+    assert.equal(Object.isFrozen(config), true);
+    assert.equal(Object.isFrozen(config.headers), true);
+
+    assert.throws(
+        () =>
+            createHttpConfig({
+                url: 'https://rpc.example',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                timeoutMs: 1000,
+                maxRetries: 2,
+                retryDelayMs: 50,
+            }),
+        /config\.headers must not include content-type/
+    );
 });
