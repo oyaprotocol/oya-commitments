@@ -1,6 +1,5 @@
 export declare const packageInfo: Readonly<{
     name: "@oyaprotocol/ethereum";
-    status: "partial";
 }>;
 export { createEthereumRpcConfig } from './config.js';
 export type { CreateEthereumRpcConfigOptions, EthereumRpcConfig } from './config.js';

@@ -90,7 +90,7 @@ Validation evidence for the rename:
 
 - `npm --prefix packages run build`
 - `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then((modules) => { console.log(modules.map((module) => module.packageInfo.name).join(',')); })"` printed `@oyaprotocol/utils,@oyaprotocol/messages,@oyaprotocol/ipfs,@oyaprotocol/ethereum,@oyaprotocol/verification`.
-- From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ethereum').then((m) => console.log(m.packageInfo.name, m.packageInfo.status))"` printed `@oyaprotocol/ethereum placeholder`.
+- From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ethereum').then((m) => console.log(m.packageInfo.name))"` printed `@oyaprotocol/ethereum`.
 - `git diff --check`
 
 Milestone 1 is complete. `@oyaprotocol/ethereum` now exposes `createEthereumRpcConfig(...)`, `requestEthereumJsonRpc(...)`, `EthereumJsonRpcError`, and `EthereumJsonRpcHttpError` through the package root. The implementation lives in `packages/ethereum/src/config.ts`, `packages/ethereum/src/request-utils.ts`, and package-local `packages/ethereum/src/validation-utils.ts`. The package remains zero-runtime-dependency and does not import from legacy runtime areas.
@@ -101,8 +101,8 @@ Validation evidence for Milestone 1:
 
 - `npm --prefix packages run build`
 - `node --test packages/ethereum/test/rpc.test.js` passed 11 tests.
-- `node --input-type=module -e "import('./packages/ethereum/dist/index.js').then((m) => console.log(m.packageInfo.name, m.packageInfo.status, typeof m.createEthereumRpcConfig, typeof m.requestEthereumJsonRpc, typeof m.EthereumJsonRpcError))"` printed `@oyaprotocol/ethereum partial function function function`.
-- From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ethereum').then((m) => console.log(m.packageInfo.name, m.packageInfo.status, typeof m.requestEthereumJsonRpc))"` printed `@oyaprotocol/ethereum partial function`.
+- `node --input-type=module -e "import('./packages/ethereum/dist/index.js').then((m) => console.log(m.packageInfo.name, typeof m.createEthereumRpcConfig, typeof m.requestEthereumJsonRpc, typeof m.EthereumJsonRpcError))"` printed `@oyaprotocol/ethereum function function function`.
+- From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ethereum').then((m) => console.log(m.packageInfo.name, typeof m.requestEthereumJsonRpc))"` printed `@oyaprotocol/ethereum function`.
 - `git diff --check`
 
 ## Context and Orientation

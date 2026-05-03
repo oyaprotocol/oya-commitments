@@ -1,6 +1,5 @@
 export const packageInfo = Object.freeze({
     name: '@oyaprotocol/ipfs',
-    status: 'partial',
 });
 
 export { createIpfsConfig } from './config.js';

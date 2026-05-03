@@ -1,6 +1,5 @@
 export declare const packageInfo: Readonly<{
     name: "@oyaprotocol/ipfs";
-    status: "partial";
 }>;
 export { createIpfsConfig } from './config.js';
 export type { CreateIpfsConfigOptions, IpfsConfig } from './config.js';
