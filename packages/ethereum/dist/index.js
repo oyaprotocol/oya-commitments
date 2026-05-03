@@ -1,4 +1,5 @@
 export const packageInfo = Object.freeze({
-    name: '@oyaprotocol/transactions',
+    name: '@oyaprotocol/ethereum',
     status: 'placeholder',
 });
+//# sourceMappingURL=index.js.map

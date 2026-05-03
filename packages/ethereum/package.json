@@ -1,7 +1,7 @@
 {
-  "name": "@oyaprotocol/transactions",
+  "name": "@oyaprotocol/ethereum",
   "version": "0.0.0",
-  "description": "Oya onchain transaction handling.",
+  "description": "Oya Ethereum JSON-RPC utilities.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

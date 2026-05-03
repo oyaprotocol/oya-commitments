@@ -7,7 +7,7 @@
 - `packages/utils` -> `@oyaprotocol/utils`
 - `packages/messages` -> `@oyaprotocol/messages`
 - `packages/ipfs` -> `@oyaprotocol/ipfs`
-- `packages/transactions` -> `@oyaprotocol/transactions`
+- `packages/ethereum` -> `@oyaprotocol/ethereum`
 - `packages/verification` -> `@oyaprotocol/verification`
 
 ## Import Strategy

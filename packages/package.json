@@ -6,7 +6,7 @@
     "./utils",
     "./messages",
     "./ipfs",
-    "./transactions",
+    "./ethereum",
     "./verification"
   ],
   "scripts": {

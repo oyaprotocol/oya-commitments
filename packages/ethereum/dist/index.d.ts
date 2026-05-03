@@ -1,4 +1,4 @@
 export declare const packageInfo: Readonly<{
-    name: "@oyaprotocol/transactions";
+    name: "@oyaprotocol/ethereum";
     status: "placeholder";
 }>;
