@@ -1,4 +1,4 @@
-import type { EthereumRpcConfig } from './config.js';
+import type { HttpConfig } from '@oyaprotocol/utils';
 import { isPlainObject } from '@oyaprotocol/utils';
 
 const RETRYABLE_ERROR_CODES = new Set([
@@ -34,7 +34,7 @@ export interface EthereumJsonRpcResponse {
 }
 
 export interface RequestEthereumJsonRpcOptions {
-    config: EthereumRpcConfig;
+    config: HttpConfig;
     fetch: EthereumJsonRpcFetchLike;
     method: string;
     params?: readonly unknown[];
@@ -426,7 +426,7 @@ async function requestEthereumJsonRpc<TResult = unknown>({
         try {
             const response = await invokeWithAbort(
                 () =>
-                    fetch(config.rpcUrl, {
+                    fetch(config.url, {
                         method: 'POST',
                         headers: {
                             ...config.headers,

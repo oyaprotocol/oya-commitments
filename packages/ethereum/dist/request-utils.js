@@ -304,7 +304,7 @@ async function requestEthereumJsonRpc({ config, fetch, method, params = [], id, 
         const timeoutSignal = createTimeoutSignal(config.timeoutMs);
         const requestSignal = combineAbortSignals([signal, timeoutSignal.signal]);
         try {
-            const response = await invokeWithAbort(() => fetch(config.rpcUrl, {
+            const response = await invokeWithAbort(() => fetch(config.url, {
                 method: 'POST',
                 headers: {
                     ...config.headers,

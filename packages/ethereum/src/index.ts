@@ -1,5 +1,5 @@
 export { createEthereumRpcConfig } from './config.js';
-export type { CreateEthereumRpcConfigOptions, EthereumRpcConfig } from './config.js';
+export type { CreateHttpConfigOptions, HttpConfig } from '@oyaprotocol/utils';
 export {
     EthereumJsonRpcError,
     EthereumJsonRpcHttpError,

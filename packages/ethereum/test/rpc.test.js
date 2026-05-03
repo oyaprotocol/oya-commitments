@@ -10,7 +10,7 @@ import {
 
 function createConfig(overrides = {}) {
     return createEthereumRpcConfig({
-        rpcUrl: 'https://rpc.example/',
+        url: 'https://rpc.example/',
         headers: {
             Authorization: 'Bearer test-token',
         },
@@ -34,7 +34,7 @@ function createTextResponse(status, body, statusText = 'OK') {
 
 test('createEthereumRpcConfig requires explicit transport configuration', () => {
     const config = createEthereumRpcConfig({
-        rpcUrl: 'https://rpc.example/',
+        url: 'https://rpc.example/',
         headers: {
             Authorization: 'Bearer token',
         },
@@ -44,7 +44,7 @@ test('createEthereumRpcConfig requires explicit transport configuration', () => 
     });
 
     assert.deepEqual(config, {
-        rpcUrl: 'https://rpc.example',
+        url: 'https://rpc.example',
         headers: {
             Authorization: 'Bearer token',
         },
@@ -59,18 +59,18 @@ test('createEthereumRpcConfig requires explicit transport configuration', () => 
     assert.throws(
         () =>
             createEthereumRpcConfig({
-                rpcUrl: '',
+                url: '',
                 headers: {},
                 timeoutMs: 1_000,
                 maxRetries: 1,
                 retryDelayMs: 0,
             }),
-        /config\.rpcUrl must be a non-empty string/
+        /config\.url must be a non-empty string/
     );
     assert.throws(
         () =>
             createEthereumRpcConfig({
-                rpcUrl: 'https://rpc.example',
+                url: 'https://rpc.example',
                 headers: new Headers(),
                 timeoutMs: 1_000,
                 maxRetries: 1,
@@ -81,7 +81,7 @@ test('createEthereumRpcConfig requires explicit transport configuration', () => 
     assert.throws(
         () =>
             createEthereumRpcConfig({
-                rpcUrl: 'https://rpc.example',
+                url: 'https://rpc.example',
                 headers: {
                     'content-type': 'application/json',
                 },
@@ -94,7 +94,7 @@ test('createEthereumRpcConfig requires explicit transport configuration', () => 
     assert.throws(
         () =>
             createEthereumRpcConfig({
-                rpcUrl: 'https://rpc.example',
+                url: 'https://rpc.example',
                 headers: {},
                 timeoutMs: '1000',
                 maxRetries: 1,

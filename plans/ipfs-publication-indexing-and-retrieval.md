@@ -27,7 +27,7 @@ Definitions used in this plan:
 - [x] 2026-04-30 21:28Z: Completed Milestone 2. Added `readIpfsText(...)`, a bounded ASCII text retrieval primitive backed by Kubo `/api/v0/cat`, with timeout, retry, byte-limit, non-ASCII, and caller-abort coverage.
 - [x] 2026-04-30 19:09Z: Added add-and-pin publication tests and documentation.
 - [x] 2026-04-30 21:28Z: Added bounded ASCII text retrieval tests and README documentation.
-- [x] 2026-04-30 21:45Z: Renamed the shared transport config surface to `createIpfsConfig(...)` / `IpfsConfig` now that it is used by both publication and retrieval.
+- [x] 2026-04-30 21:45Z: Renamed the then-current shared transport config surface to `createIpfsConfig(...)` / `IpfsConfig` now that it was used by both publication and retrieval.
 - [x] 2026-04-30 22:02Z: Removed the old publish-specific config names instead of keeping compatibility aliases, per user clarification.
 - [x] 2026-04-30 22:20Z: Consolidated shared IPFS request abort, timeout, retry-delay, and retryable-error helpers in package-internal `request-utils.ts`.
 - [x] 2026-04-30 22:34Z: Fixed `readIpfsText(...)` to cancel non-OK `/api/v0/cat` response bodies before retrying or throwing, preventing leaked fetch sockets under repeated failures.
@@ -50,6 +50,7 @@ Definitions used in this plan:
 - [x] 2026-05-02 22:29Z: Polished `packages/ipfs/README.md` with add-and-pin, retrieval, byte-bound, text-validation, and indexing notes; closed this ExecPlan with all immediate IPFS package work complete. Future onchain CID logging remains a separate follow-on plan when the user starts that work.
 - [x] 2026-05-03 20:48Z: Removed `packageInfo` from the non-placeholder IPFS package export and updated smoke imports to check real package functions instead.
 - [x] 2026-05-03 21:15Z: Moved validation helpers shared with Ethereum into `@oyaprotocol/utils`; IPFS now keeps only IPFS-specific ASCII byte validation locally.
+- [x] 2026-05-03 21:35Z: Replaced the package-branded `IpfsConfig` type with shared `HttpConfig` / `CreateHttpConfigOptions` from `@oyaprotocol/utils`; `createIpfsConfig(...)` now accepts and returns the generic `url`-based HTTP config shape.
 
 ## Surprises & Discoveries
 
@@ -97,8 +98,8 @@ Definitions used in this plan:
   Rationale: The immediate reusable kernel work is add-and-pin plus low-level retrieval. Public discovery and customer-facing access should be designed after the onchain indexing direction is specified.
   Date/Author: 2026-04-30 / Codex.
 
-- Decision: Use `IpfsConfig` as the primary shared transport configuration name.
-  Rationale: The same config now applies to both publish and read paths, so the old publish-specific config name is too narrow. The old publish-specific names are not retained as aliases because this package surface is still early and the user prefers one clear API.
+- Decision: Use `createIpfsConfig(...)` as the primary shared transport configuration creator.
+  Rationale: The same config now applies to both publish and read paths, so the old publish-specific creator name is too narrow. The old publish-specific names are not retained as aliases because this package surface is still early and the user prefers one clear API. The package-branded `IpfsConfig` type was later superseded by shared `HttpConfig` from `@oyaprotocol/utils`.
   Date/Author: 2026-04-30 / Codex.
 
 ## Outcomes & Retrospective
@@ -113,7 +114,7 @@ Validation evidence for Milestone 1:
 
 Milestone 2 is complete. `readIpfsBytes(...)` reads known CIDs through `/api/v0/cat?arg=<cid>` and returns bounded arbitrary bytes. `readIpfsText(...)` wraps that byte primitive and adds ASCII verification plus text decoding for the immediate text-artifact use case. Both require `maxBytes`, support caller cancellation, and use the same explicit transport config pattern as publication.
 
-Follow-up cleanup renamed the shared transport config to `createIpfsConfig(...)` / `IpfsConfig`. The old publish-specific config names were removed rather than retained as aliases, so new package code and tests use the neutral names exclusively.
+Follow-up cleanup renamed the shared transport config creator to `createIpfsConfig(...)`. The old publish-specific config names were removed rather than retained as aliases, so new package code and tests use neutral names.
 
 Follow-up request cleanup centralized shared abort, timeout, retry-delay, and retryable-error mechanics in package-internal `request-utils.ts`. `publishToIpfs(...)` and `readIpfsText(...)` now keep their operation-specific validation and error messages locally while sharing generic request-control behavior.
 
@@ -185,6 +186,8 @@ Validation evidence for shared validation cleanup:
 - `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig); })"` printed `function object function function`.
 - `git diff --check`
 
+HTTP config cleanup moved the public config interfaces to `@oyaprotocol/utils` as `HttpConfig` and `CreateHttpConfigOptions`. IPFS now uses the generic `url` field, while `createIpfsConfig(...)` still owns Kubo-specific normalization by trimming trailing slashes and a trailing `/api/v0` segment.
+
 Validation evidence for Milestone 2:
 
 - `npm --prefix packages run build`
@@ -200,7 +203,7 @@ The hardened package area lives under `packages/`. The relevant local instructio
 
 Current package files:
 
-- `packages/ipfs/src/config.ts`: validates explicit IPFS transport settings.
+- `packages/ipfs/src/config.ts`: validates explicit IPFS transport settings and returns shared `HttpConfig`.
 - `packages/ipfs/src/request-utils.ts`: contains shared retry, timeout, abort, HTTP error, and operation-error normalization helpers for IPFS HTTP requests.
 - `packages/ipfs/src/validation-utils.ts`: contains IPFS-specific ASCII byte validation.
 - `packages/utils/src/validation-utils.ts`: contains shared validation helpers used by IPFS and Ethereum.
@@ -321,7 +324,7 @@ Important reference behavior:
 
 Existing package interfaces:
 
-- `IpfsConfig` from `packages/ipfs/src/config.ts`
+- `HttpConfig` and `CreateHttpConfigOptions` from `@oyaprotocol/utils`
 - `PublishIpfsFetchLike`, `PublishIpfsRequestOptions`, and `PublishIpfsResponse` from `packages/ipfs/src/publish.ts`
 - `PublishToIpfsOptions` and `PublishToIpfsResult` from `packages/ipfs/src/publish.ts`
 - `ReadIpfsBytesResult`

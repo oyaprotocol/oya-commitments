@@ -32,6 +32,7 @@ Definitions used in this plan:
 - [x] 2026-05-03 02:01Z: Validated the Milestone 1 package build, package-root import, package-name import, focused tests, and diff hygiene.
 - [x] 2026-05-03 20:48Z: Removed `packageInfo` from the non-placeholder Ethereum package export and updated smoke imports to check real package functions instead.
 - [x] 2026-05-03 21:15Z: Moved validation helpers shared with IPFS into `@oyaprotocol/utils` and made Ethereum import them through the package root.
+- [x] 2026-05-03 21:35Z: Replaced the package-branded `EthereumRpcConfig` type with shared `HttpConfig` / `CreateHttpConfigOptions` from `@oyaprotocol/utils`; `createEthereumRpcConfig(...)` now accepts and returns the generic `url`-based HTTP config shape.
 
 ## Surprises & Discoveries
 
@@ -133,6 +134,8 @@ Validation evidence for shared validation cleanup:
 - `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig); })"` printed `function object function function`.
 - `git diff --check`
 
+HTTP config cleanup moved the public config interfaces to `@oyaprotocol/utils` as `HttpConfig` and `CreateHttpConfigOptions`. Ethereum now uses the generic `url` field, while `createEthereumRpcConfig(...)` still owns Ethereum-specific normalization by trimming trailing slashes before JSON-RPC requests are sent.
+
 ## Context and Orientation
 
 The repository has a newer hardened-kernel area under `packages/`. Local instructions for this area live in `packages/AGENTS.md`. Those instructions require package-root public exports, small reviewable package shells, no imports from legacy runtime areas, and validation with `npm run build` from `packages/`.
@@ -164,7 +167,7 @@ Milestone 1: Create the package-local RPC transport surface. This milestone is c
 
 Add `packages/ethereum/src/config.ts`, `packages/ethereum/src/request-utils.ts`, and any small validation helpers needed locally. Export `createEthereumRpcConfig(...)`, `requestEthereumJsonRpc(...)`, and related types from `packages/ethereum/src/index.ts`.
 
-`createEthereumRpcConfig(...)` should require explicit `rpcUrl`, `headers`, `timeoutMs`, `maxRetries`, and `retryDelayMs`. It should normalize trailing slashes from the RPC URL, freeze validated headers, reject non-plain header objects, require positive timeout, and require non-negative retry settings.
+`createEthereumRpcConfig(...)` should require explicit `url`, `headers`, `timeoutMs`, `maxRetries`, and `retryDelayMs`. It should normalize trailing slashes from the RPC URL, freeze validated headers, reject non-plain header objects, require positive timeout, and require non-negative retry settings.
 
 `requestEthereumJsonRpc(...)` should accept explicit `config`, explicit injected `fetch`, a non-empty JSON-RPC method string, an array of params, and an optional caller `AbortSignal`. It should send a POST request with `content-type: application/json`, preserve configured headers except for disallowing caller-provided `content-type`, enforce timeout even if the injected fetch ignores signals, retry transient HTTP or network failures, parse JSON, throw inspectable errors for JSON-RPC error responses, and return the result plus attempt metadata.
 

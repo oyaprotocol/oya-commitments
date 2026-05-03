@@ -162,6 +162,8 @@ Shared validation cleanup moved duplicated IPFS/Ethereum helpers into `@oyaproto
 
 Placeholder package cleanup removed `@oyaprotocol/verification` from the TypeScript workspace. Future verification packages can be reintroduced deliberately when the target language/runtime is decided.
 
+HTTP config cleanup moved package config interfaces into `@oyaprotocol/utils` as `HttpConfig` and `CreateHttpConfigOptions`. IPFS and Ethereum creator functions still own their package-specific URL normalization, but both expose the same generic `url`-based config shape.
+
 ## Context and Orientation
 
 The current repository mixes Solidity contracts, deployment scripts, app/runtime code, agent modules, and the newer standalone node area. The new `packages/` area is intended to become the hardened production kernel written from scratch. At this stage the existing runtime code remains in place and acts only as reference material for future package work.
@@ -282,6 +284,8 @@ Placeholder public surface:
 
 Current public surface in `@oyaprotocol/utils`:
 
+- `CreateHttpConfigOptions`
+- `HttpConfig`
 - `assertHeadersObject(value, label, options)`
 - `assertNonEmptyString(value, label)`
 - `assertNonNegativeInteger(value, label)`

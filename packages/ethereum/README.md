@@ -15,6 +15,8 @@ Ethereum JSON-RPC utilities for Oya kernel code. This package is a hardened kern
 
 ## Behavior
 
+`createEthereumRpcConfig(...)` accepts the shared `CreateHttpConfigOptions` shape from `@oyaprotocol/utils`. The `url` value is normalized by trimming trailing slashes before JSON-RPC requests are sent.
+
 `requestEthereumJsonRpc(...)` owns the JSON-RPC envelope and request headers. It sends `content-type: application/json`, rejects caller-provided `content-type` config headers, enforces a request timeout, retries transient HTTP/network failures, and treats JSON-RPC error payloads as non-retryable semantic errors.
 
 This package does not sign transactions, encode ABIs, read environment variables, or own RPC endpoint discovery. Callers are responsible for preparing JSON-RPC params, including converting `bigint` values to Ethereum quantity hex before calling the raw request primitive.

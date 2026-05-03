@@ -1,4 +1,4 @@
-import type { IpfsConfig } from './config.js';
+import type { HttpConfig } from '@oyaprotocol/utils';
 import type { IpfsOperationErrorMessages } from './request-utils.js';
 export type ReadIpfsFetchLike = (url: string, options: ReadIpfsFetchOptions) => Promise<ReadIpfsResponse>;
 export interface ReadIpfsFetchOptions {
@@ -13,7 +13,7 @@ export interface ReadIpfsResponse {
     body: ReadableStream<Uint8Array> | null;
 }
 export interface ReadIpfsOptions {
-    config: IpfsConfig;
+    config: HttpConfig;
     fetch: ReadIpfsFetchLike;
     cid: string;
     maxBytes: number;

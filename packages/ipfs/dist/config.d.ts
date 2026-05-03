@@ -1,16 +1,3 @@
-export interface CreateIpfsConfigOptions {
-    apiUrl: string;
-    headers: Record<string, string>;
-    timeoutMs: number;
-    maxRetries: number;
-    retryDelayMs: number;
-}
-export interface IpfsConfig {
-    readonly apiUrl: string;
-    readonly headers: Readonly<Record<string, string>>;
-    readonly timeoutMs: number;
-    readonly maxRetries: number;
-    readonly retryDelayMs: number;
-}
-declare function createIpfsConfig({ apiUrl, headers, timeoutMs, maxRetries, retryDelayMs, }: CreateIpfsConfigOptions): IpfsConfig;
+import type { CreateHttpConfigOptions, HttpConfig } from '@oyaprotocol/utils';
+declare function createIpfsConfig({ url, headers, timeoutMs, maxRetries, retryDelayMs, }: CreateHttpConfigOptions): HttpConfig;
 export { createIpfsConfig };

@@ -1,10 +1,10 @@
 import { assertHeadersObject, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, } from '@oyaprotocol/utils';
-function normalizeRpcUrl(rpcUrl) {
-    return rpcUrl.replace(/\/+$/, '');
+function normalizeUrl(url) {
+    return url.replace(/\/+$/, '');
 }
-function createEthereumRpcConfig({ rpcUrl, headers, timeoutMs, maxRetries, retryDelayMs, }) {
+function createEthereumRpcConfig({ url, headers, timeoutMs, maxRetries, retryDelayMs, }) {
     return Object.freeze({
-        rpcUrl: normalizeRpcUrl(assertNonEmptyString(rpcUrl, 'config.rpcUrl')),
+        url: normalizeUrl(assertNonEmptyString(url, 'config.url')),
         headers: assertHeadersObject(headers, 'config.headers', {
             disallowedNames: ['content-type'],
         }),

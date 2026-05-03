@@ -4,36 +4,21 @@ import {
     assertNonNegativeInteger,
     assertPositiveInteger,
 } from '@oyaprotocol/utils';
+import type { CreateHttpConfigOptions, HttpConfig } from '@oyaprotocol/utils';
 
-export interface CreateEthereumRpcConfigOptions {
-    rpcUrl: string;
-    headers: Record<string, string>;
-    timeoutMs: number;
-    maxRetries: number;
-    retryDelayMs: number;
-}
-
-export interface EthereumRpcConfig {
-    readonly rpcUrl: string;
-    readonly headers: Readonly<Record<string, string>>;
-    readonly timeoutMs: number;
-    readonly maxRetries: number;
-    readonly retryDelayMs: number;
-}
-
-function normalizeRpcUrl(rpcUrl: string): string {
-    return rpcUrl.replace(/\/+$/, '');
+function normalizeUrl(url: string): string {
+    return url.replace(/\/+$/, '');
 }
 
 function createEthereumRpcConfig({
-    rpcUrl,
+    url,
     headers,
     timeoutMs,
     maxRetries,
     retryDelayMs,
-}: CreateEthereumRpcConfigOptions): EthereumRpcConfig {
+}: CreateHttpConfigOptions): HttpConfig {
     return Object.freeze({
-        rpcUrl: normalizeRpcUrl(assertNonEmptyString(rpcUrl, 'config.rpcUrl')),
+        url: normalizeUrl(assertNonEmptyString(url, 'config.url')),
         headers: assertHeadersObject(headers, 'config.headers', {
             disallowedNames: ['content-type'],
         }),

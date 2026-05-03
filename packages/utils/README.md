@@ -13,3 +13,8 @@ Small shared utilities for hardened Oya kernel packages.
 - `assertNonNegativeInteger(value, label)`
 - `assertHeadersObject(headers, label, options)`
 - `isPlainObject(value)`
+
+## HTTP Config Types
+
+- `CreateHttpConfigOptions`
+- `HttpConfig`

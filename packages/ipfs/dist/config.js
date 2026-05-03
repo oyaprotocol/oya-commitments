@@ -1,10 +1,10 @@
 import { assertHeadersObject, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, } from '@oyaprotocol/utils';
-function normalizeApiUrl(apiUrl) {
-    return apiUrl.replace(/\/+$/, '').replace(/\/api\/v0$/, '');
+function normalizeUrl(url) {
+    return url.replace(/\/+$/, '').replace(/\/api\/v0$/, '');
 }
-function createIpfsConfig({ apiUrl, headers, timeoutMs, maxRetries, retryDelayMs, }) {
+function createIpfsConfig({ url, headers, timeoutMs, maxRetries, retryDelayMs, }) {
     return Object.freeze({
-        apiUrl: normalizeApiUrl(assertNonEmptyString(apiUrl, 'config.apiUrl')),
+        url: normalizeUrl(assertNonEmptyString(url, 'config.url')),
         headers: assertHeadersObject(headers, 'config.headers', {
             disallowedNames: ['content-type'],
         }),

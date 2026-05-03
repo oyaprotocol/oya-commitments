@@ -17,6 +17,8 @@ Utilities for publishing and retrieving Oya-related data through IPFS. This pack
 
 ## Behavior
 
+`createIpfsConfig(...)` accepts the shared `CreateHttpConfigOptions` shape from `@oyaprotocol/utils`. The `url` value is normalized for Kubo by trimming trailing slashes and a trailing `/api/v0` segment.
+
 `publishToIpfs(...)` is the standard add-and-pin primitive. It sends a Kubo `/api/v0/add` request with `cid-version=1`, `pin=true`, and `progress=false`, then returns normalized CID, URI, byte length, and pin metadata.
 
 Kubo reads and public gateway reads are separate because they target different interfaces. `readIpfsBytes(...)` and `readIpfsText(...)` use Kubo RPC with `POST /api/v0/cat`; `readIpfsPublicGatewayBytes(...)` and `readIpfsPublicGatewayText(...)` use public gateway HTTP with `GET /ipfs/<cid>`.

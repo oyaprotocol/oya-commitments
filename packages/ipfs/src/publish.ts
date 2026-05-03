@@ -1,4 +1,4 @@
-import type { IpfsConfig } from './config.js';
+import type { HttpConfig } from '@oyaprotocol/utils';
 import {
     combineAbortSignals,
     createTimeoutSignal,
@@ -31,7 +31,7 @@ export interface PublishIpfsResponse {
 }
 
 export interface PublishToIpfsOptions {
-    config: IpfsConfig;
+    config: HttpConfig;
     fetch: PublishIpfsFetchLike;
     content: PublishableContent;
     filename: string;
@@ -205,12 +205,15 @@ async function publishToIpfs({
             });
             const response = await invokeWithAbort(
                 () =>
-                    fetch(`${config.apiUrl}/api/v0/add?cid-version=1&pin=true&progress=false`, {
-                        method: 'POST',
-                        headers: config.headers,
-                        body: form,
-                        signal: requestSignal.signal,
-                    }),
+                    fetch(
+                        `${config.url}/api/v0/add?cid-version=1&pin=true&progress=false`,
+                        {
+                            method: 'POST',
+                            headers: config.headers,
+                            body: form,
+                            signal: requestSignal.signal,
+                        }
+                    ),
                 requestSignal.signal
             );
             const responseText = await invokeWithAbort(() => response.text(), requestSignal.signal);

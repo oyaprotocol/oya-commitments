@@ -1,4 +1,4 @@
-import type { IpfsConfig } from './config.js';
+import type { HttpConfig } from '@oyaprotocol/utils';
 import {
     combineAbortSignals,
     createTimeoutSignal,
@@ -31,7 +31,7 @@ export interface ReadIpfsResponse {
 }
 
 export interface ReadIpfsOptions {
-    config: IpfsConfig;
+    config: HttpConfig;
     fetch: ReadIpfsFetchLike;
     cid: string;
     maxBytes: number;
@@ -130,7 +130,7 @@ async function readIpfsBytesWithMessages(
         try {
             const response = await invokeWithAbort(
                 () =>
-                    fetch(`${config.apiUrl}/api/v0/cat?arg=${encodeURIComponent(trimmedCid)}`, {
+                    fetch(`${config.url}/api/v0/cat?arg=${encodeURIComponent(trimmedCid)}`, {
                         method: 'POST',
                         headers: config.headers,
                         signal: requestSignal.signal,

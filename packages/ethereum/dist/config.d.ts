@@ -1,16 +1,3 @@
-export interface CreateEthereumRpcConfigOptions {
-    rpcUrl: string;
-    headers: Record<string, string>;
-    timeoutMs: number;
-    maxRetries: number;
-    retryDelayMs: number;
-}
-export interface EthereumRpcConfig {
-    readonly rpcUrl: string;
-    readonly headers: Readonly<Record<string, string>>;
-    readonly timeoutMs: number;
-    readonly maxRetries: number;
-    readonly retryDelayMs: number;
-}
-declare function createEthereumRpcConfig({ rpcUrl, headers, timeoutMs, maxRetries, retryDelayMs, }: CreateEthereumRpcConfigOptions): EthereumRpcConfig;
+import type { CreateHttpConfigOptions, HttpConfig } from '@oyaprotocol/utils';
+declare function createEthereumRpcConfig({ url, headers, timeoutMs, maxRetries, retryDelayMs, }: CreateHttpConfigOptions): HttpConfig;
 export { createEthereumRpcConfig };

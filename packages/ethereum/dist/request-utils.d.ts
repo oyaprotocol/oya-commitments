@@ -1,4 +1,4 @@
-import type { EthereumRpcConfig } from './config.js';
+import type { HttpConfig } from '@oyaprotocol/utils';
 export type EthereumJsonRpcFetchLike = (url: string, options: EthereumJsonRpcFetchOptions) => Promise<EthereumJsonRpcResponse>;
 export interface EthereumJsonRpcFetchOptions {
     method: 'POST';
@@ -13,7 +13,7 @@ export interface EthereumJsonRpcResponse {
     text(): Promise<string>;
 }
 export interface RequestEthereumJsonRpcOptions {
-    config: EthereumRpcConfig;
+    config: HttpConfig;
     fetch: EthereumJsonRpcFetchLike;
     method: string;
     params?: readonly unknown[];

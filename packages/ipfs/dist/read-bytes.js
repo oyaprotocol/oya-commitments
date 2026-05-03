@@ -60,7 +60,7 @@ async function readIpfsBytesWithMessages({ config, fetch, cid, maxBytes, signal,
         const timeoutSignal = createTimeoutSignal(config.timeoutMs);
         const requestSignal = combineAbortSignals([signal, timeoutSignal.signal]);
         try {
-            const response = await invokeWithAbort(() => fetch(`${config.apiUrl}/api/v0/cat?arg=${encodeURIComponent(trimmedCid)}`, {
+            const response = await invokeWithAbort(() => fetch(`${config.url}/api/v0/cat?arg=${encodeURIComponent(trimmedCid)}`, {
                 method: 'POST',
                 headers: config.headers,
                 signal: requestSignal.signal,

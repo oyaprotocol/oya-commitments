@@ -1,4 +1,4 @@
-import type { IpfsConfig } from './config.js';
+import type { HttpConfig } from '@oyaprotocol/utils';
 export type PublishIpfsFetchLike = (url: string, options: PublishIpfsRequestOptions) => Promise<PublishIpfsResponse>;
 export type PublishableContent = string | Uint8Array | ArrayBuffer | Blob;
 export interface PublishIpfsRequestOptions {
@@ -14,7 +14,7 @@ export interface PublishIpfsResponse {
     text(): Promise<string>;
 }
 export interface PublishToIpfsOptions {
-    config: IpfsConfig;
+    config: HttpConfig;
     fetch: PublishIpfsFetchLike;
     content: PublishableContent;
     filename: string;

@@ -1,3 +1,5 @@
+export type { CreateHttpConfigOptions, HttpConfig } from './http-config.js';
+
 export {
     assertHeadersObject,
     assertNonEmptyString,

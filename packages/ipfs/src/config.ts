@@ -4,36 +4,21 @@ import {
     assertNonNegativeInteger,
     assertPositiveInteger,
 } from '@oyaprotocol/utils';
+import type { CreateHttpConfigOptions, HttpConfig } from '@oyaprotocol/utils';
 
-export interface CreateIpfsConfigOptions {
-    apiUrl: string;
-    headers: Record<string, string>;
-    timeoutMs: number;
-    maxRetries: number;
-    retryDelayMs: number;
-}
-
-export interface IpfsConfig {
-    readonly apiUrl: string;
-    readonly headers: Readonly<Record<string, string>>;
-    readonly timeoutMs: number;
-    readonly maxRetries: number;
-    readonly retryDelayMs: number;
-}
-
-function normalizeApiUrl(apiUrl: string): string {
-    return apiUrl.replace(/\/+$/, '').replace(/\/api\/v0$/, '');
+function normalizeUrl(url: string): string {
+    return url.replace(/\/+$/, '').replace(/\/api\/v0$/, '');
 }
 
 function createIpfsConfig({
-    apiUrl,
+    url,
     headers,
     timeoutMs,
     maxRetries,
     retryDelayMs,
-}: CreateIpfsConfigOptions): IpfsConfig {
+}: CreateHttpConfigOptions): HttpConfig {
     return Object.freeze({
-        apiUrl: normalizeApiUrl(assertNonEmptyString(apiUrl, 'config.apiUrl')),
+        url: normalizeUrl(assertNonEmptyString(url, 'config.url')),
         headers: assertHeadersObject(headers, 'config.headers', {
             disallowedNames: ['content-type'],
         }),
