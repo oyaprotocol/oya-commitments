@@ -40,7 +40,8 @@ function transactionLookupMatchesHash(result, transactionHash) {
     if (typeof result.hash !== 'string') {
         return false;
     }
-    return normalizeHash(result.hash, 'transaction.hash') === transactionHash;
+    return (normalizeHash(result.hash, 'transaction.hash').toLowerCase() ===
+        transactionHash.toLowerCase());
 }
 function createJsonRpcOptions({ config, fetch, method, params, id, signal, }) {
     return {
@@ -108,7 +109,7 @@ async function ethSendRawTransaction({ config, fetch, rawTransaction, transactio
         }));
         const returnedTransactionHash = normalizeHash(result.result, 'result');
         if (normalizedTransactionHash !== null &&
-            returnedTransactionHash !== normalizedTransactionHash) {
+            returnedTransactionHash.toLowerCase() !== normalizedTransactionHash.toLowerCase()) {
             throw new Error('eth_sendRawTransaction returned a transaction hash that did not match transactionHash.');
         }
         return {

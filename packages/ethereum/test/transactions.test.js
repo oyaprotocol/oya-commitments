@@ -9,7 +9,9 @@ import {
 } from '../dist/index.js';
 
 const RAW_TRANSACTION = '0x02f86c01';
+const MIXED_CASE_RAW_TRANSACTION = '0x02F86C01';
 const TRANSACTION_HASH = `0x${'a'.repeat(64)}`;
+const UPPERCASE_TRANSACTION_HASH = `0x${'A'.repeat(64)}`;
 const OTHER_TRANSACTION_HASH = `0x${'b'.repeat(64)}`;
 
 function createConfig(overrides = {}) {
@@ -47,11 +49,11 @@ test('ethSendRawTransaction submits a signed raw transaction and returns the tra
                 JSON.stringify({
                     jsonrpc: '2.0',
                     id: 9,
-                    result: `0x${'A'.repeat(64)}`,
+                    result: UPPERCASE_TRANSACTION_HASH,
                 })
             );
         },
-        rawTransaction: '0x02F86C01',
+        rawTransaction: MIXED_CASE_RAW_TRANSACTION,
         transactionHash: TRANSACTION_HASH,
         id: 9,
     });
@@ -62,7 +64,7 @@ test('ethSendRawTransaction submits a signed raw transaction and returns the tra
         jsonrpc: '2.0',
         id: 9,
         method: 'eth_sendRawTransaction',
-        params: [RAW_TRANSACTION],
+        params: [MIXED_CASE_RAW_TRANSACTION],
     });
     assert.deepEqual(
         {
@@ -71,7 +73,7 @@ test('ethSendRawTransaction submits a signed raw transaction and returns the tra
             recovered: result.recovered,
         },
         {
-            transactionHash: TRANSACTION_HASH,
+            transactionHash: UPPERCASE_TRANSACTION_HASH,
             attemptCount: 1,
             recovered: false,
         }
@@ -140,7 +142,7 @@ test('ethSendRawTransaction recovers duplicate retry errors with a supplied tran
                     jsonrpc: '2.0',
                     id: body.id,
                     result: {
-                        hash: `0x${'A'.repeat(64)}`,
+                        hash: UPPERCASE_TRANSACTION_HASH,
                         blockHash: null,
                     },
                 })

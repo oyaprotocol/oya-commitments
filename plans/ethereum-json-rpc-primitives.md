@@ -38,6 +38,7 @@ Definitions used in this plan:
 - [x] 2026-05-03 21:59Z: Moved shared retryable HTTP network error codes into `@oyaprotocol/utils` as `RETRYABLE_HTTP_NETWORK_ERROR_CODES` plus `hasRetryableNetworkErrorCode(...)`; Ethereum and IPFS now import the shared helper.
 - [x] 2026-05-03 22:11Z: Tightened `createHttpConfig(...)` to reject URLs that normalize to an empty string, including generic `/` and IPFS `/api/v0/` inputs.
 - [x] 2026-05-03 22:31Z: Added `ethSendRawTransaction(...)` with optional caller-supplied `transactionHash` recovery for duplicate-style retry errors, plus local hex validators and focused wrapper tests.
+- [x] 2026-05-03 23:05Z: Changed Ethereum hex/hash validators to preserve caller and RPC casing, using case-insensitive comparison only for internal hash equality checks.
 
 ## Surprises & Discoveries
 
@@ -186,7 +187,7 @@ Validation evidence for normalized URL validation cleanup:
 - `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
 - From `packages/`, package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` passed.
 
-Raw transaction wrapper cleanup added `ethSendRawTransaction(...)`, `EthereumRawTransactionRecoveryError`, local raw-transaction/hash validators, and JSON-RPC error attempt metadata. The wrapper submits already signed raw transactions and returns normalized hash/attempt metadata. If a retry of `eth_sendRawTransaction` returns duplicate-style errors such as `already known` or `nonce too low`, a supplied `transactionHash` lets the wrapper confirm exact acceptance through `eth_getTransactionByHash(...)`; without a hash, it throws an inspectable recovery error instead of presenting a definite failure.
+Raw transaction wrapper cleanup added `ethSendRawTransaction(...)`, `EthereumRawTransactionRecoveryError`, local raw-transaction/hash validators, and JSON-RPC error attempt metadata. The wrapper submits already signed raw transactions and returns validated hash/attempt metadata. If a retry of `eth_sendRawTransaction` returns duplicate-style errors such as `already known` or `nonce too low`, a supplied `transactionHash` lets the wrapper confirm exact acceptance through `eth_getTransactionByHash(...)`; without a hash, it throws an inspectable recovery error instead of presenting a definite failure.
 
 Validation evidence for raw transaction wrapper cleanup:
 
@@ -194,6 +195,15 @@ Validation evidence for raw transaction wrapper cleanup:
 - `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
 - `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
 - From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ethereum').then((m) => console.log(typeof m.createEthereumRpcConfig, typeof m.requestEthereumJsonRpc, typeof m.ethSendRawTransaction, typeof m.EthereumRawTransactionRecoveryError, Object.hasOwn(m, 'packageInfo')))"` printed `function function function function false`.
+
+Hex casing cleanup changed the Ethereum hex/hash validators to validate and trim values without lowercasing them. `ethSendRawTransaction(...)` now sends caller-provided raw transaction casing and returns the RPC-provided hash casing. Hash matching still uses inline lowercase comparison internally.
+
+Validation evidence for hex casing cleanup:
+
+- `npm run build` from `packages/`
+- `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- From `packages/`, package-root smoke import for `@oyaprotocol/ethereum` passed.
 
 ## Context and Orientation
 
