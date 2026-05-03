@@ -192,7 +192,7 @@ Validation evidence for raw transaction wrapper cleanup:
 
 - `npm run build` from `packages/`
 - `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
-- `node --test packages/ethereum/test/ethereum.test.js` passed 6 tests.
+- `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
 - From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ethereum').then((m) => console.log(typeof m.createEthereumRpcConfig, typeof m.requestEthereumJsonRpc, typeof m.ethSendRawTransaction, typeof m.EthereumRawTransactionRecoveryError, Object.hasOwn(m, 'packageInfo')))"` printed `function function function function false`.
 
 ## Context and Orientation
@@ -351,7 +351,7 @@ All commands below assume they are run from the repository root, the directory t
 
        npm --prefix packages run build
        node --test packages/ethereum/test/rpc.test.js
-       node --test packages/ethereum/test/ethereum.test.js
+       node --test packages/ethereum/test/transactions.test.js
 
 8. Smoke-import the package root:
 
@@ -367,7 +367,7 @@ All commands below assume they are run from the repository root, the directory t
 
        npm --prefix packages run build
        node --test packages/ethereum/test/rpc.test.js
-       node --test packages/ethereum/test/ethereum.test.js
+       node --test packages/ethereum/test/transactions.test.js
        node --input-type=module -e "import('./packages/ethereum/dist/index.js').then((m) => console.log(typeof m.createEthereumRpcConfig, typeof m.ethCall))"
        git diff --check
 
@@ -395,7 +395,7 @@ Required validation commands:
 
     npm --prefix packages run build
     node --test packages/ethereum/test/rpc.test.js
-    node --test packages/ethereum/test/ethereum.test.js
+    node --test packages/ethereum/test/transactions.test.js
     node --input-type=module -e "import('./packages/ethereum/dist/index.js').then((m) => console.log(typeof m.createEthereumRpcConfig, typeof m.ethCall))"
     git diff --check
 
