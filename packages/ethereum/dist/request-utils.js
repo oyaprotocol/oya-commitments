@@ -154,6 +154,9 @@ function parseJsonRpcResponse({ text, method, id, attemptCount, }) {
     if (response.jsonrpc !== '2.0') {
         throw new Error('Ethereum JSON-RPC response must use jsonrpc "2.0".');
     }
+    if (response.id !== id) {
+        throw new Error('Ethereum JSON-RPC response id did not match request id.');
+    }
     if ('error' in response) {
         const errorPayload = isPlainObject(response.error) ? response.error : {};
         throw new EthereumJsonRpcError(errorPayload, {
@@ -164,9 +167,6 @@ function parseJsonRpcResponse({ text, method, id, attemptCount, }) {
     }
     if (!('result' in response)) {
         throw new Error('Ethereum JSON-RPC response did not include a result.');
-    }
-    if (response.id !== id) {
-        throw new Error('Ethereum JSON-RPC response id did not match request id.');
     }
     return {
         result: response.result,
