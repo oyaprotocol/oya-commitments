@@ -2,4 +2,4 @@ export { combineAbortSignals, createTimeoutSignal, invokeWithAbort, throwIfSigna
 export type { AbortSignalHandle } from './async-utils.js';
 export { RETRYABLE_HTTP_NETWORK_ERROR_CODES, createHttpConfig, hasRetryableNetworkErrorCode, } from './http-utils.js';
 export type { CreateHttpConfigOptions, HttpConfig, HttpFetchLike, HttpPostFetchLike, HttpPostFetchOptions, HttpTextResponse, } from './http-utils.js';
-export { assertHeadersObject, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, isPlainObject, } from './validation-utils.js';
+export { assertAsciiBytes, assertBytes32HexString, assertHeadersObject, assertHexData, assertHexString, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, isPlainObject, } from './validation-utils.js';

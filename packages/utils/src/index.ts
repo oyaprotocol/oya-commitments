@@ -21,7 +21,11 @@ export type {
 } from './http-utils.js';
 
 export {
+    assertAsciiBytes,
+    assertBytes32HexString,
     assertHeadersObject,
+    assertHexData,
+    assertHexString,
     assertNonEmptyString,
     assertNonNegativeInteger,
     assertPositiveInteger,

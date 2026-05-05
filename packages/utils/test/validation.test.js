@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+    assertAsciiBytes,
+    assertBytes32HexString,
     assertHeadersObject,
+    assertHexData,
+    assertHexString,
     assertNonEmptyString,
     assertNonNegativeInteger,
     assertPositiveInteger,
@@ -87,6 +91,40 @@ test('isPlainObject accepts plain records and rejects non-record objects', () =>
     assert.equal(isPlainObject([]), false);
     assert.equal(isPlainObject(null), false);
     assert.equal(isPlainObject(new Map()), false);
+});
+
+test('ASCII and hex validators preserve valid input and reject malformed values', () => {
+    assert.doesNotThrow(() =>
+        assertAsciiBytes(new Uint8Array([0x00, 0x41, 0x7f]), 'bytes must be ASCII')
+    );
+    assert.throws(
+        () => assertAsciiBytes(new Uint8Array([0x80]), 'bytes must be ASCII'),
+        /bytes must be ASCII/
+    );
+
+    assert.equal(assertHexString('  0xAbCd  ', 'hex'), '0xAbCd');
+    assert.equal(assertHexData('0xAbCd', 'data'), '0xAbCd');
+    assert.equal(
+        assertBytes32HexString(`0x${'a'.repeat(64)}`, 'hash'),
+        `0x${'a'.repeat(64)}`
+    );
+
+    assert.throws(
+        () => assertHexString('abcd', 'hex'),
+        /hex must be a 0x-prefixed hex string/
+    );
+    assert.throws(
+        () => assertHexData('0x', 'data'),
+        /data must be non-empty byte-aligned hex data/
+    );
+    assert.throws(
+        () => assertHexData('0xabc', 'data'),
+        /data must be non-empty byte-aligned hex data/
+    );
+    assert.throws(
+        () => assertBytes32HexString('0xabcd', 'hash'),
+        /hash must be a 32-byte hex string/
+    );
 });
 
 test('createHttpConfig validates and freezes HTTP transport configuration', () => {

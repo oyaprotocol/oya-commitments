@@ -174,7 +174,7 @@ Validation evidence for package export cleanup:
 - `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createHttpConfig); })"` printed `function object function function`.
 - `git diff --check`
 
-Shared validation cleanup moved the helpers duplicated between IPFS and Ethereum into `@oyaprotocol/utils`: `assertHeadersObject(...)`, `assertNonEmptyString(...)`, `assertNonNegativeInteger(...)`, `assertPositiveInteger(...)`, and `isPlainObject(...)`. IPFS now imports those helpers from the package root and keeps only `assertAsciiBytes(...)` in `packages/ipfs/src/validation-utils.ts`.
+Shared validation cleanup moved helpers duplicated between IPFS and Ethereum into `@oyaprotocol/utils`. IPFS now imports validation helpers from the package root, including `assertAsciiBytes(...)`, and no longer has a package-local `validation-utils.ts`.
 
 Validation evidence for shared validation cleanup:
 
@@ -205,8 +205,7 @@ Current package files:
 
 - `packages/ipfs/src/config.ts`: validates explicit IPFS transport settings and returns shared `HttpConfig`.
 - `packages/ipfs/src/request-utils.ts`: contains shared retry, timeout, abort, HTTP error, and operation-error normalization helpers for IPFS HTTP requests.
-- `packages/ipfs/src/validation-utils.ts`: contains IPFS-specific ASCII byte validation.
-- `packages/utils/src/validation-utils.ts`: contains shared validation helpers used by IPFS and Ethereum.
+- `packages/utils/src/validation-utils.ts`: contains shared validation helpers used by IPFS and Ethereum, including ASCII byte validation.
 - `packages/ipfs/src/publish.ts`: publishes content to Kubo `/api/v0/add` using injected `fetch`.
 - `packages/ipfs/src/read-bytes.ts`: reads bounded arbitrary byte content from Kubo `/api/v0/cat` using injected `fetch`.
 - `packages/ipfs/src/read-public-gateway-bytes.ts`: reads bounded arbitrary byte content from public gateway `GET /ipfs/<cid>` endpoints using injected `fetch`.

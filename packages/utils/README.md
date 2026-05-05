@@ -8,7 +8,11 @@ Small shared utilities for hardened Oya kernel packages.
 
 ## Validation Helpers
 
+- `assertAsciiBytes(bytes, message)`
+- `assertBytes32HexString(value, label)`
 - `assertNonEmptyString(value, label)`
+- `assertHexData(value, label)`
+- `assertHexString(value, label)`
 - `assertPositiveInteger(value, label)`
 - `assertNonNegativeInteger(value, label)`
 - `assertHeadersObject(headers, label, options)`

@@ -46,6 +46,7 @@ Definitions used in this plan:
 - [x] 2026-05-05: Consolidated `@oyaprotocol/utils` HTTP source files into `packages/utils/src/http-utils.ts`.
 - [x] 2026-05-05: Consolidated `@oyaprotocol/utils` abort/timeout and retry-delay source files into `packages/utils/src/async-utils.ts`, giving the utils package a clean `async-utils.ts`, `http-utils.ts`, and `validation-utils.ts` source layout.
 - [x] 2026-05-05: Removed the no-op `createEthereumRpcConfig(...)` wrapper and deleted `packages/ethereum/src/config.ts`; `@oyaprotocol/ethereum` now re-exports `createHttpConfig(...)` directly from `@oyaprotocol/utils`.
+- [x] 2026-05-05: Moved IPFS ASCII byte validation and Ethereum hex/hash validators into `packages/utils/src/validation-utils.ts`; deleted `packages/ipfs/src/validation-utils.ts` and `packages/ethereum/src/hex.ts`.
 
 ## Surprises & Discoveries
 
@@ -104,6 +105,10 @@ Definitions used in this plan:
 
 - Decision: Remove the `createEthereumRpcConfig(...)` wrapper.
   Rationale: The wrapper had become a no-op around `createHttpConfig(...)` after config behavior moved into `@oyaprotocol/utils`. Re-exporting `createHttpConfig(...)` from `@oyaprotocol/ethereum` keeps the public package convenient without preserving a package-branded name that suggests Ethereum-specific behavior.
+  Date/Author: 2026-05-05 / Codex.
+
+- Decision: Move generic ASCII and simple hex validators into `@oyaprotocol/utils`.
+  Rationale: IPFS ASCII byte validation and Ethereum's current 0x-prefixed hex, byte-aligned hex data, and bytes32 hash validators are generic validation primitives. Moving them removes the remaining package-local validation files while keeping Ethereum-specific address, quantity, and checksum behavior out of utils until those validators actually exist.
   Date/Author: 2026-05-05 / Codex.
 
 - Decision: Move shared retryable HTTP network error code detection into `@oyaprotocol/utils`.
@@ -306,6 +311,19 @@ Validation evidence for Ethereum config wrapper cleanup:
 - `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
 - From `packages/`, package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` printed `function function function function false`, confirming `createHttpConfig` is present and `createEthereumRpcConfig` is absent.
 
+Validation helper cleanup moved `assertAsciiBytes(...)`, `assertHexString(...)`, `assertHexData(...)`, and `assertBytes32HexString(...)` into `@oyaprotocol/utils`. Ethereum raw transaction handling now uses `assertHexData(...)` and `assertBytes32HexString(...)`, and IPFS text readers now use the shared `assertAsciiBytes(...)`. Stale generated `packages/ethereum/dist/hex.*` and `packages/ipfs/dist/validation-utils.*` artifacts were removed after rebuilding.
+
+Validation evidence for validation helper cleanup:
+
+- `npm run build` from `packages/`
+- `find packages/ethereum/dist packages/ipfs/dist -maxdepth 1 -type f \( -name 'hex.*' -o -name 'validation-utils.*' \) -print | sort` produced no output.
+- `node --test packages/utils/test/validation.test.js` passed 8 tests.
+- `node --test packages/ipfs/test/publish.test.js` passed 18 tests.
+- `node --test packages/ipfs/test/retrieval.test.js` passed 27 tests.
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
+- From `packages/`, package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` printed `function function function function function`.
+
 ## Context and Orientation
 
 The repository has a newer hardened-kernel area under `packages/`. Local instructions for this area live in `packages/AGENTS.md`. Those instructions require package-root public exports, small reviewable package shells, no imports from legacy runtime areas, and validation with `npm run build` from `packages/`.
@@ -318,9 +336,8 @@ The current package layout relevant to this work is:
 - `packages/ethereum/src/index.ts`: exports the current config/request public surface.
 - `packages/utils/src/http-utils.ts`: validates explicit HTTP transport settings shared by Ethereum and IPFS.
 - `packages/ethereum/src/transactions.ts`: contains transaction submission helpers including `ethSendRawTransaction(...)`.
-- `packages/ethereum/src/hex.ts`: contains small local hex/hash validators for Ethereum method wrappers.
 - `packages/ethereum/src/request-utils.ts`: contains the raw JSON-RPC request primitive, JSON-RPC error classes, timeout/abort/retry handling, and fetch-like types.
-- `packages/utils/src/validation-utils.ts`: contains shared validation helpers used by Ethereum and IPFS.
+- `packages/utils/src/validation-utils.ts`: contains shared validation helpers used by Ethereum and IPFS, including ASCII byte validation and simple 0x hex/hash validators.
 - `packages/utils/src/async-utils.ts`: contains shared async control primitives for timeout signals, composed abort signals, abortable promises, caller-abort checks, and retry-delay waits.
 - `packages/utils/src/http-utils.ts`: contains shared HTTP config creation, structural HTTP POST/text fetch types, and retryable HTTP network error helpers used by Ethereum and IPFS.
 - `packages/ethereum/test/rpc.test.js`: tests the built JSON-RPC request surface against fake `fetch` implementations.
@@ -455,7 +472,6 @@ All commands below assume they are run from the repository root, the directory t
 6. Implement Milestone 2 method wrappers and validators:
 
        packages/ethereum/src/transactions.ts
-       packages/ethereum/src/hex.ts
        packages/ethereum/src/index.ts
 
    The exact helper filenames can change if implementation reveals a cleaner package-local split. Update this plan if filenames differ.
@@ -577,8 +593,8 @@ Internal interfaces likely needed:
 - `assertNonNegativeInteger(...)`
 - `assertHeadersObject(...)`
 - `normalizeAddress(...)`
-- `normalizeHash(...)`
-- `normalizeHexData(...)`
+- `assertBytes32HexString(...)`
+- `assertHexData(...)`
 - `toQuantityHex(...)`
 - `quantityHexToBigInt(...)`
 - timeout, abort-composition, retry-delay, and retry-classification helpers modeled after `packages/ipfs/src/request-utils.ts`.

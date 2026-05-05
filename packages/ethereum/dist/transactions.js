@@ -1,5 +1,4 @@
-import { isPlainObject } from '@oyaprotocol/utils';
-import { normalizeHash, normalizeHexData } from './hex.js';
+import { assertBytes32HexString, assertHexData, isPlainObject, } from '@oyaprotocol/utils';
 import { EthereumJsonRpcError, requestEthereumJsonRpc, requestEthereumJsonRpcWithRetryPolicy, } from './request-utils.js';
 const RAW_TRANSACTION_RECOVERY_MESSAGES = [
     'already known',
@@ -40,7 +39,7 @@ function transactionLookupMatchesHash(result, transactionHash) {
     if (typeof result.hash !== 'string') {
         return false;
     }
-    return (normalizeHash(result.hash, 'transaction.hash').toLowerCase() ===
+    return (assertBytes32HexString(result.hash, 'transaction.hash').toLowerCase() ===
         transactionHash.toLowerCase());
 }
 function createJsonRpcOptions({ config, fetch, method, params, id, signal, }) {
@@ -99,20 +98,22 @@ async function recoverRawTransactionSubmission({ config, fetch, transactionHash,
     }
 }
 async function ethSendRawTransaction({ config, fetch, rawTransaction, transactionHash, id, signal, }) {
-    const normalizedRawTransaction = normalizeHexData(rawTransaction, 'rawTransaction');
-    const normalizedTransactionHash = transactionHash === undefined ? null : normalizeHash(transactionHash, 'transactionHash');
+    const validatedRawTransaction = assertHexData(rawTransaction, 'rawTransaction');
+    const validatedTransactionHash = transactionHash === undefined
+        ? null
+        : assertBytes32HexString(transactionHash, 'transactionHash');
     try {
         const result = await requestEthereumJsonRpcWithRetryPolicy(createJsonRpcOptions({
             config,
             fetch,
             method: 'eth_sendRawTransaction',
-            params: [normalizedRawTransaction],
+            params: [validatedRawTransaction],
             id,
             signal,
         }), shouldRetryRawTransactionMethod);
-        const returnedTransactionHash = normalizeHash(result.result, 'result');
-        if (normalizedTransactionHash !== null &&
-            returnedTransactionHash.toLowerCase() !== normalizedTransactionHash.toLowerCase()) {
+        const returnedTransactionHash = assertBytes32HexString(result.result, 'result');
+        if (validatedTransactionHash !== null &&
+            returnedTransactionHash.toLowerCase() !== validatedTransactionHash.toLowerCase()) {
             throw new Error('eth_sendRawTransaction returned a transaction hash that did not match transactionHash.');
         }
         return {
@@ -129,7 +130,7 @@ async function ethSendRawTransaction({ config, fetch, rawTransaction, transactio
         return await recoverRawTransactionSubmission({
             config,
             fetch,
-            transactionHash: normalizedTransactionHash,
+            transactionHash: validatedTransactionHash,
             id,
             signal,
             originalError: error,

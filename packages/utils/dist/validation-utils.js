@@ -40,5 +40,33 @@ function assertHeadersObject(headers, label, options = {}) {
     }
     return Object.freeze(validated);
 }
-export { assertHeadersObject, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, isPlainObject, };
+function assertAsciiBytes(bytes, message) {
+    for (const byte of bytes) {
+        if (byte > 0x7f) {
+            throw new Error(message);
+        }
+    }
+}
+function assertHexString(value, label) {
+    const validated = assertNonEmptyString(value, label);
+    if (!/^0x[0-9a-fA-F]*$/.test(validated)) {
+        throw new Error(`${label} must be a 0x-prefixed hex string.`);
+    }
+    return validated;
+}
+function assertHexData(value, label) {
+    const validated = assertHexString(value, label);
+    if (validated.length === 2 || validated.length % 2 !== 0) {
+        throw new Error(`${label} must be non-empty byte-aligned hex data.`);
+    }
+    return validated;
+}
+function assertBytes32HexString(value, label) {
+    const validated = assertHexString(value, label);
+    if (validated.length !== 66) {
+        throw new Error(`${label} must be a 32-byte hex string.`);
+    }
+    return validated;
+}
+export { assertAsciiBytes, assertBytes32HexString, assertHeadersObject, assertHexData, assertHexString, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, isPlainObject, };
 //# sourceMappingURL=validation-utils.js.map
