@@ -114,8 +114,16 @@ test('ASCII and hex validators preserve valid input and reject malformed values'
         /hex must be a 0x-prefixed hex string/
     );
     assert.throws(
+        () => assertHexString('0xzz', 'hex'),
+        /hex must be a 0x-prefixed hex string/
+    );
+    assert.throws(
         () => assertHexData('0x', 'data'),
         /data must be non-empty byte-aligned hex data/
+    );
+    assert.throws(
+        () => assertHexData('0xzz', 'data'),
+        /data must be a 0x-prefixed hex string/
     );
     assert.throws(
         () => assertHexData('0xabc', 'data'),
@@ -124,6 +132,10 @@ test('ASCII and hex validators preserve valid input and reject malformed values'
     assert.throws(
         () => assertBytes32HexString('0xabcd', 'hash'),
         /hash must be a 32-byte hex string/
+    );
+    assert.throws(
+        () => assertBytes32HexString(`0x${'g'.repeat(64)}`, 'hash'),
+        /hash must be a 0x-prefixed hex string/
     );
 });
 

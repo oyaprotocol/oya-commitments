@@ -400,6 +400,31 @@ test('requestEthereumJsonRpc rejects invalid responses and non-serializable para
         /response id did not match request id/
     );
 
+    await assert.rejects(
+        requestEthereumJsonRpc({
+            config: createConfig(),
+            fetch: async () =>
+                createTextResponse(
+                    200,
+                    JSON.stringify({
+                        jsonrpc: '2.0',
+                        id: 2,
+                        error: {
+                            code: -32000,
+                            message: 'wrong response',
+                        },
+                    })
+                ),
+            method: 'eth_chainId',
+            id: 1,
+        }),
+        (error) => {
+            assert.equal(error instanceof EthereumJsonRpcError, false);
+            assert.match(error.message, /response id did not match request id/);
+            return true;
+        }
+    );
+
     let attempts = 0;
     await assert.rejects(
         requestEthereumJsonRpc({
