@@ -1,4 +1,9 @@
-function createTimeoutSignal(timeoutMs) {
+interface AbortSignalHandle {
+    signal: AbortSignal | undefined;
+    cleanup: (() => void) | null;
+}
+
+function createTimeoutSignal(timeoutMs: number): AbortSignalHandle {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error('Request timed out.')), timeoutMs);
     controller.signal.addEventListener('abort', () => clearTimeout(timer), { once: true });
@@ -7,8 +12,9 @@ function createTimeoutSignal(timeoutMs) {
         cleanup: () => clearTimeout(timer),
     };
 }
-function combineAbortSignals(signals) {
-    const presentSignals = signals.filter((signal) => signal !== undefined);
+
+function combineAbortSignals(signals: Array<AbortSignal | undefined>): AbortSignalHandle {
+    const presentSignals = signals.filter((signal): signal is AbortSignal => signal !== undefined);
     if (presentSignals.length === 0) {
         return {
             signal: undefined,
@@ -36,7 +42,8 @@ function combineAbortSignals(signals) {
             cleanup: null,
         };
     }
-    const listeners = [];
+
+    const listeners: Array<{ signal: AbortSignal; listener: EventListener }> = [];
     for (const signal of presentSignals) {
         const listener = () => {
             controller.abort(signal.reason);
@@ -53,16 +60,20 @@ function combineAbortSignals(signals) {
         },
     };
 }
-async function invokeWithAbort(createPromise, signal) {
+
+async function invokeWithAbort<T>(
+    createPromise: () => Promise<T>,
+    signal: AbortSignal | undefined
+): Promise<T> {
     if (!signal) {
         return await createPromise();
     }
     if (signal.aborted) {
         throw signal.reason ?? new Error('Operation aborted.');
     }
-    return await new Promise((resolve, reject) => {
+    return await new Promise<T>((resolve, reject) => {
         let settled = false;
-        const finishResolve = (value) => {
+        const finishResolve = (value: T) => {
             if (settled) {
                 return;
             }
@@ -70,7 +81,7 @@ async function invokeWithAbort(createPromise, signal) {
             signal.removeEventListener('abort', onAbort);
             resolve(value);
         };
-        const finishReject = (error) => {
+        const finishReject = (error: unknown) => {
             if (settled) {
                 return;
             }
@@ -82,21 +93,75 @@ async function invokeWithAbort(createPromise, signal) {
             finishReject(signal.reason ?? new Error('Operation aborted.'));
         };
         signal.addEventListener('abort', onAbort, { once: true });
-        let promise;
+        let promise: Promise<T>;
         try {
             promise = createPromise();
-        }
-        catch (error) {
+        } catch (error) {
             finishReject(error);
             return;
         }
         promise.then(finishResolve, finishReject);
     });
 }
-function throwIfSignalAborted(signal, message, cause) {
+
+function throwIfSignalAborted(
+    signal: AbortSignal | undefined,
+    message: string,
+    cause: unknown
+): void {
     if (signal?.aborted) {
         throw new Error(message, { cause });
     }
 }
-export { combineAbortSignals, createTimeoutSignal, invokeWithAbort, throwIfSignalAborted, };
-//# sourceMappingURL=abort-utils.js.map
+
+async function waitForRetryDelay({
+    retryDelayMs,
+    signal,
+    abortErrorMessage,
+}: {
+    retryDelayMs: number;
+    signal: AbortSignal | undefined;
+    abortErrorMessage: string;
+}): Promise<void> {
+    if (retryDelayMs <= 0) {
+        return;
+    }
+    throwIfSignalAborted(signal, abortErrorMessage, signal?.reason);
+    await new Promise<void>((resolve) => {
+        if (!signal) {
+            setTimeout(resolve, retryDelayMs);
+            return;
+        }
+
+        let settled = false;
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        const finish = () => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            if (timer !== null) {
+                clearTimeout(timer);
+            }
+            signal.removeEventListener('abort', finish);
+            resolve();
+        };
+
+        signal.addEventListener('abort', finish, { once: true });
+        if (signal.aborted) {
+            finish();
+            return;
+        }
+        timer = setTimeout(finish, retryDelayMs);
+    });
+    throwIfSignalAborted(signal, abortErrorMessage, signal?.reason);
+}
+
+export {
+    combineAbortSignals,
+    createTimeoutSignal,
+    invokeWithAbort,
+    throwIfSignalAborted,
+    waitForRetryDelay,
+};
+export type { AbortSignalHandle };

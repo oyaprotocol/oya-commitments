@@ -39,10 +39,12 @@ Definitions used in this plan:
 - [x] 2026-05-03 22:11Z: Tightened `createHttpConfig(...)` to reject URLs that normalize to an empty string, including generic `/` and IPFS `/api/v0/` inputs.
 - [x] 2026-05-03 22:31Z: Added `ethSendRawTransaction(...)` with optional caller-supplied `transactionHash` recovery for duplicate-style retry errors, plus local hex validators and focused wrapper tests.
 - [x] 2026-05-03 23:05Z: Changed Ethereum hex/hash validators to preserve caller and RPC casing, using case-insensitive comparison only for internal hash equality checks.
-- [x] 2026-05-03 23:31Z: Moved shared abort/timeout helpers into `@oyaprotocol/utils/abort-utils` and shared retry delay handling into `@oyaprotocol/utils/retry-utils`; IPFS and Ethereum now import the shared helpers.
+- [x] 2026-05-03 23:31Z: Moved shared abort/timeout and retry-delay helpers into `@oyaprotocol/utils`; IPFS and Ethereum now import the shared helpers.
 - [x] 2026-05-03 23:49Z: Removed `eth_sendRawTransaction` from the generic JSON-RPC retry allowlist; raw transaction retries now live only in `ethSendRawTransaction(...)`, which has duplicate-error recovery semantics.
 - [x] 2026-05-03 23:57Z: Fixed `combineAbortSignals(...)` fallback behavior to detect already-aborted signals before attaching listeners, avoiding leaked listeners on earlier live signals.
 - [x] 2026-05-05: Moved shared POST/text fetch transport types into `@oyaprotocol/utils` as `HttpPostFetchOptions<TBody>`, `HttpTextResponse`, `HttpFetchLike<TOptions, TResponse>`, and `HttpPostFetchLike<TBody, TResponse>`; Ethereum JSON-RPC and IPFS publish now use those generic types directly instead of exporting package-branded aliases.
+- [x] 2026-05-05: Consolidated `@oyaprotocol/utils` HTTP source files into `packages/utils/src/http-utils.ts`.
+- [x] 2026-05-05: Consolidated `@oyaprotocol/utils` abort/timeout and retry-delay source files into `packages/utils/src/async-utils.ts`, giving the utils package a clean `async-utils.ts`, `http-utils.ts`, and `validation-utils.ts` source layout.
 
 ## Surprises & Discoveries
 
@@ -113,6 +115,14 @@ Definitions used in this plan:
 
 - Decision: Move only the shared POST/text fetch transport shapes into `@oyaprotocol/utils`.
   Rationale: `EthereumJsonRpcFetchOptions` / `EthereumJsonRpcResponse` and IPFS `PublishIpfsRequestOptions` / `PublishIpfsResponse` differed only by POST body type and package branding. Generic utility types remove duplication and keep the public type surface smaller. IPFS byte and public-gateway reads still use stream response bodies, so they remain package-local.
+  Date/Author: 2026-05-05 / Codex.
+
+- Decision: Consolidate HTTP utilities into a single `http-utils.ts` source file.
+  Rationale: The HTTP config creator, POST/text fetch types, and retryable network error helpers are all small pieces of one HTTP utility surface. A single file gives the utils package a clearer source naming scheme without changing package-root imports.
+  Date/Author: 2026-05-05 / Codex.
+
+- Decision: Consolidate async control utilities into a single `async-utils.ts` source file.
+  Rationale: The abort helpers and `waitForRetryDelay(...)` are all generic async control primitives. Consolidating them removes a one-function retry file while keeping protocol retry policy out of `@oyaprotocol/utils`.
   Date/Author: 2026-05-05 / Codex.
 
 ## Outcomes & Retrospective
@@ -226,7 +236,7 @@ Validation evidence for hex casing cleanup:
 - `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
 - From `packages/`, package-root smoke import for `@oyaprotocol/ethereum` passed.
 
-Shared abort/retry utility cleanup added `abort-utils.ts` and `retry-utils.ts` to `@oyaprotocol/utils`, exporting `AbortSignalHandle`, `createTimeoutSignal(...)`, `combineAbortSignals(...)`, `invokeWithAbort(...)`, `throwIfSignalAborted(...)`, and `waitForRetryDelay(...)`. IPFS continues to re-export the shared helpers from its package-local request utility module for its internal modules, while Ethereum imports the shared helpers directly.
+Shared abort/retry utility cleanup added async control helpers to `@oyaprotocol/utils`, exporting `AbortSignalHandle`, `createTimeoutSignal(...)`, `combineAbortSignals(...)`, `invokeWithAbort(...)`, `throwIfSignalAborted(...)`, and `waitForRetryDelay(...)`. These helpers now live together in `packages/utils/src/async-utils.ts`. IPFS continues to re-export the shared helpers from its package-local request utility module for its internal modules, while Ethereum imports the shared helpers directly.
 
 Validation evidence for shared abort/retry utility cleanup:
 
@@ -245,7 +255,7 @@ Validation evidence for abort listener cleanup:
 - `node --test packages/ipfs/test/publish.test.js packages/ipfs/test/retrieval.test.js` passed 45 tests.
 - `node --test packages/ethereum/test/rpc.test.js packages/ethereum/test/transactions.test.js` passed 20 tests.
 
-Shared HTTP fetch-type cleanup added `packages/utils/src/http-fetch.ts`, exporting generic POST fetch options, text response, and fetch-like function types. Ethereum JSON-RPC and IPFS publish now use `HttpPostFetchLike<string>` and `HttpPostFetchLike<FormData>` directly in their public option interfaces. The package roots re-export the generic utility type names instead of duplicate package-branded POST/text aliases.
+Shared HTTP fetch-type cleanup added generic POST fetch options, text response, and fetch-like function types, now housed in `packages/utils/src/http-utils.ts`. Ethereum JSON-RPC and IPFS publish use `HttpPostFetchLike<string>` and `HttpPostFetchLike<FormData>` directly in their public option interfaces. The package roots re-export the generic utility type names instead of duplicate package-branded POST/text aliases.
 
 Validation evidence for shared HTTP fetch-type cleanup:
 
@@ -255,6 +265,29 @@ Validation evidence for shared HTTP fetch-type cleanup:
 - `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
 - `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
 - From `packages/`, package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` printed `function function function`.
+
+HTTP utility source cleanup consolidated `packages/utils/src/http-config.ts`, `packages/utils/src/http-fetch.ts`, and `packages/utils/src/http-network-errors.ts` into `packages/utils/src/http-utils.ts`. The public package-root exports are unchanged, and stale generated `dist/http-config.*`, `dist/http-fetch.*`, and `dist/http-network-errors.*` artifacts were removed after rebuilding.
+
+Validation evidence for HTTP utility source cleanup:
+
+- `npm run build` from `packages/`
+- `find packages/utils/dist -maxdepth 1 -type f -name 'http-*' -print | sort` listed only `http-utils.d.ts`, `http-utils.js`, and `http-utils.js.map`.
+- `node --test packages/utils/test/validation.test.js` passed 7 tests.
+- `node --test packages/ipfs/test/publish.test.js` passed 18 tests.
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
+- From `packages/`, package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` printed `function function function function`.
+
+Async utility source cleanup consolidated `packages/utils/src/abort-utils.ts` and `packages/utils/src/retry-utils.ts` into `packages/utils/src/async-utils.ts`. The public package-root exports are unchanged, and stale generated `dist/abort-utils.*` and `dist/retry-utils.*` artifacts were removed after rebuilding.
+
+Validation evidence for async utility source cleanup:
+
+- `npm run build` from `packages/`
+- `find packages/utils/dist -maxdepth 1 -type f \( -name 'abort-*' -o -name 'retry-*' -o -name 'async-*' \) -print | sort` listed only `async-utils.d.ts`, `async-utils.js`, and `async-utils.js.map`.
+- `node --test packages/utils/test/validation.test.js` passed 7 tests.
+- `node --test packages/ipfs/test/publish.test.js` passed 18 tests.
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
 
 ## Context and Orientation
 
@@ -271,7 +304,8 @@ The current package layout relevant to this work is:
 - `packages/ethereum/src/hex.ts`: contains small local hex/hash validators for Ethereum method wrappers.
 - `packages/ethereum/src/request-utils.ts`: contains the raw JSON-RPC request primitive, JSON-RPC error classes, timeout/abort/retry handling, and fetch-like types.
 - `packages/utils/src/validation-utils.ts`: contains shared validation helpers used by Ethereum and IPFS.
-- `packages/utils/src/http-fetch.ts`: contains shared structural HTTP POST/text fetch types used by Ethereum JSON-RPC and IPFS publish.
+- `packages/utils/src/async-utils.ts`: contains shared async control primitives for timeout signals, composed abort signals, abortable promises, caller-abort checks, and retry-delay waits.
+- `packages/utils/src/http-utils.ts`: contains shared HTTP config creation, structural HTTP POST/text fetch types, and retryable HTTP network error helpers used by Ethereum and IPFS.
 - `packages/ethereum/test/rpc.test.js`: tests the built JSON-RPC request surface against fake `fetch` implementations.
 - `packages/ethereum/README.md`: documents the current Milestone 1 surface.
 - `packages/ipfs/src/config.ts`, `packages/ipfs/src/request-utils.ts`, and `packages/ipfs/test/*.test.js`: reference patterns for strict config, injected fetch, timeout/retry behavior, abort handling, and focused tests.

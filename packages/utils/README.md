@@ -14,35 +14,23 @@ Small shared utilities for hardened Oya kernel packages.
 - `assertHeadersObject(headers, label, options)`
 - `isPlainObject(value)`
 
-## HTTP Config Types
+## HTTP Utilities
 
 - `CreateHttpConfigOptions`
 - `HttpConfig`
-
-## HTTP Config Helpers
-
 - `createHttpConfig(options, normalizeUrl?)`
-
-## HTTP Fetch Types
-
 - `HttpFetchLike<TOptions, TResponse>`
 - `HttpPostFetchLike<TBody, TResponse>`
 - `HttpPostFetchOptions<TBody>`
 - `HttpTextResponse`
-
-## HTTP Network Retry Helpers
-
 - `RETRYABLE_HTTP_NETWORK_ERROR_CODES`
 - `hasRetryableNetworkErrorCode(error)`
 
-## Abort Helpers
+## Async Utilities
 
 - `AbortSignalHandle`
 - `createTimeoutSignal(timeoutMs)`
 - `combineAbortSignals(signals)`
 - `invokeWithAbort(createPromise, signal)`
 - `throwIfSignalAborted(signal, message, cause)`
-
-## Retry Helpers
-
 - `waitForRetryDelay(options)`
