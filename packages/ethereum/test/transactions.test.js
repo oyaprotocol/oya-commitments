@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-    createEthereumRpcConfig,
+    createHttpConfig,
     EthereumJsonRpcError,
     EthereumRawTransactionRecoveryError,
     ethSendRawTransaction,
@@ -15,7 +15,7 @@ const UPPERCASE_TRANSACTION_HASH = `0x${'A'.repeat(64)}`;
 const OTHER_TRANSACTION_HASH = `0x${'b'.repeat(64)}`;
 
 function createConfig(overrides = {}) {
-    return createEthereumRpcConfig({
+    return createHttpConfig({
         url: 'https://rpc.example/',
         headers: {
             Authorization: 'Bearer test-token',

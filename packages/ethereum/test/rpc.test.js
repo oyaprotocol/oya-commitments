@@ -2,14 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-    createEthereumRpcConfig,
+    createHttpConfig,
     EthereumJsonRpcError,
     EthereumJsonRpcHttpError,
     requestEthereumJsonRpc,
 } from '../dist/index.js';
 
 function createConfig(overrides = {}) {
-    return createEthereumRpcConfig({
+    return createHttpConfig({
         url: 'https://rpc.example/',
         headers: {
             Authorization: 'Bearer test-token',
@@ -32,8 +32,8 @@ function createTextResponse(status, body, statusText = 'OK') {
     };
 }
 
-test('createEthereumRpcConfig requires explicit transport configuration', () => {
-    const config = createEthereumRpcConfig({
+test('createHttpConfig is re-exported for Ethereum transport configuration', () => {
+    const config = createHttpConfig({
         url: 'https://rpc.example/',
         headers: {
             Authorization: 'Bearer token',
@@ -58,7 +58,7 @@ test('createEthereumRpcConfig requires explicit transport configuration', () => 
 
     assert.throws(
         () =>
-            createEthereumRpcConfig({
+            createHttpConfig({
                 url: '',
                 headers: {},
                 timeoutMs: 1_000,
@@ -69,7 +69,7 @@ test('createEthereumRpcConfig requires explicit transport configuration', () => 
     );
     assert.throws(
         () =>
-            createEthereumRpcConfig({
+            createHttpConfig({
                 url: 'https://rpc.example',
                 headers: new Headers(),
                 timeoutMs: 1_000,
@@ -80,7 +80,7 @@ test('createEthereumRpcConfig requires explicit transport configuration', () => 
     );
     assert.throws(
         () =>
-            createEthereumRpcConfig({
+            createHttpConfig({
                 url: 'https://rpc.example',
                 headers: {
                     'content-type': 'application/json',
@@ -93,7 +93,7 @@ test('createEthereumRpcConfig requires explicit transport configuration', () => 
     );
     assert.throws(
         () =>
-            createEthereumRpcConfig({
+            createHttpConfig({
                 url: 'https://rpc.example',
                 headers: {},
                 timeoutMs: '1000',

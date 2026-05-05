@@ -149,7 +149,7 @@ Validation evidence for this milestone:
 
 - `npm --prefix packages install`
 - `npm --prefix packages run build`
-- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createEthereumRpcConfig); })"`
+- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createHttpConfig); })"`
 - `node --test packages/ipfs/test/publish.test.js`
 
 The final open thread in this plan is now closed. The next publishing primitive has been selected as explicit add-and-pin publication, followed by low-level retrieval. Public indexing is deferred to a future onchain Logger design. Implementation should continue from `plans/ipfs-publication-indexing-and-retrieval.md` rather than extending this package-shell plan.
@@ -259,7 +259,7 @@ Validation commands from the repository root:
 - `node --input-type=module -e "import('./packages/utils/dist/index.js').then((m) => console.log(typeof m.assertNonEmptyString, typeof m.assertHeadersObject, Object.hasOwn(m, 'packageInfo')))"`
 - `node --input-type=module -e "import('./packages/messages/dist/index.js').then((m) => console.log(m.packageInfo.name))"`
 - `node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => console.log(typeof m.publishToIpfs, typeof m.readIpfsPublicGatewayText, Object.hasOwn(m, 'packageInfo')))"`
-- `node --input-type=module -e "import('./packages/ethereum/dist/index.js').then((m) => console.log(typeof m.createEthereumRpcConfig, typeof m.requestEthereumJsonRpc, Object.hasOwn(m, 'packageInfo')))"`
+- `node --input-type=module -e "import('./packages/ethereum/dist/index.js').then((m) => console.log(typeof m.createHttpConfig, typeof m.requestEthereumJsonRpc, Object.hasOwn(m, 'packageInfo')))"`
 - `node --test packages/utils/test/validation.test.js`
 - `node --test packages/ipfs/test/publish.test.js`
 - `node --test packages/ipfs/test/retrieval.test.js`
@@ -303,7 +303,7 @@ Current additional public surface in `@oyaprotocol/ipfs`:
 
 Current public surface in `@oyaprotocol/ethereum`:
 
-- `createEthereumRpcConfig(options)`
+- `createHttpConfig(options)`
 - `requestEthereumJsonRpc(options)`
 - `EthereumJsonRpcError`
 - `EthereumJsonRpcHttpError`

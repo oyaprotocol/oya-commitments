@@ -1,4 +1,4 @@
-export { createEthereumRpcConfig } from './config.js';
+export { createHttpConfig } from '@oyaprotocol/utils';
 export type {
     CreateHttpConfigOptions,
     HttpConfig,

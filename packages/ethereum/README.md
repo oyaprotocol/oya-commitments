@@ -8,7 +8,7 @@ Ethereum JSON-RPC utilities for Oya kernel code. This package is a hardened kern
 
 ## Current Surface
 
-- `createEthereumRpcConfig(options)`: validate explicit JSON-RPC transport settings.
+- `createHttpConfig(options)`: validate explicit HTTP transport settings, re-exported from `@oyaprotocol/utils`.
 - `requestEthereumJsonRpc(options)`: send one JSON-RPC POST request with explicit config and injected `fetch`, returning the raw `result`, attempt count, id, and parsed response payload.
 - `ethSendRawTransaction(options)`: submit a signed raw transaction and return the transaction hash with attempt metadata. Callers may pass `transactionHash` when they already know the hash, allowing the wrapper to verify duplicate-style retry errors with `eth_getTransactionByHash`.
 - `EthereumJsonRpcError`: thrown when an HTTP-successful JSON-RPC response contains an `error` payload.
@@ -17,7 +17,7 @@ Ethereum JSON-RPC utilities for Oya kernel code. This package is a hardened kern
 
 ## Behavior
 
-`createEthereumRpcConfig(...)` accepts the shared `CreateHttpConfigOptions` shape from `@oyaprotocol/utils`. The `url` value is normalized by trimming trailing slashes before JSON-RPC requests are sent.
+`createHttpConfig(...)` accepts the shared `CreateHttpConfigOptions` shape from `@oyaprotocol/utils`. The `url` value is normalized by trimming trailing slashes before JSON-RPC requests are sent.
 
 `requestEthereumJsonRpc(...)` owns the JSON-RPC envelope and request headers. It sends `content-type: application/json`, rejects caller-provided `content-type` config headers, enforces a request timeout, retries transient HTTP/network failures only for read-only Ethereum methods, and treats JSON-RPC error payloads as non-retryable semantic errors.
 
