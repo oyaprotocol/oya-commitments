@@ -1,10 +1,14 @@
 export { createIpfsConfig } from './config.js';
-export type { CreateHttpConfigOptions, HttpConfig } from '@oyaprotocol/utils';
+export type {
+    CreateHttpConfigOptions,
+    HttpConfig,
+    HttpFetchLike,
+    HttpPostFetchLike,
+    HttpPostFetchOptions,
+    HttpTextResponse,
+} from '@oyaprotocol/utils';
 export { publishToIpfs } from './publish.js';
 export type {
-    PublishIpfsFetchLike,
-    PublishIpfsRequestOptions,
-    PublishIpfsResponse,
     PublishToIpfsOptions,
     PublishToIpfsResult,
     PublishableContent,

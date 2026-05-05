@@ -1,21 +1,8 @@
-import type { HttpConfig } from '@oyaprotocol/utils';
-export type PublishIpfsFetchLike = (url: string, options: PublishIpfsRequestOptions) => Promise<PublishIpfsResponse>;
+import type { HttpConfig, HttpPostFetchLike } from '@oyaprotocol/utils';
 export type PublishableContent = string | Uint8Array | ArrayBuffer | Blob;
-export interface PublishIpfsRequestOptions {
-    method: 'POST';
-    headers: Readonly<Record<string, string>>;
-    body: FormData;
-    signal?: AbortSignal | undefined;
-}
-export interface PublishIpfsResponse {
-    ok: boolean;
-    status: number;
-    statusText: string;
-    text(): Promise<string>;
-}
 export interface PublishToIpfsOptions {
     config: HttpConfig;
-    fetch: PublishIpfsFetchLike;
+    fetch: HttpPostFetchLike<FormData>;
     content: PublishableContent;
     filename: string;
     mediaType: string;

@@ -2,6 +2,7 @@ export { combineAbortSignals, createTimeoutSignal, invokeWithAbort, throwIfSigna
 export type { AbortSignalHandle } from './abort-utils.js';
 export { createHttpConfig } from './http-config.js';
 export type { CreateHttpConfigOptions, HttpConfig } from './http-config.js';
+export type { HttpFetchLike, HttpPostFetchLike, HttpPostFetchOptions, HttpTextResponse, } from './http-fetch.js';
 export { RETRYABLE_HTTP_NETWORK_ERROR_CODES, hasRetryableNetworkErrorCode, } from './http-network-errors.js';
 export { waitForRetryDelay } from './retry-utils.js';
 export { assertHeadersObject, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, isPlainObject, } from './validation-utils.js';

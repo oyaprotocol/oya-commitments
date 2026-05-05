@@ -1,4 +1,4 @@
-import type { HttpConfig } from '@oyaprotocol/utils';
+import type { HttpConfig, HttpPostFetchLike } from '@oyaprotocol/utils';
 import {
     combineAbortSignals,
     createTimeoutSignal,
@@ -51,28 +51,9 @@ const RETRYABLE_JSON_RPC_METHODS = new Set([
     'web3_sha3',
 ]);
 
-export type EthereumJsonRpcFetchLike = (
-    url: string,
-    options: EthereumJsonRpcFetchOptions
-) => Promise<EthereumJsonRpcResponse>;
-
-export interface EthereumJsonRpcFetchOptions {
-    method: 'POST';
-    headers: Readonly<Record<string, string>>;
-    body: string;
-    signal?: AbortSignal | undefined;
-}
-
-export interface EthereumJsonRpcResponse {
-    ok: boolean;
-    status: number;
-    statusText: string;
-    text(): Promise<string>;
-}
-
 export interface RequestEthereumJsonRpcOptions {
     config: HttpConfig;
-    fetch: EthereumJsonRpcFetchLike;
+    fetch: HttpPostFetchLike<string>;
     method: string;
     params?: readonly unknown[];
     id?: string | number;

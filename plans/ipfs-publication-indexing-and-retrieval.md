@@ -325,7 +325,7 @@ Important reference behavior:
 Existing package interfaces:
 
 - `HttpConfig` and `CreateHttpConfigOptions` from `@oyaprotocol/utils`
-- `PublishIpfsFetchLike`, `PublishIpfsRequestOptions`, and `PublishIpfsResponse` from `packages/ipfs/src/publish.ts`
+- `HttpPostFetchLike<FormData>` from `@oyaprotocol/utils` as the publish fetch contract
 - `PublishToIpfsOptions` and `PublishToIpfsResult` from `packages/ipfs/src/publish.ts`
 - `ReadIpfsBytesResult`
 - `ReadIpfsFetchOptions`

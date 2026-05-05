@@ -42,6 +42,7 @@ Definitions used in this plan:
 - [x] 2026-05-03 23:31Z: Moved shared abort/timeout helpers into `@oyaprotocol/utils/abort-utils` and shared retry delay handling into `@oyaprotocol/utils/retry-utils`; IPFS and Ethereum now import the shared helpers.
 - [x] 2026-05-03 23:49Z: Removed `eth_sendRawTransaction` from the generic JSON-RPC retry allowlist; raw transaction retries now live only in `ethSendRawTransaction(...)`, which has duplicate-error recovery semantics.
 - [x] 2026-05-03 23:57Z: Fixed `combineAbortSignals(...)` fallback behavior to detect already-aborted signals before attaching listeners, avoiding leaked listeners on earlier live signals.
+- [x] 2026-05-05: Moved shared POST/text fetch transport types into `@oyaprotocol/utils` as `HttpPostFetchOptions<TBody>`, `HttpTextResponse`, `HttpFetchLike<TOptions, TResponse>`, and `HttpPostFetchLike<TBody, TResponse>`; Ethereum JSON-RPC and IPFS publish now use those generic types directly instead of exporting package-branded aliases.
 
 ## Surprises & Discoveries
 
@@ -109,6 +110,10 @@ Definitions used in this plan:
 - Decision: Move shared abort/timeout and retry-delay helpers into `@oyaprotocol/utils`.
   Rationale: IPFS and Ethereum had exact duplicates of the abort-composition, timeout-signal, abortable-promise, caller-abort, and retry-delay helpers. Sharing the generic mechanics removes duplication while keeping protocol-specific retry policy and error classes in each package.
   Date/Author: 2026-05-03 / Codex.
+
+- Decision: Move only the shared POST/text fetch transport shapes into `@oyaprotocol/utils`.
+  Rationale: `EthereumJsonRpcFetchOptions` / `EthereumJsonRpcResponse` and IPFS `PublishIpfsRequestOptions` / `PublishIpfsResponse` differed only by POST body type and package branding. Generic utility types remove duplication and keep the public type surface smaller. IPFS byte and public-gateway reads still use stream response bodies, so they remain package-local.
+  Date/Author: 2026-05-05 / Codex.
 
 ## Outcomes & Retrospective
 
@@ -240,6 +245,17 @@ Validation evidence for abort listener cleanup:
 - `node --test packages/ipfs/test/publish.test.js packages/ipfs/test/retrieval.test.js` passed 45 tests.
 - `node --test packages/ethereum/test/rpc.test.js packages/ethereum/test/transactions.test.js` passed 20 tests.
 
+Shared HTTP fetch-type cleanup added `packages/utils/src/http-fetch.ts`, exporting generic POST fetch options, text response, and fetch-like function types. Ethereum JSON-RPC and IPFS publish now use `HttpPostFetchLike<string>` and `HttpPostFetchLike<FormData>` directly in their public option interfaces. The package roots re-export the generic utility type names instead of duplicate package-branded POST/text aliases.
+
+Validation evidence for shared HTTP fetch-type cleanup:
+
+- `npm run build` from `packages/`
+- `node --test packages/utils/test/validation.test.js` passed 7 tests.
+- `node --test packages/ipfs/test/publish.test.js` passed 18 tests.
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
+- From `packages/`, package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` printed `function function function`.
+
 ## Context and Orientation
 
 The repository has a newer hardened-kernel area under `packages/`. Local instructions for this area live in `packages/AGENTS.md`. Those instructions require package-root public exports, small reviewable package shells, no imports from legacy runtime areas, and validation with `npm run build` from `packages/`.
@@ -255,6 +271,7 @@ The current package layout relevant to this work is:
 - `packages/ethereum/src/hex.ts`: contains small local hex/hash validators for Ethereum method wrappers.
 - `packages/ethereum/src/request-utils.ts`: contains the raw JSON-RPC request primitive, JSON-RPC error classes, timeout/abort/retry handling, and fetch-like types.
 - `packages/utils/src/validation-utils.ts`: contains shared validation helpers used by Ethereum and IPFS.
+- `packages/utils/src/http-fetch.ts`: contains shared structural HTTP POST/text fetch types used by Ethereum JSON-RPC and IPFS publish.
 - `packages/ethereum/test/rpc.test.js`: tests the built JSON-RPC request surface against fake `fetch` implementations.
 - `packages/ethereum/README.md`: documents the current Milestone 1 surface.
 - `packages/ipfs/src/config.ts`, `packages/ipfs/src/request-utils.ts`, and `packages/ipfs/test/*.test.js`: reference patterns for strict config, injected fetch, timeout/retry behavior, abort handling, and focused tests.

@@ -1,4 +1,4 @@
-import type { HttpConfig } from '@oyaprotocol/utils';
+import type { HttpConfig, HttpPostFetchLike } from '@oyaprotocol/utils';
 import { isPlainObject } from '@oyaprotocol/utils';
 
 import { normalizeHash, normalizeHexData } from './hex.js';
@@ -7,10 +7,7 @@ import {
     requestEthereumJsonRpc,
     requestEthereumJsonRpcWithRetryPolicy,
 } from './request-utils.js';
-import type {
-    EthereumJsonRpcFetchLike,
-    RequestEthereumJsonRpcOptions,
-} from './request-utils.js';
+import type { RequestEthereumJsonRpcOptions } from './request-utils.js';
 
 const RAW_TRANSACTION_RECOVERY_MESSAGES = [
     'already known',
@@ -23,7 +20,7 @@ const RAW_TRANSACTION_RECOVERY_MESSAGES = [
 
 interface EthSendRawTransactionOptions {
     config: HttpConfig;
-    fetch: EthereumJsonRpcFetchLike;
+    fetch: HttpPostFetchLike<string>;
     rawTransaction: string;
     transactionHash?: string;
     id?: string | number;
@@ -101,7 +98,7 @@ function createJsonRpcOptions({
     signal,
 }: {
     config: HttpConfig;
-    fetch: EthereumJsonRpcFetchLike;
+    fetch: HttpPostFetchLike<string>;
     method: string;
     params: readonly unknown[];
     id: string | number | undefined;
@@ -130,7 +127,7 @@ async function recoverRawTransactionSubmission({
     originalError,
 }: {
     config: HttpConfig;
-    fetch: EthereumJsonRpcFetchLike;
+    fetch: HttpPostFetchLike<string>;
     transactionHash: string | null;
     id: string | number | undefined;
     signal: AbortSignal | undefined;

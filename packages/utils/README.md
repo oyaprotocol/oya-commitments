@@ -23,6 +23,13 @@ Small shared utilities for hardened Oya kernel packages.
 
 - `createHttpConfig(options, normalizeUrl?)`
 
+## HTTP Fetch Types
+
+- `HttpFetchLike<TOptions, TResponse>`
+- `HttpPostFetchLike<TBody, TResponse>`
+- `HttpPostFetchOptions<TBody>`
+- `HttpTextResponse`
+
 ## HTTP Network Retry Helpers
 
 - `RETRYABLE_HTTP_NETWORK_ERROR_CODES`

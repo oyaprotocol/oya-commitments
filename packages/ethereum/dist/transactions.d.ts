@@ -1,9 +1,8 @@
-import type { HttpConfig } from '@oyaprotocol/utils';
+import type { HttpConfig, HttpPostFetchLike } from '@oyaprotocol/utils';
 import { EthereumJsonRpcError } from './request-utils.js';
-import type { EthereumJsonRpcFetchLike } from './request-utils.js';
 interface EthSendRawTransactionOptions {
     config: HttpConfig;
-    fetch: EthereumJsonRpcFetchLike;
+    fetch: HttpPostFetchLike<string>;
     rawTransaction: string;
     transactionHash?: string;
     id?: string | number;
