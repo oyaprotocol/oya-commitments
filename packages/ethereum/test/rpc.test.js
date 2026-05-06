@@ -272,6 +272,25 @@ test('requestEthereumJsonRpc does not retry non-retryable HTTP failures', async 
         }
     );
     assert.equal(attempts, 1);
+
+    attempts = 0;
+    await assert.rejects(
+        requestEthereumJsonRpc({
+            config: createConfig({ maxRetries: 3 }),
+            fetch: async () => {
+                attempts += 1;
+                return createTextResponse(0, '', '');
+            },
+            method: 'eth_call',
+        }),
+        (error) => {
+            assert.ok(error instanceof HttpStatusError);
+            assert.equal(error.status, 0);
+            assert.match(error.message, /0 Unknown Status/);
+            return true;
+        }
+    );
+    assert.equal(attempts, 1);
 });
 
 test('requestEthereumJsonRpc does not retry JSON-RPC errors', async () => {

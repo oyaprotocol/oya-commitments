@@ -298,15 +298,18 @@ Validation evidence for HTTP utility source cleanup:
 
 Shared HTTP status error cleanup added `HttpStatusError` to `@oyaprotocol/utils` and switched Ethereum JSON-RPC, IPFS publish, Kubo reads, and public gateway reads to throw that shared runtime error for non-OK HTTP responses. Ethereum and IPFS re-export the shared class from their package roots so callers can use one `instanceof HttpStatusError` check for HTTP status failures.
 
+Status-zero response cleanup changed `HttpStatusError` to accept `status === 0`, preserving opaque/synthetic fetch response failures as transport error objects instead of replacing them with constructor validation errors. Retry classification remains unchanged: status `0` is not retried by the current `429 || >= 500` rule.
+
 Validation evidence for shared HTTP status error cleanup:
 
 - `npm run build` from `packages/`
-- `node --test packages/utils/test/validation.test.js` passed 9 tests.
+- `node --test packages/utils/test/validation.test.js` passed 10 tests.
 - `node --test packages/ipfs/test/publish.test.js` passed 18 tests.
 - `node --test packages/ipfs/test/retrieval.test.js` passed 27 tests.
 - `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
 - `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
 - Package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` printed `function function function undefined` for `HttpStatusError`, `HttpStatusError`, `HttpStatusError`, and removed `EthereumJsonRpcHttpError`.
+- `node --input-type=module -e "import('./packages/utils/dist/index.js').then(({ HttpStatusError }) => { const error = new HttpStatusError({ operation: 'Opaque fetch response', status: 0, statusText: '' }); console.log(error.status, error.statusText, error.message); })"` printed `0 Unknown Status Opaque fetch response failed with 0 Unknown Status.`
 - `git diff --check`
 
 Shared error-chain reader cleanup added `readErrorStringChain(...)` to `@oyaprotocol/utils` and removed the duplicate helper bodies from IPFS and Ethereum request utilities. `hasRetryableNetworkErrorCode(...)` now uses the same shared chain reader for nested string `code` values.

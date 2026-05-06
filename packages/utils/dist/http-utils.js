@@ -18,7 +18,7 @@ class HttpStatusError extends Error {
     responseText;
     constructor({ operation, status, statusText, responseText }) {
         const normalizedOperation = assertNonEmptyString(operation, 'operation');
-        const normalizedStatus = assertPositiveInteger(status, 'status');
+        const normalizedStatus = assertNonNegativeInteger(status, 'status');
         const normalizedStatusText = typeof statusText === 'string' && statusText.trim()
             ? statusText.trim()
             : 'Unknown Status';

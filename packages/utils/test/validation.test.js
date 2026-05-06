@@ -204,6 +204,16 @@ test('HttpStatusError captures normalized HTTP failure details', () => {
     assert.equal(error.status, 503);
     assert.equal(error.statusText, 'Service Unavailable');
     assert.equal(error.responseText, '{"error":"temporary outage"}');
+
+    const opaqueError = new HttpStatusError({
+        operation: 'Opaque fetch response',
+        status: 0,
+        statusText: '',
+    });
+
+    assert.equal(opaqueError.message, 'Opaque fetch response failed with 0 Unknown Status.');
+    assert.equal(opaqueError.status, 0);
+    assert.equal(opaqueError.statusText, 'Unknown Status');
 });
 
 test('hasRetryableNetworkErrorCode detects retryable HTTP network codes', () => {

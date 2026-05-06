@@ -53,6 +53,7 @@ Definitions used in this plan:
 - [x] 2026-05-03 21:35Z: Replaced the package-branded `IpfsConfig` type with shared `HttpConfig` / `CreateHttpConfigOptions` from `@oyaprotocol/utils`; `createIpfsConfig(...)` now accepts and returns the generic `url`-based HTTP config shape.
 - [x] 2026-05-06 00:35Z: Replaced the package-internal `IpfsHttpError` marker with shared `HttpStatusError` from `@oyaprotocol/utils` for publish, Kubo read, and public gateway read HTTP status failures.
 - [x] 2026-05-06 01:00Z: Replaced the package-internal `readErrorStringChain(...)` helper with the shared HTTP utility from `@oyaprotocol/utils`.
+- [x] 2026-05-06 01:12Z: Updated shared `HttpStatusError` to accept opaque/synthetic fetch responses with `status === 0` without changing retry policy.
 
 ## Surprises & Discoveries
 
