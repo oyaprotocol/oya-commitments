@@ -1,5 +1,5 @@
 import { readIpfsBytesWithMessages } from './read-bytes.js';
-import { assertAsciiBytes } from './validation-utils.js';
+import { assertAsciiBytes } from '@oyaprotocol/utils';
 async function readIpfsText(options) {
     const result = await readIpfsBytesWithMessages(options, {
         abortErrorMessage: 'readIpfsText was aborted by the caller.',

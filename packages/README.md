@@ -8,7 +8,6 @@
 - `packages/messages` -> `@oyaprotocol/messages`
 - `packages/ipfs` -> `@oyaprotocol/ipfs`
 - `packages/ethereum` -> `@oyaprotocol/ethereum`
-- `packages/verification` -> `@oyaprotocol/verification`
 
 ## Import Strategy
 
@@ -25,4 +24,6 @@
 
 ## Current Constraints
 
-- These package shells do not define functional ownership yet.
+- `@oyaprotocol/ipfs`, `@oyaprotocol/ethereum`, and `@oyaprotocol/utils` expose functional kernel APIs.
+- `@oyaprotocol/messages` is still a placeholder package shell.
+- Proposal or proof verification packages are intentionally not represented here yet; those may be implemented later in a lower-level language while TypeScript packages focus on network interactions.

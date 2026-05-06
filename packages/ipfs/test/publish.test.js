@@ -17,7 +17,7 @@ function createTextResponse(status, body, statusText = 'OK') {
 test('publishToIpfs publishes content and returns normalized details', async () => {
     const calls = [];
     const config = createIpfsConfig({
-        apiUrl: 'http://ipfs.example:5001/',
+        url: 'http://ipfs.example:5001/',
         headers: {
             Authorization: 'Bearer test-token',
         },
@@ -68,7 +68,7 @@ test('publishToIpfs publishes content and returns normalized details', async () 
 test('publishToIpfs retries retryable HTTP failures and succeeds', async () => {
     let attempts = 0;
     const config = createIpfsConfig({
-        apiUrl: 'http://ipfs.example:5001',
+        url: 'http://ipfs.example:5001',
         headers: {},
         timeoutMs: 1_000,
         maxRetries: 2,
@@ -97,7 +97,7 @@ test('publishToIpfs retries retryable HTTP failures and succeeds', async () => {
 test('publishToIpfs retries retryable network errors and succeeds', async () => {
     let attempts = 0;
     const config = createIpfsConfig({
-        apiUrl: 'http://ipfs.example:5001',
+        url: 'http://ipfs.example:5001',
         headers: {},
         timeoutMs: 1_000,
         maxRetries: 2,
@@ -127,7 +127,7 @@ test('publishToIpfs retries retryable network errors and succeeds', async () => 
 test('publishToIpfs retries fetch errors when a retryable network code is nested in error.cause', async () => {
     let attempts = 0;
     const config = createIpfsConfig({
-        apiUrl: 'http://ipfs.example:5001',
+        url: 'http://ipfs.example:5001',
         headers: {},
         timeoutMs: 1_000,
         maxRetries: 2,
@@ -158,7 +158,7 @@ test('publishToIpfs retries fetch errors when a retryable network code is nested
 
 test('publishToIpfs enforces timeout even when the injected fetch ignores signal', async () => {
     const config = createIpfsConfig({
-        apiUrl: 'http://ipfs.example:5001',
+        url: 'http://ipfs.example:5001',
         headers: {},
         timeoutMs: 10,
         maxRetries: 0,
@@ -182,7 +182,7 @@ test('publishToIpfs does not call fetch when the caller signal is already aborte
     let attempts = 0;
     controller.abort(new Error('stop before request'));
     const config = createIpfsConfig({
-        apiUrl: 'http://ipfs.example:5001',
+        url: 'http://ipfs.example:5001',
         headers: {},
         timeoutMs: 1_000,
         maxRetries: 0,
@@ -210,7 +210,7 @@ test('publishToIpfs does not call fetch when the caller signal is already aborte
 test('publishToIpfs does not retry non-retryable HTTP failures', async () => {
     let attempts = 0;
     const config = createIpfsConfig({
-        apiUrl: 'http://ipfs.example:5001',
+        url: 'http://ipfs.example:5001',
         headers: {},
         timeoutMs: 1_000,
         maxRetries: 3,
@@ -235,7 +235,7 @@ test('publishToIpfs does not retry non-retryable HTTP failures', async () => {
 test('publishToIpfs does not retry HTTP 408 based on status text', async () => {
     let attempts = 0;
     const config = createIpfsConfig({
-        apiUrl: 'http://ipfs.example:5001',
+        url: 'http://ipfs.example:5001',
         headers: {},
         timeoutMs: 1_000,
         maxRetries: 3,
@@ -262,7 +262,7 @@ test('publishToIpfs normalizes empty thrown values to the fallback error', async
     for (const thrownValue of emptyThrownValues) {
         let attempts = 0;
         const config = createIpfsConfig({
-            apiUrl: 'http://ipfs.example:5001',
+            url: 'http://ipfs.example:5001',
             headers: {},
             timeoutMs: 1_000,
             maxRetries: 0,
@@ -292,7 +292,7 @@ test('publishToIpfs normalizes empty thrown values to the fallback error', async
 
 test('publishToIpfs fails when the IPFS add response omits the cid', async () => {
     const config = createIpfsConfig({
-        apiUrl: 'http://ipfs.example:5001',
+        url: 'http://ipfs.example:5001',
         headers: {},
         timeoutMs: 1_000,
         maxRetries: 0,
@@ -314,7 +314,7 @@ test('createIpfsConfig requires explicit transport configuration', () => {
     assert.throws(
         () =>
             createIpfsConfig({
-                apiUrl: 'http://ipfs.example:5001',
+                url: 'http://ipfs.example:5001',
                 headers: {},
                 timeoutMs: 0,
                 maxRetries: 1,
@@ -325,7 +325,7 @@ test('createIpfsConfig requires explicit transport configuration', () => {
     assert.throws(
         () =>
             createIpfsConfig({
-                apiUrl: 'http://ipfs.example:5001',
+                url: 'http://ipfs.example:5001',
                 headers: {
                     'content-type': 'application/json',
                 },
@@ -338,7 +338,7 @@ test('createIpfsConfig requires explicit transport configuration', () => {
     assert.throws(
         () =>
             createIpfsConfig({
-                apiUrl: 'http://ipfs.example:5001',
+                url: 'http://ipfs.example:5001',
                 headers: {
                     Authorization: 123,
                 },
@@ -351,7 +351,7 @@ test('createIpfsConfig requires explicit transport configuration', () => {
     assert.throws(
         () =>
             createIpfsConfig({
-                apiUrl: 'http://ipfs.example:5001',
+                url: 'http://ipfs.example:5001',
                 headers: new Headers({
                     Authorization: 'Bearer test-token',
                 }),
@@ -365,7 +365,7 @@ test('createIpfsConfig requires explicit transport configuration', () => {
 
 test('createIpfsConfig rejects coerced integer values', () => {
     const baseConfig = {
-        apiUrl: 'http://ipfs.example:5001',
+        url: 'http://ipfs.example:5001',
         headers: {},
         timeoutMs: 1_000,
         maxRetries: 1,
@@ -398,7 +398,7 @@ test('createIpfsConfig rejects coerced integer values', () => {
 
 test('createIpfsConfig freezes validated headers', () => {
     const config = createIpfsConfig({
-        apiUrl: 'http://ipfs.example:5001',
+        url: 'http://ipfs.example:5001',
         headers: {
             Authorization: 'Bearer test-token',
         },
@@ -414,14 +414,28 @@ test('createIpfsConfig freezes validated headers', () => {
 
 test('createIpfsConfig normalizes a Kubo /api/v0 base URL', () => {
     const config = createIpfsConfig({
-        apiUrl: 'http://127.0.0.1:5001/api/v0/',
+        url: 'http://127.0.0.1:5001/api/v0/',
         headers: {},
         timeoutMs: 1_000,
         maxRetries: 1,
         retryDelayMs: 0,
     });
 
-    assert.equal(config.apiUrl, 'http://127.0.0.1:5001');
+    assert.equal(config.url, 'http://127.0.0.1:5001');
+});
+
+test('createIpfsConfig rejects a Kubo API path that normalizes to an empty URL', () => {
+    assert.throws(
+        () =>
+            createIpfsConfig({
+                url: '/api/v0/',
+                headers: {},
+                timeoutMs: 1_000,
+                maxRetries: 1,
+                retryDelayMs: 0,
+            }),
+        /config\.url must be a non-empty string/
+    );
 });
 
 test('publishToIpfs clears the fallback timeout timer after a successful request', async () => {
@@ -442,7 +456,7 @@ test('publishToIpfs clears the fallback timeout timer after a successful request
 
     try {
         const config = createIpfsConfig({
-            apiUrl: 'http://ipfs.example:5001',
+            url: 'http://ipfs.example:5001',
             headers: {},
             timeoutMs: 1_000,
             maxRetries: 0,
@@ -489,7 +503,7 @@ test('publishToIpfs aborts during retry backoff without making another attempt',
 
     try {
         const config = createIpfsConfig({
-            apiUrl: 'http://ipfs.example:5001',
+            url: 'http://ipfs.example:5001',
             headers: {},
             timeoutMs: 10_000,
             maxRetries: 1,
@@ -560,7 +574,7 @@ test('publishToIpfs removes fallback combined abort listeners after a successful
 
     try {
         const config = createIpfsConfig({
-            apiUrl: 'http://ipfs.example:5001',
+            url: 'http://ipfs.example:5001',
             headers: {},
             timeoutMs: 1_000,
             maxRetries: 0,

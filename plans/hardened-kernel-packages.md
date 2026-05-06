@@ -38,6 +38,7 @@ After this phase, a contributor should be able to:
 - [x] 2026-04-30 18:05Z: Simplified the follow-on plan after user clarification: the immediate package work is explicit add-and-pin plus low-level retrieval, while public indexing is deferred to a future onchain Logger design.
 - [x] 2026-05-02 21:52Z: Renamed the initial IPFS work package from `@oyaprotocol/publishing` / `packages/publishing` to `@oyaprotocol/ipfs` / `packages/ipfs` after the package scope expanded from publication to general IPFS retrieval.
 - [x] 2026-05-02 22:01Z: Simplified the IPFS package's internal filenames after the package rename; the follow-on plan now owns the current `config.ts`, `publish.ts`, read helpers, and focused test filenames.
+- [x] 2026-05-03 21:25Z: Removed the placeholder `@oyaprotocol/verification` TypeScript package because future verification work is likely to live in a lower-level language package, while TypeScript kernel packages focus on network interactions.
 
 ## Surprises & Discoveries
 
@@ -129,10 +130,10 @@ After this phase, a contributor should be able to:
 
 The first milestone is complete. The repo now has a dedicated `packages/` area, five named package shells, local area guidance, and a matching ExecPlan. The resulting surface started intentionally small: package manifests, package-root entrypoints, and placeholder exports only.
 
-Validation evidence for this milestone:
+Historical validation evidence for this milestone:
 
 - `npm --prefix packages run build`
-- direct Node imports returned `@oyaprotocol/utils`, `@oyaprotocol/messages`, `@oyaprotocol/ipfs`, `@oyaprotocol/transactions`, and `@oyaprotocol/verification` from the built `dist/index.js` entrypoints
+- direct Node imports returned the package names from the built `dist/index.js` entrypoints
 - a source-only import scan over `packages/*/src` found no imports from legacy repo areas
 
 The second milestone establishes the first real package primitives in `@oyaprotocol/ipfs`: explicit IPFS config creation and `publishToIpfs(...)`. Together they define a strict low-level IPFS add surface: the caller must provide explicit transport settings, explicit content metadata, and an explicit `fetch` implementation. The primitive then publishes text or bytes to a Kubo-compatible `/api/v0/add` endpoint, normalizes the returned publication details, and retries transient failures without adding pinning, indexing, or API-serving behavior yet.
@@ -140,7 +141,7 @@ The second milestone establishes the first real package primitives in `@oyaproto
 Validation evidence for this milestone:
 
 - `node --test packages/ipfs/test/publish.test.js`
-- `node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => { console.log(typeof m.createIpfsConfig, typeof m.publishToIpfs, m.packageInfo.status); })"`
+- `node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => { console.log(typeof m.createIpfsConfig, typeof m.publishToIpfs); })"`
 
 The third milestone converts the kernel area to TypeScript while keeping the change local to `packages/`. Package source now lives in `src/*.ts`, package manifests export built `dist/*.js` entrypoints with `.d.ts` declarations, and `packages/package.json` provides a workspace-local TypeScript toolchain that does not change `agent/`, `node/`, or `frontend/`.
 
@@ -148,12 +149,20 @@ Validation evidence for this milestone:
 
 - `npm --prefix packages install`
 - `npm --prefix packages run build`
-- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/transactions/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then((modules) => { console.log(modules.map((module) => module.packageInfo.name).join(',')); })"`
+- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createHttpConfig); })"`
 - `node --test packages/ipfs/test/publish.test.js`
 
 The final open thread in this plan is now closed. The next publishing primitive has been selected as explicit add-and-pin publication, followed by low-level retrieval. Public indexing is deferred to a future onchain Logger design. Implementation should continue from `plans/ipfs-publication-indexing-and-retrieval.md` rather than extending this package-shell plan.
 
 Follow-on cleanup renamed redundant IPFS package filenames after the package moved to `packages/ipfs`: the current source files are `config.ts`, `publish.ts`, `request-utils.ts`, and the read helpers under `packages/ipfs/src/`; the focused tests are `packages/ipfs/test/publish.test.js` and `packages/ipfs/test/retrieval.test.js`.
+
+Later package export cleanup removed `packageInfo` from non-placeholder packages. `@oyaprotocol/ipfs`, `@oyaprotocol/ethereum`, and `@oyaprotocol/utils` now use real public functions for smoke imports, while `@oyaprotocol/messages` keeps `packageInfo` because it is still a placeholder.
+
+Shared validation cleanup moved duplicated IPFS/Ethereum helpers into `@oyaprotocol/utils`: `assertHeadersObject(...)`, `assertNonEmptyString(...)`, `assertNonNegativeInteger(...)`, `assertPositiveInteger(...)`, and `isPlainObject(...)`. IPFS and Ethereum now declare workspace dependencies on `@oyaprotocol/utils` and import through the package root.
+
+Placeholder package cleanup removed `@oyaprotocol/verification` from the TypeScript workspace. Future verification packages can be reintroduced deliberately when the target language/runtime is decided.
+
+HTTP config cleanup moved package config interfaces into `@oyaprotocol/utils` as `HttpConfig` and `CreateHttpConfigOptions`. IPFS and Ethereum creator functions still own their package-specific URL normalization, but both expose the same generic `url`-based config shape.
 
 ## Context and Orientation
 
@@ -164,8 +173,7 @@ The new package shells introduced in this phase are:
 - `packages/utils` for `@oyaprotocol/utils`
 - `packages/messages` for `@oyaprotocol/messages`
 - `packages/ipfs` for `@oyaprotocol/ipfs`
-- `packages/transactions` for `@oyaprotocol/transactions`
-- `packages/verification` for `@oyaprotocol/verification`
+- `packages/ethereum` for `@oyaprotocol/ethereum`
 
 Each package currently contains:
 
@@ -203,9 +211,9 @@ The first concrete function is now complete in `@oyaprotocol/ipfs`. The open dec
 
 ## Concrete Steps
 
-From `/Users/johnshutt/Code/oya-commitments`:
+From the repository root:
 
-1. Create package directories under `packages/` for `utils`, `messages`, `ipfs`, `transactions`, and `verification`.
+1. Create package directories under `packages/` for `utils`, `messages`, `ipfs`, and `ethereum`.
 
 2. Add `package.json` to each package with:
 
@@ -245,16 +253,16 @@ This milestone is accepted when:
 - the repo contains clear local documentation explaining that the new package area is shell-only for now
 - no legacy runtime code is imported into the new package area
 
-Validation commands from `/Users/johnshutt/Code/oya-commitments`:
+Validation commands from the repository root:
 
 - `npm --prefix packages run build`
-- `node --input-type=module -e "import('./packages/utils/dist/index.js').then((m) => console.log(m.packageInfo.name))"`
+- `node --input-type=module -e "import('./packages/utils/dist/index.js').then((m) => console.log(typeof m.assertNonEmptyString, typeof m.assertHeadersObject, Object.hasOwn(m, 'packageInfo')))"`
 - `node --input-type=module -e "import('./packages/messages/dist/index.js').then((m) => console.log(m.packageInfo.name))"`
-- `node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => console.log(m.packageInfo.name))"`
-- `node --input-type=module -e "import('./packages/transactions/dist/index.js').then((m) => console.log(m.packageInfo.name))"`
-- `node --input-type=module -e "import('./packages/verification/dist/index.js').then((m) => console.log(m.packageInfo.name))"`
+- `node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => console.log(typeof m.publishToIpfs, typeof m.readIpfsPublicGatewayText, Object.hasOwn(m, 'packageInfo')))"`
+- `node --input-type=module -e "import('./packages/ethereum/dist/index.js').then((m) => console.log(typeof m.createHttpConfig, typeof m.requestEthereumJsonRpc, Object.hasOwn(m, 'packageInfo')))"`
+- `node --test packages/utils/test/validation.test.js`
 - `node --test packages/ipfs/test/publish.test.js`
-- `node --input-type=module -e "import('./packages/ipfs/dist/index.js').then((m) => { console.log(typeof m.createIpfsConfig, typeof m.publishToIpfs, m.packageInfo.status); })"`
+- `node --test packages/ipfs/test/retrieval.test.js`
 
 ## Idempotence and Recovery
 
@@ -262,37 +270,81 @@ Creating package shells is safe to retry. If a future step needs to rename a pac
 
 ## Artifacts and Notes
 
-Initial package names:
+Current package names:
 
 - `@oyaprotocol/utils`
 - `@oyaprotocol/messages`
 - `@oyaprotocol/ipfs`
-- `@oyaprotocol/transactions`
-- `@oyaprotocol/verification`
+- `@oyaprotocol/ethereum`
 
-Initial public surface for each package:
+Placeholder public surface:
 
-- `src/index.ts` exporting `packageInfo`
+- `src/index.ts` exporting `packageInfo` for packages without real public functions yet
 - compiled `dist/index.js` entrypoint with `dist/index.d.ts`
+
+Current public surface in `@oyaprotocol/utils`:
+
+- `AbortSignalHandle`
+- `CreateHttpConfigOptions`
+- `HttpConfig`
+- `HttpFetchLike<TOptions, TResponse>`
+- `HttpPostFetchLike<TBody, TResponse>`
+- `HttpPostFetchOptions<TBody>`
+- `HttpStatusError`
+- `HttpStatusErrorOptions`
+- `HttpTextResponse`
+- `RETRYABLE_HTTP_NETWORK_ERROR_CODES`
+- `RunWithRetryAttemptContext`
+- `RunWithRetryOptions`
+- `assertAsciiBytes(bytes, message)`
+- `assertBytes32HexString(value, label)`
+- `assertHeadersObject(value, label, options)`
+- `assertHexData(value, label)`
+- `assertHexString(value, label)`
+- `assertNonEmptyString(value, label)`
+- `assertNonNegativeInteger(value, label)`
+- `assertPositiveInteger(value, label)`
+- `combineAbortSignals(signals)`
+- `createHttpConfig(options, normalizeUrl?)`
+- `createTimeoutSignal(timeoutMs)`
+- `hasRetryableNetworkErrorCode(error)`
+- `invokeWithAbort(createPromise, signal)`
+- `isPlainObject(value)`
+- `readErrorStringChain(error, key)`
+- `runWithRetry(options)`
+- `throwIfSignalAborted(signal, message, cause)`
+- `waitForRetryDelay(options)`
 
 Current additional public surface in `@oyaprotocol/ipfs`:
 
 - `createIpfsConfig(options)`
 - `publishToIpfs(options)`
+- `readIpfsBytes(options)`
+- `readIpfsText(options)`
+- `readIpfsPublicGatewayBytes(options)`
+- `readIpfsPublicGatewayText(options)`
+
+Current public surface in `@oyaprotocol/ethereum`:
+
+- `createHttpConfig(options)`
+- `requestEthereumJsonRpc(options)`
+- `EthereumJsonRpcError`
+- `HttpStatusError`
 
 ## Interfaces and Dependencies
 
 Interfaces introduced in this phase:
 
 - package-root `exports` for each new `@oyaprotocol/*` package
-- `packageInfo` placeholder export from each package entrypoint
+- `packageInfo` placeholder export from package entrypoints that do not yet have real public functions
 
 Interfaces introduced after the initial shell milestone:
 
+- validation helpers from `@oyaprotocol/utils`
 - `createIpfsConfig(options)` from `@oyaprotocol/ipfs`
 - `publishToIpfs(options)` from `@oyaprotocol/ipfs`
 
 Dependencies introduced in this phase:
 
-- none between the new packages
+- `@oyaprotocol/ipfs` and `@oyaprotocol/ethereum` depend on `@oyaprotocol/utils`
 - no imports from legacy repo areas into `packages/`

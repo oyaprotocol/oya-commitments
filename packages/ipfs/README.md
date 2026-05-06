@@ -14,8 +14,11 @@ Utilities for publishing and retrieving Oya-related data through IPFS. This pack
 - `readIpfsPublicGatewayBytes(options)`: read bounded bytes by CID from a public IPFS gateway using `GET /ipfs/<cid>` and explicit dependencies.
 - `readIpfsPublicGatewayText(options)`: read bounded ASCII text by CID from a public IPFS gateway using `readIpfsPublicGatewayBytes(...)` plus text-specific verification.
 - `readIpfsText(options)`: read bounded ASCII text content by CID from a Kubo-compatible IPFS HTTP API using `readIpfsBytes(...)` plus text-specific verification.
+- `HttpStatusError`: thrown when an HTTP response itself is not successful, re-exported from `@oyaprotocol/utils`.
 
 ## Behavior
+
+`createIpfsConfig(...)` accepts the shared `CreateHttpConfigOptions` shape from `@oyaprotocol/utils`. The `url` value is normalized for Kubo by trimming trailing slashes and a trailing `/api/v0` segment.
 
 `publishToIpfs(...)` is the standard add-and-pin primitive. It sends a Kubo `/api/v0/add` request with `cid-version=1`, `pin=true`, and `progress=false`, then returns normalized CID, URI, byte length, and pin metadata.
 

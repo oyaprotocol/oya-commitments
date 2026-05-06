@@ -1,11 +1,8 @@
-export declare const packageInfo: Readonly<{
-    name: "@oyaprotocol/ipfs";
-    status: "partial";
-}>;
 export { createIpfsConfig } from './config.js';
-export type { CreateIpfsConfigOptions, IpfsConfig } from './config.js';
+export { HttpStatusError } from '@oyaprotocol/utils';
+export type { CreateHttpConfigOptions, HttpConfig, HttpFetchLike, HttpPostFetchLike, HttpPostFetchOptions, HttpStatusErrorOptions, HttpTextResponse, } from '@oyaprotocol/utils';
 export { publishToIpfs } from './publish.js';
-export type { PublishIpfsFetchLike, PublishIpfsRequestOptions, PublishIpfsResponse, PublishToIpfsOptions, PublishToIpfsResult, PublishableContent, } from './publish.js';
+export type { PublishToIpfsOptions, PublishToIpfsResult, PublishableContent, } from './publish.js';
 export { readIpfsBytes } from './read-bytes.js';
 export type { ReadIpfsBytesResult, ReadIpfsFetchOptions, ReadIpfsFetchLike, ReadIpfsOptions, ReadIpfsResponse, } from './read-bytes.js';
 export { readIpfsPublicGatewayBytes } from './read-public-gateway-bytes.js';

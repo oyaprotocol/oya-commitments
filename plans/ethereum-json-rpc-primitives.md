@@ -23,16 +23,35 @@ Definitions used in this plan:
 - [x] 2026-05-02 23:17Z: Created this ExecPlan after reviewing `PLANS.md`, `packages/AGENTS.md`, the completed IPFS kernel package, the placeholder Ethereum package, and reference-only legacy transaction code.
 - [x] 2026-05-03 00:11Z: Updated command instructions to use the repository root rather than a machine-specific absolute clone path.
 - [x] 2026-05-03 00:18Z: Renamed the package shell from `@oyaprotocol/transactions` in `packages/transactions` to `@oyaprotocol/ethereum` in `packages/ethereum`, and updated this ExecPlan to match.
-- [ ] Implement the package-local Ethereum RPC transport config and request primitive.
+- [x] 2026-05-03 02:01Z: Implemented the package-local Ethereum RPC transport config and raw JSON-RPC request primitive.
 - [ ] Add Ethereum method wrappers for calls, gas estimation, raw transaction submission, receipts, receipt waiting, chain/block metadata, and logs.
-- [ ] Add focused tests against fake `fetch` implementations with no external RPC calls.
+- [x] 2026-05-03 02:01Z: Added focused Milestone 1 tests against fake `fetch` implementations with no external RPC calls.
+- [ ] Add focused method-wrapper tests after Milestone 2 exists.
+- [x] 2026-05-03 02:01Z: Documented the current Milestone 1 package surface in `packages/ethereum/README.md`.
 - [ ] Document the public package surface and future Logger compatibility boundaries.
-- [ ] Validate the package build, package-root import, focused tests, and diff hygiene.
+- [x] 2026-05-03 02:01Z: Validated the Milestone 1 package build, package-root import, package-name import, focused tests, and diff hygiene.
+- [x] 2026-05-03 20:48Z: Removed `packageInfo` from the non-placeholder Ethereum package export and updated smoke imports to check real package functions instead.
+- [x] 2026-05-03 21:15Z: Moved validation helpers shared with IPFS into `@oyaprotocol/utils` and made Ethereum import them through the package root.
+- [x] 2026-05-03 21:35Z: Replaced the package-branded Ethereum config type with shared `HttpConfig` / `CreateHttpConfigOptions` from `@oyaprotocol/utils`; `createHttpConfig(...)` now accepts and returns the generic `url`-based HTTP config shape.
+- [x] 2026-05-03 21:42Z: Gated JSON-RPC retries to read-only Ethereum methods and initially `eth_sendRawTransaction`, preventing retry replays for arbitrary state-changing methods.
+- [x] 2026-05-03 21:51Z: Moved shared HTTP config validation/freezing into `@oyaprotocol/utils` as `createHttpConfig(...)`; IPFS keeps package-specific URL normalization through `createIpfsConfig(...)`, while Ethereum now uses the generic creator directly.
+- [x] 2026-05-03 21:59Z: Moved shared retryable HTTP network error codes into `@oyaprotocol/utils` as `RETRYABLE_HTTP_NETWORK_ERROR_CODES` plus `hasRetryableNetworkErrorCode(...)`; Ethereum and IPFS now import the shared helper.
+- [x] 2026-05-03 22:11Z: Tightened `createHttpConfig(...)` to reject URLs that normalize to an empty string, including generic `/` and IPFS `/api/v0/` inputs.
+- [x] 2026-05-03 22:31Z: Added `ethSendRawTransaction(...)` with optional caller-supplied `transactionHash` recovery for duplicate-style retry errors, plus local hex validators and focused wrapper tests.
+- [x] 2026-05-03 23:05Z: Changed Ethereum hex/hash validators to preserve caller and RPC casing, using case-insensitive comparison only for internal hash equality checks.
+- [x] 2026-05-03 23:31Z: Moved shared abort/timeout and retry-delay helpers into `@oyaprotocol/utils`; IPFS and Ethereum now import the shared helpers.
+- [x] 2026-05-03 23:49Z: Removed `eth_sendRawTransaction` from the generic JSON-RPC retry allowlist; raw transaction retries now live only in `ethSendRawTransaction(...)`, which has duplicate-error recovery semantics.
+- [x] 2026-05-03 23:57Z: Fixed `combineAbortSignals(...)` fallback behavior to detect already-aborted signals before attaching listeners, avoiding leaked listeners on earlier live signals.
+- [x] 2026-05-05: Moved shared POST/text fetch transport types into `@oyaprotocol/utils` as `HttpPostFetchOptions<TBody>`, `HttpTextResponse`, `HttpFetchLike<TOptions, TResponse>`, and `HttpPostFetchLike<TBody, TResponse>`; Ethereum JSON-RPC and IPFS publish now use those generic types directly instead of exporting package-branded aliases.
+- [x] 2026-05-05: Consolidated `@oyaprotocol/utils` HTTP source files into `packages/utils/src/http-utils.ts`.
+- [x] 2026-05-05: Consolidated `@oyaprotocol/utils` abort/timeout and retry-delay source files into `packages/utils/src/async-utils.ts`, giving the utils package a clean `async-utils.ts`, `http-utils.ts`, and `validation-utils.ts` source layout.
+- [x] 2026-05-05: Removed the no-op `createEthereumRpcConfig(...)` wrapper and deleted `packages/ethereum/src/config.ts`; `@oyaprotocol/ethereum` now re-exports `createHttpConfig(...)` directly from `@oyaprotocol/utils`.
+- [x] 2026-05-05: Moved IPFS ASCII byte validation and Ethereum hex/hash validators into `packages/utils/src/validation-utils.ts`; deleted `packages/ipfs/src/validation-utils.ts` and `packages/ethereum/src/hex.ts`.
 
 ## Surprises & Discoveries
 
-- Observation: The Ethereum kernel package is currently only a placeholder.
-  Evidence: `packages/ethereum/src/index.ts` exports only `packageInfo`, and `packages/ethereum/README.md` says the package is a placeholder shell.
+- Observation: The Ethereum kernel package started as a placeholder and now has its first partial surface.
+  Evidence: before Milestone 1, `packages/ethereum/src/index.ts` exported only `packageInfo`; after Milestone 1, it exports `createHttpConfig(...)`, `requestEthereumJsonRpc(...)`, and JSON-RPC error classes.
 
 - Observation: The hardened package area must treat existing runtime code as reference material only.
   Evidence: `packages/AGENTS.md` says production-kernel code must not import from `agent/`, `agent-library/`, `node/`, or `frontend/`.
@@ -43,14 +62,17 @@ Definitions used in this plan:
 - Observation: The completed IPFS package is the best local model for this work.
   Evidence: `packages/ipfs` uses explicit config, injected `fetch`, timeout/retry handling, package-root exports, built TypeScript declarations, and focused tests against fake transports.
 
+- Observation: The raw JSON-RPC primitive should reject non-JSON-serializable params before calling `fetch`.
+  Evidence: JSON cannot encode values such as `bigint`, and `packages/ethereum/test/rpc.test.js` now verifies callers get a clear JSON-serializability error before any network call is made.
+
 ## Decision Log
 
 - Decision: Implement the first smart-contract interaction primitives in `packages/ethereum`.
   Rationale: The work is about chain transaction and call mechanics, and `@oyaprotocol/ethereum` already exists as the intended hardened package shell.
   Date/Author: 2026-05-02 / Codex.
 
-- Decision: Keep the first package version zero-runtime-dependency.
-  Rationale: Raw Ethereum JSON-RPC can be implemented with injected `fetch`, JSON, `AbortController`, and local validation. Avoiding `viem`, `ethers`, or ABI packages keeps the kernel surface smaller and easier to audit.
+- Decision: Keep the first package version free of external runtime dependencies.
+  Rationale: Raw Ethereum JSON-RPC can be implemented with injected `fetch`, JSON, `AbortController`, and local validation. Avoiding `viem`, `ethers`, or ABI packages keeps the kernel surface smaller and easier to audit. A small internal dependency on `@oyaprotocol/utils` is acceptable for shared package validation helpers.
   Date/Author: 2026-05-02 / Codex.
 
 - Decision: Do not implement private-key signing in the hardened package yet.
@@ -69,20 +91,292 @@ Definitions used in this plan:
   Rationale: The package is intended to hold Ethereum JSON-RPC primitives rather than all transaction-domain behavior, and this follows the package naming convention used by `@oyaprotocol/ipfs`.
   Date/Author: 2026-05-03 / Codex.
 
+- Decision: Keep Ethereum validation and request helpers package-local for Milestone 1, even where they resemble IPFS helpers.
+  Rationale: The second package should prove the common shape before `@oyaprotocol/utils` gains public utility APIs. This keeps the first Ethereum diff local and avoids premature cross-package coupling.
+  Date/Author: 2026-05-03 / Codex.
+
+- Decision: Move shared validation helpers into `@oyaprotocol/utils`.
+  Rationale: `assertHeadersObject(...)`, `assertNonEmptyString(...)`, `assertNonNegativeInteger(...)`, `assertPositiveInteger(...)`, and `isPlainObject(...)` were identical across IPFS and Ethereum after the second package proved the common shape. A package-root `@oyaprotocol/utils` import now removes duplication without importing from legacy runtime areas.
+  Date/Author: 2026-05-03 / Codex.
+
+- Decision: Move shared HTTP config creation into `@oyaprotocol/utils`.
+  Rationale: After both IPFS and Ethereum adopted the same `HttpConfig` / `CreateHttpConfigOptions` shape, their creator functions duplicated all validation and freezing behavior. A small `createHttpConfig(...)` helper centralizes the common policy; IPFS keeps `createIpfsConfig(...)` for Kubo-specific URL normalization, while Ethereum can use the generic creator directly.
+  Date/Author: 2026-05-03 / Codex.
+
+- Decision: Remove the `createEthereumRpcConfig(...)` wrapper.
+  Rationale: The wrapper had become a no-op around `createHttpConfig(...)` after config behavior moved into `@oyaprotocol/utils`. Re-exporting `createHttpConfig(...)` from `@oyaprotocol/ethereum` keeps the public package convenient without preserving a package-branded name that suggests Ethereum-specific behavior.
+  Date/Author: 2026-05-05 / Codex.
+
+- Decision: Move generic ASCII and simple hex validators into `@oyaprotocol/utils`.
+  Rationale: IPFS ASCII byte validation and Ethereum's current 0x-prefixed hex, byte-aligned hex data, and bytes32 hash validators are generic validation primitives. Moving them removes the remaining package-local validation files while keeping Ethereum-specific address, quantity, and checksum behavior out of utils until those validators actually exist.
+  Date/Author: 2026-05-05 / Codex.
+
+- Decision: Move shared retryable HTTP network error code detection into `@oyaprotocol/utils`.
+  Rationale: IPFS and Ethereum used the same network error code allowlist and cause-chain code inspection. Sharing `RETRYABLE_HTTP_NETWORK_ERROR_CODES` and `hasRetryableNetworkErrorCode(...)` removes duplication while preserving package-local retry policy decisions such as Ethereum JSON-RPC method gating.
+  Date/Author: 2026-05-03 / Codex.
+
+- Decision: Add raw transaction retry recovery through an optional caller-supplied transaction hash instead of package-owned Keccak hashing.
+  Rationale: Signing code outside this package is the natural place to compute a raw transaction hash. `ethSendRawTransaction(...)` can use that hash to verify duplicate-style retry errors with `eth_getTransactionByHash(...)` without adding a Keccak dependency or hashing implementation to the network-adapter package.
+  Date/Author: 2026-05-03 / Codex.
+
+- Decision: Move shared abort/timeout and retry-delay helpers into `@oyaprotocol/utils`.
+  Rationale: IPFS and Ethereum had exact duplicates of the abort-composition, timeout-signal, abortable-promise, caller-abort, and retry-delay helpers. Sharing the generic mechanics removes duplication while keeping protocol-specific retry policy and error classes in each package.
+  Date/Author: 2026-05-03 / Codex.
+
+- Decision: Move only the shared POST/text fetch transport shapes into `@oyaprotocol/utils`.
+  Rationale: `EthereumJsonRpcFetchOptions` / `EthereumJsonRpcResponse` and IPFS `PublishIpfsRequestOptions` / `PublishIpfsResponse` differed only by POST body type and package branding. Generic utility types remove duplication and keep the public type surface smaller. IPFS byte and public-gateway reads still use stream response bodies, so they remain package-local.
+  Date/Author: 2026-05-05 / Codex.
+
+- Decision: Consolidate HTTP utilities into a single `http-utils.ts` source file.
+  Rationale: The HTTP config creator, POST/text fetch types, and retryable network error helpers are all small pieces of one HTTP utility surface. A single file gives the utils package a clearer source naming scheme without changing package-root imports.
+  Date/Author: 2026-05-05 / Codex.
+
+- Decision: Consolidate async control utilities into a single `async-utils.ts` source file.
+  Rationale: The abort helpers and `waitForRetryDelay(...)` are all generic async control primitives. Consolidating them removes a one-function retry file while keeping protocol retry policy out of `@oyaprotocol/utils`.
+  Date/Author: 2026-05-05 / Codex.
+
+- Decision: Use shared `HttpStatusError` for non-OK HTTP responses.
+  Rationale: Ethereum and IPFS were carrying duplicate status-bearing HTTP error classes with the same retry semantics. A shared runtime error in `@oyaprotocol/utils` keeps HTTP transport failures distinct from protocol-level JSON-RPC errors without maintaining package-specific copies.
+  Date/Author: 2026-05-06 / Codex.
+
+- Decision: Move error-string cause-chain reading into HTTP utilities.
+  Rationale: Ethereum and IPFS used identical `readErrorStringChain(...)` helpers to classify retryable timeout/network failures by walking `error.cause` chains. Keeping that traversal in `@oyaprotocol/utils` removes duplicate protocol-local logic and lets the existing network-code helper share the same implementation.
+  Date/Author: 2026-05-06 / Codex.
+
+- Decision: Move retry-loop mechanics into shared `runWithRetry(...)`.
+  Rationale: Ethereum JSON-RPC, IPFS publish, Kubo reads, and public gateway reads had duplicated attempt loops for timeout signal creation, caller-abort handling, retry delay, cleanup, and final error normalization. The shared helper owns only those mechanics while callers still provide protocol-specific attempt bodies and retry policies.
+  Date/Author: 2026-05-06 / Codex.
+
 ## Outcomes & Retrospective
 
 This section starts empty except for the initial planning outcome. Update it after each milestone with what changed, which commands were run, and what evidence proves the package works.
 
 Initial planning outcome: the scope is limited to dependency-light Ethereum JSON-RPC primitives in `@oyaprotocol/ethereum`. Future Oya Logger contract design, generic ABI encoding, private-key signing, node runtime wiring, and agent-specific behavior are explicitly out of scope for the first implementation pass.
 
-Rename outcome: the placeholder package shell now lives at `packages/ethereum`, and its package root is `@oyaprotocol/ethereum`. The workspace manifest, TypeScript project references, package lockfile, package README, source entrypoint, generated `dist/` files, and local npm workspace link were updated to match.
+Rename outcome: the package now lives at `packages/ethereum`, and its package root is `@oyaprotocol/ethereum`. The workspace manifest, TypeScript project references, package lockfile, package README, source entrypoint, generated `dist/` files, and local npm workspace link were updated to match.
 
-Validation evidence for the rename:
+Current validation evidence for the package set after the rename:
 
 - `npm --prefix packages run build`
-- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js','./packages/verification/dist/index.js'].map((path) => import(path))).then((modules) => { console.log(modules.map((module) => module.packageInfo.name).join(',')); })"` printed `@oyaprotocol/utils,@oyaprotocol/messages,@oyaprotocol/ipfs,@oyaprotocol/ethereum,@oyaprotocol/verification`.
-- From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ethereum').then((m) => console.log(m.packageInfo.name, m.packageInfo.status))"` printed `@oyaprotocol/ethereum placeholder`.
+- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createHttpConfig); })"` printed `function object function function`.
+- From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ethereum').then((m) => console.log(typeof m.createHttpConfig, typeof m.requestEthereumJsonRpc))"` printed `function function`.
 - `git diff --check`
+
+Milestone 1 is complete. `@oyaprotocol/ethereum` now exposes `createHttpConfig(...)`, `requestEthereumJsonRpc(...)`, `EthereumJsonRpcError`, and shared `HttpStatusError` through the package root. The implementation lives in `packages/utils/src/http-utils.ts` and `packages/ethereum/src/request-utils.ts`, with shared validation imported from `@oyaprotocol/utils`. The package remains dependency-light and does not import from legacy runtime areas.
+
+The request primitive sends one JSON-RPC POST with explicit config and injected `fetch`, owns the `content-type: application/json` header, enforces timeouts even when fetch ignores abort signals, retries transient HTTP/network failures only for read-only Ethereum methods, surfaces JSON-RPC error payloads as inspectable non-retryable errors, and returns the raw `result` plus attempt metadata. It expects callers to pass JSON-serializable params; future wrappers should convert bigint values to Ethereum quantity hex before calling it.
+
+Validation evidence for Milestone 1:
+
+- `npm --prefix packages run build`
+- `node --test packages/ethereum/test/rpc.test.js` passed 11 tests.
+- `node --input-type=module -e "import('./packages/ethereum/dist/index.js').then((m) => console.log(typeof m.createHttpConfig, typeof m.requestEthereumJsonRpc, typeof m.EthereumJsonRpcError))"` printed `function function function`.
+- From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ethereum').then((m) => console.log(typeof m.requestEthereumJsonRpc))"` printed `function`.
+- `git diff --check`
+
+Package export cleanup removed the old placeholder-style `packageInfo` object from `@oyaprotocol/ethereum` now that the package has real public functions. Smoke imports now check `createHttpConfig(...)`, `requestEthereumJsonRpc(...)`, and related real exports rather than package metadata.
+
+Validation evidence for package export cleanup:
+
+- `npm --prefix packages run build`
+- `node --test packages/ethereum/test/rpc.test.js` passed 11 tests.
+- `node --input-type=module -e "import('./packages/ethereum/dist/index.js').then((m) => console.log(typeof m.createHttpConfig, typeof m.requestEthereumJsonRpc, Object.hasOwn(m, 'packageInfo')))"` printed `function function false`.
+- From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ethereum').then((m) => console.log(typeof m.requestEthereumJsonRpc, Object.hasOwn(m, 'packageInfo')))"` printed `function false`.
+- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createHttpConfig); })"` printed `function object function function`.
+- `git diff --check`
+
+Shared validation cleanup moved the helpers duplicated between Ethereum and IPFS into `@oyaprotocol/utils`. Ethereum now depends on `@oyaprotocol/utils` through the workspace package graph, imports validation helpers from the package root, and no longer has `packages/ethereum/src/validation-utils.ts`.
+
+Validation evidence for shared validation cleanup:
+
+- `npm --prefix packages run build`
+- `node --test packages/utils/test/validation.test.js` passed 3 tests.
+- `node --test packages/ethereum/test/rpc.test.js` passed 11 tests.
+- From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ethereum').then((m) => console.log(typeof m.createHttpConfig, typeof m.requestEthereumJsonRpc, Object.hasOwn(m, 'packageInfo')))"` printed `function function false`.
+- `node --input-type=module -e "Promise.all(['./packages/utils/dist/index.js','./packages/messages/dist/index.js','./packages/ipfs/dist/index.js','./packages/ethereum/dist/index.js'].map((path) => import(path))).then(([utils, messages, ipfs, ethereum]) => { console.log(typeof utils.assertNonEmptyString, typeof messages.packageInfo, typeof ipfs.publishToIpfs, typeof ethereum.createHttpConfig); })"` printed `function object function function`.
+- `git diff --check`
+
+HTTP config cleanup moved the public config interfaces to `@oyaprotocol/utils` as `HttpConfig` and `CreateHttpConfigOptions`. Ethereum now uses the generic `url` field and the generic `createHttpConfig(...)` creator, whose default normalization trims trailing slashes before JSON-RPC requests are sent.
+
+Retry safety cleanup added a fixed method allowlist to the raw JSON-RPC request primitive. The helper retries read-only Ethereum JSON-RPC methods, but it does not retry arbitrary methods such as `evm_*`, `anvil_*`, `personal_*`, `admin_*`, `miner_*`, `eth_sendTransaction`, or `eth_sendRawTransaction`.
+
+Shared HTTP config creator cleanup added `createHttpConfig(...)` to `@oyaprotocol/utils`. `@oyaprotocol/ethereum` re-exports that generic creator directly, while `createIpfsConfig(...)` delegates with its Kubo `/api/v0` base URL normalizer.
+
+Validation evidence for shared HTTP config creator cleanup:
+
+- `npm run build` from `packages/`
+- `node --test packages/utils/test/validation.test.js` passed 4 tests.
+- `node --test packages/ipfs/test/publish.test.js packages/ipfs/test/retrieval.test.js` passed 44 tests.
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- From `packages/`, package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` printed `function function false`.
+- `git diff --check`
+
+Shared retryable network code cleanup added `RETRYABLE_HTTP_NETWORK_ERROR_CODES` and `hasRetryableNetworkErrorCode(...)` to `@oyaprotocol/utils`. IPFS and Ethereum now use the shared helper for network error code detection while keeping HTTP status handling, message fallback handling, and Ethereum JSON-RPC error/method policy local.
+
+Validation evidence for shared retryable network code cleanup:
+
+- `npm run build` from `packages/`
+- `node --test packages/utils/test/validation.test.js` passed 5 tests.
+- `node --test packages/ipfs/test/publish.test.js packages/ipfs/test/retrieval.test.js` passed 44 tests.
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- From `packages/`, package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` passed.
+
+Normalized URL validation cleanup made `createHttpConfig(...)` validate the URL after package-specific normalization, so inputs such as `/` or IPFS `/api/v0/` cannot create an empty `config.url`. The fix keeps the existing `config.url must be a non-empty string` error path.
+
+Validation evidence for normalized URL validation cleanup:
+
+- `npm run build` from `packages/`
+- `node --test packages/utils/test/validation.test.js` passed 5 tests.
+- `node --test packages/ipfs/test/publish.test.js packages/ipfs/test/retrieval.test.js` passed 45 tests.
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- From `packages/`, package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` passed.
+
+Raw transaction wrapper cleanup added `ethSendRawTransaction(...)`, `EthereumRawTransactionRecoveryError`, local raw-transaction/hash validators, and JSON-RPC error attempt metadata. The wrapper submits already signed raw transactions and returns validated hash/attempt metadata. If a retry of `eth_sendRawTransaction` returns duplicate-style errors such as `already known` or `nonce too low`, a supplied `transactionHash` lets the wrapper confirm exact acceptance through `eth_getTransactionByHash(...)`; without a hash, it throws an inspectable recovery error instead of presenting a definite failure.
+
+Validation evidence for raw transaction wrapper cleanup:
+
+- `npm run build` from `packages/`
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
+- From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ethereum').then((m) => console.log(typeof m.createHttpConfig, typeof m.requestEthereumJsonRpc, typeof m.ethSendRawTransaction, typeof m.EthereumRawTransactionRecoveryError, Object.hasOwn(m, 'packageInfo')))"` printed `function function function function false`.
+
+Raw transaction retry ownership cleanup removed `eth_sendRawTransaction` from the generic `requestEthereumJsonRpc(...)` retry allowlist. `ethSendRawTransaction(...)` now calls an internal package-local retry-policy path so raw transaction retries remain available only with wrapper-level duplicate-error recovery.
+
+Validation evidence for raw transaction retry ownership cleanup:
+
+- `npm run build` from `packages/`
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
+- From `packages/`, package-root smoke import for `@oyaprotocol/ethereum` passed.
+
+Hex casing cleanup changed the Ethereum hex/hash validators to validate and trim values without lowercasing them. `ethSendRawTransaction(...)` now sends caller-provided raw transaction casing and returns the RPC-provided hash casing. Hash matching still uses inline lowercase comparison internally.
+
+Validation evidence for hex casing cleanup:
+
+- `npm run build` from `packages/`
+- `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- From `packages/`, package-root smoke import for `@oyaprotocol/ethereum` passed.
+
+Shared abort/retry utility cleanup added async control helpers to `@oyaprotocol/utils`, exporting `AbortSignalHandle`, `createTimeoutSignal(...)`, `combineAbortSignals(...)`, `invokeWithAbort(...)`, `throwIfSignalAborted(...)`, and `waitForRetryDelay(...)`. These helpers now live together in `packages/utils/src/async-utils.ts`. IPFS continues to re-export the shared helpers from its package-local request utility module for its internal modules, while Ethereum imports the shared helpers directly.
+
+Validation evidence for shared abort/retry utility cleanup:
+
+- `npm run build` from `packages/`
+- `node --test packages/utils/test/validation.test.js` passed 7 tests.
+- `node --test packages/ipfs/test/publish.test.js packages/ipfs/test/retrieval.test.js` passed 45 tests.
+- `node --test packages/ethereum/test/rpc.test.js packages/ethereum/test/transactions.test.js` passed 20 tests.
+- From `packages/`, package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` passed.
+
+Abort listener cleanup fixed the manual `combineAbortSignals(...)` fallback path so it checks for already-aborted signals before attaching listeners. This avoids leaking listeners when a later input signal is already aborted.
+
+Validation evidence for abort listener cleanup:
+
+- `npm run build` from `packages/`
+- `node --test packages/utils/test/validation.test.js` passed 7 tests.
+- `node --test packages/ipfs/test/publish.test.js packages/ipfs/test/retrieval.test.js` passed 45 tests.
+- `node --test packages/ethereum/test/rpc.test.js packages/ethereum/test/transactions.test.js` passed 20 tests.
+
+Shared HTTP fetch-type cleanup added generic POST fetch options, text response, and fetch-like function types, now housed in `packages/utils/src/http-utils.ts`. Ethereum JSON-RPC and IPFS publish use `HttpPostFetchLike<string>` and `HttpPostFetchLike<FormData>` directly in their public option interfaces. The package roots re-export the generic utility type names instead of duplicate package-branded POST/text aliases.
+
+Validation evidence for shared HTTP fetch-type cleanup:
+
+- `npm run build` from `packages/`
+- `node --test packages/utils/test/validation.test.js` passed 7 tests.
+- `node --test packages/ipfs/test/publish.test.js` passed 18 tests.
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
+- From `packages/`, package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` printed `function function function`.
+
+HTTP utility source cleanup consolidated `packages/utils/src/http-config.ts`, `packages/utils/src/http-fetch.ts`, and `packages/utils/src/http-network-errors.ts` into `packages/utils/src/http-utils.ts`. The public package-root exports are unchanged, and stale generated `dist/http-config.*`, `dist/http-fetch.*`, and `dist/http-network-errors.*` artifacts were removed after rebuilding.
+
+Validation evidence for HTTP utility source cleanup:
+
+- `npm run build` from `packages/`
+- `find packages/utils/dist -maxdepth 1 -type f -name 'http-*' -print | sort` listed only `http-utils.d.ts`, `http-utils.js`, and `http-utils.js.map`.
+- `node --test packages/utils/test/validation.test.js` passed 7 tests.
+- `node --test packages/ipfs/test/publish.test.js` passed 18 tests.
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
+- From `packages/`, package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` printed `function function function function`.
+
+Shared HTTP status error cleanup added `HttpStatusError` to `@oyaprotocol/utils` and switched Ethereum JSON-RPC, IPFS publish, Kubo reads, and public gateway reads to throw that shared runtime error for non-OK HTTP responses. Ethereum and IPFS re-export the shared class from their package roots so callers can use one `instanceof HttpStatusError` check for HTTP status failures.
+
+Status-zero response cleanup changed `HttpStatusError` to accept `status === 0`, preserving opaque/synthetic fetch response failures as transport error objects instead of replacing them with constructor validation errors. Retry classification remains unchanged: status `0` is not retried by the current `429 || >= 500` rule.
+
+Validation evidence for shared HTTP status error cleanup:
+
+- `npm run build` from `packages/`
+- `node --test packages/utils/test/validation.test.js` passed 10 tests.
+- `node --test packages/ipfs/test/publish.test.js` passed 18 tests.
+- `node --test packages/ipfs/test/retrieval.test.js` passed 27 tests.
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
+- Package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` printed `function function function undefined` for `HttpStatusError`, `HttpStatusError`, `HttpStatusError`, and removed `EthereumJsonRpcHttpError`.
+- `node --input-type=module -e "import('./packages/utils/dist/index.js').then(({ HttpStatusError }) => { const error = new HttpStatusError({ operation: 'Opaque fetch response', status: 0, statusText: '' }); console.log(error.status, error.statusText, error.message); })"` printed `0 Unknown Status Opaque fetch response failed with 0 Unknown Status.`
+- `git diff --check`
+
+Shared error-chain reader cleanup added `readErrorStringChain(...)` to `@oyaprotocol/utils` and removed the duplicate helper bodies from IPFS and Ethereum request utilities. `hasRetryableNetworkErrorCode(...)` now uses the same shared chain reader for nested string `code` values.
+
+Validation evidence for shared error-chain reader cleanup:
+
+- `npm run build` from `packages/`
+- `node --test packages/utils/test/validation.test.js` passed 10 tests.
+- `node --test packages/ipfs/test/publish.test.js` passed 18 tests.
+- `node --test packages/ipfs/test/retrieval.test.js` passed 27 tests.
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
+- `node --input-type=module -e "import('./packages/utils/dist/index.js').then((m) => console.log(typeof m.readErrorStringChain, m.readErrorStringChain({ message: 'outer', cause: { message: 'inner' } }, 'message').join(',')))"` printed `function outer,inner`.
+- `git diff --check`
+
+Shared retry-loop cleanup added `runWithRetry(...)` to `@oyaprotocol/utils` and refactored Ethereum JSON-RPC, IPFS publish, Kubo reads, and public gateway reads to pass package-specific attempt callbacks, retry predicates, and error normalizers into that helper. Protocol-specific fetch construction, response parsing, JSON-RPC method gates, body cancellation, and result shapes remain in the IPFS and Ethereum packages.
+
+Validation evidence for shared retry-loop cleanup:
+
+- `npm run build` from `packages/`
+- `node --test packages/utils/test/validation.test.js` passed 11 tests.
+- `node --test packages/ipfs/test/publish.test.js` passed 18 tests.
+- `node --test packages/ipfs/test/retrieval.test.js` passed 27 tests.
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
+- `node --input-type=module -e "Promise.all([import('./packages/utils/dist/index.js'), import('./packages/ipfs/dist/index.js'), import('./packages/ethereum/dist/index.js')]).then(([utils, ipfs, ethereum]) => { console.log(typeof utils.runWithRetry, typeof ipfs.publishToIpfs, typeof ethereum.requestEthereumJsonRpc); })"` printed `function function function`.
+- `git diff --check`
+
+Async utility source cleanup consolidated `packages/utils/src/abort-utils.ts` and `packages/utils/src/retry-utils.ts` into `packages/utils/src/async-utils.ts`. The public package-root exports are unchanged, and stale generated `dist/abort-utils.*` and `dist/retry-utils.*` artifacts were removed after rebuilding.
+
+Validation evidence for async utility source cleanup:
+
+- `npm run build` from `packages/`
+- `find packages/utils/dist -maxdepth 1 -type f \( -name 'abort-*' -o -name 'retry-*' -o -name 'async-*' \) -print | sort` listed only `async-utils.d.ts`, `async-utils.js`, and `async-utils.js.map`.
+- `node --test packages/utils/test/validation.test.js` passed 7 tests.
+- `node --test packages/ipfs/test/publish.test.js` passed 18 tests.
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
+
+Ethereum config wrapper cleanup removed the no-op `createEthereumRpcConfig(...)` export and deleted `packages/ethereum/src/config.ts`. `@oyaprotocol/ethereum` now re-exports `createHttpConfig(...)` directly from `@oyaprotocol/utils`, and stale generated `packages/ethereum/dist/config.*` artifacts were removed after rebuilding.
+
+Validation evidence for Ethereum config wrapper cleanup:
+
+- `npm run build` from `packages/`
+- `find packages/ethereum/dist -maxdepth 1 -type f -name 'config.*' -print` produced no output.
+- `node --test packages/utils/test/validation.test.js` passed 7 tests.
+- `node --test packages/ipfs/test/publish.test.js` passed 18 tests.
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
+- From `packages/`, package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` printed `function function function function false`, confirming `createHttpConfig` is present and `createEthereumRpcConfig` is absent.
+
+Validation helper cleanup moved `assertAsciiBytes(...)`, `assertHexString(...)`, `assertHexData(...)`, and `assertBytes32HexString(...)` into `@oyaprotocol/utils`. Ethereum raw transaction handling now uses `assertHexData(...)` and `assertBytes32HexString(...)`, and IPFS text readers now use the shared `assertAsciiBytes(...)`. Stale generated `packages/ethereum/dist/hex.*` and `packages/ipfs/dist/validation-utils.*` artifacts were removed after rebuilding.
+
+Validation evidence for validation helper cleanup:
+
+- `npm run build` from `packages/`
+- `find packages/ethereum/dist packages/ipfs/dist -maxdepth 1 -type f \( -name 'hex.*' -o -name 'validation-utils.*' \) -print | sort` produced no output.
+- `node --test packages/utils/test/validation.test.js` passed 8 tests.
+- `node --test packages/ipfs/test/publish.test.js` passed 18 tests.
+- `node --test packages/ipfs/test/retrieval.test.js` passed 27 tests.
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
+- From `packages/`, package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` printed `function function function function function`.
 
 ## Context and Orientation
 
@@ -93,8 +387,15 @@ The current package layout relevant to this work is:
 - `packages/package.json`: workspace manifest and TypeScript build scripts for kernel packages.
 - `packages/tsconfig.json` and `packages/tsconfig.base.json`: TypeScript project configuration for all kernel packages.
 - `packages/ethereum/package.json`: package manifest for `@oyaprotocol/ethereum`, exporting `./dist/index.js`.
-- `packages/ethereum/src/index.ts`: currently only exports placeholder `packageInfo`.
-- `packages/ethereum/README.md`: currently documents the package as a placeholder.
+- `packages/ethereum/src/index.ts`: exports the current config/request public surface.
+- `packages/utils/src/http-utils.ts`: validates explicit HTTP transport settings shared by Ethereum and IPFS.
+- `packages/ethereum/src/transactions.ts`: contains transaction submission helpers including `ethSendRawTransaction(...)`.
+- `packages/ethereum/src/request-utils.ts`: contains the raw JSON-RPC request primitive, JSON-RPC error classes, timeout/abort/retry handling, and fetch-like types.
+- `packages/utils/src/validation-utils.ts`: contains shared validation helpers used by Ethereum and IPFS, including ASCII byte validation and simple 0x hex/hash validators.
+- `packages/utils/src/async-utils.ts`: contains shared async control primitives for timeout signals, composed abort signals, abortable promises, caller-abort checks, and retry-delay waits.
+- `packages/utils/src/http-utils.ts`: contains shared HTTP config creation, structural HTTP POST/text fetch types, and retryable HTTP network error helpers used by Ethereum and IPFS.
+- `packages/ethereum/test/rpc.test.js`: tests the built JSON-RPC request surface against fake `fetch` implementations.
+- `packages/ethereum/README.md`: documents the current Milestone 1 surface.
 - `packages/ipfs/src/config.ts`, `packages/ipfs/src/request-utils.ts`, and `packages/ipfs/test/*.test.js`: reference patterns for strict config, injected fetch, timeout/retry behavior, abort handling, and focused tests.
 
 Reference-only runtime code:
@@ -107,17 +408,17 @@ This plan does not require Solidity changes. It does not touch `src/`, `script/`
 
 ## Plan of Work
 
-Milestone 1: Create the package-local RPC transport surface.
+Milestone 1: Create the package-local RPC transport surface. This milestone is complete.
 
-Add `packages/ethereum/src/config.ts`, `packages/ethereum/src/request-utils.ts`, and any small validation helpers needed locally. Export `createEthereumRpcConfig(...)`, `requestEthereumJsonRpc(...)`, and related types from `packages/ethereum/src/index.ts`.
+Use `createHttpConfig(...)` from `@oyaprotocol/utils`, add `packages/ethereum/src/request-utils.ts`, and include any small validation helpers needed locally. Export `createHttpConfig(...)`, `requestEthereumJsonRpc(...)`, and related types from `packages/ethereum/src/index.ts`.
 
-`createEthereumRpcConfig(...)` should require explicit `rpcUrl`, `headers`, `timeoutMs`, `maxRetries`, and `retryDelayMs`. It should normalize trailing slashes from the RPC URL, freeze validated headers, reject non-plain header objects, require positive timeout, and require non-negative retry settings.
+`createHttpConfig(...)` should require explicit `url`, `headers`, `timeoutMs`, `maxRetries`, and `retryDelayMs`. It should normalize trailing slashes from the URL, freeze validated headers, reject non-plain header objects, require positive timeout, and require non-negative retry settings.
 
 `requestEthereumJsonRpc(...)` should accept explicit `config`, explicit injected `fetch`, a non-empty JSON-RPC method string, an array of params, and an optional caller `AbortSignal`. It should send a POST request with `content-type: application/json`, preserve configured headers except for disallowing caller-provided `content-type`, enforce timeout even if the injected fetch ignores signals, retry transient HTTP or network failures, parse JSON, throw inspectable errors for JSON-RPC error responses, and return the result plus attempt metadata.
 
 Milestone 2: Add Ethereum method wrappers and hex validation.
 
-Add `packages/ethereum/src/ethereum.ts` or equivalent package-local module for method wrappers. Export:
+Add `packages/ethereum/src/transactions.ts` and other equivalent package-local modules for method wrappers. Export:
 
 - `ethChainId(...)`
 - `ethBlockNumber(...)`
@@ -149,7 +450,7 @@ Do not implement checksum validation in this milestone because that requires Kec
 
 `ethGetLogs(...)` should accept a filter with optional `fromBlock`, `toBlock`, `address`, and `topics`. It should validate the shape but not impose application-specific chunking. Documentation must tell callers to chunk large ranges at the runtime layer.
 
-Milestone 3: Add focused tests.
+Milestone 3: Add focused tests. The Milestone 1 request/config tests are complete; wrapper, receipt, and log tests remain for Milestone 2.
 
 Add tests under `packages/ethereum/test/`, modeled after the IPFS package tests. Tests should import from `../dist/index.js`, so they validate the package build output rather than TypeScript source.
 
@@ -157,7 +458,7 @@ Required test coverage:
 
 - Config creation requires explicit fields, normalizes RPC URLs, freezes headers, and rejects caller-provided `content-type`.
 - The raw request primitive sends POST JSON-RPC with injected headers and returns result plus attempt count.
-- Retry occurs on HTTP 429 or 5xx, timeout, and retryable network errors.
+- Retry occurs on HTTP 429 or 5xx, timeout, and retryable network errors only when the JSON-RPC method is in the package's retry allowlist.
 - Retry does not occur on HTTP 400 or JSON-RPC contract errors.
 - Timeout still works when injected fetch ignores `options.signal`.
 - Caller abort prevents the first request when already aborted and interrupts retry backoff.
@@ -173,7 +474,7 @@ Update `packages/ethereum/README.md` to describe:
 
 - The package as a hardened Ethereum JSON-RPC primitive package.
 - The explicit config and injected `fetch` model.
-- The zero-runtime-dependency and no-signing constraints.
+- The no external runtime dependency and no-signing constraints.
 - The fact that contract-specific calldata must be prepared by callers for now.
 - How future Oya flows can use the primitives for token transfers, Optimistic Governor proposals, Optimistic Oracle disputes, and future Logger CID submissions.
 - How future Logger indexing can use `eth_getLogs` once the contract event shape exists.
@@ -191,7 +492,7 @@ All commands below assume they are run from the repository root, the directory t
        sed -n '1,120p' packages/AGENTS.md
        git status --short
 
-2. Inspect the current placeholder package and IPFS patterns:
+2. Inspect the current package and IPFS patterns:
 
        sed -n '1,160p' packages/ethereum/src/index.ts
        sed -n '1,160p' packages/ethereum/README.md
@@ -200,12 +501,11 @@ All commands below assume they are run from the repository root, the directory t
 
 3. Implement Milestone 1 in package-local files:
 
-       packages/ethereum/src/config.ts
+       packages/utils/src/http-utils.ts
        packages/ethereum/src/request-utils.ts
-       packages/ethereum/src/validation-utils.ts
-       packages/ethereum/src/index.ts
+      packages/ethereum/src/index.ts
 
-   Keep helpers package-local unless they become public API through `src/index.ts`.
+   Import shared validation helpers from `@oyaprotocol/utils`; keep Ethereum-specific helpers package-local unless they become public API through `src/index.ts`.
 
 4. Build the package workspace:
 
@@ -225,8 +525,7 @@ All commands below assume they are run from the repository root, the directory t
 
 6. Implement Milestone 2 method wrappers and validators:
 
-       packages/ethereum/src/ethereum.ts
-       packages/ethereum/src/hex.ts
+       packages/ethereum/src/transactions.ts
        packages/ethereum/src/index.ts
 
    The exact helper filenames can change if implementation reveals a cleaner package-local split. Update this plan if filenames differ.
@@ -235,13 +534,13 @@ All commands below assume they are run from the repository root, the directory t
 
        npm --prefix packages run build
        node --test packages/ethereum/test/rpc.test.js
-       node --test packages/ethereum/test/ethereum.test.js
+       node --test packages/ethereum/test/transactions.test.js
 
 8. Smoke-import the package root:
 
        node --input-type=module -e "import('./packages/ethereum/dist/index.js').then((m) => console.log(Object.keys(m).sort().join(',')))"
 
-   Expected behavior: the output includes `packageInfo`, `createEthereumRpcConfig`, `requestEthereumJsonRpc`, and the exported `eth*` wrappers.
+   Expected behavior: the output includes `createHttpConfig`, `requestEthereumJsonRpc`, and the exported `eth*` wrappers.
 
 9. Update package documentation:
 
@@ -251,8 +550,8 @@ All commands below assume they are run from the repository root, the directory t
 
        npm --prefix packages run build
        node --test packages/ethereum/test/rpc.test.js
-       node --test packages/ethereum/test/ethereum.test.js
-       node --input-type=module -e "import('./packages/ethereum/dist/index.js').then((m) => console.log(m.packageInfo.name, typeof m.createEthereumRpcConfig, typeof m.ethCall))"
+       node --test packages/ethereum/test/transactions.test.js
+       node --input-type=module -e "import('./packages/ethereum/dist/index.js').then((m) => console.log(typeof m.createHttpConfig, typeof m.ethCall))"
        git diff --check
 
 11. Update this ExecPlan before yielding control:
@@ -279,8 +578,8 @@ Required validation commands:
 
     npm --prefix packages run build
     node --test packages/ethereum/test/rpc.test.js
-    node --test packages/ethereum/test/ethereum.test.js
-    node --input-type=module -e "import('./packages/ethereum/dist/index.js').then((m) => console.log(m.packageInfo.name, typeof m.createEthereumRpcConfig, typeof m.ethCall))"
+    node --test packages/ethereum/test/transactions.test.js
+    node --input-type=module -e "import('./packages/ethereum/dist/index.js').then((m) => console.log(typeof m.createHttpConfig, typeof m.ethCall))"
     git diff --check
 
 Optional later integration validation, not part of the first package milestone:
@@ -303,10 +602,11 @@ If unrelated local changes appear in the worktree, leave them alone. Only modify
 
 ## Artifacts and Notes
 
-Current evidence from planning:
+Current package evidence:
 
-- `packages/ethereum/src/index.ts` is a placeholder package entrypoint.
-- `packages/ethereum/README.md` is a placeholder README.
+- `packages/ethereum/src/index.ts` exports `createHttpConfig(...)`, `requestEthereumJsonRpc(...)`, `EthereumJsonRpcError`, shared `HttpStatusError`, and public transport/request types.
+- `packages/ethereum/README.md` documents the current JSON-RPC config/request surface.
+- `packages/ethereum/test/rpc.test.js` validates the Milestone 1 surface against fake fetch implementations with no network access.
 - `packages/ipfs` demonstrates the current hardened package style: strict config, explicit injected dependencies, timeout/retry helpers, built TypeScript output, and Node tests against `dist`.
 - `agent/src/lib/tx.js` has existing app-layer `viem` usage for reference only; it should not be imported by the package.
 
@@ -327,7 +627,7 @@ Design notes for token transfers, Optimistic Governor proposals, and Optimistic 
 
 Public interfaces planned for `@oyaprotocol/ethereum`:
 
-- `createEthereumRpcConfig(options)`
+- `createHttpConfig(options)`
 - `requestEthereumJsonRpc(options)`
 - `ethChainId(options)`
 - `ethBlockNumber(options)`
@@ -347,8 +647,8 @@ Internal interfaces likely needed:
 - `assertNonNegativeInteger(...)`
 - `assertHeadersObject(...)`
 - `normalizeAddress(...)`
-- `normalizeHash(...)`
-- `normalizeHexData(...)`
+- `assertBytes32HexString(...)`
+- `assertHexData(...)`
 - `toQuantityHex(...)`
 - `quantityHexToBigInt(...)`
 - timeout, abort-composition, retry-delay, and retry-classification helpers modeled after `packages/ipfs/src/request-utils.ts`.

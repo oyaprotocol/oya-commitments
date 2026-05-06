@@ -11,7 +11,7 @@ import {
 
 function createConfig(overrides = {}) {
     return createIpfsConfig({
-        apiUrl: 'http://ipfs.example:5001/',
+        url: 'http://ipfs.example:5001/',
         headers: {
             Authorization: 'Bearer test-token',
         },

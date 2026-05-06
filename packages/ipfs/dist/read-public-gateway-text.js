@@ -1,5 +1,5 @@
 import { readIpfsPublicGatewayBytesWithMessages } from './read-public-gateway-bytes.js';
-import { assertAsciiBytes } from './validation-utils.js';
+import { assertAsciiBytes } from '@oyaprotocol/utils';
 async function readIpfsPublicGatewayText(options) {
     const result = await readIpfsPublicGatewayBytesWithMessages(options, {
         abortErrorMessage: 'readIpfsPublicGatewayText was aborted by the caller.',
