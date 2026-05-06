@@ -68,7 +68,7 @@ class EthereumRawTransactionRecoveryError extends Error {
     }
 }
 
-function isRetryRecoveryJsonRpcError(error: unknown): error is EthereumJsonRpcError {
+function isDuplicateRawTransactionError(error: unknown): error is EthereumJsonRpcError {
     if (!(error instanceof EthereumJsonRpcError)) {
         return false;
     }
@@ -235,7 +235,7 @@ async function ethSendRawTransaction({
             response: result.response,
         };
     } catch (error) {
-        if (!isRetryRecoveryJsonRpcError(error)) {
+        if (!isDuplicateRawTransactionError(error)) {
             throw error;
         }
         return await recoverRawTransactionSubmission({

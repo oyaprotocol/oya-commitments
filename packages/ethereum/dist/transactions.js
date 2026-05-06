@@ -22,7 +22,7 @@ class EthereumRawTransactionRecoveryError extends Error {
         }
     }
 }
-function isRetryRecoveryJsonRpcError(error) {
+function isDuplicateRawTransactionError(error) {
     if (!(error instanceof EthereumJsonRpcError)) {
         return false;
     }
@@ -124,7 +124,7 @@ async function ethSendRawTransaction({ config, fetch, rawTransaction, transactio
         };
     }
     catch (error) {
-        if (!isRetryRecoveryJsonRpcError(error)) {
+        if (!isDuplicateRawTransactionError(error)) {
             throw error;
         }
         return await recoverRawTransactionSubmission({
