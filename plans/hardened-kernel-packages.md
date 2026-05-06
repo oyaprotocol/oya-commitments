@@ -294,6 +294,8 @@ Current public surface in `@oyaprotocol/utils`:
 - `HttpStatusErrorOptions`
 - `HttpTextResponse`
 - `RETRYABLE_HTTP_NETWORK_ERROR_CODES`
+- `RunWithRetryAttemptContext`
+- `RunWithRetryOptions`
 - `assertAsciiBytes(bytes, message)`
 - `assertBytes32HexString(value, label)`
 - `assertHeadersObject(value, label, options)`
@@ -309,6 +311,7 @@ Current public surface in `@oyaprotocol/utils`:
 - `invokeWithAbort(createPromise, signal)`
 - `isPlainObject(value)`
 - `readErrorStringChain(error, key)`
+- `runWithRetry(options)`
 - `throwIfSignalAborted(signal, message, cause)`
 - `waitForRetryDelay(options)`
 

@@ -1,13 +1,10 @@
 import type { HttpConfig } from '@oyaprotocol/utils';
 import { HttpStatusError } from '@oyaprotocol/utils';
 import {
-    combineAbortSignals,
-    createTimeoutSignal,
     invokeWithAbort,
     normalizeIpfsOperationError,
+    runWithRetry,
     shouldRetryError,
-    throwIfSignalAborted,
-    waitForRetryDelay,
 } from './request-utils.js';
 import type { IpfsOperationErrorMessages } from './request-utils.js';
 import { assertNonEmptyString, assertPositiveInteger } from '@oyaprotocol/utils';
@@ -122,20 +119,22 @@ async function readIpfsBytesWithMessages(
     const trimmedCid = assertNonEmptyString(cid, 'cid');
     const byteLimit = assertPositiveInteger(maxBytes, 'maxBytes');
 
-    let lastError: unknown = null;
-
-    for (let attempt = 1; attempt <= config.maxRetries + 1; attempt += 1) {
-        const timeoutSignal = createTimeoutSignal(config.timeoutMs);
-        const requestSignal = combineAbortSignals([signal, timeoutSignal.signal]);
-        try {
-            const response = await invokeWithAbort(
-                () =>
-                    fetch(`${config.url}/api/v0/cat?arg=${encodeURIComponent(trimmedCid)}`, {
-                        method: 'POST',
-                        headers: config.headers,
-                        signal: requestSignal.signal,
-                    }),
-                requestSignal.signal
+    return await runWithRetry({
+        maxRetries: config.maxRetries,
+        retryDelayMs: config.retryDelayMs,
+        timeoutMs: config.timeoutMs,
+        signal,
+        abortErrorMessage: messages.abortErrorMessage,
+        shouldRetry: shouldRetryError,
+        normalizeError: (error) => normalizeIpfsOperationError(error, messages),
+        run: async ({ attempt, signal: requestSignal }) => {
+            const response = await fetch(
+                `${config.url}/api/v0/cat?arg=${encodeURIComponent(trimmedCid)}`,
+                {
+                    method: 'POST',
+                    headers: config.headers,
+                    signal: requestSignal,
+                }
             );
 
             if (!response.ok) {
@@ -151,7 +150,7 @@ async function readIpfsBytesWithMessages(
             const bytes = await readBoundedBytes({
                 body: response.body,
                 maxBytes: byteLimit,
-                signal: requestSignal.signal,
+                signal: requestSignal,
             });
 
             return {
@@ -161,25 +160,8 @@ async function readIpfsBytesWithMessages(
                 byteLength: bytes.byteLength,
                 attemptCount: attempt,
             };
-        } catch (error) {
-            lastError = error;
-            throwIfSignalAborted(signal, messages.abortErrorMessage, error);
-            if (attempt <= config.maxRetries && shouldRetryError(error)) {
-                await waitForRetryDelay({
-                    retryDelayMs: config.retryDelayMs,
-                    signal,
-                    abortErrorMessage: messages.abortErrorMessage,
-                });
-                continue;
-            }
-            break;
-        } finally {
-            requestSignal.cleanup?.();
-            timeoutSignal.cleanup?.();
-        }
-    }
-
-    throw normalizeIpfsOperationError(lastError, messages);
+        },
+    });
 }
 
 async function readIpfsBytes(options: ReadIpfsOptions): Promise<ReadIpfsBytesResult> {

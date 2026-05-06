@@ -1,4 +1,4 @@
-import { combineAbortSignals, createTimeoutSignal, hasRetryableNetworkErrorCode, HttpStatusError, invokeWithAbort, isPlainObject, readErrorStringChain, throwIfSignalAborted, waitForRetryDelay, } from '@oyaprotocol/utils';
+import { hasRetryableNetworkErrorCode, HttpStatusError, isPlainObject, readErrorStringChain, runWithRetry, } from '@oyaprotocol/utils';
 const RETRYABLE_JSON_RPC_METHODS = new Set([
     'eth_accounts',
     'eth_blobBaseFee',
@@ -178,21 +178,25 @@ async function requestEthereumJsonRpcWithRetryPolicy({ config, fetch, method, pa
         params,
     });
     const abortErrorMessage = 'requestEthereumJsonRpc was aborted by the caller.';
-    let lastError = null;
-    for (let attempt = 1; attempt <= config.maxRetries + 1; attempt += 1) {
-        const timeoutSignal = createTimeoutSignal(config.timeoutMs);
-        const requestSignal = combineAbortSignals([signal, timeoutSignal.signal]);
-        try {
-            const response = await invokeWithAbort(() => fetch(config.url, {
+    return await runWithRetry({
+        maxRetries: config.maxRetries,
+        retryDelayMs: config.retryDelayMs,
+        timeoutMs: config.timeoutMs,
+        signal,
+        abortErrorMessage,
+        shouldRetry: (error) => shouldRetryJsonRpcMethod(normalizedMethod) && shouldRetryError(error),
+        normalizeError: normalizeEthereumJsonRpcError,
+        run: async ({ attempt, signal: requestSignal }) => {
+            const response = await fetch(config.url, {
                 method: 'POST',
                 headers: {
                     ...config.headers,
                     'content-type': 'application/json',
                 },
                 body,
-                signal: requestSignal.signal,
-            }), requestSignal.signal);
-            const responseText = await invokeWithAbort(() => response.text(), requestSignal.signal);
+                signal: requestSignal,
+            });
+            const responseText = await response.text();
             if (!response.ok) {
                 throw new HttpStatusError({
                     operation: 'Ethereum JSON-RPC request',
@@ -213,28 +217,8 @@ async function requestEthereumJsonRpcWithRetryPolicy({ config, fetch, method, pa
                 id: normalizedId,
                 response: parsed.response,
             };
-        }
-        catch (error) {
-            lastError = error;
-            throwIfSignalAborted(signal, abortErrorMessage, error);
-            if (attempt <= config.maxRetries &&
-                shouldRetryJsonRpcMethod(normalizedMethod) &&
-                shouldRetryError(error)) {
-                await waitForRetryDelay({
-                    retryDelayMs: config.retryDelayMs,
-                    signal,
-                    abortErrorMessage,
-                });
-                continue;
-            }
-            break;
-        }
-        finally {
-            requestSignal.cleanup?.();
-            timeoutSignal.cleanup?.();
-        }
-    }
-    throw normalizeEthereumJsonRpcError(lastError);
+        },
+    });
 }
 async function requestEthereumJsonRpc(options) {
     return await requestEthereumJsonRpcWithRetryPolicy(options, shouldRetryMethod);

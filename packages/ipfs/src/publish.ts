@@ -1,12 +1,8 @@
 import type { HttpConfig, HttpPostFetchLike } from '@oyaprotocol/utils';
 import { HttpStatusError } from '@oyaprotocol/utils';
 import {
-    combineAbortSignals,
-    createTimeoutSignal,
-    invokeWithAbort,
+    runWithRetry,
     shouldRetryError,
-    throwIfSignalAborted,
-    waitForRetryDelay,
 } from './request-utils.js';
 
 export type PublishableContent = string | Uint8Array | ArrayBuffer | Blob;
@@ -173,31 +169,30 @@ async function publishToIpfs({
     const trimmedMediaType = mediaType.trim();
     const abortErrorMessage = 'publishToIpfs was aborted by the caller.';
 
-    let lastError: unknown = null;
-
-    for (let attempt = 1; attempt <= config.maxRetries + 1; attempt += 1) {
-        const timeoutSignal = createTimeoutSignal(config.timeoutMs);
-        const requestSignal = combineAbortSignals([signal, timeoutSignal.signal]);
-        try {
+    return await runWithRetry({
+        maxRetries: config.maxRetries,
+        retryDelayMs: config.retryDelayMs,
+        timeoutMs: config.timeoutMs,
+        signal,
+        abortErrorMessage,
+        shouldRetry: shouldRetryError,
+        normalizeError: normalizePublishError,
+        run: async ({ attempt, signal: requestSignal }) => {
             const { form, contentByteLength } = buildFormData({
                 content,
                 filename: trimmedFilename,
                 mediaType: trimmedMediaType,
             });
-            const response = await invokeWithAbort(
-                () =>
-                    fetch(
-                        `${config.url}/api/v0/add?cid-version=1&pin=true&progress=false`,
-                        {
-                            method: 'POST',
-                            headers: config.headers,
-                            body: form,
-                            signal: requestSignal.signal,
-                        }
-                    ),
-                requestSignal.signal
+            const response = await fetch(
+                `${config.url}/api/v0/add?cid-version=1&pin=true&progress=false`,
+                {
+                    method: 'POST',
+                    headers: config.headers,
+                    body: form,
+                    signal: requestSignal,
+                }
             );
-            const responseText = await invokeWithAbort(() => response.text(), requestSignal.signal);
+            const responseText = await response.text();
 
             if (!response.ok) {
                 const httpError = new HttpStatusError({
@@ -226,25 +221,8 @@ async function publishToIpfs({
                 attemptCount: attempt,
                 providerResponse,
             };
-        } catch (error) {
-            lastError = error;
-            throwIfSignalAborted(signal, abortErrorMessage, error);
-            if (attempt <= config.maxRetries && shouldRetryError(error)) {
-                await waitForRetryDelay({
-                    retryDelayMs: config.retryDelayMs,
-                    signal,
-                    abortErrorMessage,
-                });
-                continue;
-            }
-            break;
-        } finally {
-            requestSignal.cleanup?.();
-            timeoutSignal.cleanup?.();
-        }
-    }
-
-    throw normalizePublishError(lastError);
+        },
+    });
 }
 
 export { publishToIpfs };

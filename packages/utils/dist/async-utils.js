@@ -1,3 +1,4 @@
+import { assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, } from './validation-utils.js';
 function createTimeoutSignal(timeoutMs) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error('Request timed out.')), timeoutMs);
@@ -130,5 +131,49 @@ async function waitForRetryDelay({ retryDelayMs, signal, abortErrorMessage, }) {
     });
     throwIfSignalAborted(signal, abortErrorMessage, signal?.reason);
 }
-export { combineAbortSignals, createTimeoutSignal, invokeWithAbort, throwIfSignalAborted, waitForRetryDelay, };
+async function runWithRetry({ maxRetries, retryDelayMs, timeoutMs, signal, abortErrorMessage, shouldRetry, normalizeError, run, }) {
+    const retryLimit = assertNonNegativeInteger(maxRetries, 'maxRetries');
+    const retryDelay = assertNonNegativeInteger(retryDelayMs, 'retryDelayMs');
+    const requestTimeoutMs = assertPositiveInteger(timeoutMs, 'timeoutMs');
+    const callerAbortErrorMessage = assertNonEmptyString(abortErrorMessage, 'abortErrorMessage');
+    if (typeof shouldRetry !== 'function') {
+        throw new Error('shouldRetry must be provided as a function.');
+    }
+    if (typeof normalizeError !== 'function') {
+        throw new Error('normalizeError must be provided as a function.');
+    }
+    if (typeof run !== 'function') {
+        throw new Error('run must be provided as a function.');
+    }
+    let lastError = null;
+    for (let attempt = 1; attempt <= retryLimit + 1; attempt += 1) {
+        const timeoutSignal = createTimeoutSignal(requestTimeoutMs);
+        const requestSignal = combineAbortSignals([signal, timeoutSignal.signal]);
+        try {
+            return await invokeWithAbort(() => run({
+                attempt,
+                signal: requestSignal.signal,
+            }), requestSignal.signal);
+        }
+        catch (error) {
+            lastError = error;
+            throwIfSignalAborted(signal, callerAbortErrorMessage, error);
+            if (attempt <= retryLimit && shouldRetry(error)) {
+                await waitForRetryDelay({
+                    retryDelayMs: retryDelay,
+                    signal,
+                    abortErrorMessage: callerAbortErrorMessage,
+                });
+                continue;
+            }
+            break;
+        }
+        finally {
+            requestSignal.cleanup?.();
+            timeoutSignal.cleanup?.();
+        }
+    }
+    throw normalizeError(lastError);
+}
+export { combineAbortSignals, createTimeoutSignal, invokeWithAbort, runWithRetry, throwIfSignalAborted, waitForRetryDelay, };
 //# sourceMappingURL=async-utils.js.map

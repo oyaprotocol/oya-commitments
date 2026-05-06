@@ -143,6 +143,10 @@ Definitions used in this plan:
   Rationale: Ethereum and IPFS used identical `readErrorStringChain(...)` helpers to classify retryable timeout/network failures by walking `error.cause` chains. Keeping that traversal in `@oyaprotocol/utils` removes duplicate protocol-local logic and lets the existing network-code helper share the same implementation.
   Date/Author: 2026-05-06 / Codex.
 
+- Decision: Move retry-loop mechanics into shared `runWithRetry(...)`.
+  Rationale: Ethereum JSON-RPC, IPFS publish, Kubo reads, and public gateway reads had duplicated attempt loops for timeout signal creation, caller-abort handling, retry delay, cleanup, and final error normalization. The shared helper owns only those mechanics while callers still provide protocol-specific attempt bodies and retry policies.
+  Date/Author: 2026-05-06 / Codex.
+
 ## Outcomes & Retrospective
 
 This section starts empty except for the initial planning outcome. Update it after each milestone with what changed, which commands were run, and what evidence proves the package works.
@@ -323,6 +327,19 @@ Validation evidence for shared error-chain reader cleanup:
 - `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
 - `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
 - `node --input-type=module -e "import('./packages/utils/dist/index.js').then((m) => console.log(typeof m.readErrorStringChain, m.readErrorStringChain({ message: 'outer', cause: { message: 'inner' } }, 'message').join(',')))"` printed `function outer,inner`.
+- `git diff --check`
+
+Shared retry-loop cleanup added `runWithRetry(...)` to `@oyaprotocol/utils` and refactored Ethereum JSON-RPC, IPFS publish, Kubo reads, and public gateway reads to pass package-specific attempt callbacks, retry predicates, and error normalizers into that helper. Protocol-specific fetch construction, response parsing, JSON-RPC method gates, body cancellation, and result shapes remain in the IPFS and Ethereum packages.
+
+Validation evidence for shared retry-loop cleanup:
+
+- `npm run build` from `packages/`
+- `node --test packages/utils/test/validation.test.js` passed 11 tests.
+- `node --test packages/ipfs/test/publish.test.js` passed 18 tests.
+- `node --test packages/ipfs/test/retrieval.test.js` passed 27 tests.
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
+- `node --input-type=module -e "Promise.all([import('./packages/utils/dist/index.js'), import('./packages/ipfs/dist/index.js'), import('./packages/ethereum/dist/index.js')]).then(([utils, ipfs, ethereum]) => { console.log(typeof utils.runWithRetry, typeof ipfs.publishToIpfs, typeof ethereum.requestEthereumJsonRpc); })"` printed `function function function`.
 - `git diff --check`
 
 Async utility source cleanup consolidated `packages/utils/src/abort-utils.ts` and `packages/utils/src/retry-utils.ts` into `packages/utils/src/async-utils.ts`. The public package-root exports are unchanged, and stale generated `dist/abort-utils.*` and `dist/retry-utils.*` artifacts were removed after rebuilding.

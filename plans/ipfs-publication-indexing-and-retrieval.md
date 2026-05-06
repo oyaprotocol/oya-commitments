@@ -54,6 +54,7 @@ Definitions used in this plan:
 - [x] 2026-05-06 00:35Z: Replaced the package-internal `IpfsHttpError` marker with shared `HttpStatusError` from `@oyaprotocol/utils` for publish, Kubo read, and public gateway read HTTP status failures.
 - [x] 2026-05-06 01:00Z: Replaced the package-internal `readErrorStringChain(...)` helper with the shared HTTP utility from `@oyaprotocol/utils`.
 - [x] 2026-05-06 01:12Z: Updated shared `HttpStatusError` to accept opaque/synthetic fetch responses with `status === 0` without changing retry policy.
+- [x] 2026-05-06 01:32Z: Replaced duplicated IPFS publish/read retry loops with shared `runWithRetry(...)` while keeping IPFS-specific fetch, parsing, and body-cancellation logic local.
 
 ## Surprises & Discoveries
 
@@ -136,6 +137,8 @@ Read options cleanup replaced duplicate byte/text options with shared `ReadIpfsO
 Request error cleanup moved status-bearing HTTP failures first into shared internal `IpfsHttpError`, then into package-generic `HttpStatusError` in `@oyaprotocol/utils`; publish and read use the same marker to keep HTTP failures distinct from retryable network errors.
 
 Retry inspection cleanup moved the generic `readErrorStringChain(...)` cause-chain traversal into `@oyaprotocol/utils`, so IPFS and Ethereum share the same string-property reader for timeout/message classification.
+
+Retry-loop cleanup moved timeout, retry-delay, caller-abort, and cleanup mechanics into shared `runWithRetry(...)`; IPFS publish, Kubo reads, and public gateway reads now pass package-specific attempt callbacks and error normalization into the shared helper.
 
 Retry cleanup moved both HTTP status retry policy and transport-error retry policy into shared `shouldRetryError(...)`, so publish and read use one retry decision path after errors are created.
 

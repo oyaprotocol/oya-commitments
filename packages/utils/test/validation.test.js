@@ -19,6 +19,7 @@ import {
     isPlainObject,
     readErrorStringChain,
     RETRYABLE_HTTP_NETWORK_ERROR_CODES,
+    runWithRetry,
     throwIfSignalAborted,
     waitForRetryDelay,
 } from '../dist/index.js';
@@ -304,5 +305,44 @@ test('waitForRetryDelay resolves immediately for zero delay and rejects aborted 
             abortErrorMessage: 'retry aborted',
         }),
         /retry aborted/
+    );
+});
+
+test('runWithRetry retries eligible failures and normalizes terminal errors', async () => {
+    let attempts = 0;
+    const result = await runWithRetry({
+        maxRetries: 2,
+        retryDelayMs: 0,
+        timeoutMs: 1_000,
+        abortErrorMessage: 'operation aborted',
+        shouldRetry: (error) => error instanceof Error && error.message === 'temporary',
+        normalizeError: (error) => (error instanceof Error ? error : new Error('normalized')),
+        run: async ({ attempt, signal }) => {
+            attempts += 1;
+            assert.equal(signal instanceof AbortSignal, true);
+            if (attempt === 1) {
+                throw new Error('temporary');
+            }
+            return `attempt-${attempt}`;
+        },
+    });
+
+    assert.equal(result, 'attempt-2');
+    assert.equal(attempts, 2);
+
+    await assert.rejects(
+        runWithRetry({
+            maxRetries: 1,
+            retryDelayMs: 0,
+            timeoutMs: 1_000,
+            abortErrorMessage: 'operation aborted',
+            shouldRetry: () => false,
+            normalizeError: (error) =>
+                error instanceof Error ? error : new Error('terminal failure'),
+            run: async () => {
+                throw 'terminal failure';
+            },
+        }),
+        /terminal failure/
     );
 });

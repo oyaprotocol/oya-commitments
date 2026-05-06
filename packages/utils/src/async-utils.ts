@@ -1,6 +1,28 @@
+import {
+    assertNonEmptyString,
+    assertNonNegativeInteger,
+    assertPositiveInteger,
+} from './validation-utils.js';
+
 interface AbortSignalHandle {
     signal: AbortSignal | undefined;
     cleanup: (() => void) | null;
+}
+
+interface RunWithRetryAttemptContext {
+    attempt: number;
+    signal: AbortSignal | undefined;
+}
+
+interface RunWithRetryOptions<TResult> {
+    maxRetries: number;
+    retryDelayMs: number;
+    timeoutMs: number;
+    signal?: AbortSignal | undefined;
+    abortErrorMessage: string;
+    shouldRetry(error: unknown): boolean;
+    normalizeError(error: unknown): Error;
+    run(context: RunWithRetryAttemptContext): Promise<TResult>;
 }
 
 function createTimeoutSignal(timeoutMs: number): AbortSignalHandle {
@@ -157,11 +179,78 @@ async function waitForRetryDelay({
     throwIfSignalAborted(signal, abortErrorMessage, signal?.reason);
 }
 
+async function runWithRetry<TResult>({
+    maxRetries,
+    retryDelayMs,
+    timeoutMs,
+    signal,
+    abortErrorMessage,
+    shouldRetry,
+    normalizeError,
+    run,
+}: RunWithRetryOptions<TResult>): Promise<TResult> {
+    const retryLimit = assertNonNegativeInteger(maxRetries, 'maxRetries');
+    const retryDelay = assertNonNegativeInteger(retryDelayMs, 'retryDelayMs');
+    const requestTimeoutMs = assertPositiveInteger(timeoutMs, 'timeoutMs');
+    const callerAbortErrorMessage = assertNonEmptyString(
+        abortErrorMessage,
+        'abortErrorMessage'
+    );
+    if (typeof shouldRetry !== 'function') {
+        throw new Error('shouldRetry must be provided as a function.');
+    }
+    if (typeof normalizeError !== 'function') {
+        throw new Error('normalizeError must be provided as a function.');
+    }
+    if (typeof run !== 'function') {
+        throw new Error('run must be provided as a function.');
+    }
+
+    let lastError: unknown = null;
+
+    for (let attempt = 1; attempt <= retryLimit + 1; attempt += 1) {
+        const timeoutSignal = createTimeoutSignal(requestTimeoutMs);
+        const requestSignal = combineAbortSignals([signal, timeoutSignal.signal]);
+        try {
+            return await invokeWithAbort(
+                () =>
+                    run({
+                        attempt,
+                        signal: requestSignal.signal,
+                    }),
+                requestSignal.signal
+            );
+        } catch (error) {
+            lastError = error;
+            throwIfSignalAborted(signal, callerAbortErrorMessage, error);
+            if (attempt <= retryLimit && shouldRetry(error)) {
+                await waitForRetryDelay({
+                    retryDelayMs: retryDelay,
+                    signal,
+                    abortErrorMessage: callerAbortErrorMessage,
+                });
+                continue;
+            }
+            break;
+        } finally {
+            requestSignal.cleanup?.();
+            timeoutSignal.cleanup?.();
+        }
+    }
+
+    throw normalizeError(lastError);
+}
+
 export {
     combineAbortSignals,
     createTimeoutSignal,
     invokeWithAbort,
+    runWithRetry,
     throwIfSignalAborted,
     waitForRetryDelay,
 };
-export type { AbortSignalHandle };
+export type {
+    AbortSignalHandle,
+    RunWithRetryAttemptContext,
+    RunWithRetryOptions,
+};

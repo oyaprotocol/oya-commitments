@@ -36,8 +36,11 @@ Small shared utilities for hardened Oya kernel packages.
 ## Async Utilities
 
 - `AbortSignalHandle`
+- `RunWithRetryAttemptContext`
+- `RunWithRetryOptions`
 - `createTimeoutSignal(timeoutMs)`
 - `combineAbortSignals(signals)`
 - `invokeWithAbort(createPromise, signal)`
+- `runWithRetry(options)`
 - `throwIfSignalAborted(signal, message, cause)`
 - `waitForRetryDelay(options)`
