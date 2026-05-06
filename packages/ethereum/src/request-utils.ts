@@ -172,7 +172,7 @@ function buildJsonRpcBody({
         });
     } catch (error) {
         throw new Error(
-            'Ethereum JSON-RPC params must be JSON-serializable; convert bigint values to quantity hex strings before calling requestEthereumJsonRpc.',
+            'Ethereum JSON-RPC params must be JSON-serializable.',
             { cause: error }
         );
     }

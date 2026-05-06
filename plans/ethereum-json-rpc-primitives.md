@@ -62,8 +62,8 @@ Definitions used in this plan:
 - Observation: The completed IPFS package is the best local model for this work.
   Evidence: `packages/ipfs` uses explicit config, injected `fetch`, timeout/retry handling, package-root exports, built TypeScript declarations, and focused tests against fake transports.
 
-- Observation: The raw JSON-RPC primitive should reject `bigint` params before calling `fetch`.
-  Evidence: JSON cannot encode `bigint`, and `packages/ethereum/test/rpc.test.js` now verifies callers get a clear error instructing them to convert bigint values to Ethereum quantity hex first.
+- Observation: The raw JSON-RPC primitive should reject non-JSON-serializable params before calling `fetch`.
+  Evidence: JSON cannot encode values such as `bigint`, and `packages/ethereum/test/rpc.test.js` now verifies callers get a clear JSON-serializability error before any network call is made.
 
 ## Decision Log
 
