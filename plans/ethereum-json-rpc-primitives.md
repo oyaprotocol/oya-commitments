@@ -139,6 +139,10 @@ Definitions used in this plan:
   Rationale: Ethereum and IPFS were carrying duplicate status-bearing HTTP error classes with the same retry semantics. A shared runtime error in `@oyaprotocol/utils` keeps HTTP transport failures distinct from protocol-level JSON-RPC errors without maintaining package-specific copies.
   Date/Author: 2026-05-06 / Codex.
 
+- Decision: Move error-string cause-chain reading into HTTP utilities.
+  Rationale: Ethereum and IPFS used identical `readErrorStringChain(...)` helpers to classify retryable timeout/network failures by walking `error.cause` chains. Keeping that traversal in `@oyaprotocol/utils` removes duplicate protocol-local logic and lets the existing network-code helper share the same implementation.
+  Date/Author: 2026-05-06 / Codex.
+
 ## Outcomes & Retrospective
 
 This section starts empty except for the initial planning outcome. Update it after each milestone with what changed, which commands were run, and what evidence proves the package works.
@@ -303,6 +307,19 @@ Validation evidence for shared HTTP status error cleanup:
 - `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
 - `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
 - Package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` printed `function function function undefined` for `HttpStatusError`, `HttpStatusError`, `HttpStatusError`, and removed `EthereumJsonRpcHttpError`.
+- `git diff --check`
+
+Shared error-chain reader cleanup added `readErrorStringChain(...)` to `@oyaprotocol/utils` and removed the duplicate helper bodies from IPFS and Ethereum request utilities. `hasRetryableNetworkErrorCode(...)` now uses the same shared chain reader for nested string `code` values.
+
+Validation evidence for shared error-chain reader cleanup:
+
+- `npm run build` from `packages/`
+- `node --test packages/utils/test/validation.test.js` passed 10 tests.
+- `node --test packages/ipfs/test/publish.test.js` passed 18 tests.
+- `node --test packages/ipfs/test/retrieval.test.js` passed 27 tests.
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
+- `node --input-type=module -e "import('./packages/utils/dist/index.js').then((m) => console.log(typeof m.readErrorStringChain, m.readErrorStringChain({ message: 'outer', cause: { message: 'inner' } }, 'message').join(',')))"` printed `function outer,inner`.
 - `git diff --check`
 
 Async utility source cleanup consolidated `packages/utils/src/abort-utils.ts` and `packages/utils/src/retry-utils.ts` into `packages/utils/src/async-utils.ts`. The public package-root exports are unchanged, and stale generated `dist/abort-utils.*` and `dist/retry-utils.*` artifacts were removed after rebuilding.

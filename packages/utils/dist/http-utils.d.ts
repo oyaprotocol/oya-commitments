@@ -41,6 +41,7 @@ declare class HttpStatusError extends Error {
     constructor({ operation, status, statusText, responseText }: HttpStatusErrorOptions);
 }
 declare function createHttpConfig({ url, headers, timeoutMs, maxRetries, retryDelayMs }: CreateHttpConfigOptions, normalizeConfigUrl?: (url: string) => string): HttpConfig;
+declare function readErrorStringChain(error: unknown, key: string): string[];
 declare function hasRetryableNetworkErrorCode(error: unknown): boolean;
-export { HttpStatusError, RETRYABLE_HTTP_NETWORK_ERROR_CODES, createHttpConfig, hasRetryableNetworkErrorCode, };
+export { HttpStatusError, RETRYABLE_HTTP_NETWORK_ERROR_CODES, createHttpConfig, hasRetryableNetworkErrorCode, readErrorStringChain, };
 export type { CreateHttpConfigOptions, HttpConfig, HttpFetchLike, HttpPostFetchLike, HttpPostFetchOptions, HttpStatusErrorOptions, HttpTextResponse, };

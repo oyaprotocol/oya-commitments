@@ -284,13 +284,33 @@ Placeholder public surface:
 
 Current public surface in `@oyaprotocol/utils`:
 
+- `AbortSignalHandle`
 - `CreateHttpConfigOptions`
 - `HttpConfig`
+- `HttpFetchLike<TOptions, TResponse>`
+- `HttpPostFetchLike<TBody, TResponse>`
+- `HttpPostFetchOptions<TBody>`
+- `HttpStatusError`
+- `HttpStatusErrorOptions`
+- `HttpTextResponse`
+- `RETRYABLE_HTTP_NETWORK_ERROR_CODES`
+- `assertAsciiBytes(bytes, message)`
+- `assertBytes32HexString(value, label)`
 - `assertHeadersObject(value, label, options)`
+- `assertHexData(value, label)`
+- `assertHexString(value, label)`
 - `assertNonEmptyString(value, label)`
 - `assertNonNegativeInteger(value, label)`
 - `assertPositiveInteger(value, label)`
+- `combineAbortSignals(signals)`
+- `createHttpConfig(options, normalizeUrl?)`
+- `createTimeoutSignal(timeoutMs)`
+- `hasRetryableNetworkErrorCode(error)`
+- `invokeWithAbort(createPromise, signal)`
 - `isPlainObject(value)`
+- `readErrorStringChain(error, key)`
+- `throwIfSignalAborted(signal, message, cause)`
+- `waitForRetryDelay(options)`
 
 Current additional public surface in `@oyaprotocol/ipfs`:
 

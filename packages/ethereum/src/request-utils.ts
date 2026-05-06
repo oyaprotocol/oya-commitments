@@ -6,6 +6,7 @@ import {
     HttpStatusError,
     invokeWithAbort,
     isPlainObject,
+    readErrorStringChain,
     throwIfSignalAborted,
     waitForRetryDelay,
 } from '@oyaprotocol/utils';
@@ -105,19 +106,6 @@ class EthereumJsonRpcError extends Error {
         this.method = method;
         this.response = response;
     }
-}
-
-function readErrorStringChain(error: unknown, key: string): string[] {
-    const values: string[] = [];
-    let current: unknown = error;
-    while (current && typeof current === 'object') {
-        const value = (current as Record<string, unknown>)[key];
-        if (typeof value === 'string' && value) {
-            values.push(value);
-        }
-        current = (current as Record<string, unknown>).cause;
-    }
-    return values;
 }
 
 function shouldRetryError(error: unknown): boolean {

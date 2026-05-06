@@ -45,11 +45,11 @@ function createHttpConfig({ url, headers, timeoutMs, maxRetries, retryDelayMs },
         retryDelayMs: assertNonNegativeInteger(retryDelayMs, 'config.retryDelayMs'),
     });
 }
-function readErrorCodeChain(error) {
+function readErrorStringChain(error, key) {
     const values = [];
     let current = error;
     while (current && typeof current === 'object') {
-        const value = current.code;
+        const value = current[key];
         if (typeof value === 'string' && value) {
             values.push(value);
         }
@@ -58,12 +58,12 @@ function readErrorCodeChain(error) {
     return values;
 }
 function hasRetryableNetworkErrorCode(error) {
-    for (const code of readErrorCodeChain(error)) {
+    for (const code of readErrorStringChain(error, 'code')) {
         if (RETRYABLE_HTTP_NETWORK_ERROR_CODES.has(code.toUpperCase())) {
             return true;
         }
     }
     return false;
 }
-export { HttpStatusError, RETRYABLE_HTTP_NETWORK_ERROR_CODES, createHttpConfig, hasRetryableNetworkErrorCode, };
+export { HttpStatusError, RETRYABLE_HTTP_NETWORK_ERROR_CODES, createHttpConfig, hasRetryableNetworkErrorCode, readErrorStringChain, };
 //# sourceMappingURL=http-utils.js.map

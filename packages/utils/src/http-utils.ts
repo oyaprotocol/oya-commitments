@@ -111,11 +111,11 @@ function createHttpConfig(
     });
 }
 
-function readErrorCodeChain(error: unknown): string[] {
+function readErrorStringChain(error: unknown, key: string): string[] {
     const values: string[] = [];
     let current: unknown = error;
     while (current && typeof current === 'object') {
-        const value = (current as Record<string, unknown>).code;
+        const value = (current as Record<string, unknown>)[key];
         if (typeof value === 'string' && value) {
             values.push(value);
         }
@@ -125,7 +125,7 @@ function readErrorCodeChain(error: unknown): string[] {
 }
 
 function hasRetryableNetworkErrorCode(error: unknown): boolean {
-    for (const code of readErrorCodeChain(error)) {
+    for (const code of readErrorStringChain(error, 'code')) {
         if (RETRYABLE_HTTP_NETWORK_ERROR_CODES.has(code.toUpperCase())) {
             return true;
         }
@@ -138,6 +138,7 @@ export {
     RETRYABLE_HTTP_NETWORK_ERROR_CODES,
     createHttpConfig,
     hasRetryableNetworkErrorCode,
+    readErrorStringChain,
 };
 export type {
     CreateHttpConfigOptions,

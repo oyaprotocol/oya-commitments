@@ -17,6 +17,7 @@ import {
     HttpStatusError,
     invokeWithAbort,
     isPlainObject,
+    readErrorStringChain,
     RETRYABLE_HTTP_NETWORK_ERROR_CODES,
     throwIfSignalAborted,
     waitForRetryDelay,
@@ -230,6 +231,26 @@ test('hasRetryableNetworkErrorCode detects retryable HTTP network codes', () => 
         false
     );
     assert.equal(hasRetryableNetworkErrorCode(null), false);
+});
+
+test('readErrorStringChain collects string properties across error causes', () => {
+    const error = new TypeError('fetch failed', {
+        cause: Object.assign(new Error('socket closed'), {
+            code: 'ECONNRESET',
+            cause: {
+                message: 'nested plain object',
+            },
+        }),
+    });
+
+    assert.deepEqual(readErrorStringChain(error, 'name'), ['TypeError', 'Error']);
+    assert.deepEqual(readErrorStringChain(error, 'message'), [
+        'fetch failed',
+        'socket closed',
+        'nested plain object',
+    ]);
+    assert.deepEqual(readErrorStringChain(error, 'code'), ['ECONNRESET']);
+    assert.deepEqual(readErrorStringChain({ message: 123 }, 'message'), []);
 });
 
 test('abort utilities compose signals and reject aborted operations', async () => {

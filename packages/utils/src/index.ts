@@ -11,6 +11,7 @@ export {
     RETRYABLE_HTTP_NETWORK_ERROR_CODES,
     createHttpConfig,
     hasRetryableNetworkErrorCode,
+    readErrorStringChain,
 } from './http-utils.js';
 export type {
     CreateHttpConfigOptions,

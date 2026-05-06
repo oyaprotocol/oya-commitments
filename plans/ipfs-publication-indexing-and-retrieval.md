@@ -52,6 +52,7 @@ Definitions used in this plan:
 - [x] 2026-05-03 21:15Z: Moved validation helpers shared with Ethereum into `@oyaprotocol/utils`; IPFS now keeps only IPFS-specific ASCII byte validation locally.
 - [x] 2026-05-03 21:35Z: Replaced the package-branded `IpfsConfig` type with shared `HttpConfig` / `CreateHttpConfigOptions` from `@oyaprotocol/utils`; `createIpfsConfig(...)` now accepts and returns the generic `url`-based HTTP config shape.
 - [x] 2026-05-06 00:35Z: Replaced the package-internal `IpfsHttpError` marker with shared `HttpStatusError` from `@oyaprotocol/utils` for publish, Kubo read, and public gateway read HTTP status failures.
+- [x] 2026-05-06 01:00Z: Replaced the package-internal `readErrorStringChain(...)` helper with the shared HTTP utility from `@oyaprotocol/utils`.
 
 ## Surprises & Discoveries
 
@@ -132,6 +133,8 @@ Publish type cleanup renamed the publishing fetch contract to `PublishIpfsFetchL
 Read options cleanup replaced duplicate byte/text options with shared `ReadIpfsOptions`; byte and text helpers now differ only in result shape and text-specific ASCII verification.
 
 Request error cleanup moved status-bearing HTTP failures first into shared internal `IpfsHttpError`, then into package-generic `HttpStatusError` in `@oyaprotocol/utils`; publish and read use the same marker to keep HTTP failures distinct from retryable network errors.
+
+Retry inspection cleanup moved the generic `readErrorStringChain(...)` cause-chain traversal into `@oyaprotocol/utils`, so IPFS and Ethereum share the same string-property reader for timeout/message classification.
 
 Retry cleanup moved both HTTP status retry policy and transport-error retry policy into shared `shouldRetryError(...)`, so publish and read use one retry decision path after errors are created.
 

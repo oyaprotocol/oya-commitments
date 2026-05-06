@@ -31,6 +31,7 @@ Small shared utilities for hardened Oya kernel packages.
 - `HttpTextResponse`
 - `RETRYABLE_HTTP_NETWORK_ERROR_CODES`
 - `hasRetryableNetworkErrorCode(error)`
+- `readErrorStringChain(error, key)`
 
 ## Async Utilities
 

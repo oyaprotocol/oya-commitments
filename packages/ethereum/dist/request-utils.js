@@ -1,4 +1,4 @@
-import { combineAbortSignals, createTimeoutSignal, hasRetryableNetworkErrorCode, HttpStatusError, invokeWithAbort, isPlainObject, throwIfSignalAborted, waitForRetryDelay, } from '@oyaprotocol/utils';
+import { combineAbortSignals, createTimeoutSignal, hasRetryableNetworkErrorCode, HttpStatusError, invokeWithAbort, isPlainObject, readErrorStringChain, throwIfSignalAborted, waitForRetryDelay, } from '@oyaprotocol/utils';
 const RETRYABLE_JSON_RPC_METHODS = new Set([
     'eth_accounts',
     'eth_blobBaseFee',
@@ -60,18 +60,6 @@ class EthereumJsonRpcError extends Error {
         this.method = method;
         this.response = response;
     }
-}
-function readErrorStringChain(error, key) {
-    const values = [];
-    let current = error;
-    while (current && typeof current === 'object') {
-        const value = current[key];
-        if (typeof value === 'string' && value) {
-            values.push(value);
-        }
-        current = current.cause;
-    }
-    return values;
 }
 function shouldRetryError(error) {
     if (!error) {

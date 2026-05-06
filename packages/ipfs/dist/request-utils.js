@@ -1,16 +1,4 @@
-import { combineAbortSignals, createTimeoutSignal, hasRetryableNetworkErrorCode, HttpStatusError, invokeWithAbort, throwIfSignalAborted, waitForRetryDelay, } from '@oyaprotocol/utils';
-function readErrorStringChain(error, key) {
-    const values = [];
-    let current = error;
-    while (current && typeof current === 'object') {
-        const value = current[key];
-        if (typeof value === 'string' && value) {
-            values.push(value);
-        }
-        current = current.cause;
-    }
-    return values;
-}
+import { combineAbortSignals, createTimeoutSignal, hasRetryableNetworkErrorCode, HttpStatusError, invokeWithAbort, readErrorStringChain, throwIfSignalAborted, waitForRetryDelay, } from '@oyaprotocol/utils';
 function shouldRetryError(error) {
     if (!error) {
         return false;
