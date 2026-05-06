@@ -1,4 +1,5 @@
-import { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, } from './request-utils.js';
+import { HttpStatusError } from '@oyaprotocol/utils';
+import { combineAbortSignals, createTimeoutSignal, invokeWithAbort, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, } from './request-utils.js';
 function normalizeContent(content) {
     if (typeof content === 'string') {
         return {
@@ -129,8 +130,10 @@ async function publishToIpfs({ config, fetch, content, filename, mediaType, sign
             }), requestSignal.signal);
             const responseText = await invokeWithAbort(() => response.text(), requestSignal.signal);
             if (!response.ok) {
-                const httpError = new IpfsHttpError(`IPFS add failed with ${response.status} ${response.statusText || 'Unknown Status'}.`, {
+                const httpError = new HttpStatusError({
+                    operation: 'IPFS add',
                     status: response.status,
+                    statusText: response.statusText,
                     responseText,
                 });
                 throw httpError;

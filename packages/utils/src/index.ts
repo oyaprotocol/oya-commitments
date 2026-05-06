@@ -7,6 +7,7 @@ export {
 } from './async-utils.js';
 export type { AbortSignalHandle } from './async-utils.js';
 export {
+    HttpStatusError,
     RETRYABLE_HTTP_NETWORK_ERROR_CODES,
     createHttpConfig,
     hasRetryableNetworkErrorCode,
@@ -17,6 +18,7 @@ export type {
     HttpFetchLike,
     HttpPostFetchLike,
     HttpPostFetchOptions,
+    HttpStatusErrorOptions,
     HttpTextResponse,
 } from './http-utils.js';
 

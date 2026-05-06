@@ -12,7 +12,7 @@ Ethereum JSON-RPC utilities for Oya kernel code. This package is a hardened kern
 - `requestEthereumJsonRpc(options)`: send one JSON-RPC POST request with explicit config and injected `fetch`, returning the raw `result`, attempt count, id, and parsed response payload.
 - `ethSendRawTransaction(options)`: submit a signed raw transaction and return the transaction hash with attempt metadata. Callers may pass `transactionHash` when they already know the hash, allowing the wrapper to verify duplicate-style retry errors with `eth_getTransactionByHash`.
 - `EthereumJsonRpcError`: thrown when an HTTP-successful JSON-RPC response contains an `error` payload.
-- `EthereumJsonRpcHttpError`: thrown when the HTTP response itself is not successful.
+- `HttpStatusError`: thrown when the HTTP response itself is not successful, re-exported from `@oyaprotocol/utils`.
 - `EthereumRawTransactionRecoveryError`: thrown when raw transaction submission may have succeeded before a retry returned a duplicate-style error, but the wrapper could not verify the supplied transaction hash.
 
 ## Behavior

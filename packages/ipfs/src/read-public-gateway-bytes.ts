@@ -2,7 +2,6 @@ import {
     combineAbortSignals,
     createTimeoutSignal,
     invokeWithAbort,
-    IpfsHttpError,
     normalizeIpfsOperationError,
     shouldRetryError,
     throwIfSignalAborted,
@@ -11,6 +10,7 @@ import {
 import type { IpfsOperationErrorMessages } from './request-utils.js';
 import { readBoundedBytes, type ReadIpfsBytesResult } from './read-bytes.js';
 import {
+    HttpStatusError,
     assertHeadersObject,
     assertNonEmptyString,
     assertNonNegativeInteger,
@@ -103,14 +103,11 @@ async function readIpfsPublicGatewayBytesWithMessages(
             );
 
             if (!response.ok) {
-                const httpError = new IpfsHttpError(
-                    `IPFS public gateway read failed with ${response.status} ${
-                        response.statusText || 'Unknown Status'
-                    }.`,
-                    {
-                        status: response.status,
-                    }
-                );
+                const httpError = new HttpStatusError({
+                    operation: 'IPFS public gateway read',
+                    status: response.status,
+                    statusText: response.statusText,
+                });
                 response.body?.cancel(httpError).catch(() => {});
                 throw httpError;
             }

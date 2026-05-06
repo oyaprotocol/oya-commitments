@@ -4,7 +4,7 @@ import test from 'node:test';
 import {
     createHttpConfig,
     EthereumJsonRpcError,
-    EthereumJsonRpcHttpError,
+    HttpStatusError,
     requestEthereumJsonRpc,
 } from '../dist/index.js';
 
@@ -199,7 +199,7 @@ test('requestEthereumJsonRpc does not retry eth_sendRawTransaction submissions',
             params: ['0x02f86c01'],
         }),
         (error) => {
-            assert.ok(error instanceof EthereumJsonRpcHttpError);
+            assert.ok(error instanceof HttpStatusError);
             assert.equal(error.status, 503);
             return true;
         }
@@ -219,7 +219,7 @@ test('requestEthereumJsonRpc does not retry methods outside the retry allowlist'
             method: 'evm_mine',
         }),
         (error) => {
-            assert.ok(error instanceof EthereumJsonRpcHttpError);
+            assert.ok(error instanceof HttpStatusError);
             assert.equal(error.status, 503);
             return true;
         }
@@ -265,7 +265,7 @@ test('requestEthereumJsonRpc does not retry non-retryable HTTP failures', async 
             method: 'eth_call',
         }),
         (error) => {
-            assert.ok(error instanceof EthereumJsonRpcHttpError);
+            assert.ok(error instanceof HttpStatusError);
             assert.equal(error.status, 400);
             assert.match(error.message, /400 Bad Request/);
             return true;

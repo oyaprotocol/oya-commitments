@@ -26,6 +26,8 @@ Small shared utilities for hardened Oya kernel packages.
 - `HttpFetchLike<TOptions, TResponse>`
 - `HttpPostFetchLike<TBody, TResponse>`
 - `HttpPostFetchOptions<TBody>`
+- `HttpStatusError`
+- `HttpStatusErrorOptions`
 - `HttpTextResponse`
 - `RETRYABLE_HTTP_NETWORK_ERROR_CODES`
 - `hasRetryableNetworkErrorCode(error)`

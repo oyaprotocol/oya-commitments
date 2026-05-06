@@ -1,5 +1,6 @@
 export { createIpfsConfig } from './config.js';
-export type { CreateHttpConfigOptions, HttpConfig, HttpFetchLike, HttpPostFetchLike, HttpPostFetchOptions, HttpTextResponse, } from '@oyaprotocol/utils';
+export { HttpStatusError } from '@oyaprotocol/utils';
+export type { CreateHttpConfigOptions, HttpConfig, HttpFetchLike, HttpPostFetchLike, HttpPostFetchOptions, HttpStatusErrorOptions, HttpTextResponse, } from '@oyaprotocol/utils';
 export { publishToIpfs } from './publish.js';
 export type { PublishToIpfsOptions, PublishToIpfsResult, PublishableContent, } from './publish.js';
 export { readIpfsBytes } from './read-bytes.js';

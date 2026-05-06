@@ -1,9 +1,9 @@
 import type { HttpConfig, HttpPostFetchLike } from '@oyaprotocol/utils';
+import { HttpStatusError } from '@oyaprotocol/utils';
 import {
     combineAbortSignals,
     createTimeoutSignal,
     invokeWithAbort,
-    IpfsHttpError,
     shouldRetryError,
     throwIfSignalAborted,
     waitForRetryDelay,
@@ -200,15 +200,12 @@ async function publishToIpfs({
             const responseText = await invokeWithAbort(() => response.text(), requestSignal.signal);
 
             if (!response.ok) {
-                const httpError = new IpfsHttpError(
-                    `IPFS add failed with ${response.status} ${
-                        response.statusText || 'Unknown Status'
-                    }.`,
-                    {
-                        status: response.status,
-                        responseText,
-                    }
-                );
+                const httpError = new HttpStatusError({
+                    operation: 'IPFS add',
+                    status: response.status,
+                    statusText: response.statusText,
+                    responseText,
+                });
                 throw httpError;
             }
 

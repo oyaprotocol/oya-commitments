@@ -1,17 +1,4 @@
-import { combineAbortSignals, createTimeoutSignal, hasRetryableNetworkErrorCode, invokeWithAbort, throwIfSignalAborted, waitForRetryDelay, } from '@oyaprotocol/utils';
-class IpfsHttpError extends Error {
-    status;
-    responseText;
-    constructor(message, { status, responseText }) {
-        super(message);
-        this.name = 'IpfsHttpError';
-        this.status = status;
-        this.responseText = responseText;
-    }
-}
-function isIpfsHttpError(error) {
-    return error instanceof IpfsHttpError;
-}
+import { combineAbortSignals, createTimeoutSignal, hasRetryableNetworkErrorCode, HttpStatusError, invokeWithAbort, throwIfSignalAborted, waitForRetryDelay, } from '@oyaprotocol/utils';
 function readErrorStringChain(error, key) {
     const values = [];
     let current = error;
@@ -28,7 +15,7 @@ function shouldRetryError(error) {
     if (!error) {
         return false;
     }
-    if (isIpfsHttpError(error)) {
+    if (error instanceof HttpStatusError) {
         return error.status === 429 || error.status >= 500;
     }
     const names = readErrorStringChain(error, 'name');
@@ -56,5 +43,5 @@ function normalizeIpfsOperationError(error, messages) {
     }
     return new Error(`${messages.fallbackErrorBaseMessage}: ${String(error)}`);
 }
-export { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, normalizeIpfsOperationError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, };
+export { combineAbortSignals, createTimeoutSignal, invokeWithAbort, normalizeIpfsOperationError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, };
 //# sourceMappingURL=request-utils.js.map

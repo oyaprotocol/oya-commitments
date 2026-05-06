@@ -306,7 +306,7 @@ Current public surface in `@oyaprotocol/ethereum`:
 - `createHttpConfig(options)`
 - `requestEthereumJsonRpc(options)`
 - `EthereumJsonRpcError`
-- `EthereumJsonRpcHttpError`
+- `HttpStatusError`
 
 ## Interfaces and Dependencies
 

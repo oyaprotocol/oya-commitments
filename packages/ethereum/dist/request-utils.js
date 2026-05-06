@@ -1,4 +1,4 @@
-import { combineAbortSignals, createTimeoutSignal, hasRetryableNetworkErrorCode, invokeWithAbort, isPlainObject, throwIfSignalAborted, waitForRetryDelay, } from '@oyaprotocol/utils';
+import { combineAbortSignals, createTimeoutSignal, hasRetryableNetworkErrorCode, HttpStatusError, invokeWithAbort, isPlainObject, throwIfSignalAborted, waitForRetryDelay, } from '@oyaprotocol/utils';
 const RETRYABLE_JSON_RPC_METHODS = new Set([
     'eth_accounts',
     'eth_blobBaseFee',
@@ -40,16 +40,6 @@ const RETRYABLE_JSON_RPC_METHODS = new Set([
     'web3_clientVersion',
     'web3_sha3',
 ]);
-class EthereumJsonRpcHttpError extends Error {
-    status;
-    responseText;
-    constructor(message, { status, responseText }) {
-        super(message);
-        this.name = 'EthereumJsonRpcHttpError';
-        this.status = status;
-        this.responseText = responseText;
-    }
-}
 class EthereumJsonRpcError extends Error {
     attemptCount;
     code;
@@ -71,9 +61,6 @@ class EthereumJsonRpcError extends Error {
         this.response = response;
     }
 }
-function isEthereumJsonRpcHttpError(error) {
-    return error instanceof EthereumJsonRpcHttpError;
-}
 function readErrorStringChain(error, key) {
     const values = [];
     let current = error;
@@ -90,7 +77,7 @@ function shouldRetryError(error) {
     if (!error) {
         return false;
     }
-    if (isEthereumJsonRpcHttpError(error)) {
+    if (error instanceof HttpStatusError) {
         return error.status === 429 || error.status >= 500;
     }
     if (error instanceof EthereumJsonRpcError) {
@@ -219,8 +206,10 @@ async function requestEthereumJsonRpcWithRetryPolicy({ config, fetch, method, pa
             }), requestSignal.signal);
             const responseText = await invokeWithAbort(() => response.text(), requestSignal.signal);
             if (!response.ok) {
-                throw new EthereumJsonRpcHttpError(`Ethereum JSON-RPC request failed with ${response.status} ${response.statusText || 'Unknown Status'}.`, {
+                throw new HttpStatusError({
+                    operation: 'Ethereum JSON-RPC request',
                     status: response.status,
+                    statusText: response.statusText,
                     responseText,
                 });
             }
@@ -262,5 +251,5 @@ async function requestEthereumJsonRpcWithRetryPolicy({ config, fetch, method, pa
 async function requestEthereumJsonRpc(options) {
     return await requestEthereumJsonRpcWithRetryPolicy(options, shouldRetryMethod);
 }
-export { EthereumJsonRpcError, EthereumJsonRpcHttpError, requestEthereumJsonRpc, requestEthereumJsonRpcWithRetryPolicy, };
+export { EthereumJsonRpcError, requestEthereumJsonRpc, requestEthereumJsonRpcWithRetryPolicy, };
 //# sourceMappingURL=request-utils.js.map

@@ -135,6 +135,10 @@ Definitions used in this plan:
   Rationale: The abort helpers and `waitForRetryDelay(...)` are all generic async control primitives. Consolidating them removes a one-function retry file while keeping protocol retry policy out of `@oyaprotocol/utils`.
   Date/Author: 2026-05-05 / Codex.
 
+- Decision: Use shared `HttpStatusError` for non-OK HTTP responses.
+  Rationale: Ethereum and IPFS were carrying duplicate status-bearing HTTP error classes with the same retry semantics. A shared runtime error in `@oyaprotocol/utils` keeps HTTP transport failures distinct from protocol-level JSON-RPC errors without maintaining package-specific copies.
+  Date/Author: 2026-05-06 / Codex.
+
 ## Outcomes & Retrospective
 
 This section starts empty except for the initial planning outcome. Update it after each milestone with what changed, which commands were run, and what evidence proves the package works.
@@ -150,7 +154,7 @@ Current validation evidence for the package set after the rename:
 - From `packages/`, `node --input-type=module -e "import('@oyaprotocol/ethereum').then((m) => console.log(typeof m.createHttpConfig, typeof m.requestEthereumJsonRpc))"` printed `function function`.
 - `git diff --check`
 
-Milestone 1 is complete. `@oyaprotocol/ethereum` now exposes `createHttpConfig(...)`, `requestEthereumJsonRpc(...)`, `EthereumJsonRpcError`, and `EthereumJsonRpcHttpError` through the package root. The implementation lives in `packages/utils/src/http-utils.ts` and `packages/ethereum/src/request-utils.ts`, with shared validation imported from `@oyaprotocol/utils`. The package remains dependency-light and does not import from legacy runtime areas.
+Milestone 1 is complete. `@oyaprotocol/ethereum` now exposes `createHttpConfig(...)`, `requestEthereumJsonRpc(...)`, `EthereumJsonRpcError`, and shared `HttpStatusError` through the package root. The implementation lives in `packages/utils/src/http-utils.ts` and `packages/ethereum/src/request-utils.ts`, with shared validation imported from `@oyaprotocol/utils`. The package remains dependency-light and does not import from legacy runtime areas.
 
 The request primitive sends one JSON-RPC POST with explicit config and injected `fetch`, owns the `content-type: application/json` header, enforces timeouts even when fetch ignores abort signals, retries transient HTTP/network failures only for read-only Ethereum methods, surfaces JSON-RPC error payloads as inspectable non-retryable errors, and returns the raw `result` plus attempt metadata. It expects callers to pass JSON-serializable params; future wrappers should convert bigint values to Ethereum quantity hex before calling it.
 
@@ -287,6 +291,19 @@ Validation evidence for HTTP utility source cleanup:
 - `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
 - `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
 - From `packages/`, package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` printed `function function function function`.
+
+Shared HTTP status error cleanup added `HttpStatusError` to `@oyaprotocol/utils` and switched Ethereum JSON-RPC, IPFS publish, Kubo reads, and public gateway reads to throw that shared runtime error for non-OK HTTP responses. Ethereum and IPFS re-export the shared class from their package roots so callers can use one `instanceof HttpStatusError` check for HTTP status failures.
+
+Validation evidence for shared HTTP status error cleanup:
+
+- `npm run build` from `packages/`
+- `node --test packages/utils/test/validation.test.js` passed 9 tests.
+- `node --test packages/ipfs/test/publish.test.js` passed 18 tests.
+- `node --test packages/ipfs/test/retrieval.test.js` passed 27 tests.
+- `node --test packages/ethereum/test/rpc.test.js` passed 14 tests.
+- `node --test packages/ethereum/test/transactions.test.js` passed 6 tests.
+- Package-root smoke imports for `@oyaprotocol/utils`, `@oyaprotocol/ipfs`, and `@oyaprotocol/ethereum` printed `function function function undefined` for `HttpStatusError`, `HttpStatusError`, `HttpStatusError`, and removed `EthereumJsonRpcHttpError`.
+- `git diff --check`
 
 Async utility source cleanup consolidated `packages/utils/src/abort-utils.ts` and `packages/utils/src/retry-utils.ts` into `packages/utils/src/async-utils.ts`. The public package-root exports are unchanged, and stale generated `dist/abort-utils.*` and `dist/retry-utils.*` artifacts were removed after rebuilding.
 
@@ -550,7 +567,7 @@ If unrelated local changes appear in the worktree, leave them alone. Only modify
 
 Current package evidence:
 
-- `packages/ethereum/src/index.ts` exports `createHttpConfig(...)`, `requestEthereumJsonRpc(...)`, `EthereumJsonRpcError`, `EthereumJsonRpcHttpError`, and public transport/request types.
+- `packages/ethereum/src/index.ts` exports `createHttpConfig(...)`, `requestEthereumJsonRpc(...)`, `EthereumJsonRpcError`, shared `HttpStatusError`, and public transport/request types.
 - `packages/ethereum/README.md` documents the current JSON-RPC config/request surface.
 - `packages/ethereum/test/rpc.test.js` validates the Milestone 1 surface against fake fetch implementations with no network access.
 - `packages/ipfs` demonstrates the current hardened package style: strict config, explicit injected dependencies, timeout/retry helpers, built TypeScript output, and Node tests against `dist`.

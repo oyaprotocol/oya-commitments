@@ -1,6 +1,6 @@
-import { combineAbortSignals, createTimeoutSignal, invokeWithAbort, IpfsHttpError, normalizeIpfsOperationError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, } from './request-utils.js';
+import { combineAbortSignals, createTimeoutSignal, invokeWithAbort, normalizeIpfsOperationError, shouldRetryError, throwIfSignalAborted, waitForRetryDelay, } from './request-utils.js';
 import { readBoundedBytes } from './read-bytes.js';
-import { assertHeadersObject, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, } from '@oyaprotocol/utils';
+import { HttpStatusError, assertHeadersObject, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, } from '@oyaprotocol/utils';
 function buildGatewayReadUrl(gatewayUrl, cid) {
     const url = new URL(gatewayUrl);
     if (url.hash) {
@@ -32,8 +32,10 @@ async function readIpfsPublicGatewayBytesWithMessages({ gatewayUrl, headers, tim
                 signal: requestSignal.signal,
             }), requestSignal.signal);
             if (!response.ok) {
-                const httpError = new IpfsHttpError(`IPFS public gateway read failed with ${response.status} ${response.statusText || 'Unknown Status'}.`, {
+                const httpError = new HttpStatusError({
+                    operation: 'IPFS public gateway read',
                     status: response.status,
+                    statusText: response.statusText,
                 });
                 response.body?.cancel(httpError).catch(() => { });
                 throw httpError;

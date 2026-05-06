@@ -1,10 +1,12 @@
 export { createIpfsConfig } from './config.js';
+export { HttpStatusError } from '@oyaprotocol/utils';
 export type {
     CreateHttpConfigOptions,
     HttpConfig,
     HttpFetchLike,
     HttpPostFetchLike,
     HttpPostFetchOptions,
+    HttpStatusErrorOptions,
     HttpTextResponse,
 } from '@oyaprotocol/utils';
 export { publishToIpfs } from './publish.js';

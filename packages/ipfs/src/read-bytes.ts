@@ -1,9 +1,9 @@
 import type { HttpConfig } from '@oyaprotocol/utils';
+import { HttpStatusError } from '@oyaprotocol/utils';
 import {
     combineAbortSignals,
     createTimeoutSignal,
     invokeWithAbort,
-    IpfsHttpError,
     normalizeIpfsOperationError,
     shouldRetryError,
     throwIfSignalAborted,
@@ -139,14 +139,11 @@ async function readIpfsBytesWithMessages(
             );
 
             if (!response.ok) {
-                const httpError = new IpfsHttpError(
-                    `IPFS cat failed with ${response.status} ${
-                        response.statusText || 'Unknown Status'
-                    }.`,
-                    {
-                        status: response.status,
-                    }
-                );
+                const httpError = new HttpStatusError({
+                    operation: 'IPFS cat',
+                    status: response.status,
+                    statusText: response.statusText,
+                });
                 response.body?.cancel(httpError).catch(() => {});
                 throw httpError;
             }

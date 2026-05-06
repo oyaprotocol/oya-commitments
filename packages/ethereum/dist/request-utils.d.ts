@@ -13,10 +13,6 @@ export interface RequestEthereumJsonRpcResult<TResult = unknown> {
     id: string | number;
     response: unknown;
 }
-interface EthereumJsonRpcHttpErrorOptions {
-    status: number;
-    responseText?: string;
-}
 interface EthereumJsonRpcErrorOptions {
     method: string;
     response: unknown;
@@ -26,11 +22,6 @@ interface JsonRpcErrorPayload {
     code?: unknown;
     message?: unknown;
     data?: unknown;
-}
-declare class EthereumJsonRpcHttpError extends Error {
-    readonly status: number;
-    readonly responseText: string | undefined;
-    constructor(message: string, { status, responseText }: EthereumJsonRpcHttpErrorOptions);
 }
 declare class EthereumJsonRpcError extends Error {
     readonly attemptCount: number;
@@ -42,4 +33,4 @@ declare class EthereumJsonRpcError extends Error {
 }
 declare function requestEthereumJsonRpcWithRetryPolicy<TResult = unknown>({ config, fetch, method, params, id, signal, }: RequestEthereumJsonRpcOptions, shouldRetryJsonRpcMethod: (method: string) => boolean): Promise<RequestEthereumJsonRpcResult<TResult>>;
 declare function requestEthereumJsonRpc<TResult = unknown>(options: RequestEthereumJsonRpcOptions): Promise<RequestEthereumJsonRpcResult<TResult>>;
-export { EthereumJsonRpcError, EthereumJsonRpcHttpError, requestEthereumJsonRpc, requestEthereumJsonRpcWithRetryPolicy, };
+export { EthereumJsonRpcError, requestEthereumJsonRpc, requestEthereumJsonRpcWithRetryPolicy, };

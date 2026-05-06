@@ -24,10 +24,23 @@ interface HttpTextResponse {
     statusText: string;
     text(): Promise<string>;
 }
+interface HttpStatusErrorOptions {
+    operation: string;
+    status: number;
+    statusText?: string;
+    responseText?: string;
+}
 type HttpFetchLike<TOptions, TResponse> = (url: string, options: TOptions) => Promise<TResponse>;
 type HttpPostFetchLike<TBody, TResponse = HttpTextResponse> = HttpFetchLike<HttpPostFetchOptions<TBody>, TResponse>;
 declare const RETRYABLE_HTTP_NETWORK_ERROR_CODES: ReadonlySet<string>;
+declare class HttpStatusError extends Error {
+    readonly operation: string;
+    readonly status: number;
+    readonly statusText: string;
+    readonly responseText: string | undefined;
+    constructor({ operation, status, statusText, responseText }: HttpStatusErrorOptions);
+}
 declare function createHttpConfig({ url, headers, timeoutMs, maxRetries, retryDelayMs }: CreateHttpConfigOptions, normalizeConfigUrl?: (url: string) => string): HttpConfig;
 declare function hasRetryableNetworkErrorCode(error: unknown): boolean;
-export { RETRYABLE_HTTP_NETWORK_ERROR_CODES, createHttpConfig, hasRetryableNetworkErrorCode, };
-export type { CreateHttpConfigOptions, HttpConfig, HttpFetchLike, HttpPostFetchLike, HttpPostFetchOptions, HttpTextResponse, };
+export { HttpStatusError, RETRYABLE_HTTP_NETWORK_ERROR_CODES, createHttpConfig, hasRetryableNetworkErrorCode, };
+export type { CreateHttpConfigOptions, HttpConfig, HttpFetchLike, HttpPostFetchLike, HttpPostFetchOptions, HttpStatusErrorOptions, HttpTextResponse, };

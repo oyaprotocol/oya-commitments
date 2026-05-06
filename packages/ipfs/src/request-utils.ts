@@ -2,36 +2,16 @@ import {
     combineAbortSignals,
     createTimeoutSignal,
     hasRetryableNetworkErrorCode,
+    HttpStatusError,
     invokeWithAbort,
     throwIfSignalAborted,
     waitForRetryDelay,
 } from '@oyaprotocol/utils';
 import type { AbortSignalHandle } from '@oyaprotocol/utils';
 
-interface IpfsHttpErrorOptions {
-    status: number;
-    responseText?: string;
-}
-
 interface IpfsOperationErrorMessages {
     abortErrorMessage: string;
     fallbackErrorBaseMessage: string;
-}
-
-class IpfsHttpError extends Error {
-    readonly status: number;
-    readonly responseText: string | undefined;
-
-    constructor(message: string, { status, responseText }: IpfsHttpErrorOptions) {
-        super(message);
-        this.name = 'IpfsHttpError';
-        this.status = status;
-        this.responseText = responseText;
-    }
-}
-
-function isIpfsHttpError(error: unknown): error is IpfsHttpError {
-    return error instanceof IpfsHttpError;
 }
 
 function readErrorStringChain(error: unknown, key: string): string[] {
@@ -51,7 +31,7 @@ function shouldRetryError(error: unknown): boolean {
     if (!error) {
         return false;
     }
-    if (isIpfsHttpError(error)) {
+    if (error instanceof HttpStatusError) {
         return error.status === 429 || error.status >= 500;
     }
     const names = readErrorStringChain(error, 'name');
@@ -90,7 +70,6 @@ export {
     combineAbortSignals,
     createTimeoutSignal,
     invokeWithAbort,
-    IpfsHttpError,
     normalizeIpfsOperationError,
     shouldRetryError,
     throwIfSignalAborted,

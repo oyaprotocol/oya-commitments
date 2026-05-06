@@ -11,6 +11,25 @@ const RETRYABLE_HTTP_NETWORK_ERROR_CODES = new Set([
     'UND_ERR_HEADERS_TIMEOUT',
     'UND_ERR_SOCKET',
 ]);
+class HttpStatusError extends Error {
+    operation;
+    status;
+    statusText;
+    responseText;
+    constructor({ operation, status, statusText, responseText }) {
+        const normalizedOperation = assertNonEmptyString(operation, 'operation');
+        const normalizedStatus = assertPositiveInteger(status, 'status');
+        const normalizedStatusText = typeof statusText === 'string' && statusText.trim()
+            ? statusText.trim()
+            : 'Unknown Status';
+        super(`${normalizedOperation} failed with ${normalizedStatus} ${normalizedStatusText}.`);
+        this.name = 'HttpStatusError';
+        this.operation = normalizedOperation;
+        this.status = normalizedStatus;
+        this.statusText = normalizedStatusText;
+        this.responseText = responseText;
+    }
+}
 function normalizeUrl(url) {
     return url.replace(/\/+$/, '');
 }
@@ -46,5 +65,5 @@ function hasRetryableNetworkErrorCode(error) {
     }
     return false;
 }
-export { RETRYABLE_HTTP_NETWORK_ERROR_CODES, createHttpConfig, hasRetryableNetworkErrorCode, };
+export { HttpStatusError, RETRYABLE_HTTP_NETWORK_ERROR_CODES, createHttpConfig, hasRetryableNetworkErrorCode, };
 //# sourceMappingURL=http-utils.js.map

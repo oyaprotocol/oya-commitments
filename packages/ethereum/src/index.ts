@@ -1,10 +1,11 @@
-export { createHttpConfig } from '@oyaprotocol/utils';
+export { createHttpConfig, HttpStatusError } from '@oyaprotocol/utils';
 export type {
     CreateHttpConfigOptions,
     HttpConfig,
     HttpFetchLike,
     HttpPostFetchLike,
     HttpPostFetchOptions,
+    HttpStatusErrorOptions,
     HttpTextResponse,
 } from '@oyaprotocol/utils';
 export {
@@ -17,7 +18,6 @@ export type {
 } from './transactions.js';
 export {
     EthereumJsonRpcError,
-    EthereumJsonRpcHttpError,
     requestEthereumJsonRpc,
 } from './request-utils.js';
 export type {

@@ -3,6 +3,7 @@ import {
     combineAbortSignals,
     createTimeoutSignal,
     hasRetryableNetworkErrorCode,
+    HttpStatusError,
     invokeWithAbort,
     isPlainObject,
     throwIfSignalAborted,
@@ -67,11 +68,6 @@ export interface RequestEthereumJsonRpcResult<TResult = unknown> {
     response: unknown;
 }
 
-interface EthereumJsonRpcHttpErrorOptions {
-    status: number;
-    responseText?: string;
-}
-
 interface EthereumJsonRpcErrorOptions {
     method: string;
     response: unknown;
@@ -82,18 +78,6 @@ interface JsonRpcErrorPayload {
     code?: unknown;
     message?: unknown;
     data?: unknown;
-}
-
-class EthereumJsonRpcHttpError extends Error {
-    readonly status: number;
-    readonly responseText: string | undefined;
-
-    constructor(message: string, { status, responseText }: EthereumJsonRpcHttpErrorOptions) {
-        super(message);
-        this.name = 'EthereumJsonRpcHttpError';
-        this.status = status;
-        this.responseText = responseText;
-    }
 }
 
 class EthereumJsonRpcError extends Error {
@@ -123,10 +107,6 @@ class EthereumJsonRpcError extends Error {
     }
 }
 
-function isEthereumJsonRpcHttpError(error: unknown): error is EthereumJsonRpcHttpError {
-    return error instanceof EthereumJsonRpcHttpError;
-}
-
 function readErrorStringChain(error: unknown, key: string): string[] {
     const values: string[] = [];
     let current: unknown = error;
@@ -144,7 +124,7 @@ function shouldRetryError(error: unknown): boolean {
     if (!error) {
         return false;
     }
-    if (isEthereumJsonRpcHttpError(error)) {
+    if (error instanceof HttpStatusError) {
         return error.status === 429 || error.status >= 500;
     }
     if (error instanceof EthereumJsonRpcError) {
@@ -317,15 +297,12 @@ async function requestEthereumJsonRpcWithRetryPolicy<TResult = unknown>(
             const responseText = await invokeWithAbort(() => response.text(), requestSignal.signal);
 
             if (!response.ok) {
-                throw new EthereumJsonRpcHttpError(
-                    `Ethereum JSON-RPC request failed with ${response.status} ${
-                        response.statusText || 'Unknown Status'
-                    }.`,
-                    {
-                        status: response.status,
-                        responseText,
-                    }
-                );
+                throw new HttpStatusError({
+                    operation: 'Ethereum JSON-RPC request',
+                    status: response.status,
+                    statusText: response.statusText,
+                    responseText,
+                });
             }
 
             const parsed = parseJsonRpcResponse({
@@ -374,7 +351,6 @@ async function requestEthereumJsonRpc<TResult = unknown>(
 
 export {
     EthereumJsonRpcError,
-    EthereumJsonRpcHttpError,
     requestEthereumJsonRpc,
     requestEthereumJsonRpcWithRetryPolicy,
 };

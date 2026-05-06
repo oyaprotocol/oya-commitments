@@ -14,6 +14,7 @@ import {
     createHttpConfig,
     createTimeoutSignal,
     hasRetryableNetworkErrorCode,
+    HttpStatusError,
     invokeWithAbort,
     isPlainObject,
     RETRYABLE_HTTP_NETWORK_ERROR_CODES,
@@ -186,6 +187,22 @@ test('createHttpConfig validates and freezes HTTP transport configuration', () =
             }),
         /config\.url must be a non-empty string/
     );
+});
+
+test('HttpStatusError captures normalized HTTP failure details', () => {
+    const error = new HttpStatusError({
+        operation: 'Example request',
+        status: 503,
+        statusText: ' Service Unavailable ',
+        responseText: '{"error":"temporary outage"}',
+    });
+
+    assert.equal(error.name, 'HttpStatusError');
+    assert.equal(error.message, 'Example request failed with 503 Service Unavailable.');
+    assert.equal(error.operation, 'Example request');
+    assert.equal(error.status, 503);
+    assert.equal(error.statusText, 'Service Unavailable');
+    assert.equal(error.responseText, '{"error":"temporary outage"}');
 });
 
 test('hasRetryableNetworkErrorCode detects retryable HTTP network codes', () => {
