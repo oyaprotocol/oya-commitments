@@ -227,7 +227,7 @@ function normalizeEthereumJsonRpcError(error: unknown): Error {
     return new Error(`Ethereum JSON-RPC request failed: ${String(error)}`);
 }
 
-async function requestEthereumJsonRpcWithRetryPolicy<TResult = unknown>(
+async function requestEthereumJsonRpcWithCustomRetryPolicy<TResult = unknown>(
     {
         config,
         fetch,
@@ -310,11 +310,11 @@ async function requestEthereumJsonRpcWithRetryPolicy<TResult = unknown>(
 async function requestEthereumJsonRpc<TResult = unknown>(
     options: RequestEthereumJsonRpcOptions
 ): Promise<RequestEthereumJsonRpcResult<TResult>> {
-    return await requestEthereumJsonRpcWithRetryPolicy(options, shouldRetryMethod);
+    return await requestEthereumJsonRpcWithCustomRetryPolicy(options, shouldRetryMethod);
 }
 
 export {
     EthereumJsonRpcError,
     requestEthereumJsonRpc,
-    requestEthereumJsonRpcWithRetryPolicy,
+    requestEthereumJsonRpcWithCustomRetryPolicy,
 };

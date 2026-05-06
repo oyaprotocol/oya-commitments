@@ -8,7 +8,7 @@ import {
 import {
     EthereumJsonRpcError,
     requestEthereumJsonRpc,
-    requestEthereumJsonRpcWithRetryPolicy,
+    requestEthereumJsonRpcWithCustomRetryPolicy,
 } from './request-utils.js';
 import type { RequestEthereumJsonRpcOptions } from './request-utils.js';
 
@@ -206,7 +206,7 @@ async function ethSendRawTransaction({
             : assertBytes32HexString(transactionHash, 'transactionHash');
 
     try {
-        const result = await requestEthereumJsonRpcWithRetryPolicy<string>(
+        const result = await requestEthereumJsonRpcWithCustomRetryPolicy<string>(
             createJsonRpcOptions({
                 config,
                 fetch,

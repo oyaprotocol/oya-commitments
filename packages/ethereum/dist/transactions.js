@@ -1,5 +1,5 @@
 import { assertBytes32HexString, assertHexData, isPlainObject, } from '@oyaprotocol/utils';
-import { EthereumJsonRpcError, requestEthereumJsonRpc, requestEthereumJsonRpcWithRetryPolicy, } from './request-utils.js';
+import { EthereumJsonRpcError, requestEthereumJsonRpc, requestEthereumJsonRpcWithCustomRetryPolicy, } from './request-utils.js';
 const RAW_TRANSACTION_RECOVERY_MESSAGES = [
     'already known',
     'known transaction',
@@ -103,7 +103,7 @@ async function ethSendRawTransaction({ config, fetch, rawTransaction, transactio
         ? null
         : assertBytes32HexString(transactionHash, 'transactionHash');
     try {
-        const result = await requestEthereumJsonRpcWithRetryPolicy(createJsonRpcOptions({
+        const result = await requestEthereumJsonRpcWithCustomRetryPolicy(createJsonRpcOptions({
             config,
             fetch,
             method: 'eth_sendRawTransaction',

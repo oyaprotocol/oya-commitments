@@ -157,7 +157,7 @@ function normalizeEthereumJsonRpcError(error) {
     }
     return new Error(`Ethereum JSON-RPC request failed: ${String(error)}`);
 }
-async function requestEthereumJsonRpcWithRetryPolicy({ config, fetch, method, params = [], id, signal, }, shouldRetryJsonRpcMethod) {
+async function requestEthereumJsonRpcWithCustomRetryPolicy({ config, fetch, method, params = [], id, signal, }, shouldRetryJsonRpcMethod) {
     if (config === null || typeof config !== 'object' || Array.isArray(config)) {
         throw new Error('config must be an object.');
     }
@@ -221,7 +221,7 @@ async function requestEthereumJsonRpcWithRetryPolicy({ config, fetch, method, pa
     });
 }
 async function requestEthereumJsonRpc(options) {
-    return await requestEthereumJsonRpcWithRetryPolicy(options, shouldRetryMethod);
+    return await requestEthereumJsonRpcWithCustomRetryPolicy(options, shouldRetryMethod);
 }
-export { EthereumJsonRpcError, requestEthereumJsonRpc, requestEthereumJsonRpcWithRetryPolicy, };
+export { EthereumJsonRpcError, requestEthereumJsonRpc, requestEthereumJsonRpcWithCustomRetryPolicy, };
 //# sourceMappingURL=request-utils.js.map
