@@ -12,7 +12,7 @@ import {
 } from './request-utils.js';
 import type { RequestEthereumJsonRpcOptions } from './request-utils.js';
 
-const RAW_TRANSACTION_RECOVERY_MESSAGES = [
+const RAW_TRANSACTION_DUPLICATE_MESSAGES = [
     'already known',
     'known transaction',
     'already imported',
@@ -76,7 +76,7 @@ function isDuplicateRawTransactionError(error: unknown): error is EthereumJsonRp
         return false;
     }
     const message = error.message.toLowerCase();
-    return RAW_TRANSACTION_RECOVERY_MESSAGES.some((text) => message.includes(text));
+    return RAW_TRANSACTION_DUPLICATE_MESSAGES.some((text) => message.includes(text));
 }
 
 function transactionLookupMatchesHash(result: unknown, transactionHash: string): boolean {

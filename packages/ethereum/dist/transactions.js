@@ -1,6 +1,6 @@
 import { assertBytes32HexString, assertHexData, isPlainObject, } from '@oyaprotocol/utils';
 import { EthereumJsonRpcError, requestEthereumJsonRpc, requestEthereumJsonRpcWithCustomRetryPolicy, } from './request-utils.js';
-const RAW_TRANSACTION_RECOVERY_MESSAGES = [
+const RAW_TRANSACTION_DUPLICATE_MESSAGES = [
     'already known',
     'known transaction',
     'already imported',
@@ -30,7 +30,7 @@ function isDuplicateRawTransactionError(error) {
         return false;
     }
     const message = error.message.toLowerCase();
-    return RAW_TRANSACTION_RECOVERY_MESSAGES.some((text) => message.includes(text));
+    return RAW_TRANSACTION_DUPLICATE_MESSAGES.some((text) => message.includes(text));
 }
 function transactionLookupMatchesHash(result, transactionHash) {
     if (!isPlainObject(result)) {
