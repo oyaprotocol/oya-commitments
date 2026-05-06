@@ -117,7 +117,7 @@ function createJsonRpcOptions({
     };
 }
 
-function shouldRetryRawTransactionMethod(method: string): boolean {
+function isRawTransactionMethod(method: string): boolean {
     return method === 'eth_sendRawTransaction';
 }
 
@@ -215,7 +215,7 @@ async function ethSendRawTransaction({
                 id,
                 signal,
             }),
-            shouldRetryRawTransactionMethod
+            isRawTransactionMethod
         );
         const returnedTransactionHash = assertBytes32HexString(result.result, 'result');
 

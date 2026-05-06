@@ -52,7 +52,7 @@ function createJsonRpcOptions({ config, fetch, method, params, id, signal, }) {
         ...(signal === undefined ? {} : { signal }),
     };
 }
-function shouldRetryRawTransactionMethod(method) {
+function isRawTransactionMethod(method) {
     return method === 'eth_sendRawTransaction';
 }
 async function recoverRawTransactionSubmission({ config, fetch, transactionHash, id, signal, originalError, }) {
@@ -110,7 +110,7 @@ async function ethSendRawTransaction({ config, fetch, rawTransaction, transactio
             params: [validatedRawTransaction],
             id,
             signal,
-        }), shouldRetryRawTransactionMethod);
+        }), isRawTransactionMethod);
         const returnedTransactionHash = assertBytes32HexString(result.result, 'result');
         if (validatedTransactionHash !== null &&
             returnedTransactionHash.toLowerCase() !== validatedTransactionHash.toLowerCase()) {
