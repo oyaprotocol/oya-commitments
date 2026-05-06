@@ -131,21 +131,11 @@ async function recoverRawTransactionSubmission({
 }: {
     config: HttpConfig;
     fetch: HttpPostFetchLike<string>;
-    transactionHash: string | null;
+    transactionHash: string;
     id: string | number | undefined;
     signal: AbortSignal | undefined;
     originalError: EthereumJsonRpcError;
 }): Promise<EthSendRawTransactionResult> {
-    if (transactionHash === null) {
-        throw new EthereumRawTransactionRecoveryError(
-            'eth_sendRawTransaction may have been accepted before a retry returned a duplicate transaction error; provide transactionHash to verify acceptance.',
-            {
-                transactionHash,
-                originalError,
-            }
-        );
-    }
-
     try {
         const lookup = await requestEthereumJsonRpc(
             createJsonRpcOptions({
@@ -237,6 +227,15 @@ async function ethSendRawTransaction({
     } catch (error) {
         if (!isDuplicateRawTransactionError(error)) {
             throw error;
+        }
+        if (validatedTransactionHash === null) {
+            throw new EthereumRawTransactionRecoveryError(
+                'eth_sendRawTransaction may have been accepted before a retry returned a duplicate transaction error; provide transactionHash to verify acceptance.',
+                {
+                    transactionHash: validatedTransactionHash,
+                    originalError: error,
+                }
+            );
         }
         return await recoverRawTransactionSubmission({
             config,
