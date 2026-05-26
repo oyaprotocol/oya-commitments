@@ -20,6 +20,7 @@ The signed message is intentionally text-first. There is no protocol `version`, 
 
 - [x] 2026-05-24: Reviewed `PLANS.md`, `packages/AGENTS.md`, current package docs, and the placeholder `packages/messages` implementation before drafting this plan.
 - [x] 2026-05-24: Created this draft ExecPlan for user review before implementation.
+- [x] 2026-05-26: Updated the proposed Ethereum signature implementation to use focused `@noble` crypto libraries instead of `viem`.
 - [ ] Incorporate user review feedback into this plan before writing package code.
 - [ ] Implement the message schema, validation, Ethereum signature verification, allowlist authorization, and tests in `packages/messages`.
 - [ ] Update package documentation and validation evidence after implementation.
@@ -49,9 +50,9 @@ The signed message is intentionally text-first. There is no protocol `version`, 
   Rationale: This keeps the protocol understandable to users and compatible with common wallet `personal_sign` / EIP-191 signed-message behavior. It also avoids hidden canonical JSON fields that would make the message look simple while signing something larger.
   Date/Author: 2026-05-24 / Codex.
 
-- Decision: Implement built-in Ethereum signature verification in `@oyaprotocol/messages` using a package dependency such as `viem`.
-  Rationale: A message-ingress package should be able to verify messages by itself. Requiring every node to inject its own recovery function would leave the core package incomplete. `viem` provides audited Ethereum address and signed-message helpers already familiar in the repository's JavaScript ecosystem.
-  Date/Author: 2026-05-24 / Codex.
+- Decision: Implement built-in Ethereum signature verification in `@oyaprotocol/messages` using focused `@noble` crypto libraries rather than a higher-level Ethereum client package such as `viem`.
+  Rationale: A message-ingress package should be able to verify messages by itself, but it only needs Keccak-256 hashing and secp256k1 public-key recovery. `@noble/hashes` and `@noble/curves` keep the dependency surface narrower than a full Ethereum client while avoiding hand-rolled cryptography.
+  Date/Author: 2026-05-26 / Codex.
 
 - Decision: The package may expose server-agnostic HTTP helper functions, but it must not start a server or own routing.
   Rationale: The goal is Internet ingress, but `packages/` must avoid app wiring, daemon startup, environment loading, and repo-specific process behavior. A node daemon can mount the package helper behind `POST /v1/messages`.
@@ -134,11 +135,12 @@ Work from the repository root unless a command says otherwise.
 
     Expected result: confirm the package is a placeholder and that package-local instructions still prohibit importing legacy runtime code.
 
-2. Add the Ethereum signature dependency to `packages/messages/package.json`.
+2. Add focused Ethereum signature dependencies to `packages/messages/package.json`.
 
-    Proposed dependency:
+    Proposed dependencies:
 
-        "viem": "<current compatible version>"
+        "@noble/curves": "<current compatible version>"
+        "@noble/hashes": "<current compatible version>"
 
     Use `npm --prefix packages install` after editing package metadata so `packages/package-lock.json` records the workspace dependency. If the environment blocks registry access, request normal network approval rather than vendoring code or copying dependencies from another workspace.
 
@@ -166,7 +168,10 @@ Work from the repository root unless a command says otherwise.
     The function should:
 
     - normalize the body;
-    - recover the Ethereum address from the signature over exactly `text`;
+    - compute the EIP-191 Ethereum signed-message digest for exactly `text` using the prefix `"\x19Ethereum Signed Message:\n" + byteLength(text) + text`;
+    - recover the secp256k1 public key from the digest and signature using `@noble/curves`;
+    - derive the Ethereum address as the last 20 bytes of Keccak-256 over the uncompressed public key without its `0x04` prefix, using `@noble/hashes`;
+    - normalize common signature recovery IDs, including `v` values `27`/`28` and `0`/`1`;
     - compare the recovered address to `signer` case-insensitively after address normalization;
     - check the normalized signer against the supplied allowlist;
     - return a normalized accepted message with `text`, normalized signer, original signature, and message key.
@@ -269,7 +274,7 @@ This work is package-local and should be safe to retry.
 
 If dependency installation fails because network access is unavailable, leave the source changes uncommitted and record the missing install command in `Outcomes & Retrospective`. Do not copy dependencies from another package's `node_modules`.
 
-If a chosen dependency is rejected during review, revert only the dependency and the package-local verification adapter, then replace it with either a smaller Ethereum signature dependency or an injected verifier interface. The schema, ingress helper, tests around malformed input, and docs can remain mostly intact.
+If a chosen dependency is rejected during review, revert only the dependency and the package-local verification adapter, then replace it with either a different focused Ethereum signature dependency or an injected verifier interface. The schema, ingress helper, tests around malformed input, and docs can remain mostly intact.
 
 If the package API names change during review, update `packages/messages/README.md`, tests, and smoke-import commands in this plan in the same change. The package root `exports` surface should remain the only public import path.
 
@@ -330,7 +335,9 @@ Planned exported functions and types:
 
 Runtime dependency:
 
-- Ethereum signed-message recovery helper, proposed as `viem`. The package should use it only for address normalization and EIP-191 signed text recovery or verification.
+- `@noble/hashes` for Keccak-256 hashing.
+- `@noble/curves` for secp256k1 public-key recovery.
+- The package should use these dependencies only for EIP-191 signed-text verification and Ethereum address derivation. It should not add a higher-level Ethereum client dependency for this work.
 
 Internal package dependency:
 
