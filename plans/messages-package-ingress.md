@@ -59,7 +59,11 @@ The signed message is intentionally text-first. There is no protocol `version`, 
   Date/Author: 2026-05-24 / Codex.
 
 - Decision: Public function and type names should avoid repeating the word "Ingress".
-  Rationale: The package name and documentation already establish that this work is about receiving signed messages. Shorter names such as `handleSignedTextMessage(...)` are clearer at call sites than `handleSignedTextMessageIngress(...)`.
+  Rationale: The package name and documentation already establish that this work is about receiving signed messages. Shorter names such as `handleSignedMessage(...)` are clearer at call sites than `handleSignedMessageIngress(...)`.
+  Date/Author: 2026-05-26 / Codex.
+
+- Decision: Public function and type names should also avoid repeating the word "Text".
+  Rationale: The v1 package contract already says messages contain a `text` field. Names such as `normalizeSignedMessage(...)` and `verifySignedMessage(...)` are shorter while remaining unambiguous inside `@oyaprotocol/messages`.
   Date/Author: 2026-05-26 / Codex.
 
 - Decision: No cryptographic freshness or replay protection is part of v1.
@@ -152,8 +156,8 @@ Work from the repository root unless a command says otherwise.
 
     Add public functions with names close to:
 
-        normalizeSignedTextMessage(input, options)
-        createSignedTextMessageKey(message)
+        normalizeSignedMessage(input, options)
+        createSignedMessageKey(message)
 
     The validator should require:
 
@@ -167,7 +171,7 @@ Work from the repository root unless a command says otherwise.
 
     Add a public function with a name close to:
 
-        verifySignedTextMessage(input, options)
+        verifySignedMessage(input, options)
 
     The function should:
 
@@ -184,7 +188,7 @@ Work from the repository root unless a command says otherwise.
 
     Add a public helper with a name close to:
 
-        handleSignedTextMessage(request, options)
+        handleSignedMessage(request, options)
 
     Keep it server-agnostic. It may accept method, headers, and already-read body text or bytes, then return:
 
@@ -231,7 +235,7 @@ Work from the repository root unless a command says otherwise.
 
         npm --prefix packages run build
         node --test packages/messages/test/*.test.js
-        node --input-type=module -e "import('./packages/messages/dist/index.js').then((m) => console.log(typeof m.verifySignedTextMessage, typeof m.handleSignedTextMessage))"
+        node --input-type=module -e "import('./packages/messages/dist/index.js').then((m) => console.log(typeof m.verifySignedMessage, typeof m.handleSignedMessage))"
 
     Expected result: TypeScript build succeeds, all message tests pass, and the smoke import prints `function function`.
 
@@ -262,7 +266,7 @@ Required commands from the repository root:
 
     npm --prefix packages run build
     node --test packages/messages/test/*.test.js
-    node --input-type=module -e "import('./packages/messages/dist/index.js').then((m) => console.log(typeof m.verifySignedTextMessage, typeof m.handleSignedTextMessage))"
+    node --input-type=module -e "import('./packages/messages/dist/index.js').then((m) => console.log(typeof m.verifySignedMessage, typeof m.handleSignedMessage))"
 
 Broader package regression commands:
 
@@ -326,15 +330,15 @@ Public package entrypoint:
 
 Planned exported functions and types:
 
-- `normalizeSignedTextMessage(input, options)`
-- `verifySignedTextMessage(input, options)`
-- `createSignedTextMessageKey(message)`
-- `handleSignedTextMessage(request, options)`
-- `SignedTextMessageInput`
-- `SignedTextMessage`
-- `AcceptedSignedTextMessage`
-- `HandleSignedTextMessageOptions`
-- `HandleSignedTextMessageResult`
+- `normalizeSignedMessage(input, options)`
+- `verifySignedMessage(input, options)`
+- `createSignedMessageKey(message)`
+- `handleSignedMessage(request, options)`
+- `SignedMessageInput`
+- `SignedMessage`
+- `AcceptedSignedMessage`
+- `HandleSignedMessageOptions`
+- `HandleSignedMessageResult`
 - structured error types or error result codes for invalid shape, invalid signature, unauthorized signer, and body/content-type failures
 
 Runtime dependency:
