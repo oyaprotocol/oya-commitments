@@ -58,6 +58,10 @@ The signed message is intentionally text-first. There is no protocol `version`, 
   Rationale: The goal is Internet ingress, but `packages/` must avoid app wiring, daemon startup, environment loading, and repo-specific process behavior. A node daemon can mount the package helper behind `POST /v1/messages`.
   Date/Author: 2026-05-24 / Codex.
 
+- Decision: Public function and type names should avoid repeating the word "Ingress".
+  Rationale: The package name and documentation already establish that this work is about receiving signed messages. Shorter names such as `handleSignedTextMessage(...)` are clearer at call sites than `handleSignedTextMessageIngress(...)`.
+  Date/Author: 2026-05-26 / Codex.
+
 - Decision: No cryptographic freshness or replay protection is part of v1.
   Rationale: With no timestamp, nonce, message ID, audience, or domain field, the same signed text remains valid anywhere the signer is authorized. The package can expose deterministic message-key helpers for dedupe, but durable replay policy belongs to the node.
   Date/Author: 2026-05-24 / Codex.
@@ -176,11 +180,11 @@ Work from the repository root unless a command says otherwise.
     - check the normalized signer against the supplied allowlist;
     - return a normalized accepted message with `text`, normalized signer, original signature, and message key.
 
-5. Implement HTTP-shaped ingress helper.
+5. Implement HTTP-shaped message helper.
 
     Add a public helper with a name close to:
 
-        handleSignedTextMessageIngress(request, options)
+        handleSignedTextMessage(request, options)
 
     Keep it server-agnostic. It may accept method, headers, and already-read body text or bytes, then return:
 
@@ -227,7 +231,7 @@ Work from the repository root unless a command says otherwise.
 
         npm --prefix packages run build
         node --test packages/messages/test/*.test.js
-        node --input-type=module -e "import('./packages/messages/dist/index.js').then((m) => console.log(typeof m.verifySignedTextMessage, typeof m.handleSignedTextMessageIngress))"
+        node --input-type=module -e "import('./packages/messages/dist/index.js').then((m) => console.log(typeof m.verifySignedTextMessage, typeof m.handleSignedTextMessage))"
 
     Expected result: TypeScript build succeeds, all message tests pass, and the smoke import prints `function function`.
 
@@ -258,7 +262,7 @@ Required commands from the repository root:
 
     npm --prefix packages run build
     node --test packages/messages/test/*.test.js
-    node --input-type=module -e "import('./packages/messages/dist/index.js').then((m) => console.log(typeof m.verifySignedTextMessage, typeof m.handleSignedTextMessageIngress))"
+    node --input-type=module -e "import('./packages/messages/dist/index.js').then((m) => console.log(typeof m.verifySignedTextMessage, typeof m.handleSignedTextMessage))"
 
 Broader package regression commands:
 
@@ -325,12 +329,12 @@ Planned exported functions and types:
 - `normalizeSignedTextMessage(input, options)`
 - `verifySignedTextMessage(input, options)`
 - `createSignedTextMessageKey(message)`
-- `handleSignedTextMessageIngress(request, options)`
+- `handleSignedTextMessage(request, options)`
 - `SignedTextMessageInput`
 - `SignedTextMessage`
 - `AcceptedSignedTextMessage`
-- `SignedTextMessageIngressOptions`
-- `SignedTextMessageIngressResult`
+- `HandleSignedTextMessageOptions`
+- `HandleSignedTextMessageResult`
 - structured error types or error result codes for invalid shape, invalid signature, unauthorized signer, and body/content-type failures
 
 Runtime dependency:
