@@ -21,9 +21,10 @@ The signed message is intentionally text-first. There is no protocol `version`, 
 - [x] 2026-05-24: Reviewed `PLANS.md`, `packages/AGENTS.md`, current package docs, and the placeholder `packages/messages` implementation before drafting this plan.
 - [x] 2026-05-24: Created this draft ExecPlan for user review before implementation.
 - [x] 2026-05-26: Updated the proposed Ethereum signature implementation to use focused `@noble` crypto libraries instead of `viem`.
-- [ ] Incorporate user review feedback into this plan before writing package code.
-- [ ] Implement the message schema, validation, Ethereum signature verification, allowlist authorization, and tests in `packages/messages`.
-- [ ] Update package documentation and validation evidence after implementation.
+- [x] 2026-06-05: Incorporated review feedback to start with the smallest useful slice: strict schema normalization before crypto dependencies or HTTP handling.
+- [x] 2026-06-05: Implemented `normalizeSignedMessage(...)`, `SignedMessageValidationError`, schema exports, and focused schema tests in `packages/messages`.
+- [ ] Implement Ethereum signature verification, allowlist authorization, deterministic message keys, HTTP-shaped handling, and remaining tests in `packages/messages`.
+- [ ] Update final package documentation and validation evidence after the full ingress implementation is complete.
 
 ## Surprises & Discoveries
 
@@ -35,6 +36,9 @@ The signed message is intentionally text-first. There is no protocol `version`, 
 
 - Observation: Existing message ingress and publication logic in `agent/src/lib/` can inform the design but must not be reused by import.
   Evidence: `agent/src/lib/message-api.js`, `agent/src/lib/message-signing.js`, and `agent/src/lib/message-publication-api.js` already contain useful reference behavior for signed requests, HTTP status mapping, and publication flows, but package rules prohibit importing that code into `packages/messages`.
+
+- Observation: The first implementation milestone removed the `packageInfo` placeholder export and replaced it with real schema-validation exports, but it does not yet verify signatures or authorize signers.
+  Evidence: `packages/messages/src/index.ts` now exports `normalizeSignedMessage(...)` and `SignedMessageValidationError`; `packages/messages/test/schema.test.js` covers schema behavior.
 
 ## Decision Log
 
@@ -70,9 +74,29 @@ The signed message is intentionally text-first. There is no protocol `version`, 
   Rationale: With no timestamp, nonce, message ID, audience, or domain field, the same signed text remains valid anywhere the signer is authorized. The package can expose deterministic message-key helpers for dedupe, but durable replay policy belongs to the node.
   Date/Author: 2026-05-24 / Codex.
 
+- Decision: Reject unknown top-level fields in the v1 signed message body.
+  Rationale: The wire contract is intentionally small and audit-focused. Rejecting extra fields prevents callers from assuming hidden package semantics for fields such as `meta`, `chainId`, or `version`, and makes the node's responsibility for interpreting only `text` explicit.
+  Date/Author: 2026-06-05 / Codex.
+
+- Decision: Preserve `text` exactly during schema normalization and only reject the zero-length empty string.
+  Rationale: The signed payload is exactly the `text` string, so trimming or canonicalizing whitespace would change what later signature verification must recover. A whitespace-only string can still be a signed text message; policy about usefulness belongs above the package.
+  Date/Author: 2026-06-05 / Codex.
+
 ## Outcomes & Retrospective
 
-This section is intentionally empty until implementation begins. After each milestone, update it with what changed, which validation commands were run, and whether the resulting behavior matched this plan.
+The first schema milestone is complete. `@oyaprotocol/messages` now has a real package-root API for validating the v1 `{ text, signer, signature }` body before signature verification is added. The implementation preserves exact text bytes, lowercases the signer address after shape validation, preserves the submitted signature string, rejects unknown fields, and throws structured `SignedMessageValidationError` instances for request-shape failures.
+
+Validation run on 2026-06-05:
+
+    npm --prefix packages run build
+    node --test packages/messages/test/schema.test.js
+    node --input-type=module -e "import('./packages/messages/dist/index.js').then((m) => console.log(typeof m.normalizeSignedMessage, typeof m.SignedMessageValidationError, Object.hasOwn(m, 'packageInfo')))"
+    node --test packages/utils/test/*.js
+    node --test packages/ipfs/test/*.js
+    node --test packages/ethereum/test/*.js
+
+The schema test reported 6 passing tests, and the smoke import printed `function function false`.
+The broader package regression tests also passed: 11 utils tests, 45 IPFS tests, and 20 Ethereum tests.
 
 ## Context and Orientation
 
@@ -80,8 +104,10 @@ The hardened package workspace lives under `packages/`.
 
 The relevant files at the start of this plan are:
 
-- `packages/messages/src/index.ts`: currently exports only placeholder package metadata.
-- `packages/messages/README.md`: currently says the package is a placeholder shell.
+- `packages/messages/src/index.ts`: exports the package-root schema API and no longer exports placeholder metadata.
+- `packages/messages/src/schema.ts`: validates the v1 signed text message shape and defines structured schema errors.
+- `packages/messages/test/schema.test.js`: covers schema acceptance, exact text preservation, unknown-field rejection, text limits, Ethereum address shape, and signature shape.
+- `packages/messages/README.md`: documents the current schema-validation API and remaining planned signature/HTTP work.
 - `packages/messages/package.json`: exposes the package root through `dist/index.js` and `dist/index.d.ts`.
 - `packages/package.json`: owns the TypeScript build command for all kernel packages.
 - `packages/AGENTS.md`: local instructions for package code, including no imports from legacy runtime directories.
