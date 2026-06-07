@@ -55,7 +55,7 @@ function requireOnlySignedMessageFields(input: Record<string, unknown>): void {
     }
 }
 
-function normalizeText(value: unknown): string {
+function validateText(value: unknown): string {
     if (typeof value !== 'string') {
         throw createValidationError({
             code: 'invalid_text',
@@ -72,17 +72,17 @@ function normalizeText(value: unknown): string {
     return value;
 }
 
-function normalizeSigner(value: unknown): string {
+function validateSigner(value: unknown): string {
     if (typeof value !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(value)) {
         throw createValidationError({
             code: 'invalid_signer',
             message: 'signer must be a 20-byte 0x-prefixed Ethereum address.',
         });
     }
-    return value.toLowerCase();
+    return value;
 }
 
-function normalizeSignature(value: unknown): string {
+function validateSignature(value: unknown): string {
     if (typeof value !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(value)) {
         throw createValidationError({
             code: 'invalid_signature',
@@ -92,7 +92,7 @@ function normalizeSignature(value: unknown): string {
     return value;
 }
 
-function normalizeSignedMessage(input: unknown) {
+function validateSignedMessage(input: unknown) {
     if (!isPlainObject(input)) {
         throw createValidationError({
             code: 'invalid_body',
@@ -101,9 +101,9 @@ function normalizeSignedMessage(input: unknown) {
     }
 
     requireOnlySignedMessageFields(input);
-    const text = normalizeText(input.text);
-    const signer = normalizeSigner(input.signer);
-    const signature = normalizeSignature(input.signature);
+    const text = validateText(input.text);
+    const signer = validateSigner(input.signer);
+    const signature = validateSignature(input.signature);
 
     return Object.freeze({
         text,
@@ -114,7 +114,7 @@ function normalizeSignedMessage(input: unknown) {
 
 export {
     SignedMessageValidationError,
-    normalizeSignedMessage,
+    validateSignedMessage,
 };
 export type {
     SignedMessageInput,

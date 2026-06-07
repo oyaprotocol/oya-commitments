@@ -1,6 +1,6 @@
 export {
     SignedMessageValidationError,
-    normalizeSignedMessage,
+    validateSignedMessage,
 } from './schema.js';
 export type {
     SignedMessageInput,

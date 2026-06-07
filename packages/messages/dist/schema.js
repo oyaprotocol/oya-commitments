@@ -27,7 +27,7 @@ function requireOnlySignedMessageFields(input) {
         }
     }
 }
-function normalizeText(value) {
+function validateText(value) {
     if (typeof value !== 'string') {
         throw createValidationError({
             code: 'invalid_text',
@@ -42,16 +42,16 @@ function normalizeText(value) {
     }
     return value;
 }
-function normalizeSigner(value) {
+function validateSigner(value) {
     if (typeof value !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(value)) {
         throw createValidationError({
             code: 'invalid_signer',
             message: 'signer must be a 20-byte 0x-prefixed Ethereum address.',
         });
     }
-    return value.toLowerCase();
+    return value;
 }
-function normalizeSignature(value) {
+function validateSignature(value) {
     if (typeof value !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(value)) {
         throw createValidationError({
             code: 'invalid_signature',
@@ -60,7 +60,7 @@ function normalizeSignature(value) {
     }
     return value;
 }
-function normalizeSignedMessage(input) {
+function validateSignedMessage(input) {
     if (!isPlainObject(input)) {
         throw createValidationError({
             code: 'invalid_body',
@@ -68,14 +68,14 @@ function normalizeSignedMessage(input) {
         });
     }
     requireOnlySignedMessageFields(input);
-    const text = normalizeText(input.text);
-    const signer = normalizeSigner(input.signer);
-    const signature = normalizeSignature(input.signature);
+    const text = validateText(input.text);
+    const signer = validateSigner(input.signer);
+    const signature = validateSignature(input.signature);
     return Object.freeze({
         text,
         signer,
         signature,
     });
 }
-export { SignedMessageValidationError, normalizeSignedMessage, };
+export { SignedMessageValidationError, validateSignedMessage, };
 //# sourceMappingURL=schema.js.map

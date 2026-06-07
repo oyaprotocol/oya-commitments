@@ -16,10 +16,10 @@ declare class SignedMessageValidationError extends Error {
     readonly details: Readonly<Record<string, unknown>> | undefined;
     constructor({ code, message, status, details }: SignedMessageValidationErrorOptions);
 }
-declare function normalizeSignedMessage(input: unknown): Readonly<{
+declare function validateSignedMessage(input: unknown): Readonly<{
     text: string;
     signer: string;
     signature: string;
 }>;
-export { SignedMessageValidationError, normalizeSignedMessage, };
+export { SignedMessageValidationError, validateSignedMessage, };
 export type { SignedMessageInput, SignedMessageValidationErrorCode, SignedMessageValidationErrorOptions, };

@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import {
     SignedMessageValidationError,
-    normalizeSignedMessage,
+    validateSignedMessage,
 } from '../dist/index.js';
 
 const VALID_SIGNER = '0x1111111111111111111111111111111111111111';
@@ -27,8 +27,8 @@ function assertValidationError(fn, { code, status = 400, message }) {
     );
 }
 
-test('normalizeSignedMessage validates and freezes the minimal signed message shape', () => {
-    const message = normalizeSignedMessage({
+test('validateSignedMessage validates and freezes the minimal signed message shape', () => {
+    const message = validateSignedMessage({
         text: 'Please withdraw 100 USDC.',
         signer: MIXED_CASE_SIGNER,
         signature: UPPERCASE_SIGNATURE,
@@ -36,15 +36,15 @@ test('normalizeSignedMessage validates and freezes the minimal signed message sh
 
     assert.deepEqual(message, {
         text: 'Please withdraw 100 USDC.',
-        signer: MIXED_CASE_SIGNER.toLowerCase(),
+        signer: MIXED_CASE_SIGNER,
         signature: UPPERCASE_SIGNATURE,
     });
     assert.equal(Object.isFrozen(message), true);
 });
 
-test('normalizeSignedMessage preserves exact text without trimming', () => {
+test('validateSignedMessage preserves exact text without trimming', () => {
     const text = '  keep leading and trailing spaces  ';
-    const message = normalizeSignedMessage({
+    const message = validateSignedMessage({
         text,
         signer: VALID_SIGNER,
         signature: VALID_SIGNATURE,
@@ -53,18 +53,18 @@ test('normalizeSignedMessage preserves exact text without trimming', () => {
     assert.equal(message.text, text);
 });
 
-test('normalizeSignedMessage rejects non-object bodies and unsupported fields', () => {
-    assertValidationError(() => normalizeSignedMessage(null), {
+test('validateSignedMessage rejects non-object bodies and unsupported fields', () => {
+    assertValidationError(() => validateSignedMessage(null), {
         code: 'invalid_body',
         message: /Request body must be a JSON object/,
     });
-    assertValidationError(() => normalizeSignedMessage([]), {
+    assertValidationError(() => validateSignedMessage([]), {
         code: 'invalid_body',
         message: /Request body must be a JSON object/,
     });
     assertValidationError(
         () =>
-            normalizeSignedMessage({
+            validateSignedMessage({
                 text: 'hello',
                 signer: VALID_SIGNER,
                 signature: VALID_SIGNATURE,
@@ -77,10 +77,10 @@ test('normalizeSignedMessage rejects non-object bodies and unsupported fields', 
     );
 });
 
-test('normalizeSignedMessage rejects missing, non-string, and empty text', () => {
+test('validateSignedMessage rejects missing, non-string, and empty text', () => {
     assertValidationError(
         () =>
-            normalizeSignedMessage({
+            validateSignedMessage({
                 signer: VALID_SIGNER,
                 signature: VALID_SIGNATURE,
             }),
@@ -91,7 +91,7 @@ test('normalizeSignedMessage rejects missing, non-string, and empty text', () =>
     );
     assertValidationError(
         () =>
-            normalizeSignedMessage({
+            validateSignedMessage({
                 text: 123,
                 signer: VALID_SIGNER,
                 signature: VALID_SIGNATURE,
@@ -103,7 +103,7 @@ test('normalizeSignedMessage rejects missing, non-string, and empty text', () =>
     );
     assertValidationError(
         () =>
-            normalizeSignedMessage({
+            validateSignedMessage({
                 text: '',
                 signer: VALID_SIGNER,
                 signature: VALID_SIGNATURE,
@@ -115,9 +115,9 @@ test('normalizeSignedMessage rejects missing, non-string, and empty text', () =>
     );
 });
 
-test('normalizeSignedMessage does not enforce message size', () => {
+test('validateSignedMessage does not enforce message size', () => {
     const text = 'x'.repeat(4097);
-    const message = normalizeSignedMessage({
+    const message = validateSignedMessage({
         text,
         signer: VALID_SIGNER,
         signature: VALID_SIGNATURE,
@@ -127,10 +127,10 @@ test('normalizeSignedMessage does not enforce message size', () => {
     assert.equal(Object.hasOwn(message, 'textByteLength'), false);
 });
 
-test('normalizeSignedMessage validates signer and signature hex shape', () => {
+test('validateSignedMessage validates signer and signature hex shape', () => {
     assertValidationError(
         () =>
-            normalizeSignedMessage({
+            validateSignedMessage({
                 text: 'hello',
                 signature: VALID_SIGNATURE,
             }),
@@ -141,7 +141,7 @@ test('normalizeSignedMessage validates signer and signature hex shape', () => {
     );
     assertValidationError(
         () =>
-            normalizeSignedMessage({
+            validateSignedMessage({
                 text: 'hello',
                 signer: 123,
                 signature: VALID_SIGNATURE,
@@ -153,7 +153,7 @@ test('normalizeSignedMessage validates signer and signature hex shape', () => {
     );
     assertValidationError(
         () =>
-            normalizeSignedMessage({
+            validateSignedMessage({
                 text: 'hello',
                 signer: `0x${'1'.repeat(39)}`,
                 signature: VALID_SIGNATURE,
@@ -165,7 +165,7 @@ test('normalizeSignedMessage validates signer and signature hex shape', () => {
     );
     assertValidationError(
         () =>
-            normalizeSignedMessage({
+            validateSignedMessage({
                 text: 'hello',
                 signer: VALID_SIGNER,
             }),
@@ -176,7 +176,7 @@ test('normalizeSignedMessage validates signer and signature hex shape', () => {
     );
     assertValidationError(
         () =>
-            normalizeSignedMessage({
+            validateSignedMessage({
                 text: 'hello',
                 signer: VALID_SIGNER,
                 signature: 123,
@@ -188,7 +188,7 @@ test('normalizeSignedMessage validates signer and signature hex shape', () => {
     );
     assertValidationError(
         () =>
-            normalizeSignedMessage({
+            validateSignedMessage({
                 text: 'hello',
                 signer: `0x${'g'.repeat(40)}`,
                 signature: VALID_SIGNATURE,
@@ -200,7 +200,7 @@ test('normalizeSignedMessage validates signer and signature hex shape', () => {
     );
     assertValidationError(
         () =>
-            normalizeSignedMessage({
+            validateSignedMessage({
                 text: 'hello',
                 signer: VALID_SIGNER,
                 signature: `0x${'a'.repeat(128)}`,
@@ -212,7 +212,7 @@ test('normalizeSignedMessage validates signer and signature hex shape', () => {
     );
     assertValidationError(
         () =>
-            normalizeSignedMessage({
+            validateSignedMessage({
                 text: 'hello',
                 signer: VALID_SIGNER,
                 signature: `0x${'z'.repeat(130)}`,
