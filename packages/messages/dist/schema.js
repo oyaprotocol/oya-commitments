@@ -1,7 +1,5 @@
 import { assertPositiveInteger, isPlainObject } from '@oyaprotocol/utils';
 const ALLOWED_SIGNED_MESSAGE_FIELDS = new Set(['text', 'signer', 'signature']);
-const ETHEREUM_ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
-const ETHEREUM_SIGNATURE_PATTERN = /^0x[0-9a-fA-F]{130}$/;
 class SignedMessageValidationError extends Error {
     code;
     status;
@@ -65,7 +63,7 @@ function normalizeText(value, maxTextBytes) {
     return value;
 }
 function normalizeSigner(value) {
-    if (typeof value !== 'string' || !ETHEREUM_ADDRESS_PATTERN.test(value)) {
+    if (typeof value !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(value)) {
         throw createValidationError({
             code: 'invalid_signer',
             message: 'signer must be a 20-byte 0x-prefixed Ethereum address.',
@@ -74,7 +72,7 @@ function normalizeSigner(value) {
     return value.toLowerCase();
 }
 function normalizeSignature(value) {
-    if (typeof value !== 'string' || !ETHEREUM_SIGNATURE_PATTERN.test(value)) {
+    if (typeof value !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(value)) {
         throw createValidationError({
             code: 'invalid_signature',
             message: 'signature must be a 65-byte 0x-prefixed Ethereum signature.',
