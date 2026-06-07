@@ -77,6 +77,25 @@ test('validateSignedMessage rejects non-object bodies and unsupported fields', (
     );
 });
 
+test('validateSignedMessage requires signed message fields to be own properties', () => {
+    Object.defineProperties(Object.prototype, {
+        text: { value: 'hello', configurable: true },
+        signer: { value: VALID_SIGNER, configurable: true },
+        signature: { value: VALID_SIGNATURE, configurable: true },
+    });
+
+    try {
+        assertValidationError(() => validateSignedMessage({}), {
+            code: 'invalid_text',
+            message: /text is required and must be a string/,
+        });
+    } finally {
+        delete Object.prototype.text;
+        delete Object.prototype.signer;
+        delete Object.prototype.signature;
+    }
+});
+
 test('validateSignedMessage rejects missing, non-string, and empty text', () => {
     assertValidationError(
         () =>

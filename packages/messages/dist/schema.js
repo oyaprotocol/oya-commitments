@@ -27,6 +27,26 @@ function requireOnlySignedMessageFields(input) {
         }
     }
 }
+function requireSignedMessageFields(input) {
+    if (!Object.hasOwn(input, 'text')) {
+        throw createValidationError({
+            code: 'invalid_text',
+            message: 'text is required and must be a string.',
+        });
+    }
+    if (!Object.hasOwn(input, 'signer')) {
+        throw createValidationError({
+            code: 'invalid_signer',
+            message: 'signer must be a 20-byte 0x-prefixed Ethereum address.',
+        });
+    }
+    if (!Object.hasOwn(input, 'signature')) {
+        throw createValidationError({
+            code: 'invalid_signature',
+            message: 'signature must be a 65-byte 0x-prefixed Ethereum signature.',
+        });
+    }
+}
 function validateText(value) {
     if (typeof value !== 'string') {
         throw createValidationError({
@@ -68,6 +88,7 @@ function validateSignedMessage(input) {
         });
     }
     requireOnlySignedMessageFields(input);
+    requireSignedMessageFields(input);
     const text = validateText(input.text);
     const signer = validateSigner(input.signer);
     const signature = validateSignature(input.signature);
