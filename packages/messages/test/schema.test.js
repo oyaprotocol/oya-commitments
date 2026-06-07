@@ -77,7 +77,7 @@ test('normalizeSignedMessage rejects non-object bodies and unsupported fields', 
     );
 });
 
-test('normalizeSignedMessage rejects missing, non-string, empty, and overlarge text', () => {
+test('normalizeSignedMessage rejects missing, non-string, and empty text', () => {
     assertValidationError(
         () =>
             normalizeSignedMessage({
@@ -113,24 +113,9 @@ test('normalizeSignedMessage rejects missing, non-string, empty, and overlarge t
             message: /text must be non-empty/,
         }
     );
-    assertValidationError(
-        () =>
-            normalizeSignedMessage(
-                {
-                    text: 'ééé',
-                    signer: VALID_SIGNER,
-                    signature: VALID_SIGNATURE,
-                },
-                { maxTextBytes: 5 }
-            ),
-        {
-            code: 'text_too_large',
-            message: /text exceeds maxTextBytes \(5\)/,
-        }
-    );
 });
 
-test('normalizeSignedMessage has no default text byte limit', () => {
+test('normalizeSignedMessage does not enforce message size', () => {
     const text = 'x'.repeat(4097);
     const message = normalizeSignedMessage({
         text,
@@ -190,20 +175,5 @@ test('normalizeSignedMessage validates signer and signature hex shape', () => {
             code: 'invalid_signature',
             message: /65-byte 0x-prefixed Ethereum signature/,
         }
-    );
-});
-
-test('normalizeSignedMessage validates maxTextBytes options', () => {
-    assert.throws(
-        () =>
-            normalizeSignedMessage(
-                {
-                    text: 'hello',
-                    signer: VALID_SIGNER,
-                    signature: VALID_SIGNATURE,
-                },
-                { maxTextBytes: 0 }
-            ),
-        /options\.maxTextBytes must be a positive integer/
     );
 });

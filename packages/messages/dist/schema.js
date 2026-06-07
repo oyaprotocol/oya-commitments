@@ -1,4 +1,4 @@
-import { assertPositiveInteger, isPlainObject } from '@oyaprotocol/utils';
+import { isPlainObject } from '@oyaprotocol/utils';
 const ALLOWED_SIGNED_MESSAGE_FIELDS = new Set(['text', 'signer', 'signature']);
 class SignedMessageValidationError extends Error {
     code;
@@ -16,13 +16,6 @@ class SignedMessageValidationError extends Error {
 function createValidationError(options) {
     return new SignedMessageValidationError(options);
 }
-function normalizeMaxTextBytes(options) {
-    const maxTextBytes = options?.maxTextBytes;
-    if (maxTextBytes === undefined) {
-        return undefined;
-    }
-    return assertPositiveInteger(maxTextBytes, 'options.maxTextBytes');
-}
 function requireOnlySignedMessageFields(input) {
     for (const field of Object.keys(input)) {
         if (!ALLOWED_SIGNED_MESSAGE_FIELDS.has(field)) {
@@ -34,7 +27,7 @@ function requireOnlySignedMessageFields(input) {
         }
     }
 }
-function normalizeText(value, maxTextBytes) {
+function normalizeText(value) {
     if (typeof value !== 'string') {
         throw createValidationError({
             code: 'invalid_text',
@@ -46,19 +39,6 @@ function normalizeText(value, maxTextBytes) {
             code: 'invalid_text',
             message: 'text must be non-empty.',
         });
-    }
-    if (maxTextBytes !== undefined) {
-        const textByteLength = new TextEncoder().encode(value).byteLength;
-        if (textByteLength > maxTextBytes) {
-            throw createValidationError({
-                code: 'text_too_large',
-                message: `text exceeds maxTextBytes (${maxTextBytes}).`,
-                details: {
-                    maxTextBytes,
-                    textByteLength,
-                },
-            });
-        }
     }
     return value;
 }
@@ -80,8 +60,7 @@ function normalizeSignature(value) {
     }
     return value;
 }
-function normalizeSignedMessage(input, options = {}) {
-    const maxTextBytes = normalizeMaxTextBytes(options);
+function normalizeSignedMessage(input) {
     if (!isPlainObject(input)) {
         throw createValidationError({
             code: 'invalid_body',
@@ -89,7 +68,7 @@ function normalizeSignedMessage(input, options = {}) {
         });
     }
     requireOnlySignedMessageFields(input);
-    const text = normalizeText(input.text, maxTextBytes);
+    const text = normalizeText(input.text);
     const signer = normalizeSigner(input.signer);
     const signature = normalizeSignature(input.signature);
     return Object.freeze({

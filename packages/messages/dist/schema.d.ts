@@ -3,10 +3,7 @@ interface SignedMessageInput {
     readonly signer: string;
     readonly signature: string;
 }
-interface NormalizeSignedMessageOptions {
-    readonly maxTextBytes?: number;
-}
-type SignedMessageValidationErrorCode = 'invalid_body' | 'unsupported_field' | 'invalid_text' | 'text_too_large' | 'invalid_signer' | 'invalid_signature';
+type SignedMessageValidationErrorCode = 'invalid_body' | 'unsupported_field' | 'invalid_text' | 'invalid_signer' | 'invalid_signature';
 interface SignedMessageValidationErrorOptions {
     readonly code: SignedMessageValidationErrorCode;
     readonly message: string;
@@ -19,10 +16,10 @@ declare class SignedMessageValidationError extends Error {
     readonly details: Readonly<Record<string, unknown>> | undefined;
     constructor({ code, message, status, details }: SignedMessageValidationErrorOptions);
 }
-declare function normalizeSignedMessage(input: unknown, options?: NormalizeSignedMessageOptions): Readonly<{
+declare function normalizeSignedMessage(input: unknown): Readonly<{
     text: string;
     signer: string;
     signature: string;
 }>;
 export { SignedMessageValidationError, normalizeSignedMessage, };
-export type { NormalizeSignedMessageOptions, SignedMessageInput, SignedMessageValidationErrorCode, SignedMessageValidationErrorOptions, };
+export type { SignedMessageInput, SignedMessageValidationErrorCode, SignedMessageValidationErrorOptions, };
