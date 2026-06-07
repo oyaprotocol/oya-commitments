@@ -132,12 +132,58 @@ test('normalizeSignedMessage validates signer and signature hex shape', () => {
         () =>
             normalizeSignedMessage({
                 text: 'hello',
+                signature: VALID_SIGNATURE,
+            }),
+        {
+            code: 'invalid_signer',
+            message: /20-byte 0x-prefixed Ethereum address/,
+        }
+    );
+    assertValidationError(
+        () =>
+            normalizeSignedMessage({
+                text: 'hello',
+                signer: 123,
+                signature: VALID_SIGNATURE,
+            }),
+        {
+            code: 'invalid_signer',
+            message: /20-byte 0x-prefixed Ethereum address/,
+        }
+    );
+    assertValidationError(
+        () =>
+            normalizeSignedMessage({
+                text: 'hello',
                 signer: `0x${'1'.repeat(39)}`,
                 signature: VALID_SIGNATURE,
             }),
         {
             code: 'invalid_signer',
             message: /20-byte 0x-prefixed Ethereum address/,
+        }
+    );
+    assertValidationError(
+        () =>
+            normalizeSignedMessage({
+                text: 'hello',
+                signer: VALID_SIGNER,
+            }),
+        {
+            code: 'invalid_signature',
+            message: /65-byte 0x-prefixed Ethereum signature/,
+        }
+    );
+    assertValidationError(
+        () =>
+            normalizeSignedMessage({
+                text: 'hello',
+                signer: VALID_SIGNER,
+                signature: 123,
+            }),
+        {
+            code: 'invalid_signature',
+            message: /65-byte 0x-prefixed Ethereum signature/,
         }
     );
     assertValidationError(
