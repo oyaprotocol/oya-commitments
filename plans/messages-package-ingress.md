@@ -25,6 +25,7 @@ The signed message is intentionally text-first. There is no protocol `version`, 
 - [x] 2026-06-05: Implemented `normalizeSignedMessage(...)`, `SignedMessageValidationError`, schema exports, and focused schema tests in `packages/messages`.
 - [x] 2026-06-07: Removed the schema-level default text byte limit; `maxTextBytes` is now enforced only when a caller supplies it.
 - [x] 2026-06-07: Removed the exported `SignedMessage` interface and `textByteLength` from the normalized schema result to keep the current API minimal.
+- [x] 2026-06-07: Reused `@oyaprotocol/utils` validation helpers for plain-object and positive-integer checks instead of duplicating them in `packages/messages`.
 - [ ] Implement Ethereum signature verification, allowlist authorization, deterministic message keys, HTTP-shaped handling, and remaining tests in `packages/messages`.
 - [ ] Update final package documentation and validation evidence after the full ingress implementation is complete.
 
@@ -90,6 +91,10 @@ The signed message is intentionally text-first. There is no protocol `version`, 
 
 - Decision: The schema-normalized result contains only `text`, `signer`, and `signature`.
   Rationale: `textByteLength` is only needed internally for optional size-limit rejection details. Future signature verification can compute byte length when building the EIP-191 prefix instead of carrying that value in the public schema result.
+  Date/Author: 2026-06-07 / Codex.
+
+- Decision: `packages/messages` depends on `@oyaprotocol/utils` for shared validation helpers.
+  Rationale: `isPlainObject` and positive integer validation are already public utilities and are used by other kernel packages. Message-specific text, signer, signature, and structured error behavior remains local.
   Date/Author: 2026-06-07 / Codex.
 
 ## Outcomes & Retrospective

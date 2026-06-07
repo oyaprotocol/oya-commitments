@@ -1,3 +1,4 @@
+import { assertPositiveInteger, isPlainObject } from '@oyaprotocol/utils';
 const ALLOWED_SIGNED_MESSAGE_FIELDS = new Set(['text', 'signer', 'signature']);
 const ETHEREUM_ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
 const ETHEREUM_SIGNATURE_PATTERN = /^0x[0-9a-fA-F]{130}$/;
@@ -15,13 +16,6 @@ class SignedMessageValidationError extends Error {
             details === undefined ? undefined : Object.freeze({ ...details });
     }
 }
-function isPlainObject(value) {
-    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-        return false;
-    }
-    const prototype = Object.getPrototypeOf(value);
-    return prototype === Object.prototype || prototype === null;
-}
 function createValidationError(options) {
     return new SignedMessageValidationError(options);
 }
@@ -30,12 +24,7 @@ function normalizeMaxTextBytes(options) {
     if (maxTextBytes === undefined) {
         return undefined;
     }
-    if (typeof maxTextBytes !== 'number' ||
-        !Number.isInteger(maxTextBytes) ||
-        maxTextBytes < 1) {
-        throw new Error('options.maxTextBytes must be a positive integer.');
-    }
-    return maxTextBytes;
+    return assertPositiveInteger(maxTextBytes, 'options.maxTextBytes');
 }
 function requireOnlySignedMessageFields(input) {
     for (const field of Object.keys(input)) {
