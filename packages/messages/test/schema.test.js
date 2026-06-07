@@ -1,0 +1,244 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import {
+    SignedMessageValidationError,
+    validateSignedMessage,
+} from '../dist/index.js';
+
+const VALID_SIGNER = '0x1111111111111111111111111111111111111111';
+const MIXED_CASE_SIGNER = '0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa';
+const VALID_SIGNATURE = `0x${'a'.repeat(130)}`;
+const UPPERCASE_SIGNATURE = `0x${'A'.repeat(130)}`;
+
+function assertValidationError(fn, { code, status = 400, message }) {
+    assert.throws(
+        fn,
+        (error) => {
+            assert.ok(error instanceof SignedMessageValidationError);
+            assert.equal(error.name, 'SignedMessageValidationError');
+            assert.equal(error.code, code);
+            assert.equal(error.status, status);
+            if (message) {
+                assert.match(error.message, message);
+            }
+            return true;
+        }
+    );
+}
+
+test('validateSignedMessage validates and freezes the minimal signed message shape', () => {
+    const message = validateSignedMessage({
+        text: 'Please withdraw 100 USDC.',
+        signer: MIXED_CASE_SIGNER,
+        signature: UPPERCASE_SIGNATURE,
+    });
+
+    assert.deepEqual(message, {
+        text: 'Please withdraw 100 USDC.',
+        signer: MIXED_CASE_SIGNER,
+        signature: UPPERCASE_SIGNATURE,
+    });
+    assert.equal(Object.isFrozen(message), true);
+});
+
+test('validateSignedMessage preserves exact text without trimming', () => {
+    const text = '  keep leading and trailing spaces  ';
+    const message = validateSignedMessage({
+        text,
+        signer: VALID_SIGNER,
+        signature: VALID_SIGNATURE,
+    });
+
+    assert.equal(message.text, text);
+});
+
+test('validateSignedMessage rejects non-object bodies and unsupported fields', () => {
+    assertValidationError(() => validateSignedMessage(null), {
+        code: 'invalid_body',
+        message: /Request body must be a JSON object/,
+    });
+    assertValidationError(() => validateSignedMessage([]), {
+        code: 'invalid_body',
+        message: /Request body must be a JSON object/,
+    });
+    assertValidationError(
+        () =>
+            validateSignedMessage({
+                text: 'hello',
+                signer: VALID_SIGNER,
+                signature: VALID_SIGNATURE,
+                meta: {},
+            }),
+        {
+            code: 'unsupported_field',
+            message: /Unsupported field: meta/,
+        }
+    );
+});
+
+test('validateSignedMessage requires signed message fields to be own properties', () => {
+    Object.defineProperties(Object.prototype, {
+        text: { value: 'hello', configurable: true },
+        signer: { value: VALID_SIGNER, configurable: true },
+        signature: { value: VALID_SIGNATURE, configurable: true },
+    });
+
+    try {
+        assertValidationError(() => validateSignedMessage({}), {
+            code: 'invalid_text',
+            message: /text is required and must be a string/,
+        });
+    } finally {
+        delete Object.prototype.text;
+        delete Object.prototype.signer;
+        delete Object.prototype.signature;
+    }
+});
+
+test('validateSignedMessage rejects missing, non-string, and empty text', () => {
+    assertValidationError(
+        () =>
+            validateSignedMessage({
+                signer: VALID_SIGNER,
+                signature: VALID_SIGNATURE,
+            }),
+        {
+            code: 'invalid_text',
+            message: /text is required and must be a string/,
+        }
+    );
+    assertValidationError(
+        () =>
+            validateSignedMessage({
+                text: 123,
+                signer: VALID_SIGNER,
+                signature: VALID_SIGNATURE,
+            }),
+        {
+            code: 'invalid_text',
+            message: /text is required and must be a string/,
+        }
+    );
+    assertValidationError(
+        () =>
+            validateSignedMessage({
+                text: '',
+                signer: VALID_SIGNER,
+                signature: VALID_SIGNATURE,
+            }),
+        {
+            code: 'invalid_text',
+            message: /text must be non-empty/,
+        }
+    );
+});
+
+test('validateSignedMessage does not enforce message size', () => {
+    const text = 'x'.repeat(4097);
+    const message = validateSignedMessage({
+        text,
+        signer: VALID_SIGNER,
+        signature: VALID_SIGNATURE,
+    });
+
+    assert.equal(message.text, text);
+    assert.equal(Object.hasOwn(message, 'textByteLength'), false);
+});
+
+test('validateSignedMessage validates signer and signature hex shape', () => {
+    assertValidationError(
+        () =>
+            validateSignedMessage({
+                text: 'hello',
+                signature: VALID_SIGNATURE,
+            }),
+        {
+            code: 'invalid_signer',
+            message: /20-byte 0x-prefixed Ethereum address/,
+        }
+    );
+    assertValidationError(
+        () =>
+            validateSignedMessage({
+                text: 'hello',
+                signer: 123,
+                signature: VALID_SIGNATURE,
+            }),
+        {
+            code: 'invalid_signer',
+            message: /20-byte 0x-prefixed Ethereum address/,
+        }
+    );
+    assertValidationError(
+        () =>
+            validateSignedMessage({
+                text: 'hello',
+                signer: `0x${'1'.repeat(39)}`,
+                signature: VALID_SIGNATURE,
+            }),
+        {
+            code: 'invalid_signer',
+            message: /20-byte 0x-prefixed Ethereum address/,
+        }
+    );
+    assertValidationError(
+        () =>
+            validateSignedMessage({
+                text: 'hello',
+                signer: VALID_SIGNER,
+            }),
+        {
+            code: 'invalid_signature',
+            message: /65-byte 0x-prefixed Ethereum signature/,
+        }
+    );
+    assertValidationError(
+        () =>
+            validateSignedMessage({
+                text: 'hello',
+                signer: VALID_SIGNER,
+                signature: 123,
+            }),
+        {
+            code: 'invalid_signature',
+            message: /65-byte 0x-prefixed Ethereum signature/,
+        }
+    );
+    assertValidationError(
+        () =>
+            validateSignedMessage({
+                text: 'hello',
+                signer: `0x${'g'.repeat(40)}`,
+                signature: VALID_SIGNATURE,
+            }),
+        {
+            code: 'invalid_signer',
+            message: /20-byte 0x-prefixed Ethereum address/,
+        }
+    );
+    assertValidationError(
+        () =>
+            validateSignedMessage({
+                text: 'hello',
+                signer: VALID_SIGNER,
+                signature: `0x${'a'.repeat(128)}`,
+            }),
+        {
+            code: 'invalid_signature',
+            message: /65-byte 0x-prefixed Ethereum signature/,
+        }
+    );
+    assertValidationError(
+        () =>
+            validateSignedMessage({
+                text: 'hello',
+                signer: VALID_SIGNER,
+                signature: `0x${'z'.repeat(130)}`,
+            }),
+        {
+            code: 'invalid_signature',
+            message: /65-byte 0x-prefixed Ethereum signature/,
+        }
+    );
+});

@@ -1,4 +1,2 @@
-export declare const packageInfo: Readonly<{
-    name: "@oyaprotocol/messages";
-    status: "placeholder";
-}>;
+export { SignedMessageValidationError, validateSignedMessage, } from './schema.js';
+export type { SignedMessageInput, SignedMessageValidationErrorCode, SignedMessageValidationErrorOptions, } from './schema.js';

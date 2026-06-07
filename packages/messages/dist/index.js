@@ -1,5 +1,2 @@
-export const packageInfo = Object.freeze({
-    name: '@oyaprotocol/messages',
-    status: 'placeholder',
-});
+export { SignedMessageValidationError, validateSignedMessage, } from './schema.js';
 //# sourceMappingURL=index.js.map
