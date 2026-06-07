@@ -2,7 +2,6 @@ import { assertPositiveInteger, isPlainObject } from '@oyaprotocol/utils';
 const ALLOWED_SIGNED_MESSAGE_FIELDS = new Set(['text', 'signer', 'signature']);
 const ETHEREUM_ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
 const ETHEREUM_SIGNATURE_PATTERN = /^0x[0-9a-fA-F]{130}$/;
-const textEncoder = new TextEncoder();
 class SignedMessageValidationError extends Error {
     code;
     status;
@@ -51,7 +50,7 @@ function normalizeText(value, maxTextBytes) {
         });
     }
     if (maxTextBytes !== undefined) {
-        const textByteLength = textEncoder.encode(value).byteLength;
+        const textByteLength = new TextEncoder().encode(value).byteLength;
         if (textByteLength > maxTextBytes) {
             throw createValidationError({
                 code: 'text_too_large',
