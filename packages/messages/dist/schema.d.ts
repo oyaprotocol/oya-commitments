@@ -1,5 +1,3 @@
-type EthereumAddress = `0x${string}`;
-type EthereumSignature = `0x${string}`;
 interface SignedMessageInput {
     readonly text: string;
     readonly signer: string;
@@ -7,8 +5,8 @@ interface SignedMessageInput {
 }
 interface SignedMessage {
     readonly text: string;
-    readonly signer: EthereumAddress;
-    readonly signature: EthereumSignature;
+    readonly signer: string;
+    readonly signature: string;
     readonly textByteLength: number;
 }
 interface NormalizeSignedMessageOptions {
@@ -29,4 +27,4 @@ declare class SignedMessageValidationError extends Error {
 }
 declare function normalizeSignedMessage(input: unknown, options?: NormalizeSignedMessageOptions): SignedMessage;
 export { SignedMessageValidationError, normalizeSignedMessage, };
-export type { EthereumAddress, EthereumSignature, NormalizeSignedMessageOptions, SignedMessage, SignedMessageInput, SignedMessageValidationErrorCode, SignedMessageValidationErrorOptions, };
+export type { NormalizeSignedMessageOptions, SignedMessage, SignedMessageInput, SignedMessageValidationErrorCode, SignedMessageValidationErrorOptions, };

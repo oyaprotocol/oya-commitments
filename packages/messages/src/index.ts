@@ -3,8 +3,6 @@ export {
     normalizeSignedMessage,
 } from './schema.js';
 export type {
-    EthereumAddress,
-    EthereumSignature,
     NormalizeSignedMessageOptions,
     SignedMessage,
     SignedMessageInput,

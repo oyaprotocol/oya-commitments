@@ -3,9 +3,6 @@ const ETHEREUM_ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
 const ETHEREUM_SIGNATURE_PATTERN = /^0x[0-9a-fA-F]{130}$/;
 const textEncoder = new TextEncoder();
 
-type EthereumAddress = `0x${string}`;
-type EthereumSignature = `0x${string}`;
-
 interface SignedMessageInput {
     readonly text: string;
     readonly signer: string;
@@ -14,8 +11,8 @@ interface SignedMessageInput {
 
 interface SignedMessage {
     readonly text: string;
-    readonly signer: EthereumAddress;
-    readonly signature: EthereumSignature;
+    readonly signer: string;
+    readonly signature: string;
     readonly textByteLength: number;
 }
 
@@ -131,24 +128,24 @@ function normalizeText(value: unknown, maxTextBytes: number | undefined): {
     };
 }
 
-function normalizeSigner(value: unknown): EthereumAddress {
+function normalizeSigner(value: unknown): string {
     if (typeof value !== 'string' || !ETHEREUM_ADDRESS_PATTERN.test(value)) {
         throw createValidationError({
             code: 'invalid_signer',
             message: 'signer must be a 20-byte 0x-prefixed Ethereum address.',
         });
     }
-    return value.toLowerCase() as EthereumAddress;
+    return value.toLowerCase();
 }
 
-function normalizeSignature(value: unknown): EthereumSignature {
+function normalizeSignature(value: unknown): string {
     if (typeof value !== 'string' || !ETHEREUM_SIGNATURE_PATTERN.test(value)) {
         throw createValidationError({
             code: 'invalid_signature',
             message: 'signature must be a 65-byte 0x-prefixed Ethereum signature.',
         });
     }
-    return value as EthereumSignature;
+    return value;
 }
 
 function normalizeSignedMessage(
@@ -181,8 +178,6 @@ export {
     normalizeSignedMessage,
 };
 export type {
-    EthereumAddress,
-    EthereumSignature,
     NormalizeSignedMessageOptions,
     SignedMessage,
     SignedMessageInput,
