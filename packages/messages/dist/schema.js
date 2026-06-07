@@ -61,21 +61,20 @@ function normalizeText(value, maxTextBytes) {
             message: 'text must be non-empty.',
         });
     }
-    const textByteLength = textEncoder.encode(value).byteLength;
-    if (maxTextBytes !== undefined && textByteLength > maxTextBytes) {
-        throw createValidationError({
-            code: 'text_too_large',
-            message: `text exceeds maxTextBytes (${maxTextBytes}).`,
-            details: {
-                maxTextBytes,
-                textByteLength,
-            },
-        });
+    if (maxTextBytes !== undefined) {
+        const textByteLength = textEncoder.encode(value).byteLength;
+        if (textByteLength > maxTextBytes) {
+            throw createValidationError({
+                code: 'text_too_large',
+                message: `text exceeds maxTextBytes (${maxTextBytes}).`,
+                details: {
+                    maxTextBytes,
+                    textByteLength,
+                },
+            });
+        }
     }
-    return {
-        text: value,
-        textByteLength,
-    };
+    return value;
 }
 function normalizeSigner(value) {
     if (typeof value !== 'string' || !ETHEREUM_ADDRESS_PATTERN.test(value)) {
@@ -104,14 +103,13 @@ function normalizeSignedMessage(input, options = {}) {
         });
     }
     requireOnlySignedMessageFields(input);
-    const { text, textByteLength } = normalizeText(input.text, maxTextBytes);
+    const text = normalizeText(input.text, maxTextBytes);
     const signer = normalizeSigner(input.signer);
     const signature = normalizeSignature(input.signature);
     return Object.freeze({
         text,
         signer,
         signature,
-        textByteLength,
     });
 }
 export { SignedMessageValidationError, normalizeSignedMessage, };

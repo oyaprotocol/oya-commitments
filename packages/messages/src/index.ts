@@ -4,7 +4,6 @@ export {
 } from './schema.js';
 export type {
     NormalizeSignedMessageOptions,
-    SignedMessage,
     SignedMessageInput,
     SignedMessageValidationErrorCode,
     SignedMessageValidationErrorOptions,

@@ -38,7 +38,6 @@ test('normalizeSignedMessage validates and freezes the minimal signed message sh
         text: 'Please withdraw 100 USDC.',
         signer: MIXED_CASE_SIGNER.toLowerCase(),
         signature: UPPERCASE_SIGNATURE,
-        textByteLength: 25,
     });
     assert.equal(Object.isFrozen(message), true);
 });
@@ -52,7 +51,6 @@ test('normalizeSignedMessage preserves exact text without trimming', () => {
     });
 
     assert.equal(message.text, text);
-    assert.equal(message.textByteLength, text.length);
 });
 
 test('normalizeSignedMessage rejects non-object bodies and unsupported fields', () => {
@@ -141,7 +139,7 @@ test('normalizeSignedMessage has no default text byte limit', () => {
     });
 
     assert.equal(message.text, text);
-    assert.equal(message.textByteLength, 4097);
+    assert.equal(Object.hasOwn(message, 'textByteLength'), false);
 });
 
 test('normalizeSignedMessage validates signer and signature hex shape', () => {

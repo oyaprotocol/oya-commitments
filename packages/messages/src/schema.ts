@@ -9,13 +9,6 @@ interface SignedMessageInput {
     readonly signature: string;
 }
 
-interface SignedMessage {
-    readonly text: string;
-    readonly signer: string;
-    readonly signature: string;
-    readonly textByteLength: number;
-}
-
 interface NormalizeSignedMessageOptions {
     readonly maxTextBytes?: number;
 }
@@ -93,10 +86,7 @@ function requireOnlySignedMessageFields(input: Record<string, unknown>): void {
     }
 }
 
-function normalizeText(value: unknown, maxTextBytes: number | undefined): {
-    readonly text: string;
-    readonly textByteLength: number;
-} {
+function normalizeText(value: unknown, maxTextBytes: number | undefined): string {
     if (typeof value !== 'string') {
         throw createValidationError({
             code: 'invalid_text',
@@ -110,22 +100,21 @@ function normalizeText(value: unknown, maxTextBytes: number | undefined): {
         });
     }
 
-    const textByteLength = textEncoder.encode(value).byteLength;
-    if (maxTextBytes !== undefined && textByteLength > maxTextBytes) {
-        throw createValidationError({
-            code: 'text_too_large',
-            message: `text exceeds maxTextBytes (${maxTextBytes}).`,
-            details: {
-                maxTextBytes,
-                textByteLength,
-            },
-        });
+    if (maxTextBytes !== undefined) {
+        const textByteLength = textEncoder.encode(value).byteLength;
+        if (textByteLength > maxTextBytes) {
+            throw createValidationError({
+                code: 'text_too_large',
+                message: `text exceeds maxTextBytes (${maxTextBytes}).`,
+                details: {
+                    maxTextBytes,
+                    textByteLength,
+                },
+            });
+        }
     }
 
-    return {
-        text: value,
-        textByteLength,
-    };
+    return value;
 }
 
 function normalizeSigner(value: unknown): string {
@@ -151,7 +140,7 @@ function normalizeSignature(value: unknown): string {
 function normalizeSignedMessage(
     input: unknown,
     options: NormalizeSignedMessageOptions = {}
-): SignedMessage {
+) {
     const maxTextBytes = normalizeMaxTextBytes(options);
     if (!isPlainObject(input)) {
         throw createValidationError({
@@ -161,7 +150,7 @@ function normalizeSignedMessage(
     }
 
     requireOnlySignedMessageFields(input);
-    const { text, textByteLength } = normalizeText(input.text, maxTextBytes);
+    const text = normalizeText(input.text, maxTextBytes);
     const signer = normalizeSigner(input.signer);
     const signature = normalizeSignature(input.signature);
 
@@ -169,7 +158,6 @@ function normalizeSignedMessage(
         text,
         signer,
         signature,
-        textByteLength,
     });
 }
 
@@ -179,7 +167,6 @@ export {
 };
 export type {
     NormalizeSignedMessageOptions,
-    SignedMessage,
     SignedMessageInput,
     SignedMessageValidationErrorCode,
     SignedMessageValidationErrorOptions,

@@ -24,6 +24,7 @@ The signed message is intentionally text-first. There is no protocol `version`, 
 - [x] 2026-06-05: Incorporated review feedback to start with the smallest useful slice: strict schema normalization before crypto dependencies or HTTP handling.
 - [x] 2026-06-05: Implemented `normalizeSignedMessage(...)`, `SignedMessageValidationError`, schema exports, and focused schema tests in `packages/messages`.
 - [x] 2026-06-07: Removed the schema-level default text byte limit; `maxTextBytes` is now enforced only when a caller supplies it.
+- [x] 2026-06-07: Removed the exported `SignedMessage` interface and `textByteLength` from the normalized schema result to keep the current API minimal.
 - [ ] Implement Ethereum signature verification, allowlist authorization, deterministic message keys, HTTP-shaped handling, and remaining tests in `packages/messages`.
 - [ ] Update final package documentation and validation evidence after the full ingress implementation is complete.
 
@@ -87,9 +88,13 @@ The signed message is intentionally text-first. There is no protocol `version`, 
   Rationale: The package should keep low-level shape validation separate from node-specific ingress policy. Callers may still supply `maxTextBytes`, and the future HTTP-shaped helper should own operational defaults together with request body limits.
   Date/Author: 2026-06-07 / Codex.
 
+- Decision: The schema-normalized result contains only `text`, `signer`, and `signature`.
+  Rationale: `textByteLength` is only needed internally for optional size-limit rejection details. Future signature verification can compute byte length when building the EIP-191 prefix instead of carrying that value in the public schema result.
+  Date/Author: 2026-06-07 / Codex.
+
 ## Outcomes & Retrospective
 
-The first schema milestone is complete. `@oyaprotocol/messages` now has a real package-root API for validating the v1 `{ text, signer, signature }` body before signature verification is added. The implementation preserves exact text bytes, lowercases the signer address after shape validation, preserves the submitted signature string, rejects unknown fields, enforces `maxTextBytes` only when supplied by the caller, and throws structured `SignedMessageValidationError` instances for request-shape failures.
+The first schema milestone is complete. `@oyaprotocol/messages` now has a real package-root API for validating the v1 `{ text, signer, signature }` body before signature verification is added. The implementation preserves exact text bytes, lowercases the signer address after shape validation, preserves the submitted signature string, rejects unknown fields, enforces `maxTextBytes` only when supplied by the caller, returns only the three normalized wire fields, and throws structured `SignedMessageValidationError` instances for request-shape failures.
 
 Validation run on 2026-06-05:
 
@@ -366,7 +371,6 @@ Planned exported functions and types:
 - `createSignedMessageKey(message)`
 - `handleSignedMessage(request, options)`
 - `SignedMessageInput`
-- `SignedMessage`
 - `AcceptedSignedMessage`
 - `HandleSignedMessageOptions`
 - `HandleSignedMessageResult`
