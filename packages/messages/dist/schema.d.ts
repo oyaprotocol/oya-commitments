@@ -1,4 +1,3 @@
-declare const DEFAULT_MAX_TEXT_BYTES = 4096;
 type EthereumAddress = `0x${string}`;
 type EthereumSignature = `0x${string}`;
 interface SignedMessageInput {
@@ -29,5 +28,5 @@ declare class SignedMessageValidationError extends Error {
     constructor({ code, message, status, details }: SignedMessageValidationErrorOptions);
 }
 declare function normalizeSignedMessage(input: unknown, options?: NormalizeSignedMessageOptions): SignedMessage;
-export { DEFAULT_MAX_TEXT_BYTES, SignedMessageValidationError, normalizeSignedMessage, };
+export { SignedMessageValidationError, normalizeSignedMessage, };
 export type { EthereumAddress, EthereumSignature, NormalizeSignedMessageOptions, SignedMessage, SignedMessageInput, SignedMessageValidationErrorCode, SignedMessageValidationErrorOptions, };

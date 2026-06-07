@@ -1,5 +1,3 @@
-const DEFAULT_MAX_TEXT_BYTES = 4096;
-
 const ALLOWED_SIGNED_MESSAGE_FIELDS = new Set(['text', 'signer', 'signature']);
 const ETHEREUM_ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
 const ETHEREUM_SIGNATURE_PATTERN = /^0x[0-9a-fA-F]{130}$/;
@@ -69,8 +67,13 @@ function createValidationError(
     return new SignedMessageValidationError(options);
 }
 
-function normalizeMaxTextBytes(options: NormalizeSignedMessageOptions | null | undefined): number {
-    const maxTextBytes = options?.maxTextBytes ?? DEFAULT_MAX_TEXT_BYTES;
+function normalizeMaxTextBytes(
+    options: NormalizeSignedMessageOptions | null | undefined
+): number | undefined {
+    const maxTextBytes = options?.maxTextBytes;
+    if (maxTextBytes === undefined) {
+        return undefined;
+    }
     if (
         typeof maxTextBytes !== 'number' ||
         !Number.isInteger(maxTextBytes) ||
@@ -93,7 +96,7 @@ function requireOnlySignedMessageFields(input: Record<string, unknown>): void {
     }
 }
 
-function normalizeText(value: unknown, maxTextBytes: number): {
+function normalizeText(value: unknown, maxTextBytes: number | undefined): {
     readonly text: string;
     readonly textByteLength: number;
 } {
@@ -111,7 +114,7 @@ function normalizeText(value: unknown, maxTextBytes: number): {
     }
 
     const textByteLength = textEncoder.encode(value).byteLength;
-    if (textByteLength > maxTextBytes) {
+    if (maxTextBytes !== undefined && textByteLength > maxTextBytes) {
         throw createValidationError({
             code: 'text_too_large',
             message: `text exceeds maxTextBytes (${maxTextBytes}).`,
@@ -174,7 +177,6 @@ function normalizeSignedMessage(
 }
 
 export {
-    DEFAULT_MAX_TEXT_BYTES,
     SignedMessageValidationError,
     normalizeSignedMessage,
 };

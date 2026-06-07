@@ -22,8 +22,8 @@ The package currently exposes schema normalization for the v1 signed text messag
 - `signer` must be a 20-byte `0x`-prefixed Ethereum address and is normalized to lowercase.
 - `signature` must be a 65-byte `0x`-prefixed Ethereum signature string and is preserved as submitted.
 - Unknown top-level fields are rejected.
-- `options.maxTextBytes` can lower or raise the default `4096` byte text limit.
+- `options.maxTextBytes`, when supplied, enforces a positive integer byte limit for `text`. Schema normalization does not impose a default text byte limit.
 
 Schema failures throw `SignedMessageValidationError` with a stable `code`, HTTP-friendly `status`, and message.
 
-Signature recovery, allowlist authorization, deterministic message keys, and server-agnostic HTTP request handling are planned follow-on APIs in the package ExecPlan.
+Signature recovery, allowlist authorization, deterministic message keys, and server-agnostic HTTP request handling are planned follow-on APIs in the package ExecPlan. HTTP ingress callers should enforce request body limits before JSON parsing.

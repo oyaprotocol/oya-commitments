@@ -1,4 +1,3 @@
-const DEFAULT_MAX_TEXT_BYTES = 4096;
 const ALLOWED_SIGNED_MESSAGE_FIELDS = new Set(['text', 'signer', 'signature']);
 const ETHEREUM_ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
 const ETHEREUM_SIGNATURE_PATTERN = /^0x[0-9a-fA-F]{130}$/;
@@ -27,7 +26,10 @@ function createValidationError(options) {
     return new SignedMessageValidationError(options);
 }
 function normalizeMaxTextBytes(options) {
-    const maxTextBytes = options?.maxTextBytes ?? DEFAULT_MAX_TEXT_BYTES;
+    const maxTextBytes = options?.maxTextBytes;
+    if (maxTextBytes === undefined) {
+        return undefined;
+    }
     if (typeof maxTextBytes !== 'number' ||
         !Number.isInteger(maxTextBytes) ||
         maxTextBytes < 1) {
@@ -60,7 +62,7 @@ function normalizeText(value, maxTextBytes) {
         });
     }
     const textByteLength = textEncoder.encode(value).byteLength;
-    if (textByteLength > maxTextBytes) {
+    if (maxTextBytes !== undefined && textByteLength > maxTextBytes) {
         throw createValidationError({
             code: 'text_too_large',
             message: `text exceeds maxTextBytes (${maxTextBytes}).`,
@@ -112,5 +114,5 @@ function normalizeSignedMessage(input, options = {}) {
         textByteLength,
     });
 }
-export { DEFAULT_MAX_TEXT_BYTES, SignedMessageValidationError, normalizeSignedMessage, };
+export { SignedMessageValidationError, normalizeSignedMessage, };
 //# sourceMappingURL=schema.js.map

@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-    DEFAULT_MAX_TEXT_BYTES,
     SignedMessageValidationError,
     normalizeSignedMessage,
 } from '../dist/index.js';
@@ -133,6 +132,18 @@ test('normalizeSignedMessage rejects missing, non-string, empty, and overlarge t
     );
 });
 
+test('normalizeSignedMessage has no default text byte limit', () => {
+    const text = 'x'.repeat(4097);
+    const message = normalizeSignedMessage({
+        text,
+        signer: VALID_SIGNER,
+        signature: VALID_SIGNATURE,
+    });
+
+    assert.equal(message.text, text);
+    assert.equal(message.textByteLength, 4097);
+});
+
 test('normalizeSignedMessage validates signer and signature hex shape', () => {
     assertValidationError(
         () =>
@@ -185,7 +196,6 @@ test('normalizeSignedMessage validates signer and signature hex shape', () => {
 });
 
 test('normalizeSignedMessage validates maxTextBytes options', () => {
-    assert.equal(DEFAULT_MAX_TEXT_BYTES, 4096);
     assert.throws(
         () =>
             normalizeSignedMessage(
