@@ -1,1 +1,9 @@
-{"type":"module","dependencies":{"viem":"^2.20.0"}}
+{
+  "type": "module",
+  "dependencies": {
+    "viem": "^2.20.0"
+  },
+  "overrides": {
+    "ws": "8.21.0"
+  }
+}
