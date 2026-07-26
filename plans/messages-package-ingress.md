@@ -27,13 +27,14 @@ The signed message is intentionally text-first. There is no protocol `version`, 
 - [x] 2026-06-07: Removed the exported `SignedMessage` interface and `textByteLength` from the schema result to keep the current API minimal.
 - [x] 2026-06-07: Reused `@oyaprotocol/utils` for the shared plain-object check instead of duplicating it in `packages/messages`.
 - [x] 2026-06-07: Renamed the schema API from `normalizeSignedMessage(...)` to `validateSignedMessage(...)` and stopped lowercasing the submitted signer address.
-- [ ] Implement Ethereum signature verification, allowlist authorization, deterministic message keys, HTTP-shaped handling, and remaining tests in `packages/messages`.
+- [x] 2026-07-26: Added focused Noble dependencies and implemented `verifySignedMessage(...)` with EIP-191 hashing, secp256k1 recovery, case-insensitive signer comparison, structured verification errors, and fixed-vector tests.
+- [ ] Implement allowlist authorization, deterministic message keys, HTTP-shaped handling, and remaining tests in `packages/messages`.
 - [ ] Update final package documentation and validation evidence after the full ingress implementation is complete.
 
 ## Surprises & Discoveries
 
-- Observation: `@oyaprotocol/messages` is currently only a placeholder package shell.
-  Evidence: `packages/messages/src/index.ts` exports `packageInfo` with `status: 'placeholder'`, and `packages/README.md` says `@oyaprotocol/messages` is still a placeholder.
+- Observation: `@oyaprotocol/messages` was only a placeholder package shell when this plan began.
+  Evidence: the initial `packages/messages/src/index.ts` exported `packageInfo` with `status: 'placeholder'`; the schema milestone subsequently removed it.
 
 - Observation: The hardened package area must not import legacy runtime code.
   Evidence: `packages/AGENTS.md` says existing code under `agent/`, `agent-library/`, `node/`, and `frontend/` is reference material only for production-kernel packages.
@@ -41,8 +42,14 @@ The signed message is intentionally text-first. There is no protocol `version`, 
 - Observation: Existing message ingress and publication logic in `agent/src/lib/` can inform the design but must not be reused by import.
   Evidence: `agent/src/lib/message-api.js`, `agent/src/lib/message-signing.js`, and `agent/src/lib/message-publication-api.js` already contain useful reference behavior for signed requests, HTTP status mapping, and publication flows, but package rules prohibit importing that code into `packages/messages`.
 
-- Observation: The first implementation milestone removed the `packageInfo` placeholder export and replaced it with real schema-validation exports, but it does not yet verify signatures or authorize signers.
-  Evidence: `packages/messages/src/index.ts` now exports `validateSignedMessage(...)` and `SignedMessageValidationError`; `packages/messages/test/schema.test.js` covers schema behavior.
+- Observation: The first implementation milestone removed the `packageInfo` placeholder export and replaced it with real schema-validation exports, before the later signature milestone added cryptographic verification.
+  Evidence: `packages/messages/test/schema.test.js` covers schema behavior independently from `packages/messages/test/signature.test.js`.
+
+- Observation: JavaScript string length cannot be used in the EIP-191 prefix because it counts UTF-16 code units rather than encoded message bytes.
+  Evidence: the fixed `Oya 🌱` ethers signature verifies only when the prefix uses the UTF-8 byte length produced by `utf8ToBytes(...)`.
+
+- Observation: The reviewed Noble versions already used elsewhere in this repository expose the complete recovery surface without a higher-level Ethereum dependency.
+  Evidence: `@noble/curves` 1.9.1 provides compact signature parsing, recovery-bit attachment, and secp256k1 public-key recovery; `@noble/hashes` 1.8.0 provides Keccak-256 and byte/hex utilities.
 
 ## Decision Log
 
@@ -102,9 +109,21 @@ The signed message is intentionally text-first. There is no protocol `version`, 
   Rationale: `isPlainObject` is already a public utility and is used by other kernel packages. Message-specific text, signer, signature, and structured error behavior remains local.
   Date/Author: 2026-06-07 / Codex.
 
+- Decision: Keep `verifySignedMessage(...)` limited to cryptographic verification and apply allowlist authorization in the later ingress layer.
+  Rationale: Separating signer recovery from node-supplied authorization policy makes the current milestone independently useful and keeps a valid signature distinct from an authorized request.
+  Date/Author: 2026-07-26 / Codex.
+
+- Decision: Return the unchanged validated message on successful verification and throw `SignedMessageVerificationError` with `invalid_signature` and status `401` for cryptographic failures.
+  Rationale: Callers retain the exact signed fields while malformed wire data remains distinguishable as a schema validation error with status `400`.
+  Date/Author: 2026-07-26 / Codex.
+
+- Decision: Pin `@noble/curves` 1.9.1 and `@noble/hashes` 1.8.0 for the first signature-verification milestone.
+  Rationale: These compatible versions are already represented in repository lockfiles, expose the required audited primitives, and avoid an unrelated major-version migration during this focused package change.
+  Date/Author: 2026-07-26 / Codex.
+
 ## Outcomes & Retrospective
 
-The first schema milestone is complete. `@oyaprotocol/messages` now has a real package-root API for validating the v1 `{ text, signer, signature }` body before signature verification is added. The implementation preserves exact text and signer bytes, preserves the submitted signature string, rejects unknown fields, returns only the three validated wire fields, and throws structured `SignedMessageValidationError` instances for request-shape failures.
+The first schema milestone is complete. `@oyaprotocol/messages` gained a real package-root API for validating the v1 `{ text, signer, signature }` body before the signature-verification milestone. The implementation preserves exact text and signer bytes, preserves the submitted signature string, rejects unknown fields, returns only the three validated wire fields, and throws structured `SignedMessageValidationError` instances for request-shape failures.
 
 Validation run on 2026-06-05:
 
@@ -118,6 +137,17 @@ Validation run on 2026-06-05:
 The schema test reported 6 passing tests, and the smoke import printed `function function false`.
 The broader package regression tests also passed: 11 utils tests, 45 IPFS tests, and 20 Ethereum tests.
 
+The EIP-191 verification milestone is complete. `verifySignedMessage(...)` validates the wire body, hashes exactly the UTF-8 message bytes with the Ethereum signed-message prefix, accepts recovery values encoded as `27`/`28` or `0`/`1`, recovers the secp256k1 public key, derives its Ethereum address with Keccak-256, and compares it to the submitted signer without changing signer casing. Fixed vectors generated with ethers v6 cover ASCII and multi-byte Unicode text without making ethers a package dependency.
+
+Validation run on 2026-07-26:
+
+    npm --prefix packages run build
+    node --test packages/messages/test/*.js
+    node --input-type=module -e "import('./packages/messages/dist/index.js').then((m) => console.log(typeof m.validateSignedMessage, typeof m.verifySignedMessage, typeof m.SignedMessageVerificationError))"
+
+The combined schema and signature suite reported 13 passing tests, and the smoke import printed `function function function`.
+Package-area regression validation also passed: 11 utils tests, 45 IPFS tests, and 20 Ethereum tests. Together with the 13 message tests, all 89 hardened-kernel package tests passed.
+
 ## Context and Orientation
 
 The hardened package workspace lives under `packages/`.
@@ -126,8 +156,10 @@ The relevant files at the start of this plan are:
 
 - `packages/messages/src/index.ts`: exports the package-root schema API and no longer exports placeholder metadata.
 - `packages/messages/src/schema.ts`: validates the v1 signed text message shape and defines structured schema errors.
+- `packages/messages/src/ethereum-signature.ts`: verifies EIP-191 text signatures and defines structured cryptographic verification errors.
 - `packages/messages/test/schema.test.js`: covers schema acceptance, exact text preservation, unknown-field rejection, text limits, Ethereum address shape, and signature shape.
-- `packages/messages/README.md`: documents the current schema-validation API and remaining planned signature/HTTP work.
+- `packages/messages/test/signature.test.js`: covers fixed EIP-191 vectors, Unicode byte length, recovery-value normalization, mismatch failures, and malformed signature scalars.
+- `packages/messages/README.md`: documents schema validation, EIP-191 verification, replay limitations, and the remaining authorization/key/HTTP work.
 - `packages/messages/package.json`: exposes the package root through `dist/index.js` and `dist/index.d.ts`.
 - `packages/package.json`: owns the TypeScript build command for all kernel packages.
 - `packages/AGENTS.md`: local instructions for package code, including no imports from legacy runtime directories.
@@ -179,7 +211,7 @@ Do not modify `node/` or `agent/` in this first package milestone unless the use
 
 Work from the repository root unless a command says otherwise.
 
-1. Review the placeholder package and package workspace.
+1. Review the messages package and package workspace.
 
     Command:
 
@@ -187,14 +219,14 @@ Work from the repository root unless a command says otherwise.
         sed -n '1,160p' packages/messages/package.json
         sed -n '1,120p' packages/AGENTS.md
 
-    Expected result: confirm the package is a placeholder and that package-local instructions still prohibit importing legacy runtime code.
+    Expected result: confirm the current package-root exports and that package-local instructions still prohibit importing legacy runtime code.
 
-2. Add focused Ethereum signature dependencies to `packages/messages/package.json`.
+2. Add focused Ethereum signature dependencies to `packages/messages/package.json`. This step is complete.
 
-    Proposed dependencies:
+    Pinned dependencies:
 
-        "@noble/curves": "<current compatible version>"
-        "@noble/hashes": "<current compatible version>"
+        "@noble/curves": "1.9.1"
+        "@noble/hashes": "1.8.0"
 
     Use `npm --prefix packages install` after editing package metadata so `packages/package-lock.json` records the workspace dependency. If the environment blocks registry access, request normal network approval rather than vendoring code or copying dependencies from another workspace.
 
@@ -213,11 +245,11 @@ Work from the repository root unless a command says otherwise.
     - unknown top-level fields are rejected or ignored according to an explicit package decision recorded in this plan before implementation. The recommended choice is to reject unknown top-level fields for v1 auditability.
     Message size limits are not part of schema validation. The future ingress helper should make maximum request body size and, if needed, maximum text size configurable by the node.
 
-4. Implement Ethereum signed-text verification.
+4. Implement Ethereum signed-text verification. This step is complete.
 
-    Add a public function with a name close to:
+    The public function is:
 
-        verifySignedMessage(input, options)
+        verifySignedMessage(input)
 
     The function should:
 
@@ -227,8 +259,9 @@ Work from the repository root unless a command says otherwise.
     - derive the Ethereum address as the last 20 bytes of Keccak-256 over the uncompressed public key without its `0x04` prefix, using `@noble/hashes`;
     - normalize common signature recovery IDs, including `v` values `27`/`28` and `0`/`1`;
     - compare the recovered address to `signer` case-insensitively;
-    - check the signer against the supplied allowlist using a case-insensitive comparison;
-    - return an accepted message with `text`, signer, original signature, and message key.
+    - return the unchanged validated message.
+
+    Allowlist authorization and message-key creation remain separate later steps.
 
 5. Implement HTTP-shaped message helper.
 
@@ -336,7 +369,7 @@ If later node integration needs storage, queues, rate limiting, IPFS publication
 
 ## Artifacts and Notes
 
-Current placeholder evidence:
+Historical placeholder evidence from the start of this plan:
 
     packages/messages/src/index.ts exports:
     packageInfo = Object.freeze({ name: '@oyaprotocol/messages', status: 'placeholder' })
@@ -374,13 +407,18 @@ Public package entrypoint:
 
 - `@oyaprotocol/messages`
 
-Planned exported functions and types:
+Current exported functions and types:
 
 - `validateSignedMessage(input)`
-- `verifySignedMessage(input, options)`
+- `verifySignedMessage(input)`
+- `SignedMessageInput`
+- `SignedMessageValidationError`
+- `SignedMessageVerificationError`
+
+Planned exported functions and types:
+
 - `createSignedMessageKey(message)`
 - `handleSignedMessage(request, options)`
-- `SignedMessageInput`
 - `AcceptedSignedMessage`
 - `HandleSignedMessageOptions`
 - `HandleSignedMessageResult`
