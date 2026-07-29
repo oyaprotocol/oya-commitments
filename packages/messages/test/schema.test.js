@@ -134,6 +134,32 @@ test('validateSignedMessage rejects missing, non-string, and empty text', () => 
     );
 });
 
+test('validateSignedMessage allows ASCII bytes and rejects non-ASCII text', () => {
+    const asciiText = '\u0000\t\n\r ~\u007f';
+    const message = validateSignedMessage({
+        text: asciiText,
+        signer: VALID_SIGNER,
+        signature: VALID_SIGNATURE,
+    });
+
+    assert.equal(message.text, asciiText);
+
+    for (const text of ['Oya 🌱', 'café', '\u0080', '\ud800']) {
+        assertValidationError(
+            () =>
+                validateSignedMessage({
+                    text,
+                    signer: VALID_SIGNER,
+                    signature: VALID_SIGNATURE,
+                }),
+            {
+                code: 'invalid_text',
+                message: /text must contain only ASCII characters/,
+            }
+        );
+    }
+});
+
 test('validateSignedMessage does not enforce message size', () => {
     const text = 'x'.repeat(4097);
     const message = validateSignedMessage({
