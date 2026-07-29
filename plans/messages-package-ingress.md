@@ -28,6 +28,7 @@ The signed message is intentionally text-first. There is no protocol `version`, 
 - [x] 2026-06-07: Reused `@oyaprotocol/utils` for the shared plain-object check instead of duplicating it in `packages/messages`.
 - [x] 2026-06-07: Renamed the schema API from `normalizeSignedMessage(...)` to `validateSignedMessage(...)` and stopped lowercasing the submitted signer address.
 - [x] 2026-07-26: Added focused Noble dependencies and implemented `verifySignedMessage(...)` with EIP-191 hashing, secp256k1 recovery, case-insensitive signer comparison, structured verification errors, and fixed-vector tests.
+- [x] 2026-07-28: Upgraded `@noble/curves` and `@noble/hashes` to 2.2.0, migrated to their ESM subpaths and recoverable-signature API, and declared the resulting Node.js 20.19.0 runtime floor.
 - [ ] Implement allowlist authorization, deterministic message keys, HTTP-shaped handling, and remaining tests in `packages/messages`.
 - [ ] Update final package documentation and validation evidence after the full ingress implementation is complete.
 
@@ -50,6 +51,9 @@ The signed message is intentionally text-first. There is no protocol `version`, 
 
 - Observation: The reviewed Noble versions already used elsewhere in this repository expose the complete recovery surface without a higher-level Ethereum dependency.
   Evidence: `@noble/curves` 1.9.1 provides compact signature parsing, recovery-bit attachment, and secp256k1 public-key recovery; `@noble/hashes` 1.8.0 provides Keccak-256 and byte/hex utilities.
+
+- Observation: Noble 2.2.0 changed both module and recovery conventions in ways that matter for EIP-191.
+  Evidence: package subpaths require explicit `.js` extensions; recoverable signatures are encoded as `recovery || r || s` rather than Ethereum's `r || s || v`; and `secp256k1.recoverPublicKey(...)` defaults to SHA-256 prehashing, so recovery over the already-computed EIP-191 Keccak-256 digest must pass `{ prehash: false }`.
 
 ## Decision Log
 
@@ -117,9 +121,13 @@ The signed message is intentionally text-first. There is no protocol `version`, 
   Rationale: Callers retain the exact signed fields while malformed wire data remains distinguishable as a schema validation error with status `400`.
   Date/Author: 2026-07-26 / Codex.
 
-- Decision: Pin `@noble/curves` 1.9.1 and `@noble/hashes` 1.8.0 for the first signature-verification milestone.
+- Decision: Pin `@noble/curves` 1.9.1 and `@noble/hashes` 1.8.0 for the first signature-verification milestone. This decision was superseded on 2026-07-28.
   Rationale: These compatible versions are already represented in repository lockfiles, expose the required audited primitives, and avoid an unrelated major-version migration during this focused package change.
   Date/Author: 2026-07-26 / Codex.
+
+- Decision: Upgrade both Noble dependencies to exact version 2.2.0 and declare Node.js 20.19.0 as the package runtime floor.
+  Rationale: The user requested the current Noble releases. Both packages publish the same Node.js engine requirement, and the repository's Node 22 CI satisfies it. Exact pins preserve the package's existing deterministic dependency policy.
+  Date/Author: 2026-07-28 / Codex.
 
 ## Outcomes & Retrospective
 
@@ -147,6 +155,19 @@ Validation run on 2026-07-26:
 
 The combined schema and signature suite reported 13 passing tests, and the smoke import printed `function function function`.
 Package-area regression validation also passed: 11 utils tests, 45 IPFS tests, and 20 Ethereum tests. Together with the 13 message tests, all 89 hardened-kernel package tests passed.
+
+The Noble 2.2.0 migration preserves that behavior while adapting the implementation to ESM `.js` subpaths and the v2 recovered-signature byte layout. Recovery explicitly disables Noble's default SHA-256 prehash because `createEthereumSignedMessageDigest(...)` already supplies the EIP-191 Keccak-256 digest. The package now declares Node.js 20.19.0 or newer to match both Noble dependencies.
+
+Validation run on 2026-07-28:
+
+    npm --prefix packages run build
+    node --test packages/messages/test/*.js
+    node --test packages/utils/test/*.js
+    node --test packages/ipfs/test/*.js
+    node --test packages/ethereum/test/*.js
+    node --input-type=module -e "import('./packages/messages/dist/index.js').then((m) => console.log(typeof m.validateSignedMessage, typeof m.verifySignedMessage, typeof m.SignedMessageVerificationError))"
+
+The build succeeded, the smoke import printed `function function function`, and all 89 hardened-kernel tests passed: 13 messages, 11 utils, 45 IPFS, and 20 Ethereum.
 
 ## Context and Orientation
 
@@ -225,8 +246,8 @@ Work from the repository root unless a command says otherwise.
 
     Pinned dependencies:
 
-        "@noble/curves": "1.9.1"
-        "@noble/hashes": "1.8.0"
+        "@noble/curves": "2.2.0"
+        "@noble/hashes": "2.2.0"
 
     Use `npm --prefix packages install` after editing package metadata so `packages/package-lock.json` records the workspace dependency. If the environment blocks registry access, request normal network approval rather than vendoring code or copying dependencies from another workspace.
 

@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "description": "Oya signed message validation and verification.",
   "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -16,8 +19,8 @@
     "README.md"
   ],
   "dependencies": {
-    "@noble/curves": "1.9.1",
-    "@noble/hashes": "1.8.0",
+    "@noble/curves": "2.2.0",
+    "@noble/hashes": "2.2.0",
     "@oyaprotocol/utils": "0.0.0"
   }
 }

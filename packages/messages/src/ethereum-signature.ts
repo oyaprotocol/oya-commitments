@@ -1,11 +1,11 @@
-import { secp256k1 } from '@noble/curves/secp256k1';
-import { keccak_256 } from '@noble/hashes/sha3';
+import { secp256k1 } from '@noble/curves/secp256k1.js';
+import { keccak_256 } from '@noble/hashes/sha3.js';
 import {
     bytesToHex,
     concatBytes,
     hexToBytes,
     utf8ToBytes,
-} from '@noble/hashes/utils';
+} from '@noble/hashes/utils.js';
 
 import { validateSignedMessage } from './schema.js';
 import type { SignedMessageInput } from './schema.js';
@@ -50,11 +50,19 @@ function createEthereumSignedMessageDigest(text: string): Uint8Array {
 function recoverEthereumAddress(text: string, signature: string): string {
     const signatureBytes = hexToBytes(signature.slice(2));
     const recoveryBit = normalizeRecoveryBit(signatureBytes[64]);
-    const publicKey = secp256k1.Signature
-        .fromCompact(signatureBytes.subarray(0, 64))
-        .addRecoveryBit(recoveryBit)
-        .recoverPublicKey(createEthereumSignedMessageDigest(text))
-        .toRawBytes(false);
+    const recoverableSignature = new Uint8Array(65);
+    // Noble uses recovery || r || s; Ethereum serializes r || s || v.
+    recoverableSignature[0] = recoveryBit;
+    recoverableSignature.set(signatureBytes.subarray(0, 64), 1);
+    // The message is already the EIP-191 Keccak-256 digest.
+    const compressedPublicKey = secp256k1.recoverPublicKey(
+        recoverableSignature,
+        createEthereumSignedMessageDigest(text),
+        { prehash: false }
+    );
+    const publicKey = secp256k1.Point
+        .fromBytes(compressedPublicKey)
+        .toBytes(false);
     const addressHash = keccak_256(publicKey.subarray(1));
     return `0x${bytesToHex(addressHash.subarray(addressHash.length - 20))}`;
 }
