@@ -15,10 +15,10 @@ const TEXT = 'Please withdraw 100 USDC.';
 const SIGNATURE =
     '0x36891560b97f673db6931408e45fd3e8ffca26ae50f1c68adbe74e57808b9248' +
     '0f55566cc281099d59dc574c7e444851af9a8978acd55503ca3d2565061e542d1b';
-const UNICODE_TEXT = 'Oya 🌱';
-const UNICODE_SIGNATURE =
-    '0xbb6743015713562560229be26da1eb33f724e00878e855cad2a8dc670ee12c447' +
-    '9e579ddc6329563463c2f766e41076b4ea93476ee3ecb270884d16aadebeed51c';
+const RECOVERY_ONE_TEXT = 'Oya ASCII recovery 0';
+const RECOVERY_ONE_SIGNATURE =
+    '0xbd2127b32601006bb9d74d2fdea018906fee97410891af0d9158b482d79a49e25' +
+    'e69968bddbe87cabb5956f52fba6ba1ad6b29dfe637d9e73381b26f60fbe77c1c';
 
 function assertVerificationError(fn) {
     assert.throws(
@@ -49,16 +49,6 @@ test('verifySignedMessage verifies an EIP-191 signature and preserves the messag
     assert.equal(Object.isFrozen(message), true);
 });
 
-test('verifySignedMessage uses UTF-8 byte length in the EIP-191 prefix', () => {
-    const message = verifySignedMessage({
-        text: UNICODE_TEXT,
-        signer: SIGNER,
-        signature: UNICODE_SIGNATURE,
-    });
-
-    assert.equal(message.text, UNICODE_TEXT);
-});
-
 test('verifySignedMessage accepts recovery values encoded as 0 or 1', () => {
     const signatureWithZeroRecovery = `${SIGNATURE.slice(0, -2)}00`;
     const zeroRecoveryMessage = verifySignedMessage({
@@ -66,9 +56,9 @@ test('verifySignedMessage accepts recovery values encoded as 0 or 1', () => {
         signer: SIGNER.toLowerCase(),
         signature: signatureWithZeroRecovery,
     });
-    const signatureWithOneRecovery = `${UNICODE_SIGNATURE.slice(0, -2)}01`;
+    const signatureWithOneRecovery = `${RECOVERY_ONE_SIGNATURE.slice(0, -2)}01`;
     const oneRecoveryMessage = verifySignedMessage({
-        text: UNICODE_TEXT,
+        text: RECOVERY_ONE_TEXT,
         signer: SIGNER.toLowerCase(),
         signature: signatureWithOneRecovery,
     });
@@ -130,5 +120,16 @@ test('verifySignedMessage preserves schema validation errors', () => {
                 signature: '0x1234',
             }),
         SignedMessageValidationError
+    );
+    assert.throws(
+        () =>
+            verifySignedMessage({
+                text: 'Oya 🌱',
+                signer: SIGNER,
+                signature: SIGNATURE,
+            }),
+        (error) =>
+            error instanceof SignedMessageValidationError &&
+            error.code === 'invalid_text'
     );
 });

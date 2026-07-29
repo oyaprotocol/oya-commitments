@@ -18,7 +18,7 @@ The v1 signed text message body is:
 
 `validateSignedMessage(input)` validates that the body is a JSON-style object with exactly `text`, `signer`, and `signature`.
 
-- `text` must be a non-empty string and is preserved exactly; it is not trimmed or parsed.
+- `text` must be a non-empty ASCII string and is preserved exactly; it is not trimmed or parsed.
 - `signer` must be a 20-byte `0x`-prefixed Ethereum address and is preserved as submitted.
 - `signature` must be a 65-byte `0x`-prefixed Ethereum signature string and is preserved as submitted.
 - Unknown top-level fields are rejected.
@@ -30,7 +30,7 @@ Schema failures throw `SignedMessageValidationError` with a stable `code`, HTTP-
 
 `verifySignedMessage(input)` first applies the schema validation above, then verifies that `signature` is an Ethereum EIP-191 signed-message signature over exactly `text`.
 
-- The EIP-191 prefix uses the UTF-8 byte length of `text`, not the JavaScript string length.
+- The EIP-191 prefix uses the byte length of the validated ASCII `text`.
 - Recovery values `27`/`28` and `0`/`1` are accepted.
 - The recovered Ethereum address is compared to `signer` case-insensitively.
 - The validated, frozen message is returned unchanged when verification succeeds.

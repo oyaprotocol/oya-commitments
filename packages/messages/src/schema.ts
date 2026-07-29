@@ -1,4 +1,5 @@
-import { isPlainObject } from '@oyaprotocol/utils';
+import { utf8ToBytes } from '@noble/hashes/utils.js';
+import { assertAsciiBytes, isPlainObject } from '@oyaprotocol/utils';
 
 const ALLOWED_SIGNED_MESSAGE_FIELDS = new Set(['text', 'signer', 'signature']);
 
@@ -87,6 +88,17 @@ function validateText(value: unknown): string {
         throw createValidationError({
             code: 'invalid_text',
             message: 'text must be non-empty.',
+        });
+    }
+    try {
+        assertAsciiBytes(
+            utf8ToBytes(value),
+            'text must contain only ASCII characters.'
+        );
+    } catch {
+        throw createValidationError({
+            code: 'invalid_text',
+            message: 'text must contain only ASCII characters.',
         });
     }
 
