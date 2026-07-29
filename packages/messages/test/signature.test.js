@@ -8,8 +8,7 @@ import {
 } from '../dist/index.js';
 
 // These fixed vectors were generated with ethers v6 Wallet.signMessage using
-// this public test-only private key:
-// 0x0123456789012345678901234567890123456789012345678901234567890123
+// a disposable test signer. No private key is required by these tests.
 const SIGNER = '0x14791697260E4c9A71f18484C9f997B308e59325';
 const TEXT = 'Please withdraw 100 USDC.';
 const SIGNATURE =

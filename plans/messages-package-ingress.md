@@ -30,6 +30,7 @@ The signed message is intentionally text-first. There is no protocol `version`, 
 - [x] 2026-07-26: Added focused Noble dependencies and implemented `verifySignedMessage(...)` with EIP-191 hashing, secp256k1 recovery, case-insensitive signer comparison, structured verification errors, and fixed-vector tests.
 - [x] 2026-07-28: Upgraded `@noble/curves` and `@noble/hashes` to 2.2.0, migrated to their ESM subpaths and recoverable-signature API, and declared the resulting Node.js 20.19.0 runtime floor.
 - [x] 2026-07-28: Restricted signed-message text to the same ASCII byte policy as IPFS text reads and replaced the Unicode signature fixture with an ASCII recovery-bit fixture.
+- [x] 2026-07-28: Removed the disposable test signer's private-key literal from signature-test provenance to comply with the repository's categorical no-committed-private-keys policy.
 - [ ] Implement allowlist authorization, deterministic message keys, HTTP-shaped handling, and remaining tests in `packages/messages`.
 - [ ] Update final package documentation and validation evidence after the full ingress implementation is complete.
 
