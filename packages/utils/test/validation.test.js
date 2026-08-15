@@ -219,6 +219,14 @@ test('HttpStatusError captures normalized HTTP failure details', () => {
 
 test('hasRetryableNetworkErrorCode detects retryable HTTP network codes', () => {
     assert.equal(RETRYABLE_HTTP_NETWORK_ERROR_CODES.has('ECONNRESET'), true);
+    assert.equal(Object.isFrozen(RETRYABLE_HTTP_NETWORK_ERROR_CODES), true);
+    assert.equal(RETRYABLE_HTTP_NETWORK_ERROR_CODES.add, undefined);
+    assert.equal(RETRYABLE_HTTP_NETWORK_ERROR_CODES.delete, undefined);
+    assert.equal(RETRYABLE_HTTP_NETWORK_ERROR_CODES.clear, undefined);
+    assert.throws(
+        () => RETRYABLE_HTTP_NETWORK_ERROR_CODES.add('ERR_INVALID_URL'),
+        TypeError
+    );
     assert.equal(
         hasRetryableNetworkErrorCode({
             code: 'econnreset',
@@ -241,6 +249,11 @@ test('hasRetryableNetworkErrorCode detects retryable HTTP network codes', () => 
         }),
         false
     );
+    let callbackSet;
+    RETRYABLE_HTTP_NETWORK_ERROR_CODES.forEach((_code, _duplicateCode, set) => {
+        callbackSet = set;
+    });
+    assert.equal(callbackSet, RETRYABLE_HTTP_NETWORK_ERROR_CODES);
     assert.equal(hasRetryableNetworkErrorCode(null), false);
 });
 

@@ -52,7 +52,40 @@ type HttpPostFetchLike<TBody, TResponse = HttpTextResponse> = HttpFetchLike<
     TResponse
 >;
 
-const RETRYABLE_HTTP_NETWORK_ERROR_CODES: ReadonlySet<string> = new Set([
+function createReadonlySet<T>(values: Iterable<T>): ReadonlySet<T> {
+    const set = new Set(values);
+    const readonlySet: ReadonlySet<T> = {
+        get size(): number {
+            return set.size;
+        },
+        has(value: T): boolean {
+            return set.has(value);
+        },
+        entries(): SetIterator<[T, T]> {
+            return set.entries();
+        },
+        keys(): SetIterator<T> {
+            return set.keys();
+        },
+        values(): SetIterator<T> {
+            return set.values();
+        },
+        forEach(
+            callback: (value: T, duplicateValue: T, set: ReadonlySet<T>) => void,
+            thisArg?: unknown
+        ): void {
+            for (const value of set) {
+                callback.call(thisArg, value, value, readonlySet);
+            }
+        },
+        [Symbol.iterator](): SetIterator<T> {
+            return set.values();
+        },
+    };
+    return Object.freeze(readonlySet);
+}
+
+const RETRYABLE_HTTP_NETWORK_ERROR_CODES: ReadonlySet<string> = createReadonlySet([
     'ECONNREFUSED',
     'ECONNRESET',
     'EAI_AGAIN',
