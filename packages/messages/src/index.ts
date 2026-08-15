@@ -7,7 +7,7 @@ export {
     verifySignedMessage,
 } from './ethereum-signature.js';
 export {
-    authorizeSignedMessage,
+    createSignedMessageAuthorizer,
     SignedMessageAuthorizationError,
 } from './authorization.js';
 export type {
@@ -20,4 +20,5 @@ export type {
 } from './ethereum-signature.js';
 export type {
     SignedMessageAuthorizationErrorCode,
+    SignedMessageAuthorizer,
 } from './authorization.js';

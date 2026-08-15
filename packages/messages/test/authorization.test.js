@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-    authorizeSignedMessage,
+    createSignedMessageAuthorizer,
     SignedMessageAuthorizationError,
     SignedMessageValidationError,
     SignedMessageVerificationError,
@@ -23,21 +23,39 @@ function createSignedMessage() {
     };
 }
 
-test('authorizeSignedMessage verifies and authorizes case-insensitively', () => {
-    const message = authorizeSignedMessage(
-        createSignedMessage(),
-        [OTHER_SIGNER, SIGNER.toLowerCase()]
-    );
+test('createSignedMessageAuthorizer prevalidates and snapshots its allowlist', () => {
+    const allowedSigners = [
+        OTHER_SIGNER,
+        SIGNER.toLowerCase(),
+        SIGNER,
+    ];
+    const authorizer = createSignedMessageAuthorizer(allowedSigners);
+
+    allowedSigners.splice(0, allowedSigners.length, OTHER_SIGNER);
+
+    assert.equal(Object.isFrozen(authorizer), true);
+    assert.equal(authorizer.allowedSignerCount, 2);
+    assert.equal(Object.hasOwn(authorizer, 'allowedSigners'), false);
+    assert.doesNotThrow(() => authorizer.authorize(createSignedMessage()));
+});
+
+test('authorizer verifies and authorizes messages case-insensitively', () => {
+    const authorizer = createSignedMessageAuthorizer([
+        OTHER_SIGNER,
+        SIGNER.toLowerCase(),
+    ]);
+    const message = authorizer.authorize(createSignedMessage());
 
     assert.deepEqual(message, createSignedMessage());
     assert.equal(message.signer, SIGNER);
     assert.equal(Object.isFrozen(message), true);
 });
 
-test('authorizeSignedMessage rejects verified signers outside the allowlist', () => {
+test('authorizer rejects verified signers outside the allowlist', () => {
     for (const allowedSigners of [[], [OTHER_SIGNER]]) {
+        const authorizer = createSignedMessageAuthorizer(allowedSigners);
         assert.throws(
-            () => authorizeSignedMessage(createSignedMessage(), allowedSigners),
+            () => authorizer.authorize(createSignedMessage()),
             (error) => {
                 assert.ok(error instanceof SignedMessageAuthorizationError);
                 assert.equal(error.name, 'SignedMessageAuthorizationError');
@@ -50,34 +68,35 @@ test('authorizeSignedMessage rejects verified signers outside the allowlist', ()
     }
 });
 
-test('authorizeSignedMessage preserves validation and verification failures', () => {
+test('authorizer preserves validation and verification failures', () => {
+    const authorizer = createSignedMessageAuthorizer([SIGNER]);
     assert.throws(
         () =>
-            authorizeSignedMessage(
-                { ...createSignedMessage(), text: 'Changed text.' },
-                [SIGNER]
-            ),
+            authorizer.authorize({
+                ...createSignedMessage(),
+                text: 'Changed text.',
+            }),
         SignedMessageVerificationError
     );
     assert.throws(
         () =>
-            authorizeSignedMessage(
-                { ...createSignedMessage(), signer: '0x1234' },
-                [SIGNER]
-            ),
+            authorizer.authorize({
+                ...createSignedMessage(),
+                signer: '0x1234',
+            }),
         SignedMessageValidationError
     );
 });
 
-test('authorizeSignedMessage rejects malformed allowlists', () => {
+test('createSignedMessageAuthorizer rejects malformed configuration', () => {
     assert.throws(
-        () => authorizeSignedMessage(createSignedMessage(), new Set([SIGNER])),
+        () => createSignedMessageAuthorizer(new Set([SIGNER])),
         (error) =>
             error instanceof TypeError &&
             /allowedSigners must be an array/.test(error.message)
     );
     assert.throws(
-        () => authorizeSignedMessage(createSignedMessage(), [SIGNER, '0x1234']),
+        () => createSignedMessageAuthorizer([SIGNER, '0x1234']),
         (error) =>
             error instanceof TypeError &&
             /allowedSigners\[1\] must be a 20-byte 0x-prefixed Ethereum address/.test(

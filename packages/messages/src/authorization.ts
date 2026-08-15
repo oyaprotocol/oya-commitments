@@ -5,6 +5,11 @@ const ETHEREUM_ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
 
 type SignedMessageAuthorizationErrorCode = 'unauthorized_signer';
 
+interface SignedMessageAuthorizer {
+    readonly allowedSignerCount: number;
+    authorize(input: unknown): Readonly<SignedMessageInput>;
+}
+
 class SignedMessageAuthorizationError extends Error {
     readonly code: SignedMessageAuthorizationErrorCode;
     readonly status: number;
@@ -45,22 +50,28 @@ function normalizeAllowedSigners(
     return normalizedSigners;
 }
 
-function authorizeSignedMessage(
-    input: unknown,
+function createSignedMessageAuthorizer(
     allowedSigners: readonly string[]
-): Readonly<SignedMessageInput> {
+): Readonly<SignedMessageAuthorizer> {
     const normalizedSigners = normalizeAllowedSigners(allowedSigners);
-    const message = verifySignedMessage(input);
-    if (!normalizedSigners.has(message.signer.toLowerCase())) {
-        throw new SignedMessageAuthorizationError();
-    }
-    return message;
+
+    return Object.freeze({
+        allowedSignerCount: normalizedSigners.size,
+        authorize(input: unknown): Readonly<SignedMessageInput> {
+            const message = verifySignedMessage(input);
+            if (!normalizedSigners.has(message.signer.toLowerCase())) {
+                throw new SignedMessageAuthorizationError();
+            }
+            return message;
+        },
+    });
 }
 
 export {
-    authorizeSignedMessage,
+    createSignedMessageAuthorizer,
     SignedMessageAuthorizationError,
 };
 export type {
     SignedMessageAuthorizationErrorCode,
+    SignedMessageAuthorizer,
 };
