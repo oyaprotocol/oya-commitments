@@ -29,7 +29,8 @@ Small shared utilities for hardened Oya kernel packages.
 - `HttpStatusError`
 - `HttpStatusErrorOptions`
 - `HttpTextResponse`
-- `RETRYABLE_HTTP_NETWORK_ERROR_CODES` (runtime-immutable `ReadonlySet`)
+- `ImmutableSetView<T>`
+- `RETRYABLE_HTTP_NETWORK_ERROR_CODES` (runtime-immutable `ImmutableSetView<string>`)
 - `hasRetryableNetworkErrorCode(error)`
 - `readErrorStringChain(error, key)`
 

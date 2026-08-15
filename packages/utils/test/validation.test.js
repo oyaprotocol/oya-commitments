@@ -223,6 +223,7 @@ test('hasRetryableNetworkErrorCode detects retryable HTTP network codes', () => 
     assert.equal(RETRYABLE_HTTP_NETWORK_ERROR_CODES.add, undefined);
     assert.equal(RETRYABLE_HTTP_NETWORK_ERROR_CODES.delete, undefined);
     assert.equal(RETRYABLE_HTTP_NETWORK_ERROR_CODES.clear, undefined);
+    assert.equal(RETRYABLE_HTTP_NETWORK_ERROR_CODES.union, undefined);
     assert.throws(
         () => RETRYABLE_HTTP_NETWORK_ERROR_CODES.add('ERR_INVALID_URL'),
         TypeError

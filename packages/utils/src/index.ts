@@ -26,6 +26,7 @@ export type {
     HttpPostFetchOptions,
     HttpStatusErrorOptions,
     HttpTextResponse,
+    ImmutableSetView,
 } from './http-utils.js';
 
 export {

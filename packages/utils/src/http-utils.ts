@@ -52,9 +52,21 @@ type HttpPostFetchLike<TBody, TResponse = HttpTextResponse> = HttpFetchLike<
     TResponse
 >;
 
-function createReadonlySet<T>(values: Iterable<T>): ReadonlySet<T> {
+interface ImmutableSetView<T> extends Iterable<T> {
+    readonly size: number;
+    has(value: T): boolean;
+    entries(): SetIterator<[T, T]>;
+    keys(): SetIterator<T>;
+    values(): SetIterator<T>;
+    forEach(
+        callback: (value: T, duplicateValue: T, set: ImmutableSetView<T>) => void,
+        thisArg?: unknown
+    ): void;
+}
+
+function createReadonlySet<T>(values: Iterable<T>): ImmutableSetView<T> {
     const set = new Set(values);
-    const readonlySet: ReadonlySet<T> = {
+    const readonlySet: ImmutableSetView<T> = {
         get size(): number {
             return set.size;
         },
@@ -71,7 +83,7 @@ function createReadonlySet<T>(values: Iterable<T>): ReadonlySet<T> {
             return set.values();
         },
         forEach(
-            callback: (value: T, duplicateValue: T, set: ReadonlySet<T>) => void,
+            callback: (value: T, duplicateValue: T, set: ImmutableSetView<T>) => void,
             thisArg?: unknown
         ): void {
             for (const value of set) {
@@ -85,7 +97,7 @@ function createReadonlySet<T>(values: Iterable<T>): ReadonlySet<T> {
     return Object.freeze(readonlySet);
 }
 
-const RETRYABLE_HTTP_NETWORK_ERROR_CODES: ReadonlySet<string> = createReadonlySet([
+const RETRYABLE_HTTP_NETWORK_ERROR_CODES: ImmutableSetView<string> = createReadonlySet([
     'ECONNREFUSED',
     'ECONNRESET',
     'EAI_AGAIN',
@@ -181,4 +193,5 @@ export type {
     HttpPostFetchOptions,
     HttpStatusErrorOptions,
     HttpTextResponse,
+    ImmutableSetView,
 };

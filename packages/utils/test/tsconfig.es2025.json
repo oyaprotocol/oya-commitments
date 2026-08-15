@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "lib": [
+      "ES2025",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "noEmit": true
+  },
+  "include": [
+    "./es2025-consumer.ts"
+  ]
+}

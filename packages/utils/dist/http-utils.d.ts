@@ -32,7 +32,15 @@ interface HttpStatusErrorOptions {
 }
 type HttpFetchLike<TOptions, TResponse> = (url: string, options: TOptions) => Promise<TResponse>;
 type HttpPostFetchLike<TBody, TResponse = HttpTextResponse> = HttpFetchLike<HttpPostFetchOptions<TBody>, TResponse>;
-declare const RETRYABLE_HTTP_NETWORK_ERROR_CODES: ReadonlySet<string>;
+interface ImmutableSetView<T> extends Iterable<T> {
+    readonly size: number;
+    has(value: T): boolean;
+    entries(): SetIterator<[T, T]>;
+    keys(): SetIterator<T>;
+    values(): SetIterator<T>;
+    forEach(callback: (value: T, duplicateValue: T, set: ImmutableSetView<T>) => void, thisArg?: unknown): void;
+}
+declare const RETRYABLE_HTTP_NETWORK_ERROR_CODES: ImmutableSetView<string>;
 declare class HttpStatusError extends Error {
     readonly operation: string;
     readonly status: number;
@@ -44,4 +52,4 @@ declare function createHttpConfig({ url, headers, timeoutMs, maxRetries, retryDe
 declare function readErrorStringChain(error: unknown, key: string): string[];
 declare function hasRetryableNetworkErrorCode(error: unknown): boolean;
 export { HttpStatusError, RETRYABLE_HTTP_NETWORK_ERROR_CODES, createHttpConfig, hasRetryableNetworkErrorCode, readErrorStringChain, };
-export type { CreateHttpConfigOptions, HttpConfig, HttpFetchLike, HttpPostFetchLike, HttpPostFetchOptions, HttpStatusErrorOptions, HttpTextResponse, };
+export type { CreateHttpConfigOptions, HttpConfig, HttpFetchLike, HttpPostFetchLike, HttpPostFetchOptions, HttpStatusErrorOptions, HttpTextResponse, ImmutableSetView, };
