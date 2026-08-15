@@ -1,6 +1,6 @@
 # @oyaprotocol/messages
 
-Signed message validation and EIP-191 verification primitives for Oya nodes.
+Signed message validation, EIP-191 verification, and signer authorization primitives for Oya nodes.
 
 ## Public Entrypoint
 
@@ -38,6 +38,16 @@ Schema failures throw `SignedMessageValidationError` with a stable `code`, HTTP-
 
 Verification uses `@noble/curves` 2.2.0 for secp256k1 public-key recovery and `@noble/hashes` 2.2.0 for Keccak-256. These ESM dependencies require Node.js 20.19.0 or newer, which is also declared by this package.
 
-Allowlist authorization, deterministic message keys, and server-agnostic HTTP request handling remain planned follow-on APIs in the package ExecPlan. HTTP ingress callers should enforce request body and message size limits before schema validation.
+## Allowlist Authorization
+
+`authorizeMessageSigner(signer, allowedSigners)` checks a verified message signer against an explicit array of Ethereum addresses. Call it with the signer returned by `verifySignedMessage(...)`; it performs authorization only and does not verify a signature.
+
+- Address comparison is case-insensitive.
+- The submitted signer string is returned unchanged when authorized.
+- An empty allowlist denies every signer.
+- A non-member throws `SignedMessageAuthorizationError` with code `unauthorized_signer` and status `403`.
+- Malformed signer addresses, allowlist entries, or allowlist containers throw `TypeError` because they indicate invalid caller configuration or incorrect API use.
+
+Deterministic message keys and server-agnostic HTTP request handling remain planned follow-on APIs in the package ExecPlan. HTTP ingress callers should enforce request body and message size limits before schema validation.
 
 Because v1 signs only `text` and includes no timestamp, nonce, audience, or domain, a valid signature can be replayed anywhere the signer is authorized. Nodes must apply their own authorization and durable deduplication policy.

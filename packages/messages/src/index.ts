@@ -6,6 +6,10 @@ export {
     SignedMessageVerificationError,
     verifySignedMessage,
 } from './ethereum-signature.js';
+export {
+    authorizeMessageSigner,
+    SignedMessageAuthorizationError,
+} from './authorization.js';
 export type {
     SignedMessageInput,
     SignedMessageValidationErrorCode,
@@ -14,3 +18,6 @@ export type {
 export type {
     SignedMessageVerificationErrorCode,
 } from './ethereum-signature.js';
+export type {
+    SignedMessageAuthorizationErrorCode,
+} from './authorization.js';

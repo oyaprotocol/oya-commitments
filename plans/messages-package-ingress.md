@@ -31,7 +31,8 @@ The signed message is intentionally text-first. There is no protocol `version`, 
 - [x] 2026-07-28: Upgraded `@noble/curves` and `@noble/hashes` to 2.2.0, migrated to their ESM subpaths and recoverable-signature API, and declared the resulting Node.js 20.19.0 runtime floor.
 - [x] 2026-07-28: Restricted signed-message text to the same ASCII byte policy as IPFS text reads and replaced the Unicode signature fixture with an ASCII recovery-bit fixture.
 - [x] 2026-07-28: Removed the disposable test signer's private-key literal from signature-test provenance to comply with the repository's categorical no-committed-private-keys policy.
-- [ ] Implement allowlist authorization, deterministic message keys, HTTP-shaped handling, and remaining tests in `packages/messages`.
+- [x] 2026-07-28: Added standalone `authorizeMessageSigner(...)` allowlist authorization with case-insensitive address matching, fail-closed empty lists, structured `unauthorized_signer` errors, and focused tests.
+- [ ] Implement deterministic message keys, HTTP-shaped handling, and remaining tests in `packages/messages`.
 - [ ] Update final package documentation and validation evidence after the full ingress implementation is complete.
 
 ## Surprises & Discoveries
@@ -138,6 +139,14 @@ The signed message is intentionally text-first. There is no protocol `version`, 
   Rationale: Reusing `assertAsciiBytes(...)` gives signed messages and retrieved text artifacts one narrow character policy, rejects Unicode normalization and display ambiguities before signature verification, and preserves exact submitted ASCII without trimming or normalization.
   Date/Author: 2026-07-28 / Codex.
 
+- Decision: Expose allowlist authorization as `authorizeMessageSigner(signer, allowedSigners)` rather than combining it with signature verification.
+  Rationale: The signer-only name makes the trust boundary explicit: callers must pass the signer from `verifySignedMessage(...)`. The helper can remain independently reusable by the future ingress layer without changing the existing verification API or implying that arbitrary message objects have been cryptographically checked.
+  Date/Author: 2026-07-28 / Codex.
+
+- Decision: Treat a valid but non-allowlisted signer as `unauthorized_signer` with status `403`, while treating malformed signer or allowlist inputs as `TypeError`.
+  Rationale: Membership failure is an authorization result suitable for HTTP mapping. Invalid address shapes and non-array allowlists are caller configuration or API-use errors, not authentication outcomes. Empty arrays are valid and intentionally deny every signer.
+  Date/Author: 2026-07-28 / Codex.
+
 ## Outcomes & Retrospective
 
 The first schema milestone is complete. `@oyaprotocol/messages` gained a real package-root API for validating the v1 `{ text, signer, signature }` body before the signature-verification milestone. The implementation preserves exact text and signer bytes, preserves the submitted signature string, rejects unknown fields, returns only the three validated wire fields, and throws structured `SignedMessageValidationError` instances for request-shape failures.
@@ -180,6 +189,19 @@ The build succeeded, the smoke import printed `function function function`, and 
 
 ASCII-policy validation run on 2026-07-28 used the same build, package test, and smoke-import commands above. All 89 hardened-kernel tests passed again. Message tests now cover the full accepted ASCII byte boundary, rejection of emoji, accented text, `U+0080`, and lone surrogates, propagation of `invalid_text` through `verifySignedMessage(...)`, and fixed ASCII signatures for both recovery bits.
 
+The standalone authorization milestone is complete. `authorizeMessageSigner(...)` compares valid Ethereum addresses case-insensitively against a caller-supplied array, preserves the submitted signer casing on success, fails closed for an empty array, and throws a structured `SignedMessageAuthorizationError` for valid non-members. It intentionally does not perform signature verification; consumers should pass it the signer returned by `verifySignedMessage(...)`.
+
+Authorization validation run on 2026-07-28:
+
+    npm --prefix packages run build
+    node --test packages/messages/test/*.js
+    node --test packages/utils/test/*.js
+    node --test packages/ipfs/test/*.js
+    node --test packages/ethereum/test/*.js
+    node --input-type=module -e "import('./packages/messages/dist/index.js').then((m) => console.log(typeof m.verifySignedMessage, typeof m.authorizeMessageSigner, typeof m.SignedMessageAuthorizationError))"
+
+The build succeeded, the smoke import printed `function function function`, and all 92 hardened-kernel tests passed: 16 messages, 11 utils, 45 IPFS, and 20 Ethereum.
+
 ## Context and Orientation
 
 The hardened package workspace lives under `packages/`.
@@ -189,9 +211,11 @@ The relevant files at the start of this plan are:
 - `packages/messages/src/index.ts`: exports the package-root schema API and no longer exports placeholder metadata.
 - `packages/messages/src/schema.ts`: validates the v1 signed text message shape and defines structured schema errors.
 - `packages/messages/src/ethereum-signature.ts`: verifies EIP-191 text signatures and defines structured cryptographic verification errors.
+- `packages/messages/src/authorization.ts`: validates allowlist inputs and authorizes verified message signers.
 - `packages/messages/test/schema.test.js`: covers schema acceptance, exact text preservation, unknown-field rejection, text limits, Ethereum address shape, and signature shape.
 - `packages/messages/test/signature.test.js`: covers fixed ASCII EIP-191 vectors, recovery-value normalization, mismatch failures, and malformed signature scalars.
-- `packages/messages/README.md`: documents schema validation, EIP-191 verification, replay limitations, and the remaining authorization/key/HTTP work.
+- `packages/messages/test/authorization.test.js`: covers case-insensitive membership, fail-closed empty lists, structured authorization failures, and invalid allowlist configuration.
+- `packages/messages/README.md`: documents schema validation, EIP-191 verification, allowlist authorization, replay limitations, and the remaining key/HTTP work.
 - `packages/messages/package.json`: exposes the package root through `dist/index.js` and `dist/index.d.ts`.
 - `packages/package.json`: owns the TypeScript build command for all kernel packages.
 - `packages/AGENTS.md`: local instructions for package code, including no imports from legacy runtime directories.
@@ -443,9 +467,11 @@ Current exported functions and types:
 
 - `validateSignedMessage(input)`
 - `verifySignedMessage(input)`
+- `authorizeMessageSigner(signer, allowedSigners)`
 - `SignedMessageInput`
 - `SignedMessageValidationError`
 - `SignedMessageVerificationError`
+- `SignedMessageAuthorizationError`
 
 Planned exported functions and types:
 
@@ -454,7 +480,7 @@ Planned exported functions and types:
 - `AcceptedSignedMessage`
 - `HandleSignedMessageOptions`
 - `HandleSignedMessageResult`
-- structured error types or error result codes for invalid shape, invalid signature, unauthorized signer, and body/content-type failures
+- structured error types or error result codes for body and content-type failures
 
 Runtime dependency:
 
