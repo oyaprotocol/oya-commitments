@@ -40,13 +40,14 @@ Verification uses `@noble/curves` 2.2.0 for secp256k1 public-key recovery and `@
 
 ## Allowlist Authorization
 
-`authorizeMessageSigner(signer, allowedSigners)` checks a verified message signer against an explicit array of Ethereum addresses. Call it with the signer returned by `verifySignedMessage(...)`; it performs authorization only and does not verify a signature.
+`authorizeSignedMessage(input, allowedSigners)` validates and verifies a signed message before checking its recovered signer against an explicit array of Ethereum addresses. This composed API prevents callers from accidentally authorizing an unverified signer supplied by a request.
 
 - Address comparison is case-insensitive.
-- The submitted signer string is returned unchanged when authorized.
+- The validated, frozen message is returned unchanged when authorized.
 - An empty allowlist denies every signer.
 - A non-member throws `SignedMessageAuthorizationError` with code `unauthorized_signer` and status `403`.
-- Malformed signer addresses, allowlist entries, or allowlist containers throw `TypeError` because they indicate invalid caller configuration or incorrect API use.
+- Message validation and signature-verification errors are preserved.
+- Malformed allowlist entries or allowlist containers throw `TypeError` because they indicate invalid caller configuration or incorrect API use.
 
 Deterministic message keys and server-agnostic HTTP request handling remain planned follow-on APIs in the package ExecPlan. HTTP ingress callers should enforce request body and message size limits before schema validation.
 

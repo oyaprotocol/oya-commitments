@@ -1,3 +1,4 @@
+import { verifySignedMessage } from './ethereum-signature.js';
 const ETHEREUM_ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
 class SignedMessageAuthorizationError extends Error {
     code;
@@ -25,13 +26,13 @@ function normalizeAllowedSigners(allowedSigners) {
     }
     return normalizedSigners;
 }
-function authorizeMessageSigner(signer, allowedSigners) {
-    const validatedSigner = requireEthereumAddress(signer, 'signer');
+function authorizeSignedMessage(input, allowedSigners) {
     const normalizedSigners = normalizeAllowedSigners(allowedSigners);
-    if (!normalizedSigners.has(validatedSigner.toLowerCase())) {
+    const message = verifySignedMessage(input);
+    if (!normalizedSigners.has(message.signer.toLowerCase())) {
         throw new SignedMessageAuthorizationError();
     }
-    return validatedSigner;
+    return message;
 }
-export { authorizeMessageSigner, SignedMessageAuthorizationError, };
+export { authorizeSignedMessage, SignedMessageAuthorizationError, };
 //# sourceMappingURL=authorization.js.map
