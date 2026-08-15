@@ -40,16 +40,15 @@ Verification uses `@noble/curves` 2.2.0 for secp256k1 public-key recovery and `@
 
 ## Allowlist Authorization
 
-`createSignedMessageAuthorizer(allowedSigners)` validates and snapshots an explicit array of Ethereum addresses once, then returns a frozen authorizer that can be reused for every request:
+`createSignedMessageAuthorizer(allowedSigners)` validates and snapshots an explicit array of Ethereum addresses once, then returns a frozen authorization function that can be reused for every request:
 
-    const authorizer = createSignedMessageAuthorizer(allowedSigners);
-    const message = authorizer.authorize(input);
+    const authorizeSignedMessage = createSignedMessageAuthorizer(allowedSigners);
+    const message = authorizeSignedMessage(input);
 
-`authorize(...)` validates and verifies the signed message before checking its recovered signer against the authorizer's private normalized Set. This composed API prevents callers from authorizing an unverified signer or changing policy by mutating the original array after authorizer creation.
+The returned function validates and verifies the signed message before checking its recovered signer against the authorizer's private normalized Set. This composed API prevents callers from authorizing an unverified signer or changing policy by mutating the original array after authorizer creation.
 
 - Address comparison is case-insensitive.
 - Case-variant duplicate addresses count as one allowed signer.
-- `allowedSignerCount` reports the number of unique normalized addresses.
 - The validated, frozen message is returned unchanged when authorized.
 - An empty allowlist denies every signer.
 - A non-member throws `SignedMessageAuthorizationError` with code `unauthorized_signer` and status `403`.

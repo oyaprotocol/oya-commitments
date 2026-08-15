@@ -34,6 +34,7 @@ The signed message is intentionally text-first. There is no protocol `version`, 
 - [x] 2026-07-28: Added standalone `authorizeMessageSigner(...)` allowlist authorization with case-insensitive address matching, fail-closed empty lists, structured `unauthorized_signer` errors, and focused tests.
 - [x] 2026-08-15: Replaced the public signer-only helper with `authorizeSignedMessage(...)`, which verifies the signed message internally before checking allowlist membership.
 - [x] 2026-08-15: Replaced per-call allowlist validation with `createSignedMessageAuthorizer(...)`, which snapshots a private normalized Set once and returns a frozen reusable authorizer.
+- [x] 2026-08-15: Simplified `SignedMessageAuthorizer` to a function type and removed the unused `allowedSignerCount` metadata from the returned authorization capability.
 - [ ] Implement deterministic message keys, HTTP-shaped handling, and remaining tests in `packages/messages`.
 - [ ] Update final package documentation and validation evidence after the full ingress implementation is complete.
 
@@ -157,8 +158,12 @@ The signed message is intentionally text-first. There is no protocol `version`, 
   Rationale: The complete message is untrusted request input and should retain the package's structured request-error behavior. The allowlist remains caller-supplied configuration, so an invalid container or address entry is a programming/configuration failure.
   Date/Author: 2026-08-15 / Codex.
 
-- Decision: Prevalidate authorization policy with `createSignedMessageAuthorizer(allowedSigners)` and expose request-time authorization through the returned object's `authorize(input)` method.
+- Decision: Prevalidate authorization policy with `createSignedMessageAuthorizer(allowedSigners)` and expose request-time authorization through the returned object's `authorize(input)` method. The returned-object shape was superseded later on 2026-08-15 by a directly callable function.
   Rationale: Node allowlists are normally static configuration reused across requests. Validating and normalizing once moves configuration failures to startup, avoids rebuilding a Set on every request, snapshots the caller's array, and keeps the mutable Set private inside a closure. Freezing the returned object prevents its public capability from being replaced or reconfigured at runtime.
+  Date/Author: 2026-08-15 / Codex.
+
+- Decision: Represent `SignedMessageAuthorizer` as a function type and have `createSignedMessageAuthorizer(...)` return that function directly.
+  Rationale: After removing unused allowlist-count metadata, a one-method object added no useful public behavior. A named function type preserves dependency injection and the private normalized allowlist closure with a smaller call surface.
   Date/Author: 2026-08-15 / Codex.
 
 ## Outcomes & Retrospective
@@ -229,7 +234,7 @@ Composed-authorization validation run on 2026-08-15:
 
 The build succeeded, the smoke import printed `function function function false`, and all 93 hardened-kernel tests passed: 17 messages, 11 utils, 45 IPFS, and 20 Ethereum. The authorization tests include changed signed text to prove that signature verification cannot be skipped through the public authorization API.
 
-The current authorization boundary exports `createSignedMessageAuthorizer(...)`. Factory creation validates every address, normalizes case, removes duplicates, and snapshots the input into a private Set. The returned frozen authorizer exposes its unique `allowedSignerCount` and an `authorize(input)` method that preserves the composed validation, verification, and membership-checking sequence.
+The current authorization boundary exports `createSignedMessageAuthorizer(...)`. Factory creation validates every address, normalizes case, removes duplicates, and snapshots the input into a private Set. The returned frozen function preserves the composed validation, verification, and membership-checking sequence without exposing allowlist metadata or storage.
 
 Prevalidated-authorizer validation run on 2026-08-15:
 
@@ -238,9 +243,9 @@ Prevalidated-authorizer validation run on 2026-08-15:
     node --test packages/utils/test/*.js
     node --test packages/ipfs/test/*.js
     node --test packages/ethereum/test/*.js
-    node --input-type=module -e "import('./packages/messages/dist/index.js').then((m) => { const a = m.createSignedMessageAuthorizer([]); console.log(typeof m.createSignedMessageAuthorizer, typeof a.authorize, a.allowedSignerCount, Object.isFrozen(a), Object.hasOwn(m, 'authorizeSignedMessage'), Object.hasOwn(m, 'authorizeMessageSigner')); })"
+    node --input-type=module -e "import('./packages/messages/dist/index.js').then((m) => { const authorize = m.createSignedMessageAuthorizer([]); console.log(typeof m.createSignedMessageAuthorizer, typeof authorize, Object.isFrozen(authorize), Object.hasOwn(m, 'authorizeSignedMessage'), Object.hasOwn(m, 'authorizeMessageSigner')); })"
 
-The build succeeded, the smoke import printed `function function 0 true false false`, and all 94 hardened-kernel tests passed: 18 messages, 11 utils, 45 IPFS, and 20 Ethereum. Tests also confirm that case-variant duplicates collapse, mutating the original array does not alter authorization policy, and the private Set is not exposed.
+The build succeeded, the smoke import printed `function function true false false`, and all 94 hardened-kernel tests passed: 18 messages, 11 utils, 45 IPFS, and 20 Ethereum. Tests also confirm that case-variant duplicates collapse, mutating the original array does not alter authorization policy, and the private Set is not exposed.
 
 ## Context and Orientation
 

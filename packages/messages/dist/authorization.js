@@ -28,16 +28,14 @@ function normalizeAllowedSigners(allowedSigners) {
 }
 function createSignedMessageAuthorizer(allowedSigners) {
     const normalizedSigners = normalizeAllowedSigners(allowedSigners);
-    return Object.freeze({
-        allowedSignerCount: normalizedSigners.size,
-        authorize(input) {
-            const message = verifySignedMessage(input);
-            if (!normalizedSigners.has(message.signer.toLowerCase())) {
-                throw new SignedMessageAuthorizationError();
-            }
-            return message;
-        },
-    });
+    const authorizeSignedMessage = (input) => {
+        const message = verifySignedMessage(input);
+        if (!normalizedSigners.has(message.signer.toLowerCase())) {
+            throw new SignedMessageAuthorizationError();
+        }
+        return message;
+    };
+    return Object.freeze(authorizeSignedMessage);
 }
 export { createSignedMessageAuthorizer, SignedMessageAuthorizationError, };
 //# sourceMappingURL=authorization.js.map
