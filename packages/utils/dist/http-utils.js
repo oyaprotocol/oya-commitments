@@ -1,5 +1,55 @@
 import { assertHeadersObject, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, } from './validation-utils.js';
-const RETRYABLE_HTTP_NETWORK_ERROR_CODES = new Set([
+function createReadonlySet(values) {
+    const set = new Set(values);
+    const readonlySet = {
+        get size() {
+            return set.size;
+        },
+        has(value) {
+            return set.has(value);
+        },
+        entries() {
+            return set.entries();
+        },
+        keys() {
+            return set.keys();
+        },
+        values() {
+            return set.values();
+        },
+        union(other) {
+            return set.union(other);
+        },
+        intersection(other) {
+            return set.intersection(other);
+        },
+        difference(other) {
+            return set.difference(other);
+        },
+        symmetricDifference(other) {
+            return set.symmetricDifference(other);
+        },
+        isSubsetOf(other) {
+            return set.isSubsetOf(other);
+        },
+        isSupersetOf(other) {
+            return set.isSupersetOf(other);
+        },
+        isDisjointFrom(other) {
+            return set.isDisjointFrom(other);
+        },
+        forEach(callback, thisArg) {
+            for (const value of set) {
+                callback.call(thisArg, value, value, readonlySet);
+            }
+        },
+        [Symbol.iterator]() {
+            return set.values();
+        },
+    };
+    return Object.freeze(readonlySet);
+}
+const RETRYABLE_HTTP_NETWORK_ERROR_CODES = createReadonlySet([
     'ECONNREFUSED',
     'ECONNRESET',
     'EAI_AGAIN',

@@ -1,6 +1,6 @@
 # @oyaprotocol/messages
 
-Signed message validation and EIP-191 verification primitives for Oya nodes.
+Signed message validation, EIP-191 verification, and signer authorization primitives for Oya nodes.
 
 ## Public Entrypoint
 
@@ -36,8 +36,25 @@ Schema failures throw `SignedMessageValidationError` with a stable `code`, HTTP-
 - The validated, frozen message is returned unchanged when verification succeeds.
 - A well-shaped signature that cannot recover `signer` throws `SignedMessageVerificationError` with code `invalid_signature` and status `401`.
 
-Verification uses `@noble/curves` 2.2.0 for secp256k1 public-key recovery and `@noble/hashes` 2.2.0 for Keccak-256. These ESM dependencies require Node.js 20.19.0 or newer, which is also declared by this package.
+Verification uses `@noble/curves` 2.2.0 for secp256k1 public-key recovery and `@noble/hashes` 2.2.0 for Keccak-256. The kernel packages target ECMAScript 2025; when used under Node.js, this package requires Node.js 22 or newer. Noble also supports other modern JavaScript runtimes, although this package is currently tested under Node.js.
 
-Allowlist authorization, deterministic message keys, and server-agnostic HTTP request handling remain planned follow-on APIs in the package ExecPlan. HTTP ingress callers should enforce request body and message size limits before schema validation.
+## Allowlist Authorization
+
+`createSignedMessageAuthorizer(allowedSigners)` validates and snapshots an explicit array of Ethereum addresses once, then returns a frozen authorization function that can be reused for every request:
+
+    const authorizeSignedMessage = createSignedMessageAuthorizer(allowedSigners);
+    const message = authorizeSignedMessage(input);
+
+The returned function validates and verifies the signed message before checking its recovered signer against the authorizer's private normalized Set. This composed API prevents callers from authorizing an unverified signer or changing policy by mutating the original array after authorizer creation.
+
+- Address comparison is case-insensitive.
+- Case-variant duplicate addresses count as one allowed signer.
+- The validated, frozen message is returned unchanged when authorized.
+- An empty allowlist denies every signer.
+- A non-member throws `SignedMessageAuthorizationError` with code `unauthorized_signer` and status `403`.
+- Message validation and signature-verification errors are preserved.
+- Malformed allowlist entries or containers throw `TypeError` when the authorizer is created, before request processing begins.
+
+Deterministic message keys and server-agnostic HTTP request handling remain planned follow-on APIs in the package ExecPlan. HTTP ingress callers should enforce request body and message size limits before schema validation.
 
 Because v1 signs only `text` and includes no timestamp, nonce, audience, or domain, a valid signature can be replayed anywhere the signer is authorized. Nodes must apply their own authorization and durable deduplication policy.

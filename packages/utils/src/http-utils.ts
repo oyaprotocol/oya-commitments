@@ -52,7 +52,61 @@ type HttpPostFetchLike<TBody, TResponse = HttpTextResponse> = HttpFetchLike<
     TResponse
 >;
 
-const RETRYABLE_HTTP_NETWORK_ERROR_CODES: ReadonlySet<string> = new Set([
+function createReadonlySet<T>(values: Iterable<T>): ReadonlySet<T> {
+    const set = new Set(values);
+    const readonlySet: ReadonlySet<T> = {
+        get size(): number {
+            return set.size;
+        },
+        has(value: T): boolean {
+            return set.has(value);
+        },
+        entries(): SetIterator<[T, T]> {
+            return set.entries();
+        },
+        keys(): SetIterator<T> {
+            return set.keys();
+        },
+        values(): SetIterator<T> {
+            return set.values();
+        },
+        union<U>(other: ReadonlySetLike<U>): Set<T | U> {
+            return set.union(other);
+        },
+        intersection<U>(other: ReadonlySetLike<U>): Set<T & U> {
+            return set.intersection(other);
+        },
+        difference<U>(other: ReadonlySetLike<U>): Set<T> {
+            return set.difference(other);
+        },
+        symmetricDifference<U>(other: ReadonlySetLike<U>): Set<T | U> {
+            return set.symmetricDifference(other);
+        },
+        isSubsetOf(other: ReadonlySetLike<unknown>): boolean {
+            return set.isSubsetOf(other);
+        },
+        isSupersetOf(other: ReadonlySetLike<unknown>): boolean {
+            return set.isSupersetOf(other);
+        },
+        isDisjointFrom(other: ReadonlySetLike<unknown>): boolean {
+            return set.isDisjointFrom(other);
+        },
+        forEach(
+            callback: (value: T, duplicateValue: T, set: ReadonlySet<T>) => void,
+            thisArg?: unknown
+        ): void {
+            for (const value of set) {
+                callback.call(thisArg, value, value, readonlySet);
+            }
+        },
+        [Symbol.iterator](): SetIterator<T> {
+            return set.values();
+        },
+    };
+    return Object.freeze(readonlySet);
+}
+
+const RETRYABLE_HTTP_NETWORK_ERROR_CODES: ReadonlySet<string> = createReadonlySet([
     'ECONNREFUSED',
     'ECONNRESET',
     'EAI_AGAIN',

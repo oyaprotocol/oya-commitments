@@ -29,7 +29,7 @@ Small shared utilities for hardened Oya kernel packages.
 - `HttpStatusError`
 - `HttpStatusErrorOptions`
 - `HttpTextResponse`
-- `RETRYABLE_HTTP_NETWORK_ERROR_CODES`
+- `RETRYABLE_HTTP_NETWORK_ERROR_CODES` (runtime-immutable `ReadonlySet<string>` with the full ES2025 Set algebra API)
 - `hasRetryableNetworkErrorCode(error)`
 - `readErrorStringChain(error, key)`
 

@@ -20,10 +20,11 @@
 - Package source files live in `src/*.ts`.
 - Package manifests export built files from `dist/`, not raw source paths.
 - `packages/package.json` owns the local TypeScript toolchain for this area.
+- Kernel packages target ECMAScript 2025 and expect an ECMAScript 2025-compatible execution environment.
 - Build the kernel packages with `npm --prefix packages run build`.
 
 ## Current Constraints
 
 - `@oyaprotocol/ipfs`, `@oyaprotocol/ethereum`, and `@oyaprotocol/utils` expose functional kernel APIs.
-- `@oyaprotocol/messages` exposes signed text message schema validation and EIP-191 signature verification; allowlist authorization, deterministic message keys, and HTTP-shaped ingress handling are still in progress.
+- `@oyaprotocol/messages` exposes signed text message schema validation, EIP-191 signature verification, and allowlist authorization; deterministic message keys and HTTP-shaped ingress handling are still in progress.
 - Proposal or proof verification packages are intentionally not represented here yet; those may be implemented later in a lower-level language while TypeScript packages focus on network interactions.
