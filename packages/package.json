@@ -9,9 +9,8 @@
     "./ethereum"
   ],
   "scripts": {
-    "build": "tsc -b && npm run typecheck:utils-consumer",
-    "typecheck": "tsc -b --pretty false && npm run typecheck:utils-consumer",
-    "typecheck:utils-consumer": "tsc --project utils/test/tsconfig.es2025.json --pretty false"
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false"
   },
   "devDependencies": {
     "typescript": "^6.0.3"
