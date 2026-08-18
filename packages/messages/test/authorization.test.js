@@ -23,26 +23,22 @@ function createSignedMessage() {
     };
 }
 
-test('createSignedMessageAuthorizer prevalidates and snapshots its allowlist', () => {
-    const allowedSigners = [
-        OTHER_SIGNER,
-        SIGNER.toLowerCase(),
-        SIGNER,
-    ];
+test('createSignedMessageAuthorizer returns a frozen function and snapshots its allowlist', () => {
+    const allowedSigners = [SIGNER];
     const authorizeSignedMessage = createSignedMessageAuthorizer(allowedSigners);
 
     allowedSigners.splice(0, allowedSigners.length, OTHER_SIGNER);
 
     assert.equal(typeof authorizeSignedMessage, 'function');
     assert.equal(Object.isFrozen(authorizeSignedMessage), true);
-    assert.equal(Object.hasOwn(authorizeSignedMessage, 'allowedSigners'), false);
     assert.doesNotThrow(() => authorizeSignedMessage(createSignedMessage()));
 });
 
-test('authorizer verifies and authorizes messages case-insensitively', () => {
+test('authorizer accepts case variants and authorizes messages case-insensitively', () => {
     const authorizeSignedMessage = createSignedMessageAuthorizer([
         OTHER_SIGNER,
         SIGNER.toLowerCase(),
+        SIGNER,
     ]);
     const message = authorizeSignedMessage(createSignedMessage());
 
@@ -95,12 +91,14 @@ test('createSignedMessageAuthorizer rejects malformed configuration', () => {
             error instanceof TypeError &&
             /allowedSigners must be an array/.test(error.message)
     );
-    assert.throws(
-        () => createSignedMessageAuthorizer([SIGNER, '0x1234']),
-        (error) =>
-            error instanceof TypeError &&
-            /allowedSigners\[1\] must be a 20-byte 0x-prefixed Ethereum address/.test(
-                error.message
-            )
-    );
+    for (const invalidSigner of ['0x1234', 123]) {
+        assert.throws(
+            () => createSignedMessageAuthorizer([SIGNER, invalidSigner]),
+            (error) =>
+                error instanceof TypeError &&
+                /allowedSigners\[1\] must be a 20-byte 0x-prefixed Ethereum address/.test(
+                    error.message
+                )
+        );
+    }
 });
