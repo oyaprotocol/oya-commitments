@@ -21,15 +21,6 @@ class SignedMessageAuthorizationError extends Error {
     }
 }
 
-function requireEthereumAddress(value: unknown, label: string): string {
-    if (typeof value !== 'string' || !ETHEREUM_ADDRESS_PATTERN.test(value)) {
-        throw new TypeError(
-            `${label} must be a 20-byte 0x-prefixed Ethereum address.`
-        );
-    }
-    return value;
-}
-
 function normalizeAllowedSigners(
     allowedSigners: readonly string[]
 ): ReadonlySet<string> {
@@ -39,12 +30,15 @@ function normalizeAllowedSigners(
 
     const normalizedSigners = new Set<string>();
     for (const [index, allowedSigner] of allowedSigners.entries()) {
-        normalizedSigners.add(
-            requireEthereumAddress(
-                allowedSigner,
-                `allowedSigners[${index}]`
-            ).toLowerCase()
-        );
+        if (
+            typeof allowedSigner !== 'string' ||
+            !ETHEREUM_ADDRESS_PATTERN.test(allowedSigner)
+        ) {
+            throw new TypeError(
+                `allowedSigners[${index}] must be a 20-byte 0x-prefixed Ethereum address.`
+            );
+        }
+        normalizedSigners.add(allowedSigner.toLowerCase());
     }
     return normalizedSigners;
 }

@@ -10,19 +10,17 @@ class SignedMessageAuthorizationError extends Error {
         this.status = 403;
     }
 }
-function requireEthereumAddress(value, label) {
-    if (typeof value !== 'string' || !ETHEREUM_ADDRESS_PATTERN.test(value)) {
-        throw new TypeError(`${label} must be a 20-byte 0x-prefixed Ethereum address.`);
-    }
-    return value;
-}
 function normalizeAllowedSigners(allowedSigners) {
     if (!Array.isArray(allowedSigners)) {
         throw new TypeError('allowedSigners must be an array.');
     }
     const normalizedSigners = new Set();
     for (const [index, allowedSigner] of allowedSigners.entries()) {
-        normalizedSigners.add(requireEthereumAddress(allowedSigner, `allowedSigners[${index}]`).toLowerCase());
+        if (typeof allowedSigner !== 'string' ||
+            !ETHEREUM_ADDRESS_PATTERN.test(allowedSigner)) {
+            throw new TypeError(`allowedSigners[${index}] must be a 20-byte 0x-prefixed Ethereum address.`);
+        }
+        normalizedSigners.add(allowedSigner.toLowerCase());
     }
     return normalizedSigners;
 }
