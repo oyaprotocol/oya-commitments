@@ -52,21 +52,9 @@ type HttpPostFetchLike<TBody, TResponse = HttpTextResponse> = HttpFetchLike<
     TResponse
 >;
 
-interface ImmutableSetView<T> extends Iterable<T> {
-    readonly size: number;
-    has(value: T): boolean;
-    entries(): SetIterator<[T, T]>;
-    keys(): SetIterator<T>;
-    values(): SetIterator<T>;
-    forEach(
-        callback: (value: T, duplicateValue: T, set: ImmutableSetView<T>) => void,
-        thisArg?: unknown
-    ): void;
-}
-
-function createReadonlySet<T>(values: Iterable<T>): ImmutableSetView<T> {
+function createReadonlySet<T>(values: Iterable<T>): ReadonlySet<T> {
     const set = new Set(values);
-    const readonlySet: ImmutableSetView<T> = {
+    const readonlySet: ReadonlySet<T> = {
         get size(): number {
             return set.size;
         },
@@ -82,8 +70,29 @@ function createReadonlySet<T>(values: Iterable<T>): ImmutableSetView<T> {
         values(): SetIterator<T> {
             return set.values();
         },
+        union<U>(other: ReadonlySetLike<U>): Set<T | U> {
+            return set.union(other);
+        },
+        intersection<U>(other: ReadonlySetLike<U>): Set<T & U> {
+            return set.intersection(other);
+        },
+        difference<U>(other: ReadonlySetLike<U>): Set<T> {
+            return set.difference(other);
+        },
+        symmetricDifference<U>(other: ReadonlySetLike<U>): Set<T | U> {
+            return set.symmetricDifference(other);
+        },
+        isSubsetOf(other: ReadonlySetLike<unknown>): boolean {
+            return set.isSubsetOf(other);
+        },
+        isSupersetOf(other: ReadonlySetLike<unknown>): boolean {
+            return set.isSupersetOf(other);
+        },
+        isDisjointFrom(other: ReadonlySetLike<unknown>): boolean {
+            return set.isDisjointFrom(other);
+        },
         forEach(
-            callback: (value: T, duplicateValue: T, set: ImmutableSetView<T>) => void,
+            callback: (value: T, duplicateValue: T, set: ReadonlySet<T>) => void,
             thisArg?: unknown
         ): void {
             for (const value of set) {
@@ -97,7 +106,7 @@ function createReadonlySet<T>(values: Iterable<T>): ImmutableSetView<T> {
     return Object.freeze(readonlySet);
 }
 
-const RETRYABLE_HTTP_NETWORK_ERROR_CODES: ImmutableSetView<string> = createReadonlySet([
+const RETRYABLE_HTTP_NETWORK_ERROR_CODES: ReadonlySet<string> = createReadonlySet([
     'ECONNREFUSED',
     'ECONNRESET',
     'EAI_AGAIN',
@@ -193,5 +202,4 @@ export type {
     HttpPostFetchOptions,
     HttpStatusErrorOptions,
     HttpTextResponse,
-    ImmutableSetView,
 };

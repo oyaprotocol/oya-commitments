@@ -4,7 +4,10 @@ RETRYABLE_HTTP_NETWORK_ERROR_CODES.has('ECONNRESET');
 RETRYABLE_HTTP_NETWORK_ERROR_CODES.forEach((_code, _duplicateCode, set) => {
     set.has('ECONNRESET');
 });
-
-// The package-owned view intentionally does not inherit evolving Set APIs.
-// @ts-expect-error union is not part of ImmutableSetView.
 RETRYABLE_HTTP_NETWORK_ERROR_CODES.union(new Set<string>());
+RETRYABLE_HTTP_NETWORK_ERROR_CODES.intersection(new Set<string>());
+RETRYABLE_HTTP_NETWORK_ERROR_CODES.difference(new Set<string>());
+RETRYABLE_HTTP_NETWORK_ERROR_CODES.symmetricDifference(new Set<string>());
+RETRYABLE_HTTP_NETWORK_ERROR_CODES.isSubsetOf(new Set<string>());
+RETRYABLE_HTTP_NETWORK_ERROR_CODES.isSupersetOf(new Set<string>());
+RETRYABLE_HTTP_NETWORK_ERROR_CODES.isDisjointFrom(new Set<string>());

@@ -223,10 +223,48 @@ test('hasRetryableNetworkErrorCode detects retryable HTTP network codes', () => 
     assert.equal(RETRYABLE_HTTP_NETWORK_ERROR_CODES.add, undefined);
     assert.equal(RETRYABLE_HTTP_NETWORK_ERROR_CODES.delete, undefined);
     assert.equal(RETRYABLE_HTTP_NETWORK_ERROR_CODES.clear, undefined);
-    assert.equal(RETRYABLE_HTTP_NETWORK_ERROR_CODES.union, undefined);
     assert.throws(
         () => RETRYABLE_HTTP_NETWORK_ERROR_CODES.add('ERR_INVALID_URL'),
         TypeError
+    );
+    assert.deepEqual(
+        [...RETRYABLE_HTTP_NETWORK_ERROR_CODES.intersection(new Set(['ECONNRESET', 'OTHER']))],
+        ['ECONNRESET']
+    );
+    assert.deepEqual(
+        [...RETRYABLE_HTTP_NETWORK_ERROR_CODES.difference(new Set(['ECONNRESET']))],
+        [...RETRYABLE_HTTP_NETWORK_ERROR_CODES].filter((code) => code !== 'ECONNRESET')
+    );
+    assert.deepEqual(
+        [...RETRYABLE_HTTP_NETWORK_ERROR_CODES.union(new Set(['ERR_INVALID_URL']))],
+        [...RETRYABLE_HTTP_NETWORK_ERROR_CODES, 'ERR_INVALID_URL']
+    );
+    assert.deepEqual(
+        [
+            ...RETRYABLE_HTTP_NETWORK_ERROR_CODES.symmetricDifference(
+                new Set(['ECONNRESET', 'ERR_INVALID_URL'])
+            ),
+        ],
+        [
+            ...[...RETRYABLE_HTTP_NETWORK_ERROR_CODES].filter(
+                (code) => code !== 'ECONNRESET'
+            ),
+            'ERR_INVALID_URL',
+        ]
+    );
+    assert.equal(
+        RETRYABLE_HTTP_NETWORK_ERROR_CODES.isSubsetOf(
+            new Set([...RETRYABLE_HTTP_NETWORK_ERROR_CODES, 'ERR_INVALID_URL'])
+        ),
+        true
+    );
+    assert.equal(
+        RETRYABLE_HTTP_NETWORK_ERROR_CODES.isSupersetOf(new Set(['ECONNRESET'])),
+        true
+    );
+    assert.equal(
+        RETRYABLE_HTTP_NETWORK_ERROR_CODES.isDisjointFrom(new Set(['ERR_INVALID_URL'])),
+        true
     );
     assert.equal(
         hasRetryableNetworkErrorCode({

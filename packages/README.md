@@ -20,6 +20,7 @@
 - Package source files live in `src/*.ts`.
 - Package manifests export built files from `dist/`, not raw source paths.
 - `packages/package.json` owns the local TypeScript toolchain for this area.
+- Kernel packages target ECMAScript 2025 and expect an ECMAScript 2025-compatible execution environment.
 - Build the kernel packages with `npm --prefix packages run build`.
 
 ## Current Constraints
