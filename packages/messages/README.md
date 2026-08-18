@@ -36,7 +36,7 @@ Schema failures throw `SignedMessageValidationError` with a stable `code`, HTTP-
 - The validated, frozen message is returned unchanged when verification succeeds.
 - A well-shaped signature that cannot recover `signer` throws `SignedMessageVerificationError` with code `invalid_signature` and status `401`.
 
-Verification uses `@noble/curves` 2.2.0 for secp256k1 public-key recovery and `@noble/hashes` 2.2.0 for Keccak-256. These ESM dependencies require Node.js 20.19.0 or newer, which is also declared by this package.
+Verification uses `@noble/curves` 2.2.0 for secp256k1 public-key recovery and `@noble/hashes` 2.2.0 for Keccak-256. When used under Node.js, these ESM dependencies require Node.js 20.19.0 or newer. Noble also supports other modern JavaScript runtimes, although this package is currently tested under Node.js.
 
 ## Allowlist Authorization
 
