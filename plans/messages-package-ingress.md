@@ -6,15 +6,15 @@ This ExecPlan is a living document and must be maintained according to `PLANS.md
 
 Build `@oyaprotocol/messages` from a placeholder package into the first hardened message-ingress kernel for Oya nodes.
 
-After this work, a node process should be able to accept a small HTTP JSON request from an authorized user, verify that the request contains a text message signed by the claimed Ethereum address, and receive an accepted-message object that the node can enqueue or hand to its own implementation-specific logic. The message package will not decide what the text means. A node may later choose to publish the text to IPFS, trigger an Ethereum transaction, ignore it, or route it to an agent-specific policy engine, but those actions are outside this package.
+After this work, a node process should be able to accept a small HTTP JSON request from an authorized user, verify that the request contains a text message signed by the claimed Ethereum address, and receive an accepted-message object that the node can hand to its own implementation-specific logic. The node implementation defines what the text means and how to act on it.
 
 The observable behavior after completion is:
 
 1. a caller submits `POST /v1/messages`-style JSON with only `text`, `signer`, and `signature`;
-2. `@oyaprotocol/messages` validates the body, recovers the signer according to Ethereum signed-message rules, checks the signer against an explicit allowlist, and returns a deterministic acceptance result;
+2. `@oyaprotocol/messages` validates the body, verifies that the exact `text` is covered by the Ethereum signature, recovers the signer, checks the signer against an explicit allowlist, and returns an acceptance result;
 3. malformed, unsigned, mis-signed, overlarge, or unauthorized messages produce structured rejection errors that a node can map to HTTP status codes.
 
-The signed message is intentionally text-first. There is no protocol `version`, no `meta`, no chain ID, no commitment address, no Safe address, no proposal kind, no IPFS field, and no instruction schema in the wire message. The node's internal implementation owns all interpretation of the `text`.
+The signed message is intentionally text-only. Its wire body contains exactly `text`, `signer`, and `signature`. The package preserves the text exactly and hands it to the node's implementation-specific logic after authentication and authorization.
 
 ## Progress
 
@@ -23,19 +23,22 @@ The signed message is intentionally text-first. There is no protocol `version`, 
 - [x] 2026-05-26: Updated the proposed Ethereum signature implementation to use focused `@noble` crypto libraries instead of `viem`.
 - [x] 2026-06-05: Incorporated review feedback to start with the smallest useful slice: strict schema validation before crypto dependencies or HTTP handling.
 - [x] 2026-06-05: Implemented `validateSignedMessage(...)`, `SignedMessageValidationError`, schema exports, and focused schema tests in `packages/messages`.
-- [x] 2026-06-07: Removed schema-level text-size policy; message size will be handled by the future ingress layer.
-- [x] 2026-06-07: Removed the exported `SignedMessage` interface and `textByteLength` from the schema result to keep the current API minimal.
+- [x] 2026-06-07: Assigned message-size policy to the future ingress layer.
+- [x] 2026-06-07: Focused the schema result on the validated wire fields.
 - [x] 2026-06-07: Reused `@oyaprotocol/utils` for the shared plain-object check instead of duplicating it in `packages/messages`.
 - [x] 2026-06-07: Renamed the schema API from `normalizeSignedMessage(...)` to `validateSignedMessage(...)` and stopped lowercasing the submitted signer address.
 - [x] 2026-07-26: Added focused Noble dependencies and implemented `verifySignedMessage(...)` with EIP-191 hashing, secp256k1 recovery, case-insensitive signer comparison, structured verification errors, and fixed-vector tests.
 - [x] 2026-07-28: Upgraded `@noble/curves` and `@noble/hashes` to 2.2.0, migrated to their ESM subpaths and recoverable-signature API, and declared the resulting Node.js 20.19.0 runtime floor.
 - [x] 2026-07-28: Restricted signed-message text to the same ASCII byte policy as IPFS text reads and replaced the Unicode signature fixture with an ASCII recovery-bit fixture.
-- [x] 2026-07-28: Removed the disposable test signer's private-key literal from signature-test provenance to comply with the repository's categorical no-committed-private-keys policy.
+- [x] 2026-07-28: Documented signature-test provenance using public fixture values compatible with repository security policy.
 - [x] 2026-07-28: Added standalone `authorizeMessageSigner(...)` allowlist authorization with case-insensitive address matching, fail-closed empty lists, structured `unauthorized_signer` errors, and focused tests.
 - [x] 2026-08-15: Replaced the public signer-only helper with `authorizeSignedMessage(...)`, which verifies the signed message internally before checking allowlist membership.
 - [x] 2026-08-15: Replaced per-call allowlist validation with `createSignedMessageAuthorizer(...)`, which snapshots a private normalized Set once and returns a frozen reusable authorizer.
-- [x] 2026-08-15: Simplified `SignedMessageAuthorizer` to a function type and removed the unused `allowedSignerCount` metadata from the returned authorization capability.
-- [ ] Implement deterministic message keys, HTTP-shaped handling, and remaining tests in `packages/messages`.
+- [x] 2026-08-15: Simplified `SignedMessageAuthorizer` to a direct frozen function type.
+- [x] 2026-08-19: Focused the remaining plan on the implemented three-field signed-text protocol and functional HTTP-shaped handling.
+- [x] 2026-08-19: Updated the ingress design so successful results carry the authenticated message and documented transport-body and message-text limit responsibilities.
+- [x] 2026-08-19: Defined the complete handler request, option, byte-limit, content-type, and error-mapping contract and restored explicit replay-safety guidance for side-effecting consumers.
+- [ ] Implement functional HTTP-shaped handling and remaining tests in `packages/messages`.
 - [ ] Update final package documentation and validation evidence after the full ingress implementation is complete.
 
 ## Surprises & Discoveries
@@ -43,11 +46,11 @@ The signed message is intentionally text-first. There is no protocol `version`, 
 - Observation: `@oyaprotocol/messages` was only a placeholder package shell when this plan began.
   Evidence: the initial `packages/messages/src/index.ts` exported `packageInfo` with `status: 'placeholder'`; the schema milestone subsequently removed it.
 
-- Observation: The hardened package area must not import legacy runtime code.
-  Evidence: `packages/AGENTS.md` says existing code under `agent/`, `agent-library/`, `node/`, and `frontend/` is reference material only for production-kernel packages.
+- Observation: Hardened package implementation and dependencies stay within the `packages/` area and its package-root exports.
+  Evidence: `packages/AGENTS.md` defines `agent/`, `agent-library/`, `node/`, and `frontend/` as reference material for production-kernel packages.
 
-- Observation: Existing message ingress and publication logic in `agent/src/lib/` can inform the design but must not be reused by import.
-  Evidence: `agent/src/lib/message-api.js`, `agent/src/lib/message-signing.js`, and `agent/src/lib/message-publication-api.js` already contain useful reference behavior for signed requests, HTTP status mapping, and publication flows, but package rules prohibit importing that code into `packages/messages`.
+- Observation: Existing message ingress and publication logic in `agent/src/lib/` provides reference behavior for the package-local implementation.
+  Evidence: `agent/src/lib/message-api.js`, `agent/src/lib/message-signing.js`, and `agent/src/lib/message-publication-api.js` illustrate signed requests, HTTP status mapping, and publication flows.
 
 - Observation: The first implementation milestone removed the `packageInfo` placeholder export and replaced it with real schema-validation exports, before the later signature milestone added cryptographic verification.
   Evidence: `packages/messages/test/schema.test.js` covers schema behavior independently from `packages/messages/test/signature.test.js`.
@@ -55,35 +58,35 @@ The signed message is intentionally text-first. There is no protocol `version`, 
 - Observation: JavaScript string length cannot be used in the EIP-191 prefix because it counts UTF-16 code units rather than encoded message bytes.
   Evidence: the earlier fixed `Oya 🌱` ethers signature verified only when the prefix used the UTF-8 byte length produced by `utf8ToBytes(...)`. That fixture was removed when the package later restricted text to ASCII, but digest construction continues to use encoded byte length.
 
-- Observation: The reviewed Noble versions already used elsewhere in this repository expose the complete recovery surface without a higher-level Ethereum dependency.
+- Observation: The reviewed Noble versions expose the complete focused recovery surface used by this package.
   Evidence: `@noble/curves` 1.9.1 provides compact signature parsing, recovery-bit attachment, and secp256k1 public-key recovery; `@noble/hashes` 1.8.0 provides Keccak-256 and byte/hex utilities.
 
 - Observation: Noble 2.2.0 changed both module and recovery conventions in ways that matter for EIP-191.
   Evidence: package subpaths require explicit `.js` extensions; recoverable signatures are encoded as `recovery || r || s` rather than Ethereum's `r || s || v`; and `secp256k1.recoverPublicKey(...)` defaults to SHA-256 prehashing, so recovery over the already-computed EIP-191 Keccak-256 digest must pass `{ prehash: false }`.
 
-- Observation: The existing shared ASCII policy is a byte-range check, not a printable-text policy.
-  Evidence: `assertAsciiBytes(...)` rejects bytes greater than `0x7f`, so message validation now rejects all non-ASCII UTF-8 encodings while preserving every ASCII byte, including control bytes and `0x7f`, just like the IPFS text readers.
+- Observation: The existing shared ASCII policy accepts the full ASCII byte range.
+  Evidence: `assertAsciiBytes(...)` accepts every byte through `0x7f`, including control bytes and `0x7f`, and rejects higher UTF-8 byte values just like the IPFS text readers.
 
 ## Decision Log
 
-- Decision: The v1 wire body contains only `text`, `signer`, and `signature`.
-  Rationale: The user wants signed text messages without an overloaded envelope. The node should interpret text according to its own internal rules, not according to package-level commitment or transaction fields.
-  Date/Author: 2026-05-24 / Codex.
+- Decision: The v1 wire body contains exactly `text`, `signer`, and `signature`.
+  Rationale: The node receives signed text and interprets it through its own implementation-specific logic. The three-field envelope keeps the wire contract small and auditable.
+  Date/Author: 2026-05-24; reaffirmed 2026-08-19 / Codex.
 
-- Decision: The signature scheme is Ethereum signed text, not a generic multi-scheme signature abstraction.
+- Decision: Use Ethereum signed text as the signature scheme.
   Rationale: The user clarified that signatures will follow Ethereum signing standards. The package can still avoid Ethereum-domain fields in the message body while using Ethereum address recovery for authentication.
   Date/Author: 2026-05-24 / Codex.
 
 - Decision: The signed payload is exactly the `text` string.
-  Rationale: This keeps the protocol understandable to users and compatible with common wallet `personal_sign` / EIP-191 signed-message behavior. It also avoids hidden canonical JSON fields that would make the message look simple while signing something larger.
-  Date/Author: 2026-05-24 / Codex.
+  Rationale: This keeps the protocol understandable to users and compatible with common wallet `personal_sign` / EIP-191 signed-message behavior.
+  Date/Author: 2026-05-24; reaffirmed 2026-08-19 / Codex.
 
-- Decision: Implement built-in Ethereum signature verification in `@oyaprotocol/messages` using focused `@noble` crypto libraries rather than a higher-level Ethereum client package such as `viem`.
-  Rationale: A message-ingress package should be able to verify messages by itself, but it only needs Keccak-256 hashing and secp256k1 public-key recovery. `@noble/hashes` and `@noble/curves` keep the dependency surface narrower than a full Ethereum client while avoiding hand-rolled cryptography.
+- Decision: Implement built-in Ethereum signature verification in `@oyaprotocol/messages` using focused `@noble` crypto libraries.
+  Rationale: `@noble/hashes` and `@noble/curves` provide the Keccak-256 hashing and secp256k1 public-key recovery primitives required for local verification.
   Date/Author: 2026-05-26 / Codex.
 
-- Decision: The package may expose server-agnostic HTTP helper functions, but it must not start a server or own routing.
-  Rationale: The goal is Internet ingress, but `packages/` must avoid app wiring, daemon startup, environment loading, and repo-specific process behavior. A node daemon can mount the package helper behind `POST /v1/messages`.
+- Decision: Expose server-agnostic HTTP helper functions that map request-shaped input to HTTP-shaped results.
+  Rationale: A node daemon can mount the package helper behind `POST /v1/messages` while supplying its own routing and process lifecycle.
   Date/Author: 2026-05-24 / Codex.
 
 - Decision: Public function and type names should avoid repeating the word "Ingress".
@@ -94,9 +97,13 @@ The signed message is intentionally text-first. There is no protocol `version`, 
   Rationale: The v1 package contract already says messages contain a `text` field. Names such as `validateSignedMessage(...)` and `verifySignedMessage(...)` are shorter while remaining unambiguous inside `@oyaprotocol/messages`.
   Date/Author: 2026-05-26 / Codex.
 
-- Decision: No cryptographic freshness or replay protection is part of v1.
-  Rationale: With no timestamp, nonce, message ID, audience, or domain field, the same signed text remains valid anywhere the signer is authorized. The package can expose deterministic message-key helpers for dedupe, but durable replay policy belongs to the node.
-  Date/Author: 2026-05-24 / Codex.
+- Decision: Evaluate every v1 submission from its current signed text and configured authorization policy.
+  Rationale: The same signed text remains valid across repeated submissions and anywhere the signer is authorized.
+  Date/Author: 2026-05-24; reaffirmed 2026-08-19 / Codex.
+
+- Decision: Require side-effecting node consumers to apply durable replay/idempotency policy or make each operation idempotent.
+  Rationale: EIP-191 verification proves signer identity and text integrity, while a previously valid signature remains valid when submitted again. Authentication therefore cannot serve as a freshness decision for non-idempotent effects.
+  Date/Author: 2026-08-19 / Codex.
 
 - Decision: Reject unknown top-level fields in the v1 signed message body.
   Rationale: The wire contract is intentionally small and audit-focused. Rejecting extra fields prevents callers from assuming hidden package semantics for fields such as `meta`, `chainId`, or `version`, and makes the node's responsibility for interpreting only `text` explicit.
@@ -106,16 +113,24 @@ The signed message is intentionally text-first. There is no protocol `version`, 
   Rationale: The signed payload is exactly the `text` string, so trimming or canonicalizing whitespace would change what later signature verification must recover. A whitespace-only string can still be a signed text message; policy about usefulness belongs above the package.
   Date/Author: 2026-06-05 / Codex.
 
-- Decision: Schema validation does not enforce text-size limits.
-  Rationale: The package should keep low-level shape validation separate from node-specific ingress policy. The future HTTP-shaped helper should own operational size limits together with request body limits.
-  Date/Author: 2026-06-07 / Codex.
+- Decision: Apply request-body limits while the node server reads the request, then apply configured body and text limits in the HTTP-shaped ingress flow before JSON parsing and signature verification respectively.
+  Rationale: The server-side stream limit bounds buffering, the handler's body limit bounds JSON parsing, and the text limit bounds ASCII validation and cryptographic work.
+  Date/Author: 2026-06-07; clarified 2026-08-19 / Codex.
 
-- Decision: The schema result contains only `text`, `signer`, and `signature`.
+- Decision: Return the authenticated frozen message as a distinct field on a successful HTTP-shaped result.
+  Rationale: The node needs the authorized text for implementation-specific handling. Keeping `message` separate from the HTTP `body` gives the node a trusted handoff value while preserving a small response body for the remote caller.
+  Date/Author: 2026-08-19 / Codex.
+
+- Decision: Define `handleSignedMessage(request, options)` with a required `Uint8Array` body, a dedicated content-type value, an injected authorizer, and explicit positive byte limits.
+  Rationale: One byte-oriented request representation makes size measurement and UTF-8 decoding deterministic. Required options preserve the hardened packages' explicit-config convention and move invalid configuration failures to a clear `TypeError` boundary.
+  Date/Author: 2026-08-19 / Codex.
+
+- Decision: The schema result contains exactly `text`, `signer`, and `signature`.
   Rationale: Future signature verification can compute byte length when building the EIP-191 prefix instead of carrying that value in the public schema result.
-  Date/Author: 2026-06-07 / Codex.
+  Date/Author: 2026-06-07; reaffirmed 2026-08-19 / Codex.
 
 - Decision: Schema validation preserves the submitted signer address casing.
-  Rationale: Schema validation should only check wire compatibility and should not assume downstream canonicalization policy. Signature verification and allowlist checks can perform case-insensitive comparisons internally when needed.
+  Rationale: Schema validation checks wire compatibility, while signature verification and allowlist checks perform case-insensitive comparisons internally.
   Date/Author: 2026-06-07 / Codex.
 
 - Decision: `packages/messages` depends on `@oyaprotocol/utils` for shared validation helpers.
@@ -139,15 +154,15 @@ The signed message is intentionally text-first. There is no protocol `version`, 
   Date/Author: 2026-07-28 / Codex.
 
 - Decision: Restrict v1 message text to the same ASCII byte range accepted by IPFS text reads.
-  Rationale: Reusing `assertAsciiBytes(...)` gives signed messages and retrieved text artifacts one narrow character policy, rejects Unicode normalization and display ambiguities before signature verification, and preserves exact submitted ASCII without trimming or normalization.
+  Rationale: Reusing `assertAsciiBytes(...)` gives signed messages and retrieved text artifacts one narrow character policy, rejects Unicode normalization and display ambiguities before signature verification, and preserves submitted ASCII byte-for-byte.
   Date/Author: 2026-07-28 / Codex.
 
 - Decision: Expose allowlist authorization as `authorizeMessageSigner(signer, allowedSigners)` rather than combining it with signature verification. This decision was superseded on 2026-08-15.
-  Rationale: The signer-only name makes the trust boundary explicit: callers must pass the signer from `verifySignedMessage(...)`. The helper can remain independently reusable by the future ingress layer without changing the existing verification API or implying that arbitrary message objects have been cryptographically checked.
+  Rationale: The signer-only name made the trust boundary explicit: callers passed the signer from `verifySignedMessage(...)`, and the future ingress layer could reuse the helper independently.
   Date/Author: 2026-07-28 / Codex.
 
 - Decision: Treat a valid but non-allowlisted signer as `unauthorized_signer` with status `403`, while treating malformed signer or allowlist inputs as `TypeError`. The malformed-signer portion of this decision was superseded on 2026-08-15.
-  Rationale: Membership failure is an authorization result suitable for HTTP mapping. Invalid address shapes and non-array allowlists are caller configuration or API-use errors, not authentication outcomes. Empty arrays are valid and intentionally deny every signer.
+  Rationale: Membership failure is an authorization result suitable for HTTP mapping. Invalid address shapes and non-array allowlists are caller configuration or API-use errors represented by `TypeError`. Empty arrays are valid and intentionally deny every signer.
   Date/Author: 2026-07-28 / Codex.
 
 - Decision: Export `authorizeSignedMessage(input, allowedSigners)` as the authorization boundary and keep raw signer membership checking private. The per-call API portion of this decision was superseded later on 2026-08-15.
@@ -163,8 +178,12 @@ The signed message is intentionally text-first. There is no protocol `version`, 
   Date/Author: 2026-08-15 / Codex.
 
 - Decision: Represent `SignedMessageAuthorizer` as a function type and have `createSignedMessageAuthorizer(...)` return that function directly.
-  Rationale: After removing unused allowlist-count metadata, a one-method object added no useful public behavior. A named function type preserves dependency injection and the private normalized allowlist closure with a smaller call surface.
+  Rationale: A named function type preserves dependency injection and the private normalized allowlist closure with a compact call surface.
   Date/Author: 2026-08-15 / Codex.
+
+- Decision: Implement request handling as a function of the current request and immutable validated authorization configuration.
+  Rationale: This gives callers consistent results for the same request and configuration and lets node processes reuse one prevalidated authorizer.
+  Date/Author: 2026-08-18 / Codex.
 
 ## Outcomes & Retrospective
 
@@ -182,7 +201,7 @@ Validation run on 2026-06-05:
 The schema test reported 6 passing tests, and the smoke import printed `function function false`.
 The broader package regression tests also passed: 11 utils tests, 45 IPFS tests, and 20 Ethereum tests.
 
-The EIP-191 verification milestone is complete. `verifySignedMessage(...)` validates the wire body, hashes exactly the encoded message bytes with the Ethereum signed-message prefix, accepts recovery values encoded as `27`/`28` or `0`/`1`, recovers the secp256k1 public key, derives its Ethereum address with Keccak-256, and compares it to the submitted signer without changing signer casing. Fixed ASCII vectors generated with ethers v6 cover both recovery bits without making ethers a package dependency.
+The EIP-191 verification milestone is complete. `verifySignedMessage(...)` validates the wire body, hashes exactly the encoded message bytes with the Ethereum signed-message prefix, accepts recovery values encoded as `27`/`28` or `0`/`1`, recovers the secp256k1 public key, derives its Ethereum address with Keccak-256, preserves submitted signer casing, and compares addresses case-insensitively. Fixed ASCII vectors generated with ethers v6 cover both recovery bits while runtime verification uses the focused Noble dependencies.
 
 Validation run on 2026-07-26:
 
@@ -208,7 +227,7 @@ The build succeeded, the smoke import printed `function function function`, and 
 
 ASCII-policy validation run on 2026-07-28 used the same build, package test, and smoke-import commands above. All 89 hardened-kernel tests passed again. Message tests now cover the full accepted ASCII byte boundary, rejection of emoji, accented text, `U+0080`, and lone surrogates, propagation of `invalid_text` through `verifySignedMessage(...)`, and fixed ASCII signatures for both recovery bits.
 
-The initial standalone authorization milestone introduced `authorizeMessageSigner(...)` for case-insensitive membership checks, fail-closed empty arrays, and structured authorization errors. The public signer-only API was later superseded because it could not enforce that its signer argument came from signature verification.
+The initial standalone authorization milestone introduced `authorizeMessageSigner(...)` for case-insensitive membership checks, fail-closed empty arrays, and structured authorization errors. The composed authorization API later superseded it by running signature verification internally and guaranteeing signer provenance.
 
 Authorization validation run on 2026-07-28:
 
@@ -234,7 +253,7 @@ Composed-authorization validation run on 2026-08-15:
 
 The build succeeded, the smoke import printed `function function function false`, and all 93 hardened-kernel tests passed: 17 messages, 11 utils, 45 IPFS, and 20 Ethereum. The authorization tests include changed signed text to prove that signature verification cannot be skipped through the public authorization API.
 
-The current authorization boundary exports `createSignedMessageAuthorizer(...)`. Factory creation validates every address, normalizes case, removes duplicates, and snapshots the input into a private Set. The returned frozen function preserves the composed validation, verification, and membership-checking sequence without exposing allowlist metadata or storage.
+The current authorization boundary exports `createSignedMessageAuthorizer(...)`. Factory creation validates every address, normalizes case, removes duplicates, and snapshots the input into a private Set. The returned frozen function preserves the composed validation, verification, and membership-checking sequence while keeping allowlist representation encapsulated.
 
 Prevalidated-authorizer validation run on 2026-08-15:
 
@@ -245,7 +264,9 @@ Prevalidated-authorizer validation run on 2026-08-15:
     node --test packages/ethereum/test/*.js
     node --input-type=module -e "import('./packages/messages/dist/index.js').then((m) => { const authorize = m.createSignedMessageAuthorizer([]); console.log(typeof m.createSignedMessageAuthorizer, typeof authorize, Object.isFrozen(authorize), Object.hasOwn(m, 'authorizeSignedMessage'), Object.hasOwn(m, 'authorizeMessageSigner')); })"
 
-The build succeeded, the smoke import printed `function function true false false`, and all 94 hardened-kernel tests passed: 18 messages, 11 utils, 45 IPFS, and 20 Ethereum. Tests also confirm that case-variant duplicates collapse, mutating the original array does not alter authorization policy, and the private Set is not exposed.
+The build succeeded, the smoke import printed `function function true false false`, and all 94 hardened-kernel tests passed: 18 messages, 11 utils, 45 IPFS, and 20 Ethereum. Tests also confirm that case-variant duplicates collapse, authorizer policy is snapshotted at creation, and the normalized allowlist remains encapsulated.
+
+The existing three-field schema and text-only EIP-191 verification are the intended protocol. The remaining implementation is the functional HTTP-shaped handler and its focused tests and documentation.
 
 ## Context and Orientation
 
@@ -253,20 +274,20 @@ The hardened package workspace lives under `packages/`.
 
 The relevant files at the start of this plan are:
 
-- `packages/messages/src/index.ts`: exports the package-root schema API and no longer exports placeholder metadata.
+- `packages/messages/src/index.ts`: exports the package-root validation, verification, and authorization APIs.
 - `packages/messages/src/schema.ts`: validates the v1 signed text message shape and defines structured schema errors.
 - `packages/messages/src/ethereum-signature.ts`: verifies EIP-191 text signatures and defines structured cryptographic verification errors.
 - `packages/messages/src/authorization.ts`: prevalidates and snapshots allowlists into reusable authorizers that verify signed messages and authorize their recovered signers.
 - `packages/messages/test/schema.test.js`: covers schema acceptance, exact text preservation, unknown-field rejection, text limits, Ethereum address shape, and signature shape.
 - `packages/messages/test/signature.test.js`: covers fixed ASCII EIP-191 vectors, recovery-value normalization, mismatch failures, and malformed signature scalars.
 - `packages/messages/test/authorization.test.js`: covers configuration-time validation, policy snapshotting, private normalized membership, composed verification and authorization, fail-closed empty lists, preserved validation and verification errors, and structured authorization failures.
-- `packages/messages/README.md`: documents schema validation, EIP-191 verification, allowlist authorization, replay limitations, and the remaining key/HTTP work.
+- `packages/messages/README.md`: documents the three-field schema, EIP-191 verification, allowlist authorization, repeated-submission behavior, Internet-facing limits, and remaining HTTP work.
 - `packages/messages/package.json`: exposes the package root through `dist/index.js` and `dist/index.d.ts`.
 - `packages/package.json`: owns the TypeScript build command for all kernel packages.
-- `packages/AGENTS.md`: local instructions for package code, including no imports from legacy runtime directories.
+- `packages/AGENTS.md`: local instructions that scope hardened package code and dependencies to the `packages/` area.
 - `packages/utils`: available shared helpers for validation, HTTP status errors, and async retry/abort behavior. Use it only when a helper is genuinely shared and already public through `@oyaprotocol/utils`.
 
-Reference-only code that may be read but not imported:
+Reference implementation files:
 
 - `agent/src/lib/message-api.js`: current runtime HTTP endpoint for signed user messages.
 - `agent/src/lib/message-signing.js`: current EIP-191-style canonical message helper for legacy agent user messages.
@@ -275,11 +296,10 @@ Reference-only code that may be read but not imported:
 
 Definitions:
 
-- Text message: the user-authored string in the `text` field. The package treats it as opaque text.
+- Text message: the user-authored string in the `text` field. The package preserves it exactly for caller-defined interpretation.
 - Signer: the Ethereum account address claimed in the request body.
 - Signature: the Ethereum signed-message signature over exactly the `text` string.
 - Authorized signer: a signer address included in the allowlist supplied by the node.
-- Message key: a deterministic package-computed identifier for dedupe, likely derived from signer, signature, and text. It is not sent by the caller and is not replay protection by itself.
 
 The intended HTTP JSON body is:
 
@@ -291,22 +311,22 @@ The intended HTTP JSON body is:
 
 ## Plan of Work
 
-First, replace the placeholder export with a small public API centered on signed text message ingress. Keep the package focused on message shape, validation, signature verification, allowlist authorization, deterministic key creation, and HTTP-friendly result objects.
+First, expose a small public API centered on signed text message ingress. Keep the package focused on message shape, signature verification, allowlist authorization, and HTTP-friendly result objects.
 
 Second, add package-local TypeScript modules under `packages/messages/src/` instead of putting all behavior in `index.ts`. A likely source layout is:
 
 - `schema.ts` for the wire body and validation helpers.
 - `ethereum-signature.ts` for Ethereum address normalization and EIP-191 text-signature verification.
 - `authorization.ts` for allowlist normalization and membership checks.
-- `ingress.ts` for a server-agnostic request/body handler that returns HTTP-shaped status and JSON bodies without starting a server.
+- `ingress.ts` for a server-agnostic request/body handler that returns HTTP-shaped status and JSON bodies for a node server to mount.
 - `errors.ts` for structured error classes or error result shapes that keep status-code mapping consistent.
 - `index.ts` for package-root exports only.
 
 Third, add focused tests under `packages/messages/test/`. Tests should use locally generated or fixed Ethereum signed-message vectors. If a deterministic private key is used in tests, it must be a public test-only key documented in the test file, never a secret.
 
-Fourth, update `packages/messages/README.md` so consumers understand the minimal wire protocol, the fact that text is opaque, the replay limitation, and how a node can mount the helper behind `POST /v1/messages`.
+Fourth, update `packages/messages/README.md` so consumers understand the minimal wire protocol, exact text preservation, repeated-submission behavior, safe Internet-facing body and text limits, and how a node can mount the helper behind `POST /v1/messages`.
 
-Do not modify `node/` or `agent/` in this first package milestone unless the user explicitly asks for integration. This plan is to make the package capable of receiving and verifying messages; daemon adoption can be a follow-on plan.
+Implement this milestone under `packages/messages`. A follow-on plan can adopt the finished package in a node daemon.
 
 ## Concrete Steps
 
@@ -320,7 +340,7 @@ Work from the repository root unless a command says otherwise.
         sed -n '1,160p' packages/messages/package.json
         sed -n '1,120p' packages/AGENTS.md
 
-    Expected result: confirm the current package-root exports and that package-local instructions still prohibit importing legacy runtime code.
+    Expected result: confirm the current package-root exports and package-local dependency scope.
 
 2. Add focused Ethereum signature dependencies to `packages/messages/package.json`. This step is complete.
 
@@ -329,22 +349,22 @@ Work from the repository root unless a command says otherwise.
         "@noble/curves": "2.2.0"
         "@noble/hashes": "2.2.0"
 
-    Use `npm --prefix packages install` after editing package metadata so `packages/package-lock.json` records the workspace dependency. If the environment blocks registry access, request normal network approval rather than vendoring code or copying dependencies from another workspace.
+    Use `npm --prefix packages install` after editing package metadata so `packages/package-lock.json` records the workspace dependency. Request network approval if registry access requires it.
 
-3. Implement strict schema validation.
+3. Implement strict schema validation. This step is complete.
 
-    Add public functions with names close to:
+    The existing public validator is:
 
         validateSignedMessage(input)
-        createSignedMessageKey(message)
 
     The validator should require:
 
-    - `text` is a non-empty ASCII string after no implicit semantic parsing.
+    - `text` is a non-empty ASCII string preserved exactly.
     - `signer` is a valid Ethereum address.
     - `signature` is a 0x-prefixed Ethereum signature hex string.
-    - unknown top-level fields are rejected or ignored according to an explicit package decision recorded in this plan before implementation. The recommended choice is to reject unknown top-level fields for v1 auditability.
-    Message size limits are not part of schema validation. The future ingress helper should make maximum request body size and, if needed, maximum text size configurable by the node.
+    - unknown top-level fields are rejected; the only accepted fields are `text`, `signer`, and `signature`.
+
+    Internet-facing node servers cap request bytes while reading the request stream. The ingress helper also checks configured body size before JSON parsing and configured text size before authorization.
 
 4. Implement Ethereum signed-text verification. This step is complete.
 
@@ -352,39 +372,77 @@ Work from the repository root unless a command says otherwise.
 
         verifySignedMessage(input)
 
-    The function should:
+    `verifySignedMessage(...)` should:
 
     - validate the body;
     - compute the EIP-191 Ethereum signed-message digest for exactly `text` using the prefix `"\x19Ethereum Signed Message:\n" + byteLength(text) + text`;
     - recover the secp256k1 public key from the digest and signature using `@noble/curves`;
-    - derive the Ethereum address as the last 20 bytes of Keccak-256 over the uncompressed public key without its `0x04` prefix, using `@noble/hashes`;
+    - derive the Ethereum address as the last 20 bytes of Keccak-256 over the uncompressed public-key bytes after the leading `0x04`, using `@noble/hashes`;
     - normalize common signature recovery IDs, including `v` values `27`/`28` and `0`/`1`;
     - compare the recovered address to `signer` case-insensitively;
     - return the unchanged validated message.
 
-    Allowlist authorization and message-key creation remain separate later steps.
+    `createSignedMessageAuthorizer(...)` composes this verification with the prevalidated signer allowlist.
 
 5. Implement HTTP-shaped message helper.
 
-    Add a public helper with a name close to:
+    Add this public function:
 
         handleSignedMessage(request, options)
 
-    Keep it server-agnostic. It may accept method, headers, and already-read body text or bytes, then return:
+    Use these exact input shapes:
 
-        { status: 202, body: { status: "accepted", signer, messageKey } }
+        interface HandleSignedMessageRequest {
+          readonly method: string;
+          readonly contentType: string | undefined;
+          readonly body: Uint8Array;
+        }
 
-    for valid messages. It should return structured rejection bodies for:
+        interface HandleSignedMessageOptions {
+          readonly authorize: SignedMessageAuthorizer;
+          readonly maxBodyBytes: number;
+          readonly maxTextBytes: number;
+        }
 
-    - wrong method, if method is supplied;
-    - unsupported content type;
-    - body too large;
-    - invalid JSON;
-    - invalid shape;
-    - invalid signature;
-    - unauthorized signer.
+    `request` and `options` must be plain objects with own properties matching the interfaces above; reject missing or unsupported own properties with `TypeError`. Every property is required, including `contentType`, whose value is `undefined` when the HTTP header was absent. Use `<container>.<field> is required.` for a missing property. `body` is always the raw request bytes after the node server has applied its streaming limit. Both byte limits are required positive integers and have no defaults. Validate `options` before `request`. Throw `TypeError` for a non-function `options.authorize`, a byte limit that is not a positive integer, a non-string method, a `contentType` value other than string or `undefined`, or a body that is not `Uint8Array`. Use field-specific messages such as `options.maxBodyBytes must be a positive integer.` and `request.body must be a Uint8Array.` Use `Unsupported options field: <field>.` and `Unsupported request field: <field>.` for extra own properties.
 
-    The package must not call `http.createServer(...)`, read environment variables, write storage, enqueue messages, publish to IPFS, or trigger Ethereum transactions.
+    Process a well-typed request in this exact order:
+
+    1. Require `request.method === "POST"`. Return status `405` with code `method_not_allowed` otherwise.
+    2. Require `request.contentType` to match `/^[\t ]*application\/json[\t ]*(?:;[\t ]*charset[\t ]*=[\t ]*utf-8[\t ]*)?$/i`. This accepts `application/json` with an optional `charset=utf-8` parameter and horizontal whitespace. Return status `415` with code `unsupported_content_type` for a missing value, another parameter, or another media type.
+    3. Compare `request.body.byteLength` to `options.maxBodyBytes`. Return status `413` with code `body_too_large` before decoding or parsing when it exceeds the limit.
+    4. Decode the bytes as UTF-8 with `new TextDecoder("utf-8", { fatal: true })`, then call `JSON.parse(...)`. Map invalid UTF-8 and JSON syntax failures to status `400` with code `invalid_json`.
+    5. If the parsed value has an own string `text` field, measure `new TextEncoder().encode(text).byteLength`. Return status `413` with code `text_too_large` before authorization when it exceeds `options.maxTextBytes`. Let `options.authorize(...)` produce the normal schema error for missing or non-string text.
+    6. Call `options.authorize(parsedValue)`. Map `SignedMessageValidationError`, `SignedMessageVerificationError`, and `SignedMessageAuthorizationError` to their existing status, code, message, and optional details. Propagate unexpected exceptions so programming and infrastructure failures remain visible.
+
+    Use frozen result and body objects. Rejections have this shape:
+
+        {
+          status: 400 | 401 | 403 | 405 | 413 | 415,
+          body: {
+            error: string,
+            code: string,
+            details?: Readonly<Record<string, unknown>>
+          }
+        }
+
+    Use these stable package-owned messages for the new HTTP-layer errors:
+
+    - `method_not_allowed`: `Method must be POST.`
+    - `unsupported_content_type`: `Content-Type must be application/json with optional charset=utf-8.`
+    - `body_too_large`: `Request body exceeds the configured byte limit.`
+    - `invalid_json`: `Request body must be valid UTF-8 JSON.`
+    - `text_too_large`: `text exceeds the configured byte limit.`
+
+    For a valid message, return the HTTP response values together with the exact frozen message returned by the configured authorizer:
+
+        {
+          status: 202,
+          body: { status: "accepted", signer: message.signer },
+          message
+        }
+
+    `message` is the trusted handoff value for the node's implementation-specific logic. The HTTP adapter sends only `status` and `body` to the remote caller. Repeating the same valid request with the same configuration returns an equivalent acceptance result.
 
 6. Add package tests.
 
@@ -402,7 +460,18 @@ Work from the repository root unless a command says otherwise.
     - rejects invalid Ethereum addresses and malformed signatures;
     - rejects signatures that do not recover to `signer`;
     - rejects valid signatures from signers outside the allowlist;
-    - keeps the same deterministic message key for the same `(text, signer, signature)`;
+    - throws `TypeError` for malformed request/options containers, invalid request field types, a non-function authorizer, zero, negative, fractional, `NaN`, or infinite byte limits;
+    - accepts the exact supported content-type forms and rejects missing or unsupported forms with `415` and `unsupported_content_type`;
+    - rejects non-`POST` methods with `405` and `method_not_allowed`;
+    - maps invalid UTF-8 and JSON syntax to `400` and `invalid_json`;
+    - returns the exact validated, frozen, authorized message on acceptance;
+    - keeps the trusted `message` handoff separate from the HTTP response `body`;
+    - rejects an overlarge body before decoding or JSON parsing and overlarge text before invoking an injected authorizer;
+    - preserves structured validation, verification, and authorization statuses, codes, messages, and details;
+    - propagates unexpected authorizer exceptions;
+    - freezes accepted and rejected result and body objects;
+    - returns the same acceptance result for repeated calls with the same signed text and configuration;
+    - accepts separately signed identical text;
     - produces HTTP-shaped statuses suitable for a node endpoint.
 
 7. Update documentation.
@@ -433,14 +502,19 @@ Work from the repository root unless a command says otherwise.
 
 The implementation is accepted when all of the following are true:
 
-- `@oyaprotocol/messages` no longer exposes only placeholder metadata.
+- `@oyaprotocol/messages` exports functional signed-message validation, verification, and authorization APIs.
 - The package root exports the signed text message validation and verification functions through `dist/index.js` and `dist/index.d.ts`.
 - A valid request body containing `text`, `signer`, and `signature` verifies successfully when `signature` is an Ethereum signed-message signature over exactly `text`.
 - The same valid signed text is rejected when the signer is not in the explicit allowlist.
 - A changed `text`, changed `signer`, or changed `signature` fails verification.
-- The HTTP-shaped helper can be mounted by a node process without the package owning server startup.
-- No package source imports from `agent/`, `agent-library/`, `node/`, or `frontend/`.
-- The package README documents the replay limitation: without a timestamp, nonce, audience, or domain field, signatures are valid indefinitely anywhere the signer is authorized.
+- A successful handler result exposes the exact validated, frozen, authorized message through `result.message` for implementation-specific logic.
+- The accepted HTTP `body` remains separate from the trusted `message` handoff value.
+- The node server caps request bytes while reading, and the handler applies configured body and text limits before JSON parsing and signature verification.
+- The handler contract fixes request and option field types, requires explicit positive byte limits, defines content-type and UTF-8 behavior, and maps every expected rejection to a stable status and code.
+- Repeating the same valid request with the same configuration returns the same acceptance result, and separately signed identical text is accepted.
+- The HTTP-shaped helper accepts request data and returns status and JSON body values suitable for mounting in a node process.
+- Package source dependencies resolve through hardened package-root exports.
+- The package README documents exact text preservation, Internet-facing request-body and text limits, and the replay/idempotency requirement for non-idempotent side effects.
 
 Required commands from the repository root:
 
@@ -454,19 +528,19 @@ Broader package regression commands:
     node --test packages/ipfs/test/*.js
     node --test packages/ethereum/test/*.js
 
-No RPC endpoint, private key, IPFS daemon, or production secret should be required for validation. Tests that need a signer should use deterministic public test-only keys or static signature fixtures.
+Validation runs locally with deterministic public test fixtures or static signature vectors.
 
 ## Idempotence and Recovery
 
 This work is package-local and should be safe to retry.
 
-If dependency installation fails because network access is unavailable, leave the source changes uncommitted and record the missing install command in `Outcomes & Retrospective`. Do not copy dependencies from another package's `node_modules`.
+If dependency installation is interrupted, rerun `npm --prefix packages install` and record the result in `Outcomes & Retrospective`.
 
 If a chosen dependency is rejected during review, revert only the dependency and the package-local verification adapter, then replace it with either a different focused Ethereum signature dependency or an injected verifier interface. The schema, ingress helper, tests around malformed input, and docs can remain mostly intact.
 
 If the package API names change during review, update `packages/messages/README.md`, tests, and smoke-import commands in this plan in the same change. The package root `exports` surface should remain the only public import path.
 
-If later node integration needs storage, queues, rate limiting, IPFS publication, or Ethereum transaction execution, add that in `node/` or another explicit package plan. Do not fold app runtime behavior into `@oyaprotocol/messages`.
+Implement later node integration in `node/` or another explicit package plan after this package API is complete.
 
 ## Artifacts and Notes
 
@@ -483,12 +557,19 @@ Draft wire body:
       "signature": "0x..."
     }
 
-Draft accepted response body:
+Draft accepted handler result:
 
     {
-      "status": "accepted",
-      "signer": "0x1111111111111111111111111111111111111111",
-      "messageKey": "..."
+      "status": 202,
+      "body": {
+        "status": "accepted",
+        "signer": "0x1111111111111111111111111111111111111111"
+      },
+      "message": {
+        "text": "Please withdraw 100 USDC.",
+        "signer": "0x1111111111111111111111111111111111111111",
+        "signature": "0x..."
+      }
     }
 
 Draft rejection body:
@@ -498,9 +579,9 @@ Draft rejection body:
       "code": "invalid_signature"
     }
 
-Replay note for docs:
+Repeated-submission note for docs:
 
-    Because v1 signs only text and carries no timestamp, nonce, audience, or domain field, a valid signature can be replayed. Nodes should treat `messageKey` as an idempotency hint and apply their own durable dedupe and authorization policy.
+    An EIP-191 signature authenticates the signer and exact `text`; it does not establish freshness. The same valid signature remains valid across repeated submissions and anywhere the signer is authorized. Before performing a non-idempotent side effect, a node consumer must apply a durable replay/idempotency policy or make the operation itself idempotent.
 
 ## Interfaces and Dependencies
 
@@ -521,38 +602,25 @@ Current exported functions and types:
 
 Planned exported functions and types:
 
-- `createSignedMessageKey(message)`
 - `handleSignedMessage(request, options)`
-- `AcceptedSignedMessage`
-- `HandleSignedMessageOptions`
-- `HandleSignedMessageResult`
-- structured error types or error result codes for body and content-type failures
+- `HandleSignedMessageRequest`, with required `method: string`, `contentType: string | undefined`, and `body: Uint8Array`
+- `AcceptedSignedMessage`, containing status `202`, the HTTP response `body`, and the authenticated `Readonly<SignedMessageInput>` as `message`
+- `RejectedSignedMessage`, containing status `400 | 401 | 403 | 405 | 413 | 415` and a structured error `body`
+- `HandleSignedMessageOptions`, with required `authorize: SignedMessageAuthorizer`, `maxBodyBytes: number`, and `maxTextBytes: number`
+- `HandleSignedMessageResult = AcceptedSignedMessage | RejectedSignedMessage`
+- `SignedMessageHttpErrorCode = "method_not_allowed" | "unsupported_content_type" | "body_too_large" | "invalid_json" | "text_too_large"`
 
 Runtime dependency:
 
 - `@noble/hashes` for Keccak-256 hashing.
 - `@noble/curves` for secp256k1 public-key recovery.
-- The package should use these dependencies only for EIP-191 signed-text verification and Ethereum address derivation. It should not add a higher-level Ethereum client dependency for this work.
+- The runtime dependency surface uses these focused packages for EIP-191 signed-text verification and Ethereum address derivation.
 
 Internal package dependency:
 
-- `@oyaprotocol/utils` may be used for already-public validation helpers if they fit. Do not add shared helpers to `utils` unless duplication across packages becomes real.
+- `@oyaprotocol/utils` provides already-public shared validation helpers; add further shared helpers when multiple packages establish the shared requirement.
 
-External services:
+Configuration inputs:
 
-- None. Verification is local and deterministic.
-
-Environment variables:
-
-- None. The caller supplies allowlists and limits as explicit options.
-
-Non-goals for this package:
-
-- no HTTP server process;
-- no persistent queue;
-- no rate limiter;
-- no IPFS publishing;
-- no Ethereum transaction execution;
-- no interpretation of the text;
-- no commitment, chain, Safe, proposal, or agent-specific fields in the wire body;
-- no imports from legacy runtime directories.
+- The caller supplies signer allowlists through `createSignedMessageAuthorizer(...)` and passes the resulting function as `options.authorize`.
+- The caller supplies `maxBodyBytes` and `maxTextBytes` as explicit positive integer byte limits.

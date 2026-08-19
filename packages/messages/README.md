@@ -18,13 +18,16 @@ The v1 signed text message body is:
 
 `validateSignedMessage(input)` validates that the body is a JSON-style object with exactly `text`, `signer`, and `signature`.
 
-- `text` must be a non-empty ASCII string and is preserved exactly; it is not trimmed or parsed.
+- `text` must be a non-empty ASCII string and is preserved exactly as submitted.
 - `signer` must be a 20-byte `0x`-prefixed Ethereum address and is preserved as submitted.
 - `signature` must be a 65-byte `0x`-prefixed Ethereum signature string and is preserved as submitted.
 - Unknown top-level fields are rejected.
-- Message size is not enforced by schema validation.
 
 Schema failures throw `SignedMessageValidationError` with a stable `code`, HTTP-friendly `status`, and message.
+
+## Internet-Facing Limits
+
+Internet-facing consumers should cap the request body while reading it, then apply a text-size limit before passing the parsed input to `createSignedMessageAuthorizer(...)`. The transport limit bounds buffering and JSON parsing, while the text limit bounds ASCII validation and signature-verification work.
 
 ## Signature Verification
 
@@ -45,7 +48,7 @@ Verification uses `@noble/curves` 2.2.0 for secp256k1 public-key recovery and `@
     const authorizeSignedMessage = createSignedMessageAuthorizer(allowedSigners);
     const message = authorizeSignedMessage(input);
 
-The returned function validates and verifies the signed message before checking its recovered signer against the authorizer's private normalized Set. This composed API prevents callers from authorizing an unverified signer or changing policy by mutating the original array after authorizer creation.
+The returned function validates and verifies the signed message before checking its recovered signer against the authorizer's private normalized Set. This composed API guarantees that authorization follows verification and that authorizer creation snapshots the supplied policy.
 
 - Address comparison is case-insensitive.
 - Case-variant duplicate addresses count as one allowed signer.
@@ -55,6 +58,6 @@ The returned function validates and verifies the signed message before checking 
 - Message validation and signature-verification errors are preserved.
 - Malformed allowlist entries or containers throw `TypeError` when the authorizer is created, before request processing begins.
 
-Deterministic message keys and server-agnostic HTTP request handling remain planned follow-on APIs in the package ExecPlan. HTTP ingress callers should enforce request body and message size limits before schema validation.
+## Replay Safety
 
-Because v1 signs only `text` and includes no timestamp, nonce, audience, or domain, a valid signature can be replayed anywhere the signer is authorized. Nodes must apply their own authorization and durable deduplication policy.
+A v1 EIP-191 signature authenticates the signer and exact `text`; it does not establish freshness. The same valid signature remains valid across repeated submissions and anywhere the signer is authorized. Before performing a non-idempotent side effect, a node consumer must apply a durable replay/idempotency policy or make the operation itself idempotent.
