@@ -36,6 +36,7 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
 - [x] 2026-08-15: Replaced per-call allowlist validation with `createSignedMessageAuthorizer(...)`, which snapshots a private normalized Set once and returns a frozen reusable authorizer.
 - [x] 2026-08-15: Simplified `SignedMessageAuthorizer` to a direct frozen function type.
 - [x] 2026-08-19: Focused the remaining plan on the implemented three-field signed-text protocol and functional HTTP-shaped handling.
+- [x] 2026-08-19: Updated the ingress design so successful results carry the authenticated message and documented transport-body and message-text limit responsibilities.
 - [ ] Implement functional HTTP-shaped handling and remaining tests in `packages/messages`.
 - [ ] Update final package documentation and validation evidence after the full ingress implementation is complete.
 
@@ -107,9 +108,13 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
   Rationale: The signed payload is exactly the `text` string, so trimming or canonicalizing whitespace would change what later signature verification must recover. A whitespace-only string can still be a signed text message; policy about usefulness belongs above the package.
   Date/Author: 2026-06-05 / Codex.
 
-- Decision: Apply operational request-body and text-size limits in the HTTP-shaped ingress helper.
-  Rationale: This keeps low-level shape validation focused on the signed message contract and groups transport limits with request handling.
-  Date/Author: 2026-06-07 / Codex.
+- Decision: Apply request-body limits while the node server reads the request, then apply configured body and text limits in the HTTP-shaped ingress flow before JSON parsing and signature verification respectively.
+  Rationale: The server-side stream limit bounds buffering, the handler's body limit bounds JSON parsing, and the text limit bounds ASCII validation and cryptographic work.
+  Date/Author: 2026-06-07; clarified 2026-08-19 / Codex.
+
+- Decision: Return the authenticated frozen message as a distinct field on a successful HTTP-shaped result.
+  Rationale: The node needs the authorized text for implementation-specific handling. Keeping `message` separate from the HTTP `body` gives the node a trusted handoff value while preserving a small response body for the remote caller.
+  Date/Author: 2026-08-19 / Codex.
 
 - Decision: The schema result contains exactly `text`, `signer`, and `signature`.
   Rationale: Future signature verification can compute byte length when building the EIP-191 prefix instead of carrying that value in the public schema result.
@@ -267,7 +272,7 @@ The relevant files at the start of this plan are:
 - `packages/messages/test/schema.test.js`: covers schema acceptance, exact text preservation, unknown-field rejection, text limits, Ethereum address shape, and signature shape.
 - `packages/messages/test/signature.test.js`: covers fixed ASCII EIP-191 vectors, recovery-value normalization, mismatch failures, and malformed signature scalars.
 - `packages/messages/test/authorization.test.js`: covers configuration-time validation, policy snapshotting, private normalized membership, composed verification and authorization, fail-closed empty lists, preserved validation and verification errors, and structured authorization failures.
-- `packages/messages/README.md`: documents the three-field schema, EIP-191 verification, allowlist authorization, replay behavior, and remaining HTTP work.
+- `packages/messages/README.md`: documents the three-field schema, EIP-191 verification, allowlist authorization, repeated-submission behavior, Internet-facing limits, and remaining HTTP work.
 - `packages/messages/package.json`: exposes the package root through `dist/index.js` and `dist/index.d.ts`.
 - `packages/package.json`: owns the TypeScript build command for all kernel packages.
 - `packages/AGENTS.md`: local instructions that scope hardened package code and dependencies to the `packages/` area.
@@ -310,7 +315,7 @@ Second, add package-local TypeScript modules under `packages/messages/src/` inst
 
 Third, add focused tests under `packages/messages/test/`. Tests should use locally generated or fixed Ethereum signed-message vectors. If a deterministic private key is used in tests, it must be a public test-only key documented in the test file, never a secret.
 
-Fourth, update `packages/messages/README.md` so consumers understand the minimal wire protocol, exact text preservation, repeated-submission behavior, and how a node can mount the helper behind `POST /v1/messages`.
+Fourth, update `packages/messages/README.md` so consumers understand the minimal wire protocol, exact text preservation, repeated-submission behavior, safe Internet-facing body and text limits, and how a node can mount the helper behind `POST /v1/messages`.
 
 Implement this milestone under `packages/messages`. A follow-on plan can adopt the finished package in a node daemon.
 
@@ -350,7 +355,7 @@ Work from the repository root unless a command says otherwise.
     - `signature` is a 0x-prefixed Ethereum signature hex string.
     - unknown top-level fields are rejected; the only accepted fields are `text`, `signer`, and `signature`.
 
-    The ingress helper applies node-configured request-body and text-size limits.
+    Internet-facing node servers cap request bytes while reading the request stream. The ingress helper also checks configured body size before JSON parsing and configured text size before authorization.
 
 4. Implement Ethereum signed-text verification. This step is complete.
 
@@ -376,11 +381,15 @@ Work from the repository root unless a command says otherwise.
 
         handleSignedMessage(request, options)
 
-    Keep it server-agnostic. It may accept method, headers, and already-read body text or bytes, then return:
+    Keep it server-agnostic. It may accept method, headers, and already-read body text or bytes. For a valid message, return the HTTP response values together with the exact frozen message returned by the configured authorizer:
 
-        { status: 202, body: { status: "accepted", signer } }
+        {
+          status: 202,
+          body: { status: "accepted", signer: message.signer },
+          message
+        }
 
-    for valid messages. It should return structured rejection bodies for:
+    `message` is the trusted handoff value for the node's implementation-specific logic. The HTTP adapter sends only `status` and `body` to the remote caller. Rejection results contain structured response values for:
 
     - wrong method, if method is supplied;
     - unsupported content type;
@@ -390,7 +399,7 @@ Work from the repository root unless a command says otherwise.
     - invalid signature;
     - unauthorized signer.
 
-    The helper evaluates the supplied method, headers, body, limits, and authorizer and returns the corresponding HTTP-shaped result. Repeating the same valid request with the same configuration returns the same acceptance result.
+    The node server enforces its transport-body limit while reading the request. The helper checks the byte length of its supplied body before JSON parsing, checks the parsed text byte length before invoking the authorizer, and then returns the corresponding HTTP-shaped result. Repeating the same valid request with the same configuration returns the same acceptance result.
 
 6. Add package tests.
 
@@ -408,6 +417,9 @@ Work from the repository root unless a command says otherwise.
     - rejects invalid Ethereum addresses and malformed signatures;
     - rejects signatures that do not recover to `signer`;
     - rejects valid signatures from signers outside the allowlist;
+    - returns the exact validated, frozen, authorized message on acceptance;
+    - keeps the trusted `message` handoff separate from the HTTP response `body`;
+    - rejects an overlarge body before JSON parsing and overlarge text before signature verification;
     - returns the same acceptance result for repeated calls with the same signed text and configuration;
     - accepts separately signed identical text;
     - produces HTTP-shaped statuses suitable for a node endpoint.
@@ -445,10 +457,13 @@ The implementation is accepted when all of the following are true:
 - A valid request body containing `text`, `signer`, and `signature` verifies successfully when `signature` is an Ethereum signed-message signature over exactly `text`.
 - The same valid signed text is rejected when the signer is not in the explicit allowlist.
 - A changed `text`, changed `signer`, or changed `signature` fails verification.
+- A successful handler result exposes the exact validated, frozen, authorized message through `result.message` for implementation-specific logic.
+- The accepted HTTP `body` remains separate from the trusted `message` handoff value.
+- The node server caps request bytes while reading, and the handler applies configured body and text limits before JSON parsing and signature verification.
 - Repeating the same valid request with the same configuration returns the same acceptance result, and separately signed identical text is accepted.
 - The HTTP-shaped helper accepts request data and returns status and JSON body values suitable for mounting in a node process.
 - Package source dependencies resolve through hardened package-root exports.
-- The package README documents exact text preservation and repeated-submission behavior.
+- The package README documents exact text preservation, repeated-submission behavior, and Internet-facing request-body and text limits.
 
 Required commands from the repository root:
 
@@ -491,11 +506,19 @@ Draft wire body:
       "signature": "0x..."
     }
 
-Draft accepted response body:
+Draft accepted handler result:
 
     {
-      "status": "accepted",
-      "signer": "0x1111111111111111111111111111111111111111"
+      "status": 202,
+      "body": {
+        "status": "accepted",
+        "signer": "0x1111111111111111111111111111111111111111"
+      },
+      "message": {
+        "text": "Please withdraw 100 USDC.",
+        "signer": "0x1111111111111111111111111111111111111111",
+        "signature": "0x..."
+      }
     }
 
 Draft rejection body:
@@ -529,7 +552,7 @@ Current exported functions and types:
 Planned exported functions and types:
 
 - `handleSignedMessage(request, options)`
-- `AcceptedSignedMessage`
+- `AcceptedSignedMessage`, containing status `202`, the HTTP response `body`, and the authenticated `Readonly<SignedMessageInput>` as `message`
 - `HandleSignedMessageOptions`
 - `HandleSignedMessageResult`
 - structured error types or error result codes for body and content-type failures

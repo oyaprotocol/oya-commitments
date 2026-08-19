@@ -25,6 +25,10 @@ The v1 signed text message body is:
 
 Schema failures throw `SignedMessageValidationError` with a stable `code`, HTTP-friendly `status`, and message.
 
+## Internet-Facing Limits
+
+Internet-facing consumers should cap the request body while reading it, then apply a text-size limit before passing the parsed input to `createSignedMessageAuthorizer(...)`. The transport limit bounds buffering and JSON parsing, while the text limit bounds ASCII validation and signature-verification work.
+
 ## Signature Verification
 
 `verifySignedMessage(input)` first applies the schema validation above, then verifies that `signature` is an Ethereum EIP-191 signed-message signature over exactly `text`.
