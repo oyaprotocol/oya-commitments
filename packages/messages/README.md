@@ -58,4 +58,6 @@ The returned function validates and verifies the signed message before checking 
 - Message validation and signature-verification errors are preserved.
 - Malformed allowlist entries or containers throw `TypeError` when the authorizer is created, before request processing begins.
 
-A v1 EIP-191 signature authenticates the exact `text` and remains valid across repeated submissions and anywhere the signer is authorized. Each invocation validates, verifies, and authorizes the supplied message.
+## Replay Safety
+
+A v1 EIP-191 signature authenticates the signer and exact `text`; it does not establish freshness. The same valid signature remains valid across repeated submissions and anywhere the signer is authorized. Before performing a non-idempotent side effect, a node consumer must apply a durable replay/idempotency policy or make the operation itself idempotent.

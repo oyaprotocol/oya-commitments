@@ -37,6 +37,7 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
 - [x] 2026-08-15: Simplified `SignedMessageAuthorizer` to a direct frozen function type.
 - [x] 2026-08-19: Focused the remaining plan on the implemented three-field signed-text protocol and functional HTTP-shaped handling.
 - [x] 2026-08-19: Updated the ingress design so successful results carry the authenticated message and documented transport-body and message-text limit responsibilities.
+- [x] 2026-08-19: Defined the complete handler request, option, byte-limit, content-type, and error-mapping contract and restored explicit replay-safety guidance for side-effecting consumers.
 - [ ] Implement functional HTTP-shaped handling and remaining tests in `packages/messages`.
 - [ ] Update final package documentation and validation evidence after the full ingress implementation is complete.
 
@@ -100,6 +101,10 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
   Rationale: The same signed text remains valid across repeated submissions and anywhere the signer is authorized.
   Date/Author: 2026-05-24; reaffirmed 2026-08-19 / Codex.
 
+- Decision: Require side-effecting node consumers to apply durable replay/idempotency policy or make each operation idempotent.
+  Rationale: EIP-191 verification proves signer identity and text integrity, while a previously valid signature remains valid when submitted again. Authentication therefore cannot serve as a freshness decision for non-idempotent effects.
+  Date/Author: 2026-08-19 / Codex.
+
 - Decision: Reject unknown top-level fields in the v1 signed message body.
   Rationale: The wire contract is intentionally small and audit-focused. Rejecting extra fields prevents callers from assuming hidden package semantics for fields such as `meta`, `chainId`, or `version`, and makes the node's responsibility for interpreting only `text` explicit.
   Date/Author: 2026-06-05 / Codex.
@@ -114,6 +119,10 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
 
 - Decision: Return the authenticated frozen message as a distinct field on a successful HTTP-shaped result.
   Rationale: The node needs the authorized text for implementation-specific handling. Keeping `message` separate from the HTTP `body` gives the node a trusted handoff value while preserving a small response body for the remote caller.
+  Date/Author: 2026-08-19 / Codex.
+
+- Decision: Define `handleSignedMessage(request, options)` with a required `Uint8Array` body, a dedicated content-type value, an injected authorizer, and explicit positive byte limits.
+  Rationale: One byte-oriented request representation makes size measurement and UTF-8 decoding deterministic. Required options preserve the hardened packages' explicit-config convention and move invalid configuration failures to a clear `TypeError` boundary.
   Date/Author: 2026-08-19 / Codex.
 
 - Decision: The schema result contains exactly `text`, `signer`, and `signature`.
@@ -377,11 +386,55 @@ Work from the repository root unless a command says otherwise.
 
 5. Implement HTTP-shaped message helper.
 
-    Add a public helper with a name close to:
+    Add this public function:
 
         handleSignedMessage(request, options)
 
-    Keep it server-agnostic. It may accept method, headers, and already-read body text or bytes. For a valid message, return the HTTP response values together with the exact frozen message returned by the configured authorizer:
+    Use these exact input shapes:
+
+        interface HandleSignedMessageRequest {
+          readonly method: string;
+          readonly contentType: string | undefined;
+          readonly body: Uint8Array;
+        }
+
+        interface HandleSignedMessageOptions {
+          readonly authorize: SignedMessageAuthorizer;
+          readonly maxBodyBytes: number;
+          readonly maxTextBytes: number;
+        }
+
+    `request` and `options` must be plain objects with own properties matching the interfaces above; reject missing or unsupported own properties with `TypeError`. Every property is required, including `contentType`, whose value is `undefined` when the HTTP header was absent. Use `<container>.<field> is required.` for a missing property. `body` is always the raw request bytes after the node server has applied its streaming limit. Both byte limits are required positive integers and have no defaults. Validate `options` before `request`. Throw `TypeError` for a non-function `options.authorize`, a byte limit that is not a positive integer, a non-string method, a `contentType` value other than string or `undefined`, or a body that is not `Uint8Array`. Use field-specific messages such as `options.maxBodyBytes must be a positive integer.` and `request.body must be a Uint8Array.` Use `Unsupported options field: <field>.` and `Unsupported request field: <field>.` for extra own properties.
+
+    Process a well-typed request in this exact order:
+
+    1. Require `request.method === "POST"`. Return status `405` with code `method_not_allowed` otherwise.
+    2. Require `request.contentType` to match `/^[\t ]*application\/json[\t ]*(?:;[\t ]*charset[\t ]*=[\t ]*utf-8[\t ]*)?$/i`. This accepts `application/json` with an optional `charset=utf-8` parameter and horizontal whitespace. Return status `415` with code `unsupported_content_type` for a missing value, another parameter, or another media type.
+    3. Compare `request.body.byteLength` to `options.maxBodyBytes`. Return status `413` with code `body_too_large` before decoding or parsing when it exceeds the limit.
+    4. Decode the bytes as UTF-8 with `new TextDecoder("utf-8", { fatal: true })`, then call `JSON.parse(...)`. Map invalid UTF-8 and JSON syntax failures to status `400` with code `invalid_json`.
+    5. If the parsed value has an own string `text` field, measure `new TextEncoder().encode(text).byteLength`. Return status `413` with code `text_too_large` before authorization when it exceeds `options.maxTextBytes`. Let `options.authorize(...)` produce the normal schema error for missing or non-string text.
+    6. Call `options.authorize(parsedValue)`. Map `SignedMessageValidationError`, `SignedMessageVerificationError`, and `SignedMessageAuthorizationError` to their existing status, code, message, and optional details. Propagate unexpected exceptions so programming and infrastructure failures remain visible.
+
+    Use frozen result and body objects. Rejections have this shape:
+
+        {
+          status: 400 | 401 | 403 | 405 | 413 | 415,
+          body: {
+            error: string,
+            code: string,
+            details?: Readonly<Record<string, unknown>>
+          }
+        }
+
+    Use these stable package-owned messages for the new HTTP-layer errors:
+
+    - `method_not_allowed`: `Method must be POST.`
+    - `unsupported_content_type`: `Content-Type must be application/json with optional charset=utf-8.`
+    - `body_too_large`: `Request body exceeds the configured byte limit.`
+    - `invalid_json`: `Request body must be valid UTF-8 JSON.`
+    - `text_too_large`: `text exceeds the configured byte limit.`
+
+    For a valid message, return the HTTP response values together with the exact frozen message returned by the configured authorizer:
 
         {
           status: 202,
@@ -389,17 +442,7 @@ Work from the repository root unless a command says otherwise.
           message
         }
 
-    `message` is the trusted handoff value for the node's implementation-specific logic. The HTTP adapter sends only `status` and `body` to the remote caller. Rejection results contain structured response values for:
-
-    - wrong method, if method is supplied;
-    - unsupported content type;
-    - body too large;
-    - invalid JSON;
-    - invalid shape;
-    - invalid signature;
-    - unauthorized signer.
-
-    The node server enforces its transport-body limit while reading the request. The helper checks the byte length of its supplied body before JSON parsing, checks the parsed text byte length before invoking the authorizer, and then returns the corresponding HTTP-shaped result. Repeating the same valid request with the same configuration returns the same acceptance result.
+    `message` is the trusted handoff value for the node's implementation-specific logic. The HTTP adapter sends only `status` and `body` to the remote caller. Repeating the same valid request with the same configuration returns an equivalent acceptance result.
 
 6. Add package tests.
 
@@ -417,9 +460,16 @@ Work from the repository root unless a command says otherwise.
     - rejects invalid Ethereum addresses and malformed signatures;
     - rejects signatures that do not recover to `signer`;
     - rejects valid signatures from signers outside the allowlist;
+    - throws `TypeError` for malformed request/options containers, invalid request field types, a non-function authorizer, zero, negative, fractional, `NaN`, or infinite byte limits;
+    - accepts the exact supported content-type forms and rejects missing or unsupported forms with `415` and `unsupported_content_type`;
+    - rejects non-`POST` methods with `405` and `method_not_allowed`;
+    - maps invalid UTF-8 and JSON syntax to `400` and `invalid_json`;
     - returns the exact validated, frozen, authorized message on acceptance;
     - keeps the trusted `message` handoff separate from the HTTP response `body`;
-    - rejects an overlarge body before JSON parsing and overlarge text before signature verification;
+    - rejects an overlarge body before decoding or JSON parsing and overlarge text before invoking an injected authorizer;
+    - preserves structured validation, verification, and authorization statuses, codes, messages, and details;
+    - propagates unexpected authorizer exceptions;
+    - freezes accepted and rejected result and body objects;
     - returns the same acceptance result for repeated calls with the same signed text and configuration;
     - accepts separately signed identical text;
     - produces HTTP-shaped statuses suitable for a node endpoint.
@@ -460,10 +510,11 @@ The implementation is accepted when all of the following are true:
 - A successful handler result exposes the exact validated, frozen, authorized message through `result.message` for implementation-specific logic.
 - The accepted HTTP `body` remains separate from the trusted `message` handoff value.
 - The node server caps request bytes while reading, and the handler applies configured body and text limits before JSON parsing and signature verification.
+- The handler contract fixes request and option field types, requires explicit positive byte limits, defines content-type and UTF-8 behavior, and maps every expected rejection to a stable status and code.
 - Repeating the same valid request with the same configuration returns the same acceptance result, and separately signed identical text is accepted.
 - The HTTP-shaped helper accepts request data and returns status and JSON body values suitable for mounting in a node process.
 - Package source dependencies resolve through hardened package-root exports.
-- The package README documents exact text preservation, repeated-submission behavior, and Internet-facing request-body and text limits.
+- The package README documents exact text preservation, Internet-facing request-body and text limits, and the replay/idempotency requirement for non-idempotent side effects.
 
 Required commands from the repository root:
 
@@ -530,7 +581,7 @@ Draft rejection body:
 
 Repeated-submission note for docs:
 
-    The package signs and verifies the exact `text`. The same valid signature remains valid across repeated submissions and anywhere the signer is authorized. The handler evaluates each submission from its request data and configured authorization policy.
+    An EIP-191 signature authenticates the signer and exact `text`; it does not establish freshness. The same valid signature remains valid across repeated submissions and anywhere the signer is authorized. Before performing a non-idempotent side effect, a node consumer must apply a durable replay/idempotency policy or make the operation itself idempotent.
 
 ## Interfaces and Dependencies
 
@@ -552,10 +603,12 @@ Current exported functions and types:
 Planned exported functions and types:
 
 - `handleSignedMessage(request, options)`
+- `HandleSignedMessageRequest`, with required `method: string`, `contentType: string | undefined`, and `body: Uint8Array`
 - `AcceptedSignedMessage`, containing status `202`, the HTTP response `body`, and the authenticated `Readonly<SignedMessageInput>` as `message`
-- `HandleSignedMessageOptions`
-- `HandleSignedMessageResult`
-- structured error types or error result codes for body and content-type failures
+- `RejectedSignedMessage`, containing status `400 | 401 | 403 | 405 | 413 | 415` and a structured error `body`
+- `HandleSignedMessageOptions`, with required `authorize: SignedMessageAuthorizer`, `maxBodyBytes: number`, and `maxTextBytes: number`
+- `HandleSignedMessageResult = AcceptedSignedMessage | RejectedSignedMessage`
+- `SignedMessageHttpErrorCode = "method_not_allowed" | "unsupported_content_type" | "body_too_large" | "invalid_json" | "text_too_large"`
 
 Runtime dependency:
 
@@ -569,4 +622,5 @@ Internal package dependency:
 
 Configuration inputs:
 
-- The caller supplies signer allowlists and ingress limits as explicit options.
+- The caller supplies signer allowlists through `createSignedMessageAuthorizer(...)` and passes the resulting function as `options.authorize`.
+- The caller supplies `maxBodyBytes` and `maxTextBytes` as explicit positive integer byte limits.
