@@ -55,6 +55,6 @@ The returned function validates and verifies the signed message before checking 
 - Message validation and signature-verification errors are preserved.
 - Malformed allowlist entries or containers throw `TypeError` when the authorizer is created, before request processing begins.
 
-Deterministic message keys and server-agnostic HTTP request handling remain planned follow-on APIs in the package ExecPlan. HTTP ingress callers should enforce request body and message size limits before schema validation.
+Server-agnostic HTTP request handling remains a planned follow-on API in the package ExecPlan. HTTP ingress callers should enforce request body and message size limits before schema validation.
 
-Because v1 signs only `text` and includes no timestamp, nonce, audience, or domain, a valid signature can be replayed anywhere the signer is authorized. Nodes must apply their own authorization and durable deduplication policy.
+Because v1 signs only `text` and includes no timestamp, nonce, audience, or domain, a valid signature can be replayed anywhere the signer is authorized. The package intentionally retains no request history and performs no deduplication. Callers or higher-level consumers may include an application-specific identifier inside the opaque signed text when they need correlation or their own stateful policy.
