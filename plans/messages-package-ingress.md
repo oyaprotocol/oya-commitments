@@ -38,8 +38,8 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
 - [x] 2026-08-19: Focused the remaining plan on the implemented three-field signed-text protocol and functional HTTP-shaped handling.
 - [x] 2026-08-19: Updated the ingress design so successful results carry the authenticated message and documented transport-body and message-text limit responsibilities.
 - [x] 2026-08-19: Defined the complete handler request, option, byte-limit, content-type, and error-mapping contract and restored explicit replay-safety guidance for side-effecting consumers.
-- [ ] Implement functional HTTP-shaped handling and remaining tests in `packages/messages`.
-- [ ] Update final package documentation and validation evidence after the full ingress implementation is complete.
+- [x] 2026-08-20 01:43Z: Implemented and exported functional HTTP-shaped handling with strict request/configuration validation, ordered request processing, frozen acceptance and rejection results, structured message-error mapping, and focused ingress tests.
+- [x] 2026-08-20 01:43Z: Updated package documentation, rebuilt the kernel packages, smoke-imported the completed API, and passed all 109 hardened-kernel package tests.
 
 ## Surprises & Discoveries
 
@@ -266,7 +266,22 @@ Prevalidated-authorizer validation run on 2026-08-15:
 
 The build succeeded, the smoke import printed `function function true false false`, and all 94 hardened-kernel tests passed: 18 messages, 11 utils, 45 IPFS, and 20 Ethereum. Tests also confirm that case-variant duplicates collapse, authorizer policy is snapshotted at creation, and the normalized allowlist remains encapsulated.
 
-The existing three-field schema and text-only EIP-191 verification are the intended protocol. The remaining implementation is the functional HTTP-shaped handler and its focused tests and documentation.
+The existing three-field schema and text-only EIP-191 verification are the intended protocol.
+
+The HTTP-shaped ingress milestone is complete. `handleSignedMessage(...)` validates options before request input, enforces the required method, content type, body bytes, UTF-8 JSON, and text bytes in the documented order, calls the injected authorizer only after the transport checks pass, and returns frozen HTTP-shaped results. Successful results keep the exact authenticated message separate from the small remote response body. Expected validation, verification, and authorization errors preserve their structured status, code, message, and optional details, while unexpected authorizer failures propagate.
+
+Final validation run on 2026-08-20:
+
+    npm --prefix packages run build
+    node --test packages/messages/test/*.test.js
+    node --input-type=module -e "import('./packages/messages/dist/index.js').then((m) => console.log(typeof m.verifySignedMessage, typeof m.handleSignedMessage))"
+    node --test packages/utils/test/*.js
+    node --test packages/ipfs/test/*.js
+    node --test packages/ethereum/test/*.js
+
+The build succeeded, the smoke import printed `function function`, and all 109 hardened-kernel package tests passed: 33 messages, 11 utils, 45 IPFS, and 20 Ethereum. The 15 ingress tests cover successful authenticated handoff, repeated submissions, separately signed identical text, exact content-type handling, processing order, byte limits, invalid UTF-8 and JSON, body-shape delegation, structured error preservation, unexpected exception propagation, strict container fields and types, positive integer configuration, and frozen results.
+
+This ExecPlan is complete for the `@oyaprotocol/messages` package. A later plan can mount the handler in a node process and define downstream IPFS publication and onchain Logger behavior without changing this package's authentication boundary.
 
 ## Context and Orientation
 
@@ -278,10 +293,12 @@ The relevant files at the start of this plan are:
 - `packages/messages/src/schema.ts`: validates the v1 signed text message shape and defines structured schema errors.
 - `packages/messages/src/ethereum-signature.ts`: verifies EIP-191 text signatures and defines structured cryptographic verification errors.
 - `packages/messages/src/authorization.ts`: prevalidates and snapshots allowlists into reusable authorizers that verify signed messages and authorize their recovered signers.
+- `packages/messages/src/ingress.ts`: validates HTTP-shaped request/configuration input, enforces transport and text limits, maps expected message errors, and returns frozen acceptance or rejection results.
 - `packages/messages/test/schema.test.js`: covers schema acceptance, exact text preservation, unknown-field rejection, text limits, Ethereum address shape, and signature shape.
 - `packages/messages/test/signature.test.js`: covers fixed ASCII EIP-191 vectors, recovery-value normalization, mismatch failures, and malformed signature scalars.
 - `packages/messages/test/authorization.test.js`: covers configuration-time validation, policy snapshotting, private normalized membership, composed verification and authorization, fail-closed empty lists, preserved validation and verification errors, and structured authorization failures.
-- `packages/messages/README.md`: documents the three-field schema, EIP-191 verification, allowlist authorization, repeated-submission behavior, Internet-facing limits, and remaining HTTP work.
+- `packages/messages/test/ingress.test.js`: covers the complete HTTP-shaped handler contract, error mapping, processing order, immutable results, repeated requests, and runtime misuse.
+- `packages/messages/README.md`: documents the three-field schema, EIP-191 verification, allowlist authorization, HTTP-shaped handling, repeated-submission behavior, and Internet-facing limits.
 - `packages/messages/package.json`: exposes the package root through `dist/index.js` and `dist/index.d.ts`.
 - `packages/package.json`: owns the TypeScript build command for all kernel packages.
 - `packages/AGENTS.md`: local instructions that scope hardened package code and dependencies to the `packages/` area.
@@ -594,15 +611,12 @@ Current exported functions and types:
 - `validateSignedMessage(input)`
 - `verifySignedMessage(input)`
 - `createSignedMessageAuthorizer(allowedSigners)`
+- `handleSignedMessage(request, options)`
 - `SignedMessageAuthorizer`
 - `SignedMessageInput`
 - `SignedMessageValidationError`
 - `SignedMessageVerificationError`
 - `SignedMessageAuthorizationError`
-
-Planned exported functions and types:
-
-- `handleSignedMessage(request, options)`
 - `HandleSignedMessageRequest`, with required `method: string`, `contentType: string | undefined`, and `body: Uint8Array`
 - `AcceptedSignedMessage`, containing status `202`, the HTTP response `body`, and the authenticated `Readonly<SignedMessageInput>` as `message`
 - `RejectedSignedMessage`, containing status `400 | 401 | 403 | 405 | 413 | 415` and a structured error `body`
