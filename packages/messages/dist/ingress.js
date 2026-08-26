@@ -2,8 +2,6 @@ import { isPlainObject } from '@oyaprotocol/utils';
 import { SignedMessageAuthorizationError } from './authorization.js';
 import { SignedMessageVerificationError } from './ethereum-signature.js';
 import { SignedMessageValidationError } from './schema.js';
-// This module adapts already-buffered HTTP request data to signed-message
-// authorization. It does not own a server, socket, route, or response writer.
 const OPTION_FIELDS = new Set([
     'authorize',
     'maxBodyBytes',
@@ -41,8 +39,6 @@ function requirePositiveInteger(value, fieldName) {
     }
     return value;
 }
-// Shape failures indicate adapter or configuration bugs, so they throw
-// TypeError instead of becoming HTTP rejection results.
 function validateOptions(options) {
     requirePlainObject(options, 'options');
     requireOnlyFields(options, OPTION_FIELDS, 'options');
@@ -103,8 +99,6 @@ function hasOwnStringText(value) {
 function handleSignedMessage(request, options) {
     const validatedOptions = validateOptions(options);
     const validatedRequest = validateRequest(request);
-    // The order is deliberate: reject cheap transport failures and size limits
-    // before decoding JSON or invoking cryptographic authorization.
     if (validatedRequest.method !== 'POST') {
         return createHttpRejection(405, 'method_not_allowed', 'Method must be POST.');
     }
@@ -133,8 +127,6 @@ function handleSignedMessage(request, options) {
         message = validatedOptions.authorize(parsedValue);
     }
     catch (error) {
-        // Expected message failures become stable client responses. Unexpected
-        // programming or infrastructure failures remain visible to the caller.
         if (!isMappableSignedMessageError(error)) {
             throw error;
         }
@@ -146,8 +138,6 @@ function handleSignedMessage(request, options) {
         status: 'accepted',
         signer: message.signer,
     });
-    // Keep the authenticated message as an internal handoff; an HTTP adapter
-    // sends only status and body to the remote caller.
     return Object.freeze({
         status: 202,
         body,
