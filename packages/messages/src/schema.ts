@@ -19,20 +19,18 @@ type SignedMessageValidationErrorCode =
 interface SignedMessageValidationErrorOptions {
     readonly code: SignedMessageValidationErrorCode;
     readonly message: string;
-    readonly status?: number;
     readonly details?: Readonly<Record<string, unknown>>;
 }
 
 class SignedMessageValidationError extends Error {
     readonly code: SignedMessageValidationErrorCode;
-    readonly status: number;
+    readonly status: 400 = 400;
     readonly details: Readonly<Record<string, unknown>> | undefined;
 
-    constructor({ code, message, status = 400, details }: SignedMessageValidationErrorOptions) {
+    constructor({ code, message, details }: SignedMessageValidationErrorOptions) {
         super(message);
         this.name = 'SignedMessageValidationError';
         this.code = code;
-        this.status = status;
         this.details =
             details === undefined ? undefined : Object.freeze({ ...details });
     }

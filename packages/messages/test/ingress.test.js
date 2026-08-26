@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
     createSignedMessageAuthorizer,
     handleSignedMessage,
+    SignedMessageValidationError,
 } from '../dist/index.js';
 
 // The first vector was generated with ethers v6 Wallet.signMessage using a
@@ -338,6 +339,32 @@ test('handleSignedMessage preserves structured validation, verification, and aut
         status: 403,
         code: 'unauthorized_signer',
         message: /signer is not authorized/,
+    });
+});
+
+test('handleSignedMessage constrains injected validation errors to status 400', () => {
+    const error = new SignedMessageValidationError({
+        code: 'invalid_body',
+        message: 'Injected validation failure.',
+        status: 202,
+        details: { source: 'test' },
+    });
+    assert.equal(error.status, 400);
+
+    const result = handleSignedMessage(
+        createRequest(),
+        createOptions({
+            authorize() {
+                throw error;
+            },
+        })
+    );
+
+    assertRejection(result, {
+        status: 400,
+        code: 'invalid_body',
+        message: /Injected validation failure/,
+        details: { source: 'test' },
     });
 });
 

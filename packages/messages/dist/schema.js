@@ -3,13 +3,12 @@ import { assertAsciiBytes, isPlainObject } from '@oyaprotocol/utils';
 const ALLOWED_SIGNED_MESSAGE_FIELDS = new Set(['text', 'signer', 'signature']);
 class SignedMessageValidationError extends Error {
     code;
-    status;
+    status = 400;
     details;
-    constructor({ code, message, status = 400, details }) {
+    constructor({ code, message, details }) {
         super(message);
         this.name = 'SignedMessageValidationError';
         this.code = code;
-        this.status = status;
         this.details =
             details === undefined ? undefined : Object.freeze({ ...details });
     }

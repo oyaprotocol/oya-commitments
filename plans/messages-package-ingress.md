@@ -42,6 +42,7 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
 - [x] 2026-08-20 01:43Z: Updated package documentation, rebuilt the kernel packages, smoke-imported the completed API, and passed all 109 hardened-kernel package tests.
 - [x] 2026-08-26: Simplified the ingress type surface after review by exporting only the request, options, and result types; rebuilt the package and passed all 33 message tests.
 - [x] 2026-08-26: Removed the package-level Node.js engine declaration and documented the ECMAScript and Web Platform APIs required by the runtime-neutral message package.
+- [x] 2026-08-26: Fixed message error statuses as literal 400, 401, and 403 values, removed validation-status customization and the ingress cast, added an injected-error regression, and passed all 34 message tests.
 
 ## Surprises & Discoveries
 
@@ -193,6 +194,10 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
 
 - Decision: Do not declare a Node.js engine requirement for `@oyaprotocol/messages`.
   Rationale: The package uses ESM plus standard ECMAScript and Web Platform primitives without importing Node-specific APIs. Runtime compatibility should be expressed through those required APIs and proven with runtime-specific smoke tests; pinned dependencies retain their own runtime metadata.
+  Date/Author: 2026-08-26 / user and Codex.
+
+- Decision: Message validation, verification, and authorization errors have fixed literal statuses 400, 401, and 403.
+  Rationale: Package-owned error classes must not allow injected authorizers to escape the documented rejection status union or create rejection bodies with successful HTTP statuses.
   Date/Author: 2026-08-26 / user and Codex.
 
 ## Outcomes & Retrospective

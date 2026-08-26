@@ -5,12 +5,11 @@ import { validateSignedMessage } from './schema.js';
 const ETHEREUM_SIGNED_MESSAGE_PREFIX = '\x19Ethereum Signed Message:\n';
 class SignedMessageVerificationError extends Error {
     code;
-    status;
+    status = 401;
     constructor() {
         super('signature must be a valid EIP-191 signature for signer.');
         this.name = 'SignedMessageVerificationError';
         this.code = 'invalid_signature';
-        this.status = 401;
     }
 }
 function normalizeRecoveryBit(value) {

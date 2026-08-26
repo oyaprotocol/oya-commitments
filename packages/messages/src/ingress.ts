@@ -272,7 +272,7 @@ function handleSignedMessage(
             throw error;
         }
         return createRejection(
-            error.status as RejectedSignedMessage['status'],
+            error.status,
             error.code,
             error.message,
             error instanceof SignedMessageValidationError
