@@ -43,6 +43,7 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
 - [x] 2026-08-26: Simplified the ingress type surface after review by exporting only the request, options, and result types; rebuilt the package and passed all 33 message tests.
 - [x] 2026-08-26: Removed the package-level Node.js engine declaration and documented the ECMAScript and Web Platform APIs required by the runtime-neutral message package.
 - [x] 2026-08-26: Fixed message error statuses as literal 400, 401, and 403 values, removed validation-status customization and the ingress cast, added an injected-error regression, and passed all 34 message tests.
+- [x] 2026-08-26: Mapped recognized errors to fixed statuses by runtime class in ingress, expanded the regression to cover direct status mutation on all three exported error classes, and passed all 34 message tests.
 
 ## Surprises & Discoveries
 
@@ -196,8 +197,8 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
   Rationale: The package uses ESM plus standard ECMAScript and Web Platform primitives without importing Node-specific APIs. Runtime compatibility should be expressed through those required APIs and proven with runtime-specific smoke tests; pinned dependencies retain their own runtime metadata.
   Date/Author: 2026-08-26 / user and Codex.
 
-- Decision: Message validation, verification, and authorization errors have fixed literal statuses 400, 401, and 403.
-  Rationale: Package-owned error classes must not allow injected authorizers to escape the documented rejection status union or create rejection bodies with successful HTTP statuses.
+- Decision: Ingress maps validation, verification, and authorization errors by runtime class to statuses 400, 401, and 403 rather than trusting their status properties.
+  Rationale: The result status is its public discriminator, so injected authorizers must not be able to escape the documented rejection union or create rejection bodies with successful HTTP statuses by mutating JavaScript error instances.
   Date/Author: 2026-08-26 / user and Codex.
 
 ## Outcomes & Retrospective

@@ -4,7 +4,9 @@ import test from 'node:test';
 import {
     createSignedMessageAuthorizer,
     handleSignedMessage,
+    SignedMessageAuthorizationError,
     SignedMessageValidationError,
+    SignedMessageVerificationError,
 } from '../dist/index.js';
 
 // The first vector was generated with ethers v6 Wallet.signMessage using a
@@ -342,30 +344,54 @@ test('handleSignedMessage preserves structured validation, verification, and aut
     });
 });
 
-test('handleSignedMessage constrains injected validation errors to status 400', () => {
-    const error = new SignedMessageValidationError({
-        code: 'invalid_body',
-        message: 'Injected validation failure.',
-        status: 202,
-        details: { source: 'test' },
-    });
-    assert.equal(error.status, 400);
-
-    const result = handleSignedMessage(
-        createRequest(),
-        createOptions({
-            authorize() {
-                throw error;
+test('handleSignedMessage maps injected error classes to fixed statuses', () => {
+    const cases = [
+        {
+            error: new SignedMessageValidationError({
+                code: 'invalid_body',
+                message: 'Injected validation failure.',
+                details: { source: 'test' },
+            }),
+            rejection: {
+                status: 400,
+                code: 'invalid_body',
+                message: /Injected validation failure/,
+                details: { source: 'test' },
             },
-        })
-    );
+        },
+        {
+            error: new SignedMessageVerificationError(),
+            rejection: {
+                status: 401,
+                code: 'invalid_signature',
+                message: /signature must be a valid EIP-191 signature for signer/,
+            },
+        },
+        {
+            error: new SignedMessageAuthorizationError(),
+            rejection: {
+                status: 403,
+                code: 'unauthorized_signer',
+                message: /signer is not authorized/,
+            },
+        },
+    ];
 
-    assertRejection(result, {
-        status: 400,
-        code: 'invalid_body',
-        message: /Injected validation failure/,
-        details: { source: 'test' },
-    });
+    for (const { error, rejection } of cases) {
+        error.status = 202;
+        assert.equal(error.status, 202);
+
+        const result = handleSignedMessage(
+            createRequest(),
+            createOptions({
+                authorize() {
+                    throw error;
+                },
+            })
+        );
+
+        assertRejection(result, rejection);
+    }
 });
 
 test('handleSignedMessage propagates unexpected authorizer failures', () => {

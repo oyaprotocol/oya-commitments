@@ -130,7 +130,12 @@ function handleSignedMessage(request, options) {
         if (!isMappableSignedMessageError(error)) {
             throw error;
         }
-        return createRejection(error.status, error.code, error.message, error instanceof SignedMessageValidationError
+        const status = error instanceof SignedMessageValidationError
+            ? 400
+            : error instanceof SignedMessageVerificationError
+                ? 401
+                : 403;
+        return createRejection(status, error.code, error.message, error instanceof SignedMessageValidationError
             ? error.details
             : undefined);
     }
