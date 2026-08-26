@@ -130,7 +130,9 @@ function handleSignedMessage(request, options) {
         if (!isMappableSignedMessageError(error)) {
             throw error;
         }
-        return createRejection(error.status, error.code, error.message, error.details);
+        return createRejection(error.status, error.code, error.message, error instanceof SignedMessageValidationError
+            ? error.details
+            : undefined);
     }
     const body = Object.freeze({
         status: 'accepted',

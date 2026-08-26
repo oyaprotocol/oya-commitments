@@ -38,35 +38,25 @@ type SignedMessageHttpErrorCode =
     | 'invalid_json'
     | 'text_too_large';
 
-interface SignedMessageErrorBody {
-    readonly error: string;
-    readonly code: string;
-    readonly details?: Readonly<Record<string, unknown>>;
-}
-
-interface AcceptedSignedMessageBody {
-    readonly status: 'accepted';
-    readonly signer: string;
-}
-
 interface AcceptedSignedMessage {
     readonly status: 202;
-    readonly body: Readonly<AcceptedSignedMessageBody>;
+    readonly body: Readonly<{
+        status: 'accepted';
+        signer: string;
+    }>;
     readonly message: Readonly<SignedMessageInput>;
 }
 
 interface RejectedSignedMessage {
     readonly status: 400 | 401 | 403 | 405 | 413 | 415;
-    readonly body: Readonly<SignedMessageErrorBody>;
+    readonly body: Readonly<{
+        error: string;
+        code: string;
+        details?: Readonly<Record<string, unknown>>;
+    }>;
 }
 
 type HandleSignedMessageResult = AcceptedSignedMessage | RejectedSignedMessage;
-
-interface MappableSignedMessageError extends Error {
-    readonly code: string;
-    readonly status: number;
-    readonly details?: Readonly<Record<string, unknown>>;
-}
 
 function requirePlainObject(
     value: unknown,
@@ -194,7 +184,10 @@ function createHttpRejection(
 
 function isMappableSignedMessageError(
     error: unknown
-): error is MappableSignedMessageError {
+): error is
+    | SignedMessageValidationError
+    | SignedMessageVerificationError
+    | SignedMessageAuthorizationError {
     return (
         error instanceof SignedMessageValidationError ||
         error instanceof SignedMessageVerificationError ||
@@ -284,7 +277,9 @@ function handleSignedMessage(
             error.status as RejectedSignedMessage['status'],
             error.code,
             error.message,
-            error.details
+            error instanceof SignedMessageValidationError
+                ? error.details
+                : undefined
         );
     }
 
