@@ -88,8 +88,8 @@ test('handleSignedMessage accepts an authorized signed message and returns a tru
     assert.equal(Object.isFrozen(result.message), true);
 });
 
-test('handleSignedMessage returns the exact message supplied by the injected authorizer', () => {
-    const message = Object.freeze(createSignedMessage());
+test('handleSignedMessage snapshots the message supplied by the injected authorizer', () => {
+    const message = createSignedMessage();
     let authorizedInput;
     const authorize = (input) => {
         authorizedInput = input;
@@ -102,8 +102,16 @@ test('handleSignedMessage returns the exact message supplied by the injected aut
     );
 
     assert.deepEqual(authorizedInput, createSignedMessage());
-    assert.strictEqual(result.message, message);
+    assert.deepEqual(result.message, createSignedMessage());
+    assert.notStrictEqual(result.message, message);
     assert.notStrictEqual(result.body, message);
+    assert.equal(Object.isFrozen(result.message), true);
+
+    message.text = 'Changed after acceptance.';
+    message.signer = UNAUTHORIZED_SIGNER;
+
+    assert.deepEqual(result.message, createSignedMessage());
+    assert.equal(result.body.signer, SIGNER);
 });
 
 test('handleSignedMessage consistently accepts repeated signed text and distinct signers of identical text', () => {

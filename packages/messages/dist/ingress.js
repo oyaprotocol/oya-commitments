@@ -139,14 +139,19 @@ function handleSignedMessage(request, options) {
             ? error.details
             : undefined);
     }
+    const acceptedMessage = Object.freeze({
+        text: message.text,
+        signer: message.signer,
+        signature: message.signature,
+    });
     const body = Object.freeze({
         status: 'accepted',
-        signer: message.signer,
+        signer: acceptedMessage.signer,
     });
     return Object.freeze({
         status: 202,
         body,
-        message,
+        message: acceptedMessage,
     });
 }
 export { handleSignedMessage };

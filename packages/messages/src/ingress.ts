@@ -287,14 +287,19 @@ function handleSignedMessage(
         );
     }
 
+    const acceptedMessage = Object.freeze({
+        text: message.text,
+        signer: message.signer,
+        signature: message.signature,
+    });
     const body = Object.freeze({
         status: 'accepted' as const,
-        signer: message.signer,
+        signer: acceptedMessage.signer,
     });
     return Object.freeze({
         status: 202 as const,
         body,
-        message,
+        message: acceptedMessage,
     });
 }
 
