@@ -10,7 +10,6 @@ interface HandleSignedMessageOptions {
     readonly maxBodyBytes: number;
     readonly maxTextBytes: number;
 }
-type SignedMessageHttpErrorCode = 'method_not_allowed' | 'unsupported_content_type' | 'body_too_large' | 'invalid_json' | 'text_too_large';
 interface AcceptedSignedMessage {
     readonly status: 202;
     readonly body: Readonly<{
@@ -30,4 +29,4 @@ interface RejectedSignedMessage {
 type HandleSignedMessageResult = AcceptedSignedMessage | RejectedSignedMessage;
 declare function handleSignedMessage(request: HandleSignedMessageRequest, options: HandleSignedMessageOptions): HandleSignedMessageResult;
 export { handleSignedMessage };
-export type { AcceptedSignedMessage, HandleSignedMessageOptions, HandleSignedMessageRequest, HandleSignedMessageResult, RejectedSignedMessage, SignedMessageHttpErrorCode, };
+export type { HandleSignedMessageOptions, HandleSignedMessageRequest, HandleSignedMessageResult, };

@@ -31,13 +31,6 @@ interface HandleSignedMessageOptions {
     readonly maxTextBytes: number;
 }
 
-type SignedMessageHttpErrorCode =
-    | 'method_not_allowed'
-    | 'unsupported_content_type'
-    | 'body_too_large'
-    | 'invalid_json'
-    | 'text_too_large';
-
 interface AcceptedSignedMessage {
     readonly status: 202;
     readonly body: Readonly<{
@@ -176,7 +169,12 @@ function createRejection(
 
 function createHttpRejection(
     status: 405 | 413 | 415 | 400,
-    code: SignedMessageHttpErrorCode,
+    code:
+        | 'method_not_allowed'
+        | 'unsupported_content_type'
+        | 'body_too_large'
+        | 'invalid_json'
+        | 'text_too_large',
     message: string
 ): RejectedSignedMessage {
     return createRejection(status, code, message);
@@ -296,10 +294,7 @@ function handleSignedMessage(
 
 export { handleSignedMessage };
 export type {
-    AcceptedSignedMessage,
     HandleSignedMessageOptions,
     HandleSignedMessageRequest,
     HandleSignedMessageResult,
-    RejectedSignedMessage,
-    SignedMessageHttpErrorCode,
 };

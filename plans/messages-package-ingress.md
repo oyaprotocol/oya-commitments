@@ -40,6 +40,7 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
 - [x] 2026-08-19: Defined the complete handler request, option, byte-limit, content-type, and error-mapping contract and restored explicit replay-safety guidance for side-effecting consumers.
 - [x] 2026-08-20 01:43Z: Implemented and exported functional HTTP-shaped handling with strict request/configuration validation, ordered request processing, frozen acceptance and rejection results, structured message-error mapping, and focused ingress tests.
 - [x] 2026-08-20 01:43Z: Updated package documentation, rebuilt the kernel packages, smoke-imported the completed API, and passed all 109 hardened-kernel package tests.
+- [x] 2026-08-26: Simplified the ingress type surface after review by exporting only the request, options, and result types; rebuilt the package and passed all 33 message tests.
 
 ## Surprises & Discoveries
 
@@ -184,6 +185,10 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
 - Decision: Implement request handling as a function of the current request and immutable validated authorization configuration.
   Rationale: This gives callers consistent results for the same request and configuration and lets node processes reuse one prevalidated authorizer.
   Date/Author: 2026-08-18 / Codex.
+
+- Decision: Export only `HandleSignedMessageRequest`, `HandleSignedMessageOptions`, and `HandleSignedMessageResult` for the ingress API; keep accepted and rejected result variants internal and remove the incomplete transport-only error-code type.
+  Rationale: Consumers can narrow the result union by status without importing its branches, while a type that covered only transport codes did not accurately describe every possible rejection code.
+  Date/Author: 2026-08-26 / user and Codex.
 
 ## Outcomes & Retrospective
 
@@ -618,11 +623,8 @@ Current exported functions and types:
 - `SignedMessageVerificationError`
 - `SignedMessageAuthorizationError`
 - `HandleSignedMessageRequest`, with required `method: string`, `contentType: string | undefined`, and `body: Uint8Array`
-- `AcceptedSignedMessage`, containing status `202`, the HTTP response `body`, and the authenticated `Readonly<SignedMessageInput>` as `message`
-- `RejectedSignedMessage`, containing status `400 | 401 | 403 | 405 | 413 | 415` and a structured error `body`
 - `HandleSignedMessageOptions`, with required `authorize: SignedMessageAuthorizer`, `maxBodyBytes: number`, and `maxTextBytes: number`
-- `HandleSignedMessageResult = AcceptedSignedMessage | RejectedSignedMessage`
-- `SignedMessageHttpErrorCode = "method_not_allowed" | "unsupported_content_type" | "body_too_large" | "invalid_json" | "text_too_large"`
+- `HandleSignedMessageResult`, a discriminated union containing either status `202`, the HTTP response `body`, and the authenticated `Readonly<SignedMessageInput>` as `message`, or status `400 | 401 | 403 | 405 | 413 | 415` and a structured error `body`
 
 Runtime dependency:
 
