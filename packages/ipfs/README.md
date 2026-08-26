@@ -28,4 +28,4 @@ All read helpers require `maxBytes`. This keeps unexpectedly large content from 
 
 ## Indexing
 
-Pinning keeps content retained by an IPFS node, but it does not create a discovery index. Public CID discovery is intentionally deferred to a future onchain Logger design where nodes can publish data to IPFS and log CIDs onchain for verifiers and interfaces to scan.
+Pinning keeps content retained by an IPFS node, but it does not create a discovery index or publication order. Public CID discovery and ordering are intentionally deferred to a future onchain Logger design where nodes publish data to IPFS and then log CIDs onchain for verifiers and interfaces to scan by block and log position.

@@ -37,7 +37,7 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
 - [x] 2026-08-15: Simplified `SignedMessageAuthorizer` to a direct frozen function type.
 - [x] 2026-08-19: Focused the remaining plan on the implemented three-field signed-text protocol and functional HTTP-shaped handling.
 - [x] 2026-08-19: Updated the ingress design so successful results carry the authenticated message and documented transport-body and message-text limit responsibilities.
-- [x] 2026-08-19: Defined the complete handler request, option, byte-limit, content-type, and error-mapping contract and restored explicit replay-safety guidance for side-effecting consumers.
+- [x] 2026-08-19: Defined the complete handler request, option, byte-limit, content-type, and error-mapping contract and documented the downstream publication boundary.
 - [x] 2026-08-20 01:43Z: Implemented and exported functional HTTP-shaped handling with strict request/configuration validation, ordered request processing, frozen acceptance and rejection results, structured message-error mapping, and focused ingress tests.
 - [x] 2026-08-20 01:43Z: Updated package documentation, rebuilt the kernel packages, smoke-imported the completed API, and passed all 109 hardened-kernel package tests.
 - [x] 2026-08-26: Simplified the ingress type surface after review by exporting only the request, options, and result types; rebuilt the package and passed all 33 message tests.
@@ -45,6 +45,7 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
 - [x] 2026-08-26: Fixed message error statuses as literal 400, 401, and 403 values, removed validation-status customization and the ingress cast, added an injected-error regression, and passed all 34 message tests.
 - [x] 2026-08-26: Mapped recognized errors to fixed statuses by runtime class in ingress, expanded the regression to cover direct status mutation on all three exported error classes, and passed all 34 message tests.
 - [x] 2026-08-26: Replaced the authorizer-owned success reference with a frozen three-field snapshot, added a post-acceptance mutation regression, and passed all 34 message tests.
+- [x] 2026-08-26: Assigned public publication ordering to the future onchain Logger record rather than the ingress layer or IPFS artifact.
 
 ## Surprises & Discoveries
 
@@ -106,9 +107,9 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
   Rationale: The same signed text remains valid across repeated submissions and anywhere the signer is authorized.
   Date/Author: 2026-05-24; reaffirmed 2026-08-19 / Codex.
 
-- Decision: Require side-effecting node consumers to apply durable replay/idempotency policy or make each operation idempotent.
-  Rationale: EIP-191 verification proves signer identity and text integrity, while a previously valid signature remains valid when submitted again. Authentication therefore cannot serve as a freshness decision for non-idempotent effects.
-  Date/Author: 2026-08-19 / Codex.
+- Decision: Keep publication ordering out of the ingress package and the pre-publication IPFS artifact.
+  Rationale: EIP-191 verification proves signer identity and text integrity. The future onchain Logger will provide the authoritative public publication record, with block and log positions establishing when and in what order each published CID was recorded.
+  Date/Author: 2026-08-26 / user and Codex.
 
 - Decision: Reject unknown top-level fields in the v1 signed message body.
   Rationale: The wire contract is intentionally small and audit-focused. Rejecting extra fields prevents callers from assuming hidden package semantics for fields such as `meta`, `chainId`, or `version`, and makes the node's responsibility for interpreting only `text` explicit.
@@ -552,7 +553,7 @@ The implementation is accepted when all of the following are true:
 - Repeating the same valid request with the same configuration returns the same acceptance result, and separately signed identical text is accepted.
 - The HTTP-shaped helper accepts request data and returns status and JSON body values suitable for mounting in a node process.
 - Package source dependencies resolve through hardened package-root exports.
-- The package README documents exact text preservation, Internet-facing request-body and text limits, and the replay/idempotency requirement for non-idempotent side effects.
+- The package README documents exact text preservation, Internet-facing request-body and text limits, and the boundary between message authentication and future onchain publication ordering.
 
 Required commands from the repository root:
 
@@ -617,9 +618,9 @@ Draft rejection body:
       "code": "invalid_signature"
     }
 
-Repeated-submission note for docs:
+Publication-ordering note for docs:
 
-    An EIP-191 signature authenticates the signer and exact `text`; it does not establish freshness. The same valid signature remains valid across repeated submissions and anywhere the signer is authorized. Before performing a non-idempotent side effect, a node consumer must apply a durable replay/idempotency policy or make the operation itself idempotent.
+    An EIP-191 signature authenticates the signer and exact `text`; it does not assign a publication time or order. Repeated valid submissions remain acceptable at this ingress boundary. The downstream publication flow will establish the public record by logging the published IPFS CID through the onchain Logger, whose block and log position identify when and in what order the message was recorded.
 
 ## Interfaces and Dependencies
 

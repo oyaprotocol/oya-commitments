@@ -138,6 +138,6 @@ Status `202` means the message passed package authentication and authorization. 
 
 An Internet-facing server must cap request bytes while reading the request stream before it constructs the handler's `Uint8Array`. It then supplies explicit `maxBodyBytes` and `maxTextBytes` values to the handler. The stream limit bounds buffering, the handler body limit bounds decoding and JSON parsing, and the text limit bounds validation and cryptographic work.
 
-## Replay Safety
+## Publication Ordering
 
-A v1 EIP-191 signature authenticates the signer and exact `text`; it does not establish freshness. The same valid signature remains valid across repeated submissions and anywhere the signer is authorized. Before performing a non-idempotent side effect, a node consumer must apply a durable replay/idempotency policy or make the operation itself idempotent.
+A v1 EIP-191 signature authenticates the signer and exact `text`; it does not assign a publication time or order. Repeated valid submissions remain acceptable at this ingress boundary. The downstream publication flow will establish the public record by logging the published IPFS CID through the onchain Logger, whose block and log position identify when and in what order the message was recorded.

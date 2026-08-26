@@ -52,6 +52,7 @@ Definitions used in this plan:
 - [x] 2026-05-03 21:15Z: Moved validation helpers shared with Ethereum into `@oyaprotocol/utils`; IPFS now keeps only IPFS-specific ASCII byte validation locally.
 - [x] 2026-05-03 21:35Z: Replaced the package-branded `IpfsConfig` type with shared `HttpConfig` / `CreateHttpConfigOptions` from `@oyaprotocol/utils`; `createIpfsConfig(...)` now accepts and returns the generic `url`-based HTTP config shape.
 - [x] 2026-05-06 00:35Z: Replaced the package-internal `IpfsHttpError` marker with shared `HttpStatusError` from `@oyaprotocol/utils` for publish, Kubo read, and public gateway read HTTP status failures.
+- [x] 2026-08-26: Clarified that the future onchain Logger, rather than the pre-publication artifact, supplies the authoritative public publication order through block and log positions.
 - [x] 2026-05-06 01:00Z: Replaced the package-internal `readErrorStringChain(...)` helper with the shared HTTP utility from `@oyaprotocol/utils`.
 - [x] 2026-05-06 01:12Z: Updated shared `HttpStatusError` to accept opaque/synthetic fetch responses with `status === 0` without changing retry policy.
 - [x] 2026-05-06 01:32Z: Replaced duplicated IPFS publish/read retry loops with shared `runWithRetry(...)` while keeping IPFS-specific fetch, parsing, and body-cancellation logic local.
@@ -308,7 +309,7 @@ IPFS add is content-addressed, so re-adding identical bytes should produce the s
 
 If a request fails or times out before the caller can trust the response, retry by re-adding the same canonical bytes. This may produce the same CID and may discover that the prior attempt already succeeded.
 
-Future onchain logging must be append-only and idempotent at the application layer. The exact logger semantics are intentionally deferred.
+Future onchain logging will provide the authoritative publication record and ordering through each CID event's block and log position. The exact Logger semantics are intentionally deferred.
 
 ## Artifacts and Notes
 
