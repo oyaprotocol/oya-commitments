@@ -38,8 +38,6 @@ type SignedMessageHttpErrorCode =
     | 'invalid_json'
     | 'text_too_large';
 
-type RejectedSignedMessageStatus = 400 | 401 | 403 | 405 | 413 | 415;
-
 interface SignedMessageErrorBody {
     readonly error: string;
     readonly code: string;
@@ -58,7 +56,7 @@ interface AcceptedSignedMessage {
 }
 
 interface RejectedSignedMessage {
-    readonly status: RejectedSignedMessageStatus;
+    readonly status: 400 | 401 | 403 | 405 | 413 | 415;
     readonly body: Readonly<SignedMessageErrorBody>;
 }
 
@@ -171,7 +169,7 @@ function validateRequest(request: unknown): HandleSignedMessageRequest {
 }
 
 function createRejection(
-    status: RejectedSignedMessageStatus,
+    status: RejectedSignedMessage['status'],
     code: string,
     message: string,
     details?: Readonly<Record<string, unknown>>
@@ -283,7 +281,7 @@ function handleSignedMessage(
             throw error;
         }
         return createRejection(
-            error.status as RejectedSignedMessageStatus,
+            error.status as RejectedSignedMessage['status'],
             error.code,
             error.message,
             error.details

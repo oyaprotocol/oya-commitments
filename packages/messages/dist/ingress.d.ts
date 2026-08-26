@@ -11,7 +11,6 @@ interface HandleSignedMessageOptions {
     readonly maxTextBytes: number;
 }
 type SignedMessageHttpErrorCode = 'method_not_allowed' | 'unsupported_content_type' | 'body_too_large' | 'invalid_json' | 'text_too_large';
-type RejectedSignedMessageStatus = 400 | 401 | 403 | 405 | 413 | 415;
 interface SignedMessageErrorBody {
     readonly error: string;
     readonly code: string;
@@ -27,7 +26,7 @@ interface AcceptedSignedMessage {
     readonly message: Readonly<SignedMessageInput>;
 }
 interface RejectedSignedMessage {
-    readonly status: RejectedSignedMessageStatus;
+    readonly status: 400 | 401 | 403 | 405 | 413 | 415;
     readonly body: Readonly<SignedMessageErrorBody>;
 }
 type HandleSignedMessageResult = AcceptedSignedMessage | RejectedSignedMessage;
