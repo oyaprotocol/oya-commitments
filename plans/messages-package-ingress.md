@@ -41,6 +41,7 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
 - [x] 2026-08-20 01:43Z: Implemented and exported functional HTTP-shaped handling with strict request/configuration validation, ordered request processing, frozen acceptance and rejection results, structured message-error mapping, and focused ingress tests.
 - [x] 2026-08-20 01:43Z: Updated package documentation, rebuilt the kernel packages, smoke-imported the completed API, and passed all 109 hardened-kernel package tests.
 - [x] 2026-08-26: Simplified the ingress type surface after review by exporting only the request, options, and result types; rebuilt the package and passed all 33 message tests.
+- [x] 2026-08-26: Removed the package-level Node.js engine declaration and documented the ECMAScript and Web Platform APIs required by the runtime-neutral message package.
 
 ## Surprises & Discoveries
 
@@ -150,7 +151,7 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
   Rationale: These compatible versions are already represented in repository lockfiles, expose the required audited primitives, and avoid an unrelated major-version migration during this focused package change.
   Date/Author: 2026-07-26 / Codex.
 
-- Decision: Upgrade both Noble dependencies to exact version 2.2.0 and declare Node.js 20.19.0 as the package runtime floor.
+- Decision: Upgrade both Noble dependencies to exact version 2.2.0 and declare Node.js 20.19.0 as the package runtime floor. The package-level engine declaration was superseded on 2026-08-26; the exact dependency pins remain current.
   Rationale: The user requested the current Noble releases. Both packages publish the same Node.js engine requirement, and the repository's Node 22 CI satisfies it. Exact pins preserve the package's existing deterministic dependency policy.
   Date/Author: 2026-07-28 / Codex.
 
@@ -190,6 +191,10 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
   Rationale: Consumers can narrow the result union by status without importing its branches, while a type that covered only transport codes did not accurately describe every possible rejection code.
   Date/Author: 2026-08-26 / user and Codex.
 
+- Decision: Do not declare a Node.js engine requirement for `@oyaprotocol/messages`.
+  Rationale: The package uses ESM plus standard ECMAScript and Web Platform primitives without importing Node-specific APIs. Runtime compatibility should be expressed through those required APIs and proven with runtime-specific smoke tests; pinned dependencies retain their own runtime metadata.
+  Date/Author: 2026-08-26 / user and Codex.
+
 ## Outcomes & Retrospective
 
 The first schema milestone is complete. `@oyaprotocol/messages` gained a real package-root API for validating the v1 `{ text, signer, signature }` body before the signature-verification milestone. The implementation preserves exact text and signer bytes, preserves the submitted signature string, rejects unknown fields, returns only the three validated wire fields, and throws structured `SignedMessageValidationError` instances for request-shape failures.
@@ -217,7 +222,7 @@ Validation run on 2026-07-26:
 The combined schema and signature suite reported 13 passing tests, and the smoke import printed `function function function`.
 Package-area regression validation also passed: 11 utils tests, 45 IPFS tests, and 20 Ethereum tests. Together with the 13 message tests, all 89 hardened-kernel package tests passed.
 
-The Noble 2.2.0 migration preserves that behavior while adapting the implementation to ESM `.js` subpaths and the v2 recovered-signature byte layout. Recovery explicitly disables Noble's default SHA-256 prehash because `createEthereumSignedMessageDigest(...)` already supplies the EIP-191 Keccak-256 digest. The package now declares Node.js 20.19.0 or newer to match both Noble dependencies.
+The Noble 2.2.0 migration preserves that behavior while adapting the implementation to ESM `.js` subpaths and the v2 recovered-signature byte layout. Recovery explicitly disables Noble's default SHA-256 prehash because `createEthereumSignedMessageDigest(...)` already supplies the EIP-191 Keccak-256 digest. The dependencies retain their own runtime metadata; `@oyaprotocol/messages` no longer duplicates that metadata with a Node-only package engine declaration.
 
 Validation run on 2026-07-28:
 

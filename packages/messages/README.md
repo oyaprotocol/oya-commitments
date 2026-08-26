@@ -6,6 +6,21 @@ Signed message validation, EIP-191 verification, signer authorization, and HTTP-
 
 - `@oyaprotocol/messages`
 
+## Runtime Requirements
+
+The package is ESM compiled for an ECMAScript 2025-compatible environment. Its public APIs require these standard JavaScript and Web Platform primitives:
+
+- ESM package exports and explicit `.js` module specifiers
+- `Uint8Array`
+- `BigInt`
+- `TextEncoder` and `TextDecoder`, including fatal UTF-8 decoding
+- `Object.hasOwn(...)` and `Object.freeze(...)`
+- `Reflect.ownKeys(...)`
+- `Set`
+- `JSON.parse(...)`
+
+The package does not import `node:*` modules or use Node-only globals such as `process` or `Buffer`. It does not declare a Node.js engine requirement. The pinned Noble dependencies publish their own runtime metadata. Current repository validation runs under Node.js; support for other ECMAScript 2025 runtimes should be established with runtime-specific smoke tests.
+
 ## Message Shape
 
 The v1 signed text message body is:
@@ -35,7 +50,7 @@ Schema failures throw `SignedMessageValidationError` with a stable `code`, HTTP-
 - The validated, frozen message is returned unchanged when verification succeeds.
 - A well-shaped signature that cannot recover `signer` throws `SignedMessageVerificationError` with code `invalid_signature` and status `401`.
 
-Verification uses `@noble/curves` 2.2.0 for secp256k1 public-key recovery and `@noble/hashes` 2.2.0 for Keccak-256. The kernel packages target ECMAScript 2025; when used under Node.js, this package requires Node.js 22 or newer. Noble also supports other modern JavaScript runtimes, although this package is currently tested under Node.js.
+Verification uses `@noble/curves` 2.2.0 for secp256k1 public-key recovery and `@noble/hashes` 2.2.0 for Keccak-256.
 
 ## Allowlist Authorization
 
