@@ -11,13 +11,12 @@ type SignedMessageAuthorizer = (
 
 class SignedMessageAuthorizationError extends Error {
     readonly code: SignedMessageAuthorizationErrorCode;
-    readonly status: number;
+    readonly status: 403 = 403;
 
     constructor() {
         super('signer is not authorized.');
         this.name = 'SignedMessageAuthorizationError';
         this.code = 'unauthorized_signer';
-        this.status = 403;
     }
 }
 

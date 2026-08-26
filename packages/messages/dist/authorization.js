@@ -2,12 +2,11 @@ import { verifySignedMessage } from './ethereum-signature.js';
 const ETHEREUM_ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
 class SignedMessageAuthorizationError extends Error {
     code;
-    status;
+    status = 403;
     constructor() {
         super('signer is not authorized.');
         this.name = 'SignedMessageAuthorizationError';
         this.code = 'unauthorized_signer';
-        this.status = 403;
     }
 }
 function normalizeAllowedSigners(allowedSigners) {

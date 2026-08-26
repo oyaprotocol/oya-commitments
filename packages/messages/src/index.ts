@@ -10,6 +10,7 @@ export {
     createSignedMessageAuthorizer,
     SignedMessageAuthorizationError,
 } from './authorization.js';
+export { handleSignedMessage } from './ingress.js';
 export type {
     SignedMessageInput,
     SignedMessageValidationErrorCode,
@@ -22,3 +23,8 @@ export type {
     SignedMessageAuthorizationErrorCode,
     SignedMessageAuthorizer,
 } from './authorization.js';
+export type {
+    HandleSignedMessageOptions,
+    HandleSignedMessageRequest,
+    HandleSignedMessageResult,
+} from './ingress.js';

@@ -16,13 +16,12 @@ type SignedMessageVerificationErrorCode = 'invalid_signature';
 
 class SignedMessageVerificationError extends Error {
     readonly code: SignedMessageVerificationErrorCode;
-    readonly status: number;
+    readonly status: 401 = 401;
 
     constructor() {
         super('signature must be a valid EIP-191 signature for signer.');
         this.name = 'SignedMessageVerificationError';
         this.code = 'invalid_signature';
-        this.status = 401;
     }
 }
 

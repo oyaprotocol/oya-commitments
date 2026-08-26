@@ -3,7 +3,7 @@ type SignedMessageAuthorizationErrorCode = 'unauthorized_signer';
 type SignedMessageAuthorizer = (input: unknown) => Readonly<SignedMessageInput>;
 declare class SignedMessageAuthorizationError extends Error {
     readonly code: SignedMessageAuthorizationErrorCode;
-    readonly status: number;
+    readonly status: 403;
     constructor();
 }
 declare function createSignedMessageAuthorizer(allowedSigners: readonly string[]): SignedMessageAuthorizer;

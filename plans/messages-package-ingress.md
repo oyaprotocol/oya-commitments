@@ -38,8 +38,13 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
 - [x] 2026-08-19: Focused the remaining plan on the implemented three-field signed-text protocol and functional HTTP-shaped handling.
 - [x] 2026-08-19: Updated the ingress design so successful results carry the authenticated message and documented transport-body and message-text limit responsibilities.
 - [x] 2026-08-19: Defined the complete handler request, option, byte-limit, content-type, and error-mapping contract and restored explicit replay-safety guidance for side-effecting consumers.
-- [ ] Implement functional HTTP-shaped handling and remaining tests in `packages/messages`.
-- [ ] Update final package documentation and validation evidence after the full ingress implementation is complete.
+- [x] 2026-08-20 01:43Z: Implemented and exported functional HTTP-shaped handling with strict request/configuration validation, ordered request processing, frozen acceptance and rejection results, structured message-error mapping, and focused ingress tests.
+- [x] 2026-08-20 01:43Z: Updated package documentation, rebuilt the kernel packages, smoke-imported the completed API, and passed all 109 hardened-kernel package tests.
+- [x] 2026-08-26: Simplified the ingress type surface after review by exporting only the request, options, and result types; rebuilt the package and passed all 33 message tests.
+- [x] 2026-08-26: Removed the package-level Node.js engine declaration and documented the ECMAScript and Web Platform APIs required by the runtime-neutral message package.
+- [x] 2026-08-26: Fixed message error statuses as literal 400, 401, and 403 values, removed validation-status customization and the ingress cast, added an injected-error regression, and passed all 34 message tests.
+- [x] 2026-08-26: Mapped recognized errors to fixed statuses by runtime class in ingress, expanded the regression to cover direct status mutation on all three exported error classes, and passed all 34 message tests.
+- [x] 2026-08-26: Replaced the authorizer-owned success reference with a frozen three-field snapshot, added a post-acceptance mutation regression, and passed all 34 message tests.
 
 ## Surprises & Discoveries
 
@@ -149,7 +154,7 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
   Rationale: These compatible versions are already represented in repository lockfiles, expose the required audited primitives, and avoid an unrelated major-version migration during this focused package change.
   Date/Author: 2026-07-26 / Codex.
 
-- Decision: Upgrade both Noble dependencies to exact version 2.2.0 and declare Node.js 20.19.0 as the package runtime floor.
+- Decision: Upgrade both Noble dependencies to exact version 2.2.0 and declare Node.js 20.19.0 as the package runtime floor. The package-level engine declaration was superseded on 2026-08-26; the exact dependency pins remain current.
   Rationale: The user requested the current Noble releases. Both packages publish the same Node.js engine requirement, and the repository's Node 22 CI satisfies it. Exact pins preserve the package's existing deterministic dependency policy.
   Date/Author: 2026-07-28 / Codex.
 
@@ -185,6 +190,22 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
   Rationale: This gives callers consistent results for the same request and configuration and lets node processes reuse one prevalidated authorizer.
   Date/Author: 2026-08-18 / Codex.
 
+- Decision: Export only `HandleSignedMessageRequest`, `HandleSignedMessageOptions`, and `HandleSignedMessageResult` for the ingress API; keep accepted and rejected result variants internal and remove the incomplete transport-only error-code type.
+  Rationale: Consumers can narrow the result union by status without importing its branches, while a type that covered only transport codes did not accurately describe every possible rejection code.
+  Date/Author: 2026-08-26 / user and Codex.
+
+- Decision: Do not declare a Node.js engine requirement for `@oyaprotocol/messages`.
+  Rationale: The package uses ESM plus standard ECMAScript and Web Platform primitives without importing Node-specific APIs. Runtime compatibility should be expressed through those required APIs and proven with runtime-specific smoke tests; pinned dependencies retain their own runtime metadata.
+  Date/Author: 2026-08-26 / user and Codex.
+
+- Decision: Ingress maps validation, verification, and authorization errors by runtime class to statuses 400, 401, and 403 rather than trusting their status properties.
+  Rationale: The result status is its public discriminator, so injected authorizers must not be able to escape the documented rejection union or create rejection bodies with successful HTTP statuses by mutating JavaScript error instances.
+  Date/Author: 2026-08-26 / user and Codex.
+
+- Decision: Successful ingress results contain a frozen value snapshot of the authorizer's three message fields rather than the authorizer-owned object reference.
+  Rationale: Downstream consumers must receive the message values accepted at authorization time, and the response signer must remain consistent with that immutable handoff even if another reference to the authorizer's object is later mutated.
+  Date/Author: 2026-08-26 / user and Codex.
+
 ## Outcomes & Retrospective
 
 The first schema milestone is complete. `@oyaprotocol/messages` gained a real package-root API for validating the v1 `{ text, signer, signature }` body before the signature-verification milestone. The implementation preserves exact text and signer bytes, preserves the submitted signature string, rejects unknown fields, returns only the three validated wire fields, and throws structured `SignedMessageValidationError` instances for request-shape failures.
@@ -212,7 +233,7 @@ Validation run on 2026-07-26:
 The combined schema and signature suite reported 13 passing tests, and the smoke import printed `function function function`.
 Package-area regression validation also passed: 11 utils tests, 45 IPFS tests, and 20 Ethereum tests. Together with the 13 message tests, all 89 hardened-kernel package tests passed.
 
-The Noble 2.2.0 migration preserves that behavior while adapting the implementation to ESM `.js` subpaths and the v2 recovered-signature byte layout. Recovery explicitly disables Noble's default SHA-256 prehash because `createEthereumSignedMessageDigest(...)` already supplies the EIP-191 Keccak-256 digest. The package now declares Node.js 20.19.0 or newer to match both Noble dependencies.
+The Noble 2.2.0 migration preserves that behavior while adapting the implementation to ESM `.js` subpaths and the v2 recovered-signature byte layout. Recovery explicitly disables Noble's default SHA-256 prehash because `createEthereumSignedMessageDigest(...)` already supplies the EIP-191 Keccak-256 digest. The dependencies retain their own runtime metadata; `@oyaprotocol/messages` no longer duplicates that metadata with a Node-only package engine declaration.
 
 Validation run on 2026-07-28:
 
@@ -266,7 +287,22 @@ Prevalidated-authorizer validation run on 2026-08-15:
 
 The build succeeded, the smoke import printed `function function true false false`, and all 94 hardened-kernel tests passed: 18 messages, 11 utils, 45 IPFS, and 20 Ethereum. Tests also confirm that case-variant duplicates collapse, authorizer policy is snapshotted at creation, and the normalized allowlist remains encapsulated.
 
-The existing three-field schema and text-only EIP-191 verification are the intended protocol. The remaining implementation is the functional HTTP-shaped handler and its focused tests and documentation.
+The existing three-field schema and text-only EIP-191 verification are the intended protocol.
+
+The HTTP-shaped ingress milestone is complete. `handleSignedMessage(...)` validates options before request input, enforces the required method, content type, body bytes, UTF-8 JSON, and text bytes in the documented order, calls the injected authorizer only after the transport checks pass, and returns frozen HTTP-shaped results. Successful results keep the exact authenticated message separate from the small remote response body. Expected validation, verification, and authorization errors preserve their structured status, code, message, and optional details, while unexpected authorizer failures propagate.
+
+Final validation run on 2026-08-20:
+
+    npm --prefix packages run build
+    node --test packages/messages/test/*.test.js
+    node --input-type=module -e "import('./packages/messages/dist/index.js').then((m) => console.log(typeof m.verifySignedMessage, typeof m.handleSignedMessage))"
+    node --test packages/utils/test/*.js
+    node --test packages/ipfs/test/*.js
+    node --test packages/ethereum/test/*.js
+
+The build succeeded, the smoke import printed `function function`, and all 109 hardened-kernel package tests passed: 33 messages, 11 utils, 45 IPFS, and 20 Ethereum. The 15 ingress tests cover successful authenticated handoff, repeated submissions, separately signed identical text, exact content-type handling, processing order, byte limits, invalid UTF-8 and JSON, body-shape delegation, structured error preservation, unexpected exception propagation, strict container fields and types, positive integer configuration, and frozen results.
+
+This ExecPlan is complete for the `@oyaprotocol/messages` package. A later plan can mount the handler in a node process and define downstream IPFS publication and onchain Logger behavior without changing this package's authentication boundary.
 
 ## Context and Orientation
 
@@ -278,10 +314,12 @@ The relevant files at the start of this plan are:
 - `packages/messages/src/schema.ts`: validates the v1 signed text message shape and defines structured schema errors.
 - `packages/messages/src/ethereum-signature.ts`: verifies EIP-191 text signatures and defines structured cryptographic verification errors.
 - `packages/messages/src/authorization.ts`: prevalidates and snapshots allowlists into reusable authorizers that verify signed messages and authorize their recovered signers.
+- `packages/messages/src/ingress.ts`: validates HTTP-shaped request/configuration input, enforces transport and text limits, maps expected message errors, and returns frozen acceptance or rejection results.
 - `packages/messages/test/schema.test.js`: covers schema acceptance, exact text preservation, unknown-field rejection, text limits, Ethereum address shape, and signature shape.
 - `packages/messages/test/signature.test.js`: covers fixed ASCII EIP-191 vectors, recovery-value normalization, mismatch failures, and malformed signature scalars.
 - `packages/messages/test/authorization.test.js`: covers configuration-time validation, policy snapshotting, private normalized membership, composed verification and authorization, fail-closed empty lists, preserved validation and verification errors, and structured authorization failures.
-- `packages/messages/README.md`: documents the three-field schema, EIP-191 verification, allowlist authorization, repeated-submission behavior, Internet-facing limits, and remaining HTTP work.
+- `packages/messages/test/ingress.test.js`: covers the complete HTTP-shaped handler contract, error mapping, processing order, immutable results, repeated requests, and runtime misuse.
+- `packages/messages/README.md`: documents the three-field schema, EIP-191 verification, allowlist authorization, HTTP-shaped handling, repeated-submission behavior, and Internet-facing limits.
 - `packages/messages/package.json`: exposes the package root through `dist/index.js` and `dist/index.d.ts`.
 - `packages/package.json`: owns the TypeScript build command for all kernel packages.
 - `packages/AGENTS.md`: local instructions that scope hardened package code and dependencies to the `packages/` area.
@@ -594,21 +632,15 @@ Current exported functions and types:
 - `validateSignedMessage(input)`
 - `verifySignedMessage(input)`
 - `createSignedMessageAuthorizer(allowedSigners)`
+- `handleSignedMessage(request, options)`
 - `SignedMessageAuthorizer`
 - `SignedMessageInput`
 - `SignedMessageValidationError`
 - `SignedMessageVerificationError`
 - `SignedMessageAuthorizationError`
-
-Planned exported functions and types:
-
-- `handleSignedMessage(request, options)`
 - `HandleSignedMessageRequest`, with required `method: string`, `contentType: string | undefined`, and `body: Uint8Array`
-- `AcceptedSignedMessage`, containing status `202`, the HTTP response `body`, and the authenticated `Readonly<SignedMessageInput>` as `message`
-- `RejectedSignedMessage`, containing status `400 | 401 | 403 | 405 | 413 | 415` and a structured error `body`
 - `HandleSignedMessageOptions`, with required `authorize: SignedMessageAuthorizer`, `maxBodyBytes: number`, and `maxTextBytes: number`
-- `HandleSignedMessageResult = AcceptedSignedMessage | RejectedSignedMessage`
-- `SignedMessageHttpErrorCode = "method_not_allowed" | "unsupported_content_type" | "body_too_large" | "invalid_json" | "text_too_large"`
+- `HandleSignedMessageResult`, a discriminated union containing either status `202`, the HTTP response `body`, and the authenticated `Readonly<SignedMessageInput>` as `message`, or status `400 | 401 | 403 | 405 | 413 | 415` and a structured error `body`
 
 Runtime dependency:
 

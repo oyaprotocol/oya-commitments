@@ -7,14 +7,13 @@ type SignedMessageValidationErrorCode = 'invalid_body' | 'unsupported_field' | '
 interface SignedMessageValidationErrorOptions {
     readonly code: SignedMessageValidationErrorCode;
     readonly message: string;
-    readonly status?: number;
     readonly details?: Readonly<Record<string, unknown>>;
 }
 declare class SignedMessageValidationError extends Error {
     readonly code: SignedMessageValidationErrorCode;
-    readonly status: number;
+    readonly status: 400;
     readonly details: Readonly<Record<string, unknown>> | undefined;
-    constructor({ code, message, status, details }: SignedMessageValidationErrorOptions);
+    constructor({ code, message, details }: SignedMessageValidationErrorOptions);
 }
 declare function validateSignedMessage(input: unknown): Readonly<{
     text: string;
