@@ -6,12 +6,12 @@ import { SignedMessageVerificationError } from './ethereum-signature.js';
 import { SignedMessageValidationError } from './schema.js';
 import type { SignedMessageInput } from './schema.js';
 
-const HANDLE_SIGNED_MESSAGE_OPTION_FIELDS = new Set<PropertyKey>([
+const OPTION_FIELDS = new Set<PropertyKey>([
     'authorize',
     'maxBodyBytes',
     'maxTextBytes',
 ]);
-const HANDLE_SIGNED_MESSAGE_REQUEST_FIELDS = new Set<PropertyKey>([
+const REQUEST_FIELDS = new Set<PropertyKey>([
     'method',
     'contentType',
     'body',
@@ -96,7 +96,7 @@ function validateOptions(options: unknown): HandleSignedMessageOptions {
     requirePlainObject(options, 'options');
     requireOnlyFields(
         options,
-        HANDLE_SIGNED_MESSAGE_OPTION_FIELDS,
+        OPTION_FIELDS,
         'options'
     );
     requireOwnFields(
@@ -126,7 +126,7 @@ function validateRequest(request: unknown): HandleSignedMessageRequest {
     requirePlainObject(request, 'request');
     requireOnlyFields(
         request,
-        HANDLE_SIGNED_MESSAGE_REQUEST_FIELDS,
+        REQUEST_FIELDS,
         'request'
     );
     requireOwnFields(request, ['method', 'contentType', 'body'], 'request');

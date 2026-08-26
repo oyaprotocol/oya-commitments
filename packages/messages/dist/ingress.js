@@ -2,12 +2,12 @@ import { isPlainObject } from '@oyaprotocol/utils';
 import { SignedMessageAuthorizationError } from './authorization.js';
 import { SignedMessageVerificationError } from './ethereum-signature.js';
 import { SignedMessageValidationError } from './schema.js';
-const HANDLE_SIGNED_MESSAGE_OPTION_FIELDS = new Set([
+const OPTION_FIELDS = new Set([
     'authorize',
     'maxBodyBytes',
     'maxTextBytes',
 ]);
-const HANDLE_SIGNED_MESSAGE_REQUEST_FIELDS = new Set([
+const REQUEST_FIELDS = new Set([
     'method',
     'contentType',
     'body',
@@ -41,7 +41,7 @@ function requirePositiveInteger(value, fieldName) {
 }
 function validateOptions(options) {
     requirePlainObject(options, 'options');
-    requireOnlyFields(options, HANDLE_SIGNED_MESSAGE_OPTION_FIELDS, 'options');
+    requireOnlyFields(options, OPTION_FIELDS, 'options');
     requireOwnFields(options, ['authorize', 'maxBodyBytes', 'maxTextBytes'], 'options');
     if (typeof options.authorize !== 'function') {
         throw new TypeError('options.authorize must be a function.');
@@ -54,7 +54,7 @@ function validateOptions(options) {
 }
 function validateRequest(request) {
     requirePlainObject(request, 'request');
-    requireOnlyFields(request, HANDLE_SIGNED_MESSAGE_REQUEST_FIELDS, 'request');
+    requireOnlyFields(request, REQUEST_FIELDS, 'request');
     requireOwnFields(request, ['method', 'contentType', 'body'], 'request');
     if (typeof request.method !== 'string') {
         throw new TypeError('request.method must be a string.');
