@@ -1,20 +1,21 @@
-# Add Signed Text Message Ingress Package
+# Add Signed Text Message Ingress and Accepted-Message Handling
 
 This ExecPlan is a living document and must be maintained according to `PLANS.md`.
 
 ## Purpose / Big Picture
 
-Build `@oyaprotocol/messages` from a placeholder package into the first hardened message-ingress kernel for Oya nodes.
+Build `@oyaprotocol/messages` from a placeholder package into the first hardened message-ingress kernel for Oya nodes, then extend that kernel with one optional configured function that can act on an authenticated message.
 
-After this work, a node process should be able to accept a small HTTP JSON request from an authorized user, verify that the request contains a text message signed by the claimed Ethereum address, and receive an accepted-message object that the node can hand to its own implementation-specific logic. The node implementation defines what the text means and how to act on it.
+After this work, a trusted host—normally the Oya node—should be able to pass a small HTTP-shaped JSON request from an authorized message sender, verify that the request contains a text message signed by the claimed Ethereum address, and optionally have `handleSignedMessage(...)` invoke one host-configured accepted-message handler. The host-configured function defines what happens next, such as publishing the authenticated message to IPFS, while the messages package remains independent of sockets, environment loading, process lifecycle, and any particular downstream action.
 
 The observable behavior after completion is:
 
-1. a caller submits `POST /v1/messages`-style JSON with only `text`, `signer`, and `signature`;
-2. `@oyaprotocol/messages` validates the body, verifies that the exact `text` is covered by the Ethereum signature, recovers the signer, checks the signer against an explicit allowlist, and returns an acceptance result;
-3. malformed, unsigned, mis-signed, overlarge, or unauthorized messages produce structured rejection errors that a node can map to HTTP status codes.
+1. a remote message sender submits `POST /v1/messages`-style JSON with only `text`, `signer`, and `signature` to the host;
+2. `@oyaprotocol/messages` validates the body, verifies that the exact `text` is covered by the Ethereum signature, recovers the signer, and checks the signer against an explicit allowlist;
+3. after successful ingress, `handleSignedMessage(...)` optionally awaits one configured function with the frozen authenticated message and exposes that function's return value as `handleSignedMessageResult` on the accepted result;
+4. malformed, unsigned, mis-signed, overlarge, or unauthorized messages produce structured rejection errors without invoking the configured function, while an exception or rejected promise from that function propagates to the host.
 
-The signed message is intentionally text-only. Its wire body contains exactly `text`, `signer`, and `signature`. The package preserves the text exactly and hands it to the node's implementation-specific logic after authentication and authorization.
+The signed message is intentionally text-only. Its wire body contains exactly `text`, `signer`, and `signature`. The package preserves the text exactly and passes a frozen snapshot of those authenticated fields to the optional host-configured function after authentication and authorization.
 
 ## Progress
 
@@ -46,6 +47,15 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
 - [x] 2026-08-26: Mapped recognized errors to fixed statuses by runtime class in ingress, expanded the regression to cover direct status mutation on all three exported error classes, and passed all 34 message tests.
 - [x] 2026-08-26: Replaced the authorizer-owned success reference with a frozen three-field snapshot, added a post-acceptance mutation regression, and passed all 34 message tests.
 - [x] 2026-08-26: Assigned public publication ordering to the future onchain Logger record rather than the ingress layer or IPFS artifact.
+- [x] 2026-08-26: Reopened this ExecPlan for the focused accepted-message handler change and specified the async callback, result, error, test, and documentation contracts.
+- [x] 2026-08-30: Distinguished the remote message sender from the trusted host/node and standardized callback-configuration references on "host" terminology.
+- [x] 2026-08-30: Standardized the configured function's returned-value field as `handleSignedMessageResult` throughout this plan.
+- [x] 2026-08-30: Corrected the proposed type contract so overloads correlate callback presence with a required callback-result property and callback-absent calls do not infer `unknown`.
+- [x] 2026-08-30: Added a last-position fallback overload for runtime-selected callbacks without weakening the two precise overloads.
+- [ ] Add the callback-present, callback-absent, and dynamically optional option shapes, the three ordered `handleSignedMessage(...)` overloads, and the consistently asynchronous implementation.
+- [ ] Add focused ingress tests for callback ordering, awaiting, result propagation, rejection bypass, repeated invocation, and failure propagation.
+- [ ] Add a compile-time declaration test proving callback-result inference and callback-absent property exclusion.
+- [ ] Update package documentation, rebuild the package area, smoke-import the public API, and run package regressions.
 
 ## Surprises & Discoveries
 
@@ -72,6 +82,12 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
 
 - Observation: The existing shared ASCII policy accepts the full ASCII byte range.
   Evidence: `assertAsciiBytes(...)` accepts every byte through `0x7f`, including control bytes and `0x7f`, and rejects higher UTF-8 byte values just like the IPFS text readers.
+
+- Observation: The current ingress helper is synchronous and accepts an exact three-field options object.
+  Evidence: `packages/messages/src/ingress.ts` currently allows only `authorize`, `maxBodyBytes`, and `maxTextBytes`, then returns immediately after creating the frozen accepted result.
+
+- Observation: The existing authenticated message snapshot is already the narrow trust boundary needed by a configurable downstream function.
+  Evidence: successful ingress copies `text`, `signer`, and `signature` into a new frozen object before returning it, so the callback does not need the parsed request body or an authorizer-owned reference.
 
 ## Decision Log
 
@@ -112,7 +128,7 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
   Date/Author: 2026-08-26 / user and Codex.
 
 - Decision: Reject unknown top-level fields in the v1 signed message body.
-  Rationale: The wire contract is intentionally small and audit-focused. Rejecting extra fields prevents callers from assuming hidden package semantics for fields such as `meta`, `chainId`, or `version`, and makes the node's responsibility for interpreting only `text` explicit.
+  Rationale: The wire contract is intentionally small and audit-focused. Rejecting extra fields prevents message senders from assuming hidden package semantics for fields such as `meta`, `chainId`, or `version`, and makes the host's responsibility for interpreting only `text` explicit.
   Date/Author: 2026-06-05 / Codex.
 
 - Decision: Preserve `text` exactly during schema validation and only reject the zero-length empty string.
@@ -124,7 +140,7 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
   Date/Author: 2026-06-07; clarified 2026-08-19 / Codex.
 
 - Decision: Return the authenticated frozen message as a distinct field on a successful HTTP-shaped result.
-  Rationale: The node needs the authorized text for implementation-specific handling. Keeping `message` separate from the HTTP `body` gives the node a trusted handoff value while preserving a small response body for the remote caller.
+  Rationale: The node needs the authorized text for implementation-specific handling. Keeping `message` separate from the HTTP `body` gives the node a trusted handoff value while preserving a small response body for the remote message sender.
   Date/Author: 2026-08-19 / Codex.
 
 - Decision: Define `handleSignedMessage(request, options)` with a required `Uint8Array` body, a dedicated content-type value, an injected authorizer, and explicit positive byte limits.
@@ -164,35 +180,35 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
   Date/Author: 2026-07-28 / Codex.
 
 - Decision: Expose allowlist authorization as `authorizeMessageSigner(signer, allowedSigners)` rather than combining it with signature verification. This decision was superseded on 2026-08-15.
-  Rationale: The signer-only name made the trust boundary explicit: callers passed the signer from `verifySignedMessage(...)`, and the future ingress layer could reuse the helper independently.
+  Rationale: The signer-only name made the trust boundary explicit: API consumers passed the signer from `verifySignedMessage(...)`, and the future ingress layer could reuse the helper independently.
   Date/Author: 2026-07-28 / Codex.
 
 - Decision: Treat a valid but non-allowlisted signer as `unauthorized_signer` with status `403`, while treating malformed signer or allowlist inputs as `TypeError`. The malformed-signer portion of this decision was superseded on 2026-08-15.
-  Rationale: Membership failure is an authorization result suitable for HTTP mapping. Invalid address shapes and non-array allowlists are caller configuration or API-use errors represented by `TypeError`. Empty arrays are valid and intentionally deny every signer.
+  Rationale: Membership failure is an authorization result suitable for HTTP mapping. Invalid address shapes and non-array allowlists are host configuration or API-use errors represented by `TypeError`. Empty arrays are valid and intentionally deny every signer.
   Date/Author: 2026-07-28 / Codex.
 
 - Decision: Export `authorizeSignedMessage(input, allowedSigners)` as the authorization boundary and keep raw signer membership checking private. The per-call API portion of this decision was superseded later on 2026-08-15.
-  Rationale: Documentation alone cannot enforce that a signer came from `verifySignedMessage(...)`. Composing schema validation, EIP-191 verification, and membership checking prevents callers from accidentally authorizing the unverified `signer` field from a request while preserving the lower-level `verifySignedMessage(...)` API for verification-only use cases.
+  Rationale: Documentation alone cannot enforce that a signer came from `verifySignedMessage(...)`. Composing schema validation, EIP-191 verification, and membership checking prevents API consumers from accidentally authorizing the unverified `signer` field from a request while preserving the lower-level `verifySignedMessage(...)` API for verification-only use cases.
   Date/Author: 2026-08-15 / Codex.
 
 - Decision: Preserve `SignedMessageValidationError` and `SignedMessageVerificationError` from the composed authorization API, and reserve `TypeError` for malformed allowlist configuration.
-  Rationale: The complete message is untrusted request input and should retain the package's structured request-error behavior. The allowlist remains caller-supplied configuration, so an invalid container or address entry is a programming/configuration failure.
+  Rationale: The complete message is untrusted request input and should retain the package's structured request-error behavior. The allowlist remains host-supplied configuration, so an invalid container or address entry is a programming/configuration failure.
   Date/Author: 2026-08-15 / Codex.
 
 - Decision: Prevalidate authorization policy with `createSignedMessageAuthorizer(allowedSigners)` and expose request-time authorization through the returned object's `authorize(input)` method. The returned-object shape was superseded later on 2026-08-15 by a directly callable function.
-  Rationale: Node allowlists are normally static configuration reused across requests. Validating and normalizing once moves configuration failures to startup, avoids rebuilding a Set on every request, snapshots the caller's array, and keeps the mutable Set private inside a closure. Freezing the returned object prevents its public capability from being replaced or reconfigured at runtime.
+  Rationale: Node allowlists are normally static configuration reused across requests. Validating and normalizing once moves configuration failures to startup, avoids rebuilding a Set on every request, snapshots the host-supplied array, and keeps the mutable Set private inside a closure. Freezing the returned object prevents its public capability from being replaced or reconfigured at runtime.
   Date/Author: 2026-08-15 / Codex.
 
 - Decision: Represent `SignedMessageAuthorizer` as a function type and have `createSignedMessageAuthorizer(...)` return that function directly.
   Rationale: A named function type preserves dependency injection and the private normalized allowlist closure with a compact call surface.
   Date/Author: 2026-08-15 / Codex.
 
-- Decision: Implement request handling as a function of the current request and immutable validated authorization configuration.
-  Rationale: This gives callers consistent results for the same request and configuration and lets node processes reuse one prevalidated authorizer.
+- Decision: Implement request handling as a function of the current request and immutable validated authorization configuration. The deterministic-result portion of this decision is superseded for configurations that include `onAcceptedMessage`.
+  Rationale: Ingress rejection and authentication behavior remains determined by the request and authorization configuration. A configured downstream function may intentionally return different results or perform a new action for each otherwise identical successful submission.
   Date/Author: 2026-08-18 / Codex.
 
-- Decision: Export only `HandleSignedMessageRequest`, `HandleSignedMessageOptions`, and `HandleSignedMessageResult` for the ingress API; keep accepted and rejected result variants internal and remove the incomplete transport-only error-code type.
-  Rationale: Consumers can narrow the result union by status without importing its branches, while a type that covered only transport codes did not accurately describe every possible rejection code.
+- Decision: Export only `HandleSignedMessageRequest`, `HandleSignedMessageOptions`, and `HandleSignedMessageResult` for the ingress API; keep accepted and rejected result variants internal and remove the incomplete transport-only error-code type. The three-type limit is superseded by the focused export of `AcceptedSignedMessageHandler`.
+  Rationale: Consumers can narrow the result union by status without importing its branches, while a type that covered only transport codes did not accurately describe every possible rejection code. The later handler-function type is itself a public configuration contract and therefore warrants one additional named export.
   Date/Author: 2026-08-26 / user and Codex.
 
 - Decision: Do not declare a Node.js engine requirement for `@oyaprotocol/messages`.
@@ -206,6 +222,46 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
 - Decision: Successful ingress results contain a frozen value snapshot of the authorizer's three message fields rather than the authorizer-owned object reference.
   Rationale: Downstream consumers must receive the message values accepted at authorization time, and the response signer must remain consistent with that immutable handoff even if another reference to the authorizer's object is later mutated.
   Date/Author: 2026-08-26 / user and Codex.
+
+- Decision: Add one optional `onAcceptedMessage` function to `HandleSignedMessageOptions` instead of hard-coding IPFS publication or adding a list of package-owned actions.
+  Rationale: One injected function lets the host/node select publication or another future behavior while keeping `@oyaprotocol/messages` runtime-neutral. A host that needs several ordered actions can compose them inside that single function without making ingress own an action registry or execution policy.
+  Date/Author: 2026-08-26 / user and Codex.
+
+- Decision: Pass the frozen authenticated `Readonly<SignedMessageInput>` to `onAcceptedMessage`, not the raw parsed request or the HTTP response body.
+  Rationale: The three-field snapshot is the value that passed schema validation, signature verification, and authorization. Passing only that value keeps the callback on the authenticated side of the trust boundary and avoids coupling downstream behavior to transport response formatting.
+  Date/Author: 2026-08-26 / user and Codex.
+
+- Decision: Give `onAcceptedMessage` exactly one argument in this milestone and do not add transport context, an abort signal, or an action array.
+  Rationale: The focused requirement is configurable post-authentication behavior. Cancellation semantics and ordered multi-action orchestration require concrete downstream policy; the host can currently close over dependencies and compose several operations inside its one configured function.
+  Date/Author: 2026-08-26 / user and Codex.
+
+- Decision: Make `handleSignedMessage(...)` consistently asynchronous and await the configured function before returning an accepted result.
+  Rationale: Downstream actions such as IPFS publication are asynchronous. Always returning a Promise gives the API one stable calling convention and prevents the host from observing acceptance before the configured action settles.
+  Date/Author: 2026-08-26 / user and Codex.
+
+- Decision: Preserve the configured function's return value as an internal `handleSignedMessageResult` field on the accepted result and propagate synchronous throws or rejected promises unchanged.
+  Rationale: A publication function must be able to return its CID metadata to the host, while infrastructure and programming failures must remain visible rather than being misclassified as request rejections. The existing HTTP `status` and `body` remain ingress-owned and do not absorb arbitrary callback output.
+  Date/Author: 2026-08-26 / user and Codex.
+
+- Decision: Keep the accepted-message handler optional and invoke it once for every successful call.
+  Rationale: Omitting the function preserves authentication-only usage. When it is configured, ingress should not add deduplication, publication ordering, or action-specific policy; repeated valid submissions each produce one callback invocation, and future onchain Logger behavior remains responsible for the public publication record.
+  Date/Author: 2026-08-26 / user and Codex.
+
+- Decision: Export the generic `AcceptedSignedMessageHandler<TResult>` function type and make `HandleSignedMessageOptions<TResult>` and `HandleSignedMessageResult<TResult>` generic over its return value. The generic-options portion of this decision was superseded on 2026-08-30 by correlated callback-present and callback-absent option shapes.
+  Rationale: Future package-root functions such as an IPFS publisher should be able to declare compatibility with the configured hook without duplicating its signature, and host integrations should retain the concrete type of publication metadata or another configured-handler result. Making the callback optional on one generic options interface did not preserve whether the callback-result property exists.
+  Date/Author: 2026-08-26; superseded in part 2026-08-30 / user and Codex.
+
+- Decision: Correlate statically known callback presence with accepted-result shape through two option types and two precise public `handleSignedMessage(...)` overloads.
+  Rationale: A callback-present call has a runtime guarantee that the accepted result owns `handleSignedMessageResult`, so that property must be required and exactly `TResult` after narrowing `status === 202`. A callback-absent call must use the non-generic overload and return an accepted variant with no such property. The source retains one implementation signature, while emitted declarations expose these correlated overloads before the broader fallback.
+  Date/Author: 2026-08-30 / user and Codex.
+
+- Decision: Define `HandleSignedMessageResult<TResult = never>` so its default describes callback-absent handling and its generic form describes callback-present handling.
+  Rationale: The prior function signature declared `TResult` without a default, so calls with no callback had no inference candidate and could fall back to `unknown`. The non-generic overload now returns `HandleSignedMessageResult` using its `never` default, while the generic overload infers `TResult` from the required callback and returns `HandleSignedMessageResult<TResult>`.
+  Date/Author: 2026-08-30 / user and Codex.
+
+- Decision: Add a third, last-position overload for dynamically optional accepted-message handlers.
+  Rationale: A host may select its callback from runtime configuration, leaving either the options object typed as a callback-present/callback-absent union or its `onAcceptedMessage` property typed as `AcceptedSignedMessageHandler<TResult> | undefined`. Neither value satisfies one specific overload even though the implementation supports both runtime branches. The fallback accepts the broader optional-handler shape and truthfully returns the union of the two possible result shapes. Keeping it after the precise overloads preserves exact inference for statically callback-present and callback-absent calls.
+  Date/Author: 2026-08-30 / user and Codex.
 
 ## Outcomes & Retrospective
 
@@ -303,7 +359,7 @@ Final validation run on 2026-08-20:
 
 The build succeeded, the smoke import printed `function function`, and all 109 hardened-kernel package tests passed: 33 messages, 11 utils, 45 IPFS, and 20 Ethereum. The 15 ingress tests cover successful authenticated handoff, repeated submissions, separately signed identical text, exact content-type handling, processing order, byte limits, invalid UTF-8 and JSON, body-shape delegation, structured error preservation, unexpected exception propagation, strict container fields and types, positive integer configuration, and frozen results.
 
-This ExecPlan is complete for the `@oyaprotocol/messages` package. A later plan can mount the handler in a node process and define downstream IPFS publication and onchain Logger behavior without changing this package's authentication boundary.
+The original synchronous HTTP-shaped ingress milestone is complete. This ExecPlan is now reopened for the focused optional accepted-message handler milestone. No callback implementation or validation evidence has been recorded yet. The follow-up remains local to `packages/messages`; it does not import reference code from `node/` or `agent/`, and it does not yet implement IPFS publication or onchain Logger behavior.
 
 ## Context and Orientation
 
@@ -315,7 +371,7 @@ The relevant files at the start of this plan are:
 - `packages/messages/src/schema.ts`: validates the v1 signed text message shape and defines structured schema errors.
 - `packages/messages/src/ethereum-signature.ts`: verifies EIP-191 text signatures and defines structured cryptographic verification errors.
 - `packages/messages/src/authorization.ts`: prevalidates and snapshots allowlists into reusable authorizers that verify signed messages and authorize their recovered signers.
-- `packages/messages/src/ingress.ts`: validates HTTP-shaped request/configuration input, enforces transport and text limits, maps expected message errors, and returns frozen acceptance or rejection results.
+- `packages/messages/src/ingress.ts`: validates HTTP-shaped request/configuration input, enforces transport and text limits, maps expected message errors, and currently returns frozen acceptance or rejection results synchronously. This focused milestone will add the optional accepted-message handler here.
 - `packages/messages/test/schema.test.js`: covers schema acceptance, exact text preservation, unknown-field rejection, text limits, Ethereum address shape, and signature shape.
 - `packages/messages/test/signature.test.js`: covers fixed ASCII EIP-191 vectors, recovery-value normalization, mismatch failures, and malformed signature scalars.
 - `packages/messages/test/authorization.test.js`: covers configuration-time validation, policy snapshotting, private normalized membership, composed verification and authorization, fail-closed empty lists, preserved validation and verification errors, and structured authorization failures.
@@ -335,10 +391,14 @@ Reference implementation files:
 
 Definitions:
 
-- Text message: the user-authored string in the `text` field. The package preserves it exactly for caller-defined interpretation.
+- Message sender: the remote party that submits the signed HTTP request. The message sender does not configure or invoke the accepted-message handler.
+- Host: the trusted runtime code—normally the Oya node—that constructs callback-absent, callback-present, or dynamically optional handler options, invokes `handleSignedMessage(...)`, and selects any `onAcceptedMessage` function.
+- Text message: the user-authored string in the `text` field. The package preserves it exactly for host-defined interpretation.
 - Signer: the Ethereum account address claimed in the request body.
 - Signature: the Ethereum signed-message signature over exactly the `text` string.
 - Authorized signer: a signer address included in the allowlist supplied by the node.
+- Accepted-message handler: one optional host-supplied function invoked only after successful validation, verification, and authorization. It receives the frozen authenticated message and may return a value or a Promise.
+- Handle-signed-message result: the exact value produced by the configured accepted-message handler after it settles, exposed as `handleSignedMessageResult` separately from the ingress-owned HTTP response body.
 
 The intended HTTP JSON body is:
 
@@ -363,9 +423,11 @@ Second, add package-local TypeScript modules under `packages/messages/src/` inst
 
 Third, add focused tests under `packages/messages/test/`. Tests should use locally generated or fixed Ethereum signed-message vectors. If a deterministic private key is used in tests, it must be a public test-only key documented in the test file, never a secret.
 
-Fourth, update `packages/messages/README.md` so consumers understand the minimal wire protocol, exact text preservation, repeated-submission behavior, safe Internet-facing body and text limits, and how a node can mount the helper behind `POST /v1/messages`.
+Fourth, update `packages/messages/README.md` so consumers understand the minimal wire protocol, exact text preservation, repeated-submission behavior, safe Internet-facing body and text limits, and how an external runtime adapter can mount the helper behind `POST /v1/messages`.
 
-Implement this milestone under `packages/messages`. A follow-on plan can adopt the finished package in a node daemon.
+The focused follow-up extends `handleSignedMessage(...)` with one optional `onAcceptedMessage` function. Validate this option alongside the existing immutable configuration, convert the public handler to an `async` function, invoke the callback only after the authenticated message snapshot exists, await it, and return its exact settled value as `handleSignedMessageResult`. Rejected ingress requests must bypass the callback entirely. Callback failures must propagate unchanged.
+
+Keep this milestone under `packages/messages`. Do not add `@oyaprotocol/ipfs` as a dependency and do not implement `publishSignedMessage(...)` yet. A later focused change can provide an IPFS-backed function matching the accepted-message handler type, and the host/node can select that function in its configuration.
 
 ## Concrete Steps
 
@@ -423,11 +485,26 @@ Work from the repository root unless a command says otherwise.
 
     `createSignedMessageAuthorizer(...)` composes this verification with the prevalidated signer allowlist.
 
-5. Implement HTTP-shaped message helper.
+5. Extend the HTTP-shaped message helper with optional accepted-message handling.
 
-    Add this public function:
+    The existing public function becomes consistently asynchronous and exposes two precise correlated overloads followed by one dynamically optional fallback overload. Keep this order so statically known cases select the narrowest return type:
 
-        handleSignedMessage(request, options)
+        function handleSignedMessage(
+          request: HandleSignedMessageRequest,
+          options: HandleSignedMessageOptions
+        ): Promise<HandleSignedMessageResult>;
+
+        function handleSignedMessage<TResult>(
+          request: HandleSignedMessageRequest,
+          options: HandleSignedMessageOptionsWithHandler<TResult>
+        ): Promise<HandleSignedMessageResult<TResult>>;
+
+        function handleSignedMessage<TResult>(
+          request: HandleSignedMessageRequest,
+          options: HandleSignedMessageOptionsWithOptionalHandler<TResult>
+        ): Promise<
+          HandleSignedMessageResult | HandleSignedMessageResult<TResult>
+        >;
 
     Use these exact input shapes:
 
@@ -437,13 +514,60 @@ Work from the repository root unless a command says otherwise.
           readonly body: Uint8Array;
         }
 
-        interface HandleSignedMessageOptions {
+        type AcceptedSignedMessageHandler<TResult = unknown> = (
+          message: Readonly<SignedMessageInput>
+        ) => TResult | PromiseLike<TResult>;
+
+        interface HandleSignedMessageBaseOptions {
           readonly authorize: SignedMessageAuthorizer;
           readonly maxBodyBytes: number;
           readonly maxTextBytes: number;
         }
 
-    `request` and `options` must be plain objects with own properties matching the interfaces above; reject missing or unsupported own properties with `TypeError`. Every property is required, including `contentType`, whose value is `undefined` when the HTTP header was absent. Use `<container>.<field> is required.` for a missing property. `body` is always the raw request bytes after the node server has applied its streaming limit. Both byte limits are required positive integers and have no defaults. Validate `options` before `request`. Throw `TypeError` for a non-function `options.authorize`, a byte limit that is not a positive integer, a non-string method, a `contentType` value other than string or `undefined`, or a body that is not `Uint8Array`. Use field-specific messages such as `options.maxBodyBytes must be a positive integer.` and `request.body must be a Uint8Array.` Use `Unsupported options field: <field>.` and `Unsupported request field: <field>.` for extra own properties.
+        interface HandleSignedMessageOptions
+          extends HandleSignedMessageBaseOptions {
+          readonly onAcceptedMessage?: undefined;
+        }
+
+        interface HandleSignedMessageOptionsWithHandler<TResult>
+          extends HandleSignedMessageBaseOptions {
+          readonly onAcceptedMessage: AcceptedSignedMessageHandler<TResult>;
+        }
+
+        interface HandleSignedMessageOptionsWithOptionalHandler<TResult>
+          extends HandleSignedMessageBaseOptions {
+          readonly onAcceptedMessage?:
+            | AcceptedSignedMessageHandler<TResult>
+            | undefined;
+        }
+
+        interface AcceptedSignedMessage {
+          readonly status: 202;
+          readonly body: Readonly<{
+            status: "accepted";
+            signer: string;
+          }>;
+          readonly message: Readonly<SignedMessageInput>;
+        }
+
+        interface AcceptedSignedMessageWithHandler<TResult>
+          extends AcceptedSignedMessage {
+          readonly handleSignedMessageResult: TResult;
+        }
+
+        type HandleSignedMessageResult<TResult = never> =
+          | RejectedSignedMessage
+          | ([TResult] extends [never]
+              ? AcceptedSignedMessage
+              : AcceptedSignedMessageWithHandler<TResult>);
+
+    Export `AcceptedSignedMessageHandler`, `HandleSignedMessageOptions`, `HandleSignedMessageOptionsWithHandler`, `HandleSignedMessageOptionsWithOptionalHandler`, and `HandleSignedMessageResult` from `packages/messages/src/index.ts` with the existing request type. Keep the shared base options plus accepted and rejected result variants internal. The tuple form `[TResult] extends [never]` prevents conditional-type distribution and makes the default `HandleSignedMessageResult` resolve to the callback-absent accepted variant rather than to `never`.
+
+    The implementation signature accepts `HandleSignedMessageOptionsWithOptionalHandler<TResult>` and returns the corresponding result union internally; only the three ordered overload signatures are public. A value typed as `HandleSignedMessageOptions | HandleSignedMessageOptionsWithHandler<TResult>` is structurally assignable to the broad fallback. Unlike that union alone, the broad optional-handler shape also accepts an object whose `onAcceptedMessage` property is itself typed as `AcceptedSignedMessageHandler<TResult> | undefined` under `exactOptionalPropertyTypes`. Branch on the validated `onAcceptedMessage` value when constructing the accepted result so the runtime shape matches the selected overload without asserting that an optional property is present.
+
+    `request` and `options` must be plain objects with own properties matching the interfaces above; reject missing or unsupported own properties with `TypeError`. Every request property is required, including `contentType`, whose value is `undefined` when the HTTP header was absent. `authorize`, `maxBodyBytes`, and `maxTextBytes` remain required options. Callback-absent options may omit `onAcceptedMessage` or set it explicitly to `undefined`. Callback-present options require it to be a function. At runtime, reject any other value with `TypeError('options.onAcceptedMessage must be a function or undefined.')`. Add it to the allowed options field set but not the required runtime options field list.
+
+    Use `<container>.<field> is required.` for a missing required property. `body` is always the raw request bytes after the host's external adapter has applied any streaming limit. Both byte limits are required positive integers and have no defaults. Validate `options`, including `onAcceptedMessage`, before `request`. Throw `TypeError` for a non-function `options.authorize`, a byte limit that is not a positive integer, a non-string method, a `contentType` value other than string or `undefined`, or a body that is not `Uint8Array`. Use field-specific messages such as `options.maxBodyBytes must be a positive integer.` and `request.body must be a Uint8Array.` Use `Unsupported options field: <field>.` and `Unsupported request field: <field>.` for extra own properties.
 
     Process a well-typed request in this exact order:
 
@@ -453,6 +577,7 @@ Work from the repository root unless a command says otherwise.
     4. Decode the bytes as UTF-8 with `new TextDecoder("utf-8", { fatal: true })`, then call `JSON.parse(...)`. Map invalid UTF-8 and JSON syntax failures to status `400` with code `invalid_json`.
     5. If the parsed value has an own string `text` field, measure `new TextEncoder().encode(text).byteLength`. Return status `413` with code `text_too_large` before authorization when it exceeds `options.maxTextBytes`. Let `options.authorize(...)` produce the normal schema error for missing or non-string text.
     6. Call `options.authorize(parsedValue)`. Map `SignedMessageValidationError`, `SignedMessageVerificationError`, and `SignedMessageAuthorizationError` to their existing status, code, message, and optional details. Propagate unexpected exceptions so programming and infrastructure failures remain visible.
+    7. Copy `text`, `signer`, and `signature` into the existing frozen authenticated message snapshot. If `options.onAcceptedMessage` is a function, call it exactly once with that snapshot and await its return value before constructing the final accepted result. Do not invoke it for any rejection path.
 
     Use frozen result and body objects. Rejections have this shape:
 
@@ -473,7 +598,7 @@ Work from the repository root unless a command says otherwise.
     - `invalid_json`: `Request body must be valid UTF-8 JSON.`
     - `text_too_large`: `text exceeds the configured byte limit.`
 
-    For a valid message, return the HTTP response values together with the exact frozen message returned by the configured authorizer:
+    For a valid message without a configured accepted-message handler, resolve to the existing HTTP response values and frozen message snapshot:
 
         {
           status: 202,
@@ -481,15 +606,32 @@ Work from the repository root unless a command says otherwise.
           message
         }
 
-    `message` is the trusted handoff value for the node's implementation-specific logic. The HTTP adapter sends only `status` and `body` to the remote caller. Repeating the same valid request with the same configuration returns an equivalent acceptance result.
+    When `onAcceptedMessage` is configured, resolve only after it settles and add its exact return value as an own `handleSignedMessageResult` property:
 
-6. Add package tests.
+        {
+          status: 202,
+          body: { status: "accepted", signer: message.signer },
+          message,
+          handleSignedMessageResult
+        }
+
+    Freeze the outer accepted result, its HTTP body, and the authenticated message snapshot. Preserve `handleSignedMessageResult` by reference; do not clone, transform, or recursively freeze an arbitrary host-owned value. If the callback returns `undefined`, include `handleSignedMessageResult` as an own property with value `undefined` so host code can distinguish a configured callback from the no-callback result shape.
+
+    `message` is the trusted handoff value for implementation-specific logic. The HTTP adapter sends only `status` and `body` unless a higher layer deliberately defines another response. With no callback, repeated calls continue to resolve to equivalent acceptance results. With a callback, every successful call invokes it once; ingress does not cache or deduplicate callback execution.
+
+    Because `handleSignedMessage(...)` is now `async`, option/request `TypeError`s, unexpected authorizer failures, synchronous callback throws, and callback promise rejections all reject the returned Promise. Do not map callback failures to a request rejection or return status `202` after a callback failure.
+
+6. Add package runtime tests and a public declaration type test.
 
     Suggested test files:
 
         packages/messages/test/schema.test.js
         packages/messages/test/signature.test.js
         packages/messages/test/ingress.test.js
+        packages/messages/test/ingress-types.test.ts
+        packages/messages/tsconfig.type-test.json
+
+    Update every existing `handleSignedMessage(...)` test call to await the returned Promise. Use `assert.rejects(...)` for invalid configuration, invalid request types, unexpected authorizer failures, and configured callback failures that previously used or would otherwise use synchronous throw assertions.
 
     Tests should cover:
 
@@ -499,7 +641,7 @@ Work from the repository root unless a command says otherwise.
     - rejects invalid Ethereum addresses and malformed signatures;
     - rejects signatures that do not recover to `signer`;
     - rejects valid signatures from signers outside the allowlist;
-    - throws `TypeError` for malformed request/options containers, invalid request field types, a non-function authorizer, zero, negative, fractional, `NaN`, or infinite byte limits;
+    - rejects with `TypeError` for malformed request/options containers, invalid request field types, a non-function authorizer, a non-function/non-`undefined` `onAcceptedMessage`, zero, negative, fractional, `NaN`, or infinite byte limits;
     - accepts the exact supported content-type forms and rejects missing or unsupported forms with `415` and `unsupported_content_type`;
     - rejects non-`POST` methods with `405` and `method_not_allowed`;
     - maps invalid UTF-8 and JSON syntax to `400` and `invalid_json`;
@@ -507,15 +649,36 @@ Work from the repository root unless a command says otherwise.
     - keeps the trusted `message` handoff separate from the HTTP response `body`;
     - rejects an overlarge body before decoding or JSON parsing and overlarge text before invoking an injected authorizer;
     - preserves structured validation, verification, and authorization statuses, codes, messages, and details;
-    - propagates unexpected authorizer exceptions;
+    - propagates unexpected authorizer exceptions as Promise rejections;
     - freezes accepted and rejected result and body objects;
-    - returns the same acceptance result for repeated calls with the same signed text and configuration;
+    - returns equivalent acceptance results for repeated calls with the same signed text when no callback is configured;
     - accepts separately signed identical text;
+    - preserves the existing accepted result shape when `onAcceptedMessage` is omitted or explicitly `undefined`;
+    - invokes a synchronous callback exactly once with the frozen authenticated message after authorization and exposes its exact return value as `handleSignedMessageResult`;
+    - awaits an asynchronous callback before resolving and preserves its settled value as `handleSignedMessageResult`;
+    - includes an own `handleSignedMessageResult` property when a configured callback returns `undefined`;
+    - never invokes the callback for transport, parsing, validation, verification, or authorization rejection paths;
+    - invokes the callback once per successful submission, including repeated valid submissions;
+    - propagates synchronous callback throws and asynchronous callback rejections without returning an accepted result;
+    - preserves the callback result by reference while keeping the outer accepted result frozen;
     - produces HTTP-shaped statuses suitable for a node endpoint.
+
+    `packages/messages/test/ingress-types.test.ts` must import from the built `packages/messages/dist/index.js` entrypoint so it tests the emitted public declarations rather than source-internal types. Add compile-time assertions proving:
+
+    - a callback returning `{ cid: string }` produces a status-`202` branch whose required `handleSignedMessageResult` is exactly `{ cid: string }`, not `{ cid: string } | undefined` or `unknown`;
+    - a callback returning `undefined` still produces a status-`202` branch with a required property whose value type is `undefined`;
+    - omitting `onAcceptedMessage` or setting it explicitly to `undefined` selects the non-generic overload and produces a status-`202` branch with no `handleSignedMessageResult` property;
+    - `@ts-expect-error` assertions fail the type test if callback-absent accepted results accidentally expose the property;
+    - an options value typed as `HandleSignedMessageOptions | HandleSignedMessageOptionsWithHandler<{ cid: string }>` is accepted by the fallback overload and returns the union of the callback-absent and callback-present result shapes;
+    - an options object whose `onAcceptedMessage` property is typed as `AcceptedSignedMessageHandler<{ cid: string }> | undefined` is also accepted by the fallback overload, including with `exactOptionalPropertyTypes` enabled;
+    - after a dynamic call narrows to status `202`, direct access to `handleSignedMessageResult` remains a type error until property presence is narrowed, after which the value is exactly `{ cid: string }`;
+    - the common rejection branch remains available from all three overloads and does not expose the property.
+
+    Add `packages/messages/tsconfig.type-test.json` extending `packages/tsconfig.base.json`, with `noEmit: true`, `composite: false`, and only `test/ingress-types.test.ts` included. This keeps the compile-time fixture out of the package build output while using the same strict and `exactOptionalPropertyTypes` settings as the package.
 
 7. Update documentation.
 
-    Update `packages/messages/README.md` and, if needed, `packages/README.md` to say `@oyaprotocol/messages` now exposes functional signed text ingress APIs.
+    Update `packages/messages/README.md` and, if needed, `packages/README.md` to document that `handleSignedMessage(...)` always returns a Promise, provides precise callback-present and callback-absent overloads plus a dynamically optional fallback, awaits `onAcceptedMessage` after authorization, exposes its return value as the required `handleSignedMessageResult` property for callback-present acceptance, bypasses it for rejections, and propagates its failures. Explain that the fallback returns both possible accepted shapes, so the host must narrow property presence before reading `handleSignedMessageResult`. Include one small configuration example with a placeholder action function. Do not document IPFS publication as implemented in this milestone.
 
 8. Build and smoke-import.
 
@@ -523,9 +686,10 @@ Work from the repository root unless a command says otherwise.
 
         npm --prefix packages run build
         node --test packages/messages/test/*.test.js
+        node packages/node_modules/typescript/bin/tsc -p packages/messages/tsconfig.type-test.json
         node --input-type=module -e "import('./packages/messages/dist/index.js').then((m) => console.log(typeof m.verifySignedMessage, typeof m.handleSignedMessage))"
 
-    Expected result: TypeScript build succeeds, all message tests pass, and the smoke import prints `function function`.
+    Expected result: TypeScript build succeeds, all message runtime tests pass, the public declaration type test exits successfully, and the smoke import prints `function function`.
 
 9. Run package-area regression checks.
 
@@ -548,17 +712,29 @@ The implementation is accepted when all of the following are true:
 - A changed `text`, changed `signer`, or changed `signature` fails verification.
 - A successful handler result exposes the exact validated, frozen, authorized message through `result.message` for implementation-specific logic.
 - The accepted HTTP `body` remains separate from the trusted `message` handoff value.
-- The node server caps request bytes while reading, and the handler applies configured body and text limits before JSON parsing and signature verification.
+- An external HTTP adapter caps request bytes while reading, and the handler applies configured body and text limits before JSON parsing and signature verification.
 - The handler contract fixes request and option field types, requires explicit positive byte limits, defines content-type and UTF-8 behavior, and maps every expected rejection to a stable status and code.
-- Repeating the same valid request with the same configuration returns the same acceptance result, and separately signed identical text is accepted.
-- The HTTP-shaped helper accepts request data and returns status and JSON body values suitable for mounting in a node process.
+- `handleSignedMessage(...)` always returns a Promise, including when no accepted-message handler is configured.
+- Omitting `onAcceptedMessage` or setting it to `undefined` selects the callback-absent overload and produces an accepted result with no `handleSignedMessageResult` property.
+- A configured `onAcceptedMessage` receives the frozen authenticated message exactly once and only after successful authorization.
+- Supplying `onAcceptedMessage` selects the generic callback-present overload; after narrowing `status === 202`, `result.handleSignedMessageResult` is a required property with exactly the inferred `TResult` type.
+- A callback-present result does not widen `handleSignedMessageResult` to `TResult | undefined` unless `undefined` is itself part of the callback's declared return type.
+- An options union or an `onAcceptedMessage` value typed as `AcceptedSignedMessageHandler<TResult> | undefined` selects the last-position fallback overload without a cast or caller-side branch and returns the union of the callback-present and callback-absent result shapes.
+- A dynamically optional call requires both acceptance and property-presence narrowing before reading `handleSignedMessageResult`; once narrowed, the property has exactly the inferred `TResult` type.
+- The handler awaits synchronous or asynchronous callback results and exposes the exact settled value separately from the ingress-owned HTTP `body`.
+- A configured callback is never called for rejected ingress, and its throws or rejected promises propagate without an accepted result.
+- Repeating the same valid request without a callback returns an equivalent acceptance result; repeating it with a callback invokes that callback once for each successful submission; separately signed identical text remains accepted.
+- The HTTP-shaped helper accepts request data and returns status and JSON body values suitable for mounting in an external runtime adapter without importing that adapter into the kernel package.
 - Package source dependencies resolve through hardened package-root exports.
-- The package README documents exact text preservation, Internet-facing request-body and text limits, and the boundary between message authentication and future onchain publication ordering.
+- The package README documents exact text preservation, Internet-facing request-body and text limits, optional accepted-message handling, callback result/error semantics, and the boundary between message authentication and future onchain publication ordering.
+- The focused milestone adds no dependency on `@oyaprotocol/ipfs` and no package-specific action registry.
+- The emitted public declarations pass the compile-time overload/inference fixture under the package's strict TypeScript settings.
 
 Required commands from the repository root:
 
     npm --prefix packages run build
     node --test packages/messages/test/*.test.js
+    node packages/node_modules/typescript/bin/tsc -p packages/messages/tsconfig.type-test.json
     node --input-type=module -e "import('./packages/messages/dist/index.js').then((m) => console.log(typeof m.verifySignedMessage, typeof m.handleSignedMessage))"
 
 Broader package regression commands:
@@ -579,7 +755,9 @@ If a chosen dependency is rejected during review, revert only the dependency and
 
 If the package API names change during review, update `packages/messages/README.md`, tests, and smoke-import commands in this plan in the same change. The package root `exports` surface should remain the only public import path.
 
-Implement later node integration in `node/` or another explicit package plan after this package API is complete.
+The callback runs once per successful `handleSignedMessage(...)` invocation. Retrying the same request therefore runs the configured function again; this package deliberately does not cache or deduplicate host-owned behavior. Any configured function must define its own retry behavior appropriate to its side effect, while future onchain Logger events provide the public publication record and ordering.
+
+Keep this focused change in `packages/messages`. Do not move behavior into or import from the existing `node/` or `agent/` implementations. If review rejects the callback API, revert only the generic type, option, async invocation, result field, and focused tests; the completed schema, signature, authorization, and synchronous ingress logic remain independently recoverable.
 
 ## Artifacts and Notes
 
@@ -611,6 +789,21 @@ Draft accepted handler result:
       }
     }
 
+Draft configured accepted-message handling:
+
+    const result = await handleSignedMessage(request, {
+      authorize,
+      maxBodyBytes: 65536,
+      maxTextBytes: 8192,
+      onAcceptedMessage: async (message) => {
+        return await configuredAction(message);
+      }
+    });
+
+    if (result.status === 202) {
+      inspectConfiguredHandlerResult(result.handleSignedMessageResult);
+    }
+
 Draft rejection body:
 
     {
@@ -628,20 +821,25 @@ Public package entrypoint:
 
 - `@oyaprotocol/messages`
 
-Current exported functions and types:
+Target exported functions and types after the focused milestone:
 
 - `validateSignedMessage(input)`
 - `verifySignedMessage(input)`
 - `createSignedMessageAuthorizer(allowedSigners)`
-- `handleSignedMessage(request, options)`
+- `handleSignedMessage(request, options: HandleSignedMessageOptions)`, returning `Promise<HandleSignedMessageResult>`
+- `handleSignedMessage<TResult>(request, options: HandleSignedMessageOptionsWithHandler<TResult>)`, returning `Promise<HandleSignedMessageResult<TResult>>`
+- `handleSignedMessage<TResult>(request, options: HandleSignedMessageOptionsWithOptionalHandler<TResult>)`, returning `Promise<HandleSignedMessageResult | HandleSignedMessageResult<TResult>>`; this fallback overload appears last
 - `SignedMessageAuthorizer`
+- `AcceptedSignedMessageHandler<TResult>`, receiving `Readonly<SignedMessageInput>` and returning `TResult | PromiseLike<TResult>`
 - `SignedMessageInput`
 - `SignedMessageValidationError`
 - `SignedMessageVerificationError`
 - `SignedMessageAuthorizationError`
 - `HandleSignedMessageRequest`, with required `method: string`, `contentType: string | undefined`, and `body: Uint8Array`
-- `HandleSignedMessageOptions`, with required `authorize: SignedMessageAuthorizer`, `maxBodyBytes: number`, and `maxTextBytes: number`
-- `HandleSignedMessageResult`, a discriminated union containing either status `202`, the HTTP response `body`, and the authenticated `Readonly<SignedMessageInput>` as `message`, or status `400 | 401 | 403 | 405 | 413 | 415` and a structured error `body`
+- `HandleSignedMessageOptions`, with required `authorize: SignedMessageAuthorizer`, `maxBodyBytes: number`, and `maxTextBytes: number`, plus absent-or-`undefined` `onAcceptedMessage`
+- `HandleSignedMessageOptionsWithHandler<TResult>`, with the same required base options and a required `onAcceptedMessage: AcceptedSignedMessageHandler<TResult>`
+- `HandleSignedMessageOptionsWithOptionalHandler<TResult>`, with the same required base options and an optional `onAcceptedMessage: AcceptedSignedMessageHandler<TResult> | undefined` for runtime-selected callbacks
+- `HandleSignedMessageResult<TResult = never>`, whose default callback-absent accepted branch has no `handleSignedMessageResult` property and whose callback-present accepted branch has a required `handleSignedMessageResult: TResult`; both forms include the same status `400 | 401 | 403 | 405 | 413 | 415` structured rejection branch
 
 Runtime dependency:
 
@@ -652,8 +850,10 @@ Runtime dependency:
 Internal package dependency:
 
 - `@oyaprotocol/utils` provides already-public shared validation helpers; add further shared helpers when multiple packages establish the shared requirement.
+- This focused callback milestone does not add `@oyaprotocol/ipfs`, `@oyaprotocol/ethereum`, or another runtime dependency.
 
 Configuration inputs:
 
-- The caller supplies signer allowlists through `createSignedMessageAuthorizer(...)` and passes the resulting function as `options.authorize`.
-- The caller supplies `maxBodyBytes` and `maxTextBytes` as explicit positive integer byte limits.
+- The host supplies signer allowlists through `createSignedMessageAuthorizer(...)` and passes the resulting function as `options.authorize`.
+- The host supplies `maxBodyBytes` and `maxTextBytes` as explicit positive integer byte limits.
+- The host may supply one function directly as `options.onAcceptedMessage`; the package does not resolve function names from JSON configuration or own an action registry.
