@@ -6,16 +6,16 @@ This ExecPlan is a living document and must be maintained according to `PLANS.md
 
 Build `@oyaprotocol/messages` from a placeholder package into the first hardened message-ingress kernel for Oya nodes, then extend that kernel with one optional configured function that can act on an authenticated message.
 
-After this work, a caller should be able to pass a small HTTP-shaped JSON request from an authorized user, verify that the request contains a text message signed by the claimed Ethereum address, and optionally have `handleSignedMessage(...)` invoke one caller-configured accepted-message handler. The configured function defines what happens next, such as publishing the authenticated message to IPFS, while the messages package remains independent of sockets, environment loading, process lifecycle, and any particular downstream action.
+After this work, a trusted host—normally the Oya node—should be able to pass a small HTTP-shaped JSON request from an authorized message sender, verify that the request contains a text message signed by the claimed Ethereum address, and optionally have `handleSignedMessage(...)` invoke one host-configured accepted-message handler. The host-configured function defines what happens next, such as publishing the authenticated message to IPFS, while the messages package remains independent of sockets, environment loading, process lifecycle, and any particular downstream action.
 
 The observable behavior after completion is:
 
-1. a caller submits `POST /v1/messages`-style JSON with only `text`, `signer`, and `signature`;
+1. a remote message sender submits `POST /v1/messages`-style JSON with only `text`, `signer`, and `signature` to the host;
 2. `@oyaprotocol/messages` validates the body, verifies that the exact `text` is covered by the Ethereum signature, recovers the signer, and checks the signer against an explicit allowlist;
 3. after successful ingress, `handleSignedMessage(...)` optionally awaits one configured function with the frozen authenticated message and exposes that function's return value as `actionResult` on the accepted result;
-4. malformed, unsigned, mis-signed, overlarge, or unauthorized messages produce structured rejection errors without invoking the configured function, while an exception or rejected promise from that function propagates to the caller.
+4. malformed, unsigned, mis-signed, overlarge, or unauthorized messages produce structured rejection errors without invoking the configured function, while an exception or rejected promise from that function propagates to the host.
 
-The signed message is intentionally text-only. Its wire body contains exactly `text`, `signer`, and `signature`. The package preserves the text exactly and passes a frozen snapshot of those authenticated fields to the optional configured function after authentication and authorization.
+The signed message is intentionally text-only. Its wire body contains exactly `text`, `signer`, and `signature`. The package preserves the text exactly and passes a frozen snapshot of those authenticated fields to the optional host-configured function after authentication and authorization.
 
 ## Progress
 
@@ -48,6 +48,7 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
 - [x] 2026-08-26: Replaced the authorizer-owned success reference with a frozen three-field snapshot, added a post-acceptance mutation regression, and passed all 34 message tests.
 - [x] 2026-08-26: Assigned public publication ordering to the future onchain Logger record rather than the ingress layer or IPFS artifact.
 - [x] 2026-08-26: Reopened this ExecPlan for the focused accepted-message handler change and specified the async callback, result, error, test, and documentation contracts.
+- [x] 2026-08-30: Distinguished the remote message sender from the trusted host/node and standardized callback-configuration references on "host" terminology.
 - [ ] Add the optional typed `onAcceptedMessage` function to `HandleSignedMessageOptions` and make `handleSignedMessage(...)` consistently asynchronous.
 - [ ] Add focused ingress tests for callback ordering, awaiting, result propagation, rejection bypass, repeated invocation, and failure propagation.
 - [ ] Update package documentation, rebuild the package area, smoke-import the public API, and run package regressions.
@@ -123,7 +124,7 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
   Date/Author: 2026-08-26 / user and Codex.
 
 - Decision: Reject unknown top-level fields in the v1 signed message body.
-  Rationale: The wire contract is intentionally small and audit-focused. Rejecting extra fields prevents callers from assuming hidden package semantics for fields such as `meta`, `chainId`, or `version`, and makes the node's responsibility for interpreting only `text` explicit.
+  Rationale: The wire contract is intentionally small and audit-focused. Rejecting extra fields prevents message senders from assuming hidden package semantics for fields such as `meta`, `chainId`, or `version`, and makes the host's responsibility for interpreting only `text` explicit.
   Date/Author: 2026-06-05 / Codex.
 
 - Decision: Preserve `text` exactly during schema validation and only reject the zero-length empty string.
@@ -135,7 +136,7 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
   Date/Author: 2026-06-07; clarified 2026-08-19 / Codex.
 
 - Decision: Return the authenticated frozen message as a distinct field on a successful HTTP-shaped result.
-  Rationale: The node needs the authorized text for implementation-specific handling. Keeping `message` separate from the HTTP `body` gives the node a trusted handoff value while preserving a small response body for the remote caller.
+  Rationale: The node needs the authorized text for implementation-specific handling. Keeping `message` separate from the HTTP `body` gives the node a trusted handoff value while preserving a small response body for the remote message sender.
   Date/Author: 2026-08-19 / Codex.
 
 - Decision: Define `handleSignedMessage(request, options)` with a required `Uint8Array` body, a dedicated content-type value, an injected authorizer, and explicit positive byte limits.
@@ -175,23 +176,23 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
   Date/Author: 2026-07-28 / Codex.
 
 - Decision: Expose allowlist authorization as `authorizeMessageSigner(signer, allowedSigners)` rather than combining it with signature verification. This decision was superseded on 2026-08-15.
-  Rationale: The signer-only name made the trust boundary explicit: callers passed the signer from `verifySignedMessage(...)`, and the future ingress layer could reuse the helper independently.
+  Rationale: The signer-only name made the trust boundary explicit: API consumers passed the signer from `verifySignedMessage(...)`, and the future ingress layer could reuse the helper independently.
   Date/Author: 2026-07-28 / Codex.
 
 - Decision: Treat a valid but non-allowlisted signer as `unauthorized_signer` with status `403`, while treating malformed signer or allowlist inputs as `TypeError`. The malformed-signer portion of this decision was superseded on 2026-08-15.
-  Rationale: Membership failure is an authorization result suitable for HTTP mapping. Invalid address shapes and non-array allowlists are caller configuration or API-use errors represented by `TypeError`. Empty arrays are valid and intentionally deny every signer.
+  Rationale: Membership failure is an authorization result suitable for HTTP mapping. Invalid address shapes and non-array allowlists are host configuration or API-use errors represented by `TypeError`. Empty arrays are valid and intentionally deny every signer.
   Date/Author: 2026-07-28 / Codex.
 
 - Decision: Export `authorizeSignedMessage(input, allowedSigners)` as the authorization boundary and keep raw signer membership checking private. The per-call API portion of this decision was superseded later on 2026-08-15.
-  Rationale: Documentation alone cannot enforce that a signer came from `verifySignedMessage(...)`. Composing schema validation, EIP-191 verification, and membership checking prevents callers from accidentally authorizing the unverified `signer` field from a request while preserving the lower-level `verifySignedMessage(...)` API for verification-only use cases.
+  Rationale: Documentation alone cannot enforce that a signer came from `verifySignedMessage(...)`. Composing schema validation, EIP-191 verification, and membership checking prevents API consumers from accidentally authorizing the unverified `signer` field from a request while preserving the lower-level `verifySignedMessage(...)` API for verification-only use cases.
   Date/Author: 2026-08-15 / Codex.
 
 - Decision: Preserve `SignedMessageValidationError` and `SignedMessageVerificationError` from the composed authorization API, and reserve `TypeError` for malformed allowlist configuration.
-  Rationale: The complete message is untrusted request input and should retain the package's structured request-error behavior. The allowlist remains caller-supplied configuration, so an invalid container or address entry is a programming/configuration failure.
+  Rationale: The complete message is untrusted request input and should retain the package's structured request-error behavior. The allowlist remains host-supplied configuration, so an invalid container or address entry is a programming/configuration failure.
   Date/Author: 2026-08-15 / Codex.
 
 - Decision: Prevalidate authorization policy with `createSignedMessageAuthorizer(allowedSigners)` and expose request-time authorization through the returned object's `authorize(input)` method. The returned-object shape was superseded later on 2026-08-15 by a directly callable function.
-  Rationale: Node allowlists are normally static configuration reused across requests. Validating and normalizing once moves configuration failures to startup, avoids rebuilding a Set on every request, snapshots the caller's array, and keeps the mutable Set private inside a closure. Freezing the returned object prevents its public capability from being replaced or reconfigured at runtime.
+  Rationale: Node allowlists are normally static configuration reused across requests. Validating and normalizing once moves configuration failures to startup, avoids rebuilding a Set on every request, snapshots the host-supplied array, and keeps the mutable Set private inside a closure. Freezing the returned object prevents its public capability from being replaced or reconfigured at runtime.
   Date/Author: 2026-08-15 / Codex.
 
 - Decision: Represent `SignedMessageAuthorizer` as a function type and have `createSignedMessageAuthorizer(...)` return that function directly.
@@ -219,7 +220,7 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
   Date/Author: 2026-08-26 / user and Codex.
 
 - Decision: Add one optional `onAcceptedMessage` function to `HandleSignedMessageOptions` instead of hard-coding IPFS publication or adding a list of package-owned actions.
-  Rationale: One injected function lets a caller select publication or another future behavior while keeping `@oyaprotocol/messages` runtime-neutral. A caller that needs several ordered actions can compose them inside that single function without making ingress own an action registry or execution policy.
+  Rationale: One injected function lets the host/node select publication or another future behavior while keeping `@oyaprotocol/messages` runtime-neutral. A host that needs several ordered actions can compose them inside that single function without making ingress own an action registry or execution policy.
   Date/Author: 2026-08-26 / user and Codex.
 
 - Decision: Pass the frozen authenticated `Readonly<SignedMessageInput>` to `onAcceptedMessage`, not the raw parsed request or the HTTP response body.
@@ -227,15 +228,15 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
   Date/Author: 2026-08-26 / user and Codex.
 
 - Decision: Give `onAcceptedMessage` exactly one argument in this milestone and do not add transport context, an abort signal, or an action array.
-  Rationale: The focused requirement is configurable post-authentication behavior. Cancellation semantics and ordered multi-action orchestration require concrete downstream policy; the caller can currently close over dependencies and compose several operations inside its one configured function.
+  Rationale: The focused requirement is configurable post-authentication behavior. Cancellation semantics and ordered multi-action orchestration require concrete downstream policy; the host can currently close over dependencies and compose several operations inside its one configured function.
   Date/Author: 2026-08-26 / user and Codex.
 
 - Decision: Make `handleSignedMessage(...)` consistently asynchronous and await the configured function before returning an accepted result.
-  Rationale: Downstream actions such as IPFS publication are asynchronous. Always returning a Promise gives the API one stable calling convention and prevents the caller from observing acceptance before the configured action settles.
+  Rationale: Downstream actions such as IPFS publication are asynchronous. Always returning a Promise gives the API one stable calling convention and prevents the host from observing acceptance before the configured action settles.
   Date/Author: 2026-08-26 / user and Codex.
 
 - Decision: Preserve the configured function's return value as an internal `actionResult` field on the accepted result and propagate synchronous throws or rejected promises unchanged.
-  Rationale: A publication function must be able to return its CID metadata to the caller, while infrastructure and programming failures must remain visible rather than being misclassified as request rejections. The existing HTTP `status` and `body` remain ingress-owned and do not absorb arbitrary callback output.
+  Rationale: A publication function must be able to return its CID metadata to the host, while infrastructure and programming failures must remain visible rather than being misclassified as request rejections. The existing HTTP `status` and `body` remain ingress-owned and do not absorb arbitrary callback output.
   Date/Author: 2026-08-26 / user and Codex.
 
 - Decision: Keep the accepted-message handler optional and invoke it once for every successful call.
@@ -243,7 +244,7 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
   Date/Author: 2026-08-26 / user and Codex.
 
 - Decision: Export the generic `AcceptedSignedMessageHandler<TResult>` function type and make `HandleSignedMessageOptions<TResult>` and `HandleSignedMessageResult<TResult>` generic over its return value.
-  Rationale: Future package-root functions such as an IPFS publisher should be able to declare compatibility with the configured hook without duplicating its signature, and callers should retain the concrete type of publication metadata or another action result.
+  Rationale: Future package-root functions such as an IPFS publisher should be able to declare compatibility with the configured hook without duplicating its signature, and host integrations should retain the concrete type of publication metadata or another action result.
   Date/Author: 2026-08-26 / user and Codex.
 
 ## Outcomes & Retrospective
@@ -374,11 +375,13 @@ Reference implementation files:
 
 Definitions:
 
-- Text message: the user-authored string in the `text` field. The package preserves it exactly for caller-defined interpretation.
+- Message sender: the remote party that submits the signed HTTP request. The message sender does not configure or invoke the accepted-message handler.
+- Host: the trusted runtime code—normally the Oya node—that constructs `HandleSignedMessageOptions`, invokes `handleSignedMessage(...)`, and selects any `onAcceptedMessage` function.
+- Text message: the user-authored string in the `text` field. The package preserves it exactly for host-defined interpretation.
 - Signer: the Ethereum account address claimed in the request body.
 - Signature: the Ethereum signed-message signature over exactly the `text` string.
 - Authorized signer: a signer address included in the allowlist supplied by the node.
-- Accepted-message handler: one optional caller-supplied function invoked only after successful validation, verification, and authorization. It receives the frozen authenticated message and may return a value or a Promise.
+- Accepted-message handler: one optional host-supplied function invoked only after successful validation, verification, and authorization. It receives the frozen authenticated message and may return a value or a Promise.
 - Action result: the exact value produced by the configured accepted-message handler after it settles. It is exposed separately from the ingress-owned HTTP response body.
 
 The intended HTTP JSON body is:
@@ -408,7 +411,7 @@ Fourth, update `packages/messages/README.md` so consumers understand the minimal
 
 The focused follow-up extends `handleSignedMessage(...)` with one optional `onAcceptedMessage` function. Validate this option alongside the existing immutable configuration, convert the public handler to an `async` function, invoke the callback only after the authenticated message snapshot exists, await it, and return its exact settled value as `actionResult`. Rejected ingress requests must bypass the callback entirely. Callback failures must propagate unchanged.
 
-Keep this milestone under `packages/messages`. Do not add `@oyaprotocol/ipfs` as a dependency and do not implement `publishSignedMessage(...)` yet. A later focused change can provide an IPFS-backed function matching the accepted-message handler type, and a caller can select that function in its configuration.
+Keep this milestone under `packages/messages`. Do not add `@oyaprotocol/ipfs` as a dependency and do not implement `publishSignedMessage(...)` yet. A later focused change can provide an IPFS-backed function matching the accepted-message handler type, and the host/node can select that function in its configuration.
 
 ## Concrete Steps
 
@@ -495,7 +498,7 @@ Work from the repository root unless a command says otherwise.
 
     `request` and `options` must be plain objects with own properties matching the interfaces above; reject missing or unsupported own properties with `TypeError`. Every request property is required, including `contentType`, whose value is `undefined` when the HTTP header was absent. `authorize`, `maxBodyBytes`, and `maxTextBytes` remain required options. `onAcceptedMessage` may be absent or explicitly `undefined`; if present with any other value, reject with `TypeError('options.onAcceptedMessage must be a function or undefined.')`. Add it to the allowed options field set but not the required options field list.
 
-    Use `<container>.<field> is required.` for a missing required property. `body` is always the raw request bytes after the caller has applied any streaming limit. Both byte limits are required positive integers and have no defaults. Validate `options`, including `onAcceptedMessage`, before `request`. Throw `TypeError` for a non-function `options.authorize`, a byte limit that is not a positive integer, a non-string method, a `contentType` value other than string or `undefined`, or a body that is not `Uint8Array`. Use field-specific messages such as `options.maxBodyBytes must be a positive integer.` and `request.body must be a Uint8Array.` Use `Unsupported options field: <field>.` and `Unsupported request field: <field>.` for extra own properties.
+    Use `<container>.<field> is required.` for a missing required property. `body` is always the raw request bytes after the host's external adapter has applied any streaming limit. Both byte limits are required positive integers and have no defaults. Validate `options`, including `onAcceptedMessage`, before `request`. Throw `TypeError` for a non-function `options.authorize`, a byte limit that is not a positive integer, a non-string method, a `contentType` value other than string or `undefined`, or a body that is not `Uint8Array`. Use field-specific messages such as `options.maxBodyBytes must be a positive integer.` and `request.body must be a Uint8Array.` Use `Unsupported options field: <field>.` and `Unsupported request field: <field>.` for extra own properties.
 
     Process a well-typed request in this exact order:
 
@@ -543,7 +546,7 @@ Work from the repository root unless a command says otherwise.
           actionResult
         }
 
-    Freeze the outer accepted result, its HTTP body, and the authenticated message snapshot. Preserve `actionResult` by reference; do not clone, transform, or recursively freeze an arbitrary caller-owned value. If the callback returns `undefined`, include `actionResult` as an own property with value `undefined` so callers can distinguish a configured callback from the no-callback result shape.
+    Freeze the outer accepted result, its HTTP body, and the authenticated message snapshot. Preserve `actionResult` by reference; do not clone, transform, or recursively freeze an arbitrary host-owned value. If the callback returns `undefined`, include `actionResult` as an own property with value `undefined` so host code can distinguish a configured callback from the no-callback result shape.
 
     `message` is the trusted handoff value for implementation-specific logic. The HTTP adapter sends only `status` and `body` unless a higher layer deliberately defines another response. With no callback, repeated calls continue to resolve to equivalent acceptance results. With a callback, every successful call invokes it once; ingress does not cache or deduplicate callback execution.
 
@@ -661,7 +664,7 @@ If a chosen dependency is rejected during review, revert only the dependency and
 
 If the package API names change during review, update `packages/messages/README.md`, tests, and smoke-import commands in this plan in the same change. The package root `exports` surface should remain the only public import path.
 
-The callback runs once per successful `handleSignedMessage(...)` invocation. Retrying the same request therefore runs the configured function again; this package deliberately does not cache or deduplicate caller-owned behavior. Any configured function must define its own retry behavior appropriate to its side effect, while future onchain Logger events provide the public publication record and ordering.
+The callback runs once per successful `handleSignedMessage(...)` invocation. Retrying the same request therefore runs the configured function again; this package deliberately does not cache or deduplicate host-owned behavior. Any configured function must define its own retry behavior appropriate to its side effect, while future onchain Logger events provide the public publication record and ordering.
 
 Keep this focused change in `packages/messages`. Do not move behavior into or import from the existing `node/` or `agent/` implementations. If review rejects the callback API, revert only the generic type, option, async invocation, result field, and focused tests; the completed schema, signature, authorization, and synchronous ingress logic remain independently recoverable.
 
@@ -756,6 +759,6 @@ Internal package dependency:
 
 Configuration inputs:
 
-- The caller supplies signer allowlists through `createSignedMessageAuthorizer(...)` and passes the resulting function as `options.authorize`.
-- The caller supplies `maxBodyBytes` and `maxTextBytes` as explicit positive integer byte limits.
-- The caller may supply one function directly as `options.onAcceptedMessage`; the package does not resolve function names from JSON configuration or own an action registry.
+- The host supplies signer allowlists through `createSignedMessageAuthorizer(...)` and passes the resulting function as `options.authorize`.
+- The host supplies `maxBodyBytes` and `maxTextBytes` as explicit positive integer byte limits.
+- The host may supply one function directly as `options.onAcceptedMessage`; the package does not resolve function names from JSON configuration or own an action registry.
