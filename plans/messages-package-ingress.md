@@ -12,7 +12,7 @@ The observable behavior after completion is:
 
 1. a remote message sender submits `POST /v1/messages`-style JSON with only `text`, `signer`, and `signature` to the host;
 2. `@oyaprotocol/messages` validates the body, verifies that the exact `text` is covered by the Ethereum signature, recovers the signer, and checks the signer against an explicit allowlist;
-3. after successful ingress, `handleSignedMessage(...)` optionally awaits one configured function with the frozen authenticated message and exposes that function's return value as `actionResult` on the accepted result;
+3. after successful ingress, `handleSignedMessage(...)` optionally awaits one configured function with the frozen authenticated message and exposes that function's return value as `handleSignedMessageResult` on the accepted result;
 4. malformed, unsigned, mis-signed, overlarge, or unauthorized messages produce structured rejection errors without invoking the configured function, while an exception or rejected promise from that function propagates to the host.
 
 The signed message is intentionally text-only. Its wire body contains exactly `text`, `signer`, and `signature`. The package preserves the text exactly and passes a frozen snapshot of those authenticated fields to the optional host-configured function after authentication and authorization.
@@ -49,6 +49,7 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
 - [x] 2026-08-26: Assigned public publication ordering to the future onchain Logger record rather than the ingress layer or IPFS artifact.
 - [x] 2026-08-26: Reopened this ExecPlan for the focused accepted-message handler change and specified the async callback, result, error, test, and documentation contracts.
 - [x] 2026-08-30: Distinguished the remote message sender from the trusted host/node and standardized callback-configuration references on "host" terminology.
+- [x] 2026-08-30: Standardized the configured function's returned-value field as `handleSignedMessageResult` throughout this plan.
 - [ ] Add the optional typed `onAcceptedMessage` function to `HandleSignedMessageOptions` and make `handleSignedMessage(...)` consistently asynchronous.
 - [ ] Add focused ingress tests for callback ordering, awaiting, result propagation, rejection bypass, repeated invocation, and failure propagation.
 - [ ] Update package documentation, rebuild the package area, smoke-import the public API, and run package regressions.
@@ -235,7 +236,7 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
   Rationale: Downstream actions such as IPFS publication are asynchronous. Always returning a Promise gives the API one stable calling convention and prevents the host from observing acceptance before the configured action settles.
   Date/Author: 2026-08-26 / user and Codex.
 
-- Decision: Preserve the configured function's return value as an internal `actionResult` field on the accepted result and propagate synchronous throws or rejected promises unchanged.
+- Decision: Preserve the configured function's return value as an internal `handleSignedMessageResult` field on the accepted result and propagate synchronous throws or rejected promises unchanged.
   Rationale: A publication function must be able to return its CID metadata to the host, while infrastructure and programming failures must remain visible rather than being misclassified as request rejections. The existing HTTP `status` and `body` remain ingress-owned and do not absorb arbitrary callback output.
   Date/Author: 2026-08-26 / user and Codex.
 
@@ -244,7 +245,7 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
   Date/Author: 2026-08-26 / user and Codex.
 
 - Decision: Export the generic `AcceptedSignedMessageHandler<TResult>` function type and make `HandleSignedMessageOptions<TResult>` and `HandleSignedMessageResult<TResult>` generic over its return value.
-  Rationale: Future package-root functions such as an IPFS publisher should be able to declare compatibility with the configured hook without duplicating its signature, and host integrations should retain the concrete type of publication metadata or another action result.
+  Rationale: Future package-root functions such as an IPFS publisher should be able to declare compatibility with the configured hook without duplicating its signature, and host integrations should retain the concrete type of publication metadata or another configured-handler result.
   Date/Author: 2026-08-26 / user and Codex.
 
 ## Outcomes & Retrospective
@@ -382,7 +383,7 @@ Definitions:
 - Signature: the Ethereum signed-message signature over exactly the `text` string.
 - Authorized signer: a signer address included in the allowlist supplied by the node.
 - Accepted-message handler: one optional host-supplied function invoked only after successful validation, verification, and authorization. It receives the frozen authenticated message and may return a value or a Promise.
-- Action result: the exact value produced by the configured accepted-message handler after it settles. It is exposed separately from the ingress-owned HTTP response body.
+- Handle-signed-message result: the exact value produced by the configured accepted-message handler after it settles, exposed as `handleSignedMessageResult` separately from the ingress-owned HTTP response body.
 
 The intended HTTP JSON body is:
 
@@ -409,7 +410,7 @@ Third, add focused tests under `packages/messages/test/`. Tests should use local
 
 Fourth, update `packages/messages/README.md` so consumers understand the minimal wire protocol, exact text preservation, repeated-submission behavior, safe Internet-facing body and text limits, and how an external runtime adapter can mount the helper behind `POST /v1/messages`.
 
-The focused follow-up extends `handleSignedMessage(...)` with one optional `onAcceptedMessage` function. Validate this option alongside the existing immutable configuration, convert the public handler to an `async` function, invoke the callback only after the authenticated message snapshot exists, await it, and return its exact settled value as `actionResult`. Rejected ingress requests must bypass the callback entirely. Callback failures must propagate unchanged.
+The focused follow-up extends `handleSignedMessage(...)` with one optional `onAcceptedMessage` function. Validate this option alongside the existing immutable configuration, convert the public handler to an `async` function, invoke the callback only after the authenticated message snapshot exists, await it, and return its exact settled value as `handleSignedMessageResult`. Rejected ingress requests must bypass the callback entirely. Callback failures must propagate unchanged.
 
 Keep this milestone under `packages/messages`. Do not add `@oyaprotocol/ipfs` as a dependency and do not implement `publishSignedMessage(...)` yet. A later focused change can provide an IPFS-backed function matching the accepted-message handler type, and the host/node can select that function in its configuration.
 
@@ -537,16 +538,16 @@ Work from the repository root unless a command says otherwise.
           message
         }
 
-    When `onAcceptedMessage` is configured, resolve only after it settles and add its exact return value as an own `actionResult` property:
+    When `onAcceptedMessage` is configured, resolve only after it settles and add its exact return value as an own `handleSignedMessageResult` property:
 
         {
           status: 202,
           body: { status: "accepted", signer: message.signer },
           message,
-          actionResult
+          handleSignedMessageResult
         }
 
-    Freeze the outer accepted result, its HTTP body, and the authenticated message snapshot. Preserve `actionResult` by reference; do not clone, transform, or recursively freeze an arbitrary host-owned value. If the callback returns `undefined`, include `actionResult` as an own property with value `undefined` so host code can distinguish a configured callback from the no-callback result shape.
+    Freeze the outer accepted result, its HTTP body, and the authenticated message snapshot. Preserve `handleSignedMessageResult` by reference; do not clone, transform, or recursively freeze an arbitrary host-owned value. If the callback returns `undefined`, include `handleSignedMessageResult` as an own property with value `undefined` so host code can distinguish a configured callback from the no-callback result shape.
 
     `message` is the trusted handoff value for implementation-specific logic. The HTTP adapter sends only `status` and `body` unless a higher layer deliberately defines another response. With no callback, repeated calls continue to resolve to equivalent acceptance results. With a callback, every successful call invokes it once; ingress does not cache or deduplicate callback execution.
 
@@ -583,9 +584,9 @@ Work from the repository root unless a command says otherwise.
     - returns equivalent acceptance results for repeated calls with the same signed text when no callback is configured;
     - accepts separately signed identical text;
     - preserves the existing accepted result shape when `onAcceptedMessage` is omitted or explicitly `undefined`;
-    - invokes a synchronous callback exactly once with the frozen authenticated message after authorization and exposes its exact return value as `actionResult`;
-    - awaits an asynchronous callback before resolving and preserves its settled value as `actionResult`;
-    - includes an own `actionResult` property when a configured callback returns `undefined`;
+    - invokes a synchronous callback exactly once with the frozen authenticated message after authorization and exposes its exact return value as `handleSignedMessageResult`;
+    - awaits an asynchronous callback before resolving and preserves its settled value as `handleSignedMessageResult`;
+    - includes an own `handleSignedMessageResult` property when a configured callback returns `undefined`;
     - never invokes the callback for transport, parsing, validation, verification, or authorization rejection paths;
     - invokes the callback once per successful submission, including repeated valid submissions;
     - propagates synchronous callback throws and asynchronous callback rejections without returning an accepted result;
@@ -594,7 +595,7 @@ Work from the repository root unless a command says otherwise.
 
 7. Update documentation.
 
-    Update `packages/messages/README.md` and, if needed, `packages/README.md` to document that `handleSignedMessage(...)` always returns a Promise, accepts one optional `onAcceptedMessage` function, awaits it after authorization, exposes its return value as `actionResult`, bypasses it for rejections, and propagates its failures. Include one small configuration example with a placeholder action function. Do not document IPFS publication as implemented in this milestone.
+    Update `packages/messages/README.md` and, if needed, `packages/README.md` to document that `handleSignedMessage(...)` always returns a Promise, accepts one optional `onAcceptedMessage` function, awaits it after authorization, exposes its return value as `handleSignedMessageResult`, bypasses it for rejections, and propagates its failures. Include one small configuration example with a placeholder action function. Do not document IPFS publication as implemented in this milestone.
 
 8. Build and smoke-import.
 
@@ -632,7 +633,7 @@ The implementation is accepted when all of the following are true:
 - `handleSignedMessage(...)` always returns a Promise, including when no accepted-message handler is configured.
 - Omitting `onAcceptedMessage` or setting it to `undefined` preserves the accepted result shape apart from the Promise-based calling convention.
 - A configured `onAcceptedMessage` receives the frozen authenticated message exactly once and only after successful authorization.
-- The handler awaits synchronous or asynchronous callback results and exposes the exact settled value as `result.actionResult`, separate from the ingress-owned HTTP `body`.
+- The handler awaits synchronous or asynchronous callback results and exposes the exact settled value as `result.handleSignedMessageResult`, separate from the ingress-owned HTTP `body`.
 - A configured callback is never called for rejected ingress, and its throws or rejected promises propagate without an accepted result.
 - Repeating the same valid request without a callback returns an equivalent acceptance result; repeating it with a callback invokes that callback once for each successful submission; separately signed identical text remains accepted.
 - The HTTP-shaped helper accepts request data and returns status and JSON body values suitable for mounting in an external runtime adapter without importing that adapter into the kernel package.
@@ -709,8 +710,8 @@ Draft configured accepted-message handling:
       }
     });
 
-    if (result.status === 202 && Object.hasOwn(result, "actionResult")) {
-      inspectConfiguredActionResult(result.actionResult);
+    if (result.status === 202 && Object.hasOwn(result, "handleSignedMessageResult")) {
+      inspectConfiguredHandlerResult(result.handleSignedMessageResult);
     }
 
 Draft rejection body:
@@ -744,7 +745,7 @@ Target exported functions and types after the focused milestone:
 - `SignedMessageAuthorizationError`
 - `HandleSignedMessageRequest`, with required `method: string`, `contentType: string | undefined`, and `body: Uint8Array`
 - `HandleSignedMessageOptions<TResult>`, with required `authorize: SignedMessageAuthorizer`, `maxBodyBytes: number`, and `maxTextBytes: number`, plus optional `onAcceptedMessage: AcceptedSignedMessageHandler<TResult> | undefined`
-- `HandleSignedMessageResult<TResult>`, a discriminated union containing either status `202`, the HTTP response `body`, the authenticated `Readonly<SignedMessageInput>` as `message`, and optional `actionResult: TResult`, or status `400 | 401 | 403 | 405 | 413 | 415` and a structured error `body`
+- `HandleSignedMessageResult<TResult>`, a discriminated union containing either status `202`, the HTTP response `body`, the authenticated `Readonly<SignedMessageInput>` as `message`, and optional `handleSignedMessageResult: TResult`, or status `400 | 401 | 403 | 405 | 413 | 415` and a structured error `body`
 
 Runtime dependency:
 
