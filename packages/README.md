@@ -26,5 +26,5 @@
 ## Current Constraints
 
 - `@oyaprotocol/ipfs`, `@oyaprotocol/ethereum`, and `@oyaprotocol/utils` expose functional kernel APIs.
-- `@oyaprotocol/messages` exposes signed text message schema validation, EIP-191 signature verification, allowlist authorization, and HTTP-shaped ingress handling.
+- `@oyaprotocol/messages` exposes signed text message schema validation, EIP-191 signature verification, allowlist authorization, HTTP-shaped ingress handling, and an optional host-configured accepted-message function.
 - Proposal or proof verification packages are intentionally not represented here yet; those may be implemented later in a lower-level language while TypeScript packages focus on network interactions.

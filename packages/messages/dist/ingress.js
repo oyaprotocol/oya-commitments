@@ -6,6 +6,7 @@ const OPTION_FIELDS = new Set([
     'authorize',
     'maxBodyBytes',
     'maxTextBytes',
+    'onAcceptedMessage',
 ]);
 const REQUEST_FIELDS = new Set([
     'method',
@@ -46,10 +47,20 @@ function validateOptions(options) {
     if (typeof options.authorize !== 'function') {
         throw new TypeError('options.authorize must be a function.');
     }
+    const onAcceptedMessage = options.onAcceptedMessage;
+    if (onAcceptedMessage !== undefined &&
+        typeof onAcceptedMessage !== 'function') {
+        throw new TypeError('options.onAcceptedMessage must be a function or undefined.');
+    }
     return {
         authorize: options.authorize,
         maxBodyBytes: requirePositiveInteger(options.maxBodyBytes, 'options.maxBodyBytes'),
         maxTextBytes: requirePositiveInteger(options.maxTextBytes, 'options.maxTextBytes'),
+        ...(onAcceptedMessage === undefined
+            ? {}
+            : {
+                onAcceptedMessage: onAcceptedMessage,
+            }),
     };
 }
 function validateRequest(request) {
@@ -96,7 +107,7 @@ function hasOwnStringText(value) {
         Object.hasOwn(value, 'text') &&
         typeof value.text === 'string');
 }
-function handleSignedMessage(request, options) {
+async function handleSignedMessage(request, options) {
     const validatedOptions = validateOptions(options);
     const validatedRequest = validateRequest(request);
     if (validatedRequest.method !== 'POST') {
@@ -148,6 +159,15 @@ function handleSignedMessage(request, options) {
         status: 'accepted',
         signer: acceptedMessage.signer,
     });
+    if (validatedOptions.onAcceptedMessage !== undefined) {
+        const handleSignedMessageResult = await validatedOptions.onAcceptedMessage(acceptedMessage);
+        return Object.freeze({
+            status: 202,
+            body,
+            message: acceptedMessage,
+            handleSignedMessageResult,
+        });
+    }
     return Object.freeze({
         status: 202,
         body,

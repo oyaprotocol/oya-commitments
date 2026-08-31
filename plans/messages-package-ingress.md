@@ -52,10 +52,10 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
 - [x] 2026-08-30: Standardized the configured function's returned-value field as `handleSignedMessageResult` throughout this plan.
 - [x] 2026-08-30: Corrected the proposed type contract so overloads correlate callback presence with a required callback-result property and callback-absent calls do not infer `unknown`.
 - [x] 2026-08-30: Added a last-position fallback overload for runtime-selected callbacks without weakening the two precise overloads.
-- [ ] Add the callback-present, callback-absent, and dynamically optional option shapes, the three ordered `handleSignedMessage(...)` overloads, and the consistently asynchronous implementation.
-- [ ] Add focused ingress tests for callback ordering, awaiting, result propagation, rejection bypass, repeated invocation, and failure propagation.
-- [ ] Add a compile-time declaration test proving callback-result inference and callback-absent property exclusion.
-- [ ] Update package documentation, rebuild the package area, smoke-import the public API, and run package regressions.
+- [x] 2026-08-31 02:14Z: Added the callback-present, callback-absent, and dynamically optional option shapes, the three ordered `handleSignedMessage(...)` overloads, and the consistently asynchronous implementation.
+- [x] 2026-08-31 02:14Z: Added focused ingress tests for callback ordering, awaiting, result propagation, rejection bypass, repeated invocation, and failure propagation; all 39 message tests pass.
+- [x] 2026-08-31 02:14Z: Added a compile-time test against the emitted package declarations proving callback-result inference, callback-absent property exclusion, and dynamic-option narrowing under `exactOptionalPropertyTypes`.
+- [x] 2026-08-31 02:14Z: Updated package documentation, rebuilt the package area, smoke-imported the public API, and passed all 76 utils, IPFS, and Ethereum regression tests.
 
 ## Surprises & Discoveries
 
@@ -83,8 +83,8 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
 - Observation: The existing shared ASCII policy accepts the full ASCII byte range.
   Evidence: `assertAsciiBytes(...)` accepts every byte through `0x7f`, including control bytes and `0x7f`, and rejects higher UTF-8 byte values just like the IPFS text readers.
 
-- Observation: The current ingress helper is synchronous and accepts an exact three-field options object.
-  Evidence: `packages/messages/src/ingress.ts` currently allows only `authorize`, `maxBodyBytes`, and `maxTextBytes`, then returns immediately after creating the frozen accepted result.
+- Observation: Before the accepted-message milestone, the ingress helper was synchronous and accepted an exact three-field options object.
+  Evidence: The prior `packages/messages/src/ingress.ts` allowed only `authorize`, `maxBodyBytes`, and `maxTextBytes`; the completed milestone adds the optional handler and makes every path Promise-based.
 
 - Observation: The existing authenticated message snapshot is already the narrow trust boundary needed by a configurable downstream function.
   Evidence: successful ingress copies `text`, `signer`, and `signature` into a new frozen object before returning it, so the callback does not need the parsed request body or an authorizer-owned reference.
@@ -359,7 +359,17 @@ Final validation run on 2026-08-20:
 
 The build succeeded, the smoke import printed `function function`, and all 109 hardened-kernel package tests passed: 33 messages, 11 utils, 45 IPFS, and 20 Ethereum. The 15 ingress tests cover successful authenticated handoff, repeated submissions, separately signed identical text, exact content-type handling, processing order, byte limits, invalid UTF-8 and JSON, body-shape delegation, structured error preservation, unexpected exception propagation, strict container fields and types, positive integer configuration, and frozen results.
 
-The original synchronous HTTP-shaped ingress milestone is complete. This ExecPlan is now reopened for the focused optional accepted-message handler milestone. No callback implementation or validation evidence has been recorded yet. The follow-up remains local to `packages/messages`; it does not import reference code from `node/` or `agent/`, and it does not yet implement IPFS publication or onchain Logger behavior.
+The accepted-message handler milestone is complete. `handleSignedMessage(...)` now always returns a Promise and provides precise callback-absent and callback-present overloads plus a last-position dynamically optional fallback. A configured handler receives the frozen authenticated snapshot after authorization, is awaited exactly once per accepted call, and contributes its exact settled value through the required `handleSignedMessageResult` property. Rejections bypass the handler, while authorizer and handler failures reject the Promise unchanged.
+
+Validation run on 2026-08-31:
+
+    npm --prefix packages run build
+    node --test packages/messages/test/*.test.js
+    node packages/node_modules/typescript/bin/tsc -p packages/messages/tsconfig.type-test.json
+    node --input-type=module -e "import('./packages/messages/dist/index.js').then((m) => console.log(typeof m.verifySignedMessage, typeof m.handleSignedMessage))"
+    node --test packages/utils/test/*.js packages/ipfs/test/*.js packages/ethereum/test/*.js
+
+The build and emitted-declaration type test succeeded, the smoke import printed `function function`, all 39 message tests passed, and all 76 broader package tests passed. The completed milestone remains local to `packages/messages`; it adds no dependency on `@oyaprotocol/ipfs`, does not import from `node/` or `agent/`, and does not implement IPFS publication or onchain Logger behavior.
 
 ## Context and Orientation
 
@@ -371,7 +381,7 @@ The relevant files at the start of this plan are:
 - `packages/messages/src/schema.ts`: validates the v1 signed text message shape and defines structured schema errors.
 - `packages/messages/src/ethereum-signature.ts`: verifies EIP-191 text signatures and defines structured cryptographic verification errors.
 - `packages/messages/src/authorization.ts`: prevalidates and snapshots allowlists into reusable authorizers that verify signed messages and authorize their recovered signers.
-- `packages/messages/src/ingress.ts`: validates HTTP-shaped request/configuration input, enforces transport and text limits, maps expected message errors, and currently returns frozen acceptance or rejection results synchronously. This focused milestone will add the optional accepted-message handler here.
+- `packages/messages/src/ingress.ts`: validates HTTP-shaped request/configuration input, enforces transport and text limits, maps expected message errors, optionally awaits the host-configured accepted-message handler, and returns frozen acceptance or rejection results through a Promise.
 - `packages/messages/test/schema.test.js`: covers schema acceptance, exact text preservation, unknown-field rejection, text limits, Ethereum address shape, and signature shape.
 - `packages/messages/test/signature.test.js`: covers fixed ASCII EIP-191 vectors, recovery-value normalization, mismatch failures, and malformed signature scalars.
 - `packages/messages/test/authorization.test.js`: covers configuration-time validation, policy snapshotting, private normalized membership, composed verification and authorization, fail-closed empty lists, preserved validation and verification errors, and structured authorization failures.

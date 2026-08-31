@@ -10,6 +10,7 @@ const OPTION_FIELDS = new Set<PropertyKey>([
     'authorize',
     'maxBodyBytes',
     'maxTextBytes',
+    'onAcceptedMessage',
 ]);
 const REQUEST_FIELDS = new Set<PropertyKey>([
     'method',
@@ -25,10 +26,30 @@ interface HandleSignedMessageRequest {
     readonly body: Uint8Array;
 }
 
-interface HandleSignedMessageOptions {
+type AcceptedSignedMessageHandler<TResult = unknown> = (
+    message: Readonly<SignedMessageInput>
+) => TResult | PromiseLike<TResult>;
+
+interface HandleSignedMessageBaseOptions {
     readonly authorize: SignedMessageAuthorizer;
     readonly maxBodyBytes: number;
     readonly maxTextBytes: number;
+}
+
+interface HandleSignedMessageOptions extends HandleSignedMessageBaseOptions {
+    readonly onAcceptedMessage?: undefined;
+}
+
+interface HandleSignedMessageOptionsWithHandler<TResult>
+    extends HandleSignedMessageBaseOptions {
+    readonly onAcceptedMessage: AcceptedSignedMessageHandler<TResult>;
+}
+
+interface HandleSignedMessageOptionsWithOptionalHandler<TResult>
+    extends HandleSignedMessageBaseOptions {
+    readonly onAcceptedMessage?:
+        | AcceptedSignedMessageHandler<TResult>
+        | undefined;
 }
 
 interface AcceptedSignedMessage {
@@ -40,6 +61,11 @@ interface AcceptedSignedMessage {
     readonly message: Readonly<SignedMessageInput>;
 }
 
+interface AcceptedSignedMessageWithHandler<TResult>
+    extends AcceptedSignedMessage {
+    readonly handleSignedMessageResult: TResult;
+}
+
 interface RejectedSignedMessage {
     readonly status: 400 | 401 | 403 | 405 | 413 | 415;
     readonly body: Readonly<{
@@ -49,7 +75,11 @@ interface RejectedSignedMessage {
     }>;
 }
 
-type HandleSignedMessageResult = AcceptedSignedMessage | RejectedSignedMessage;
+type HandleSignedMessageResult<TResult = never> =
+    | RejectedSignedMessage
+    | ([TResult] extends [never]
+          ? AcceptedSignedMessage
+          : AcceptedSignedMessageWithHandler<TResult>);
 
 function requirePlainObject(
     value: unknown,
@@ -92,7 +122,9 @@ function requirePositiveInteger(value: unknown, fieldName: string): number {
     return value;
 }
 
-function validateOptions(options: unknown): HandleSignedMessageOptions {
+function validateOptions<TResult>(
+    options: unknown
+): HandleSignedMessageOptionsWithOptionalHandler<TResult> {
     requirePlainObject(options, 'options');
     requireOnlyFields(
         options,
@@ -108,6 +140,15 @@ function validateOptions(options: unknown): HandleSignedMessageOptions {
     if (typeof options.authorize !== 'function') {
         throw new TypeError('options.authorize must be a function.');
     }
+    const onAcceptedMessage = options.onAcceptedMessage;
+    if (
+        onAcceptedMessage !== undefined &&
+        typeof onAcceptedMessage !== 'function'
+    ) {
+        throw new TypeError(
+            'options.onAcceptedMessage must be a function or undefined.'
+        );
+    }
 
     return {
         authorize: options.authorize as SignedMessageAuthorizer,
@@ -119,6 +160,12 @@ function validateOptions(options: unknown): HandleSignedMessageOptions {
             options.maxTextBytes,
             'options.maxTextBytes'
         ),
+        ...(onAcceptedMessage === undefined
+            ? {}
+            : {
+                  onAcceptedMessage:
+                      onAcceptedMessage as AcceptedSignedMessageHandler<TResult>,
+              }),
     };
 }
 
@@ -207,8 +254,20 @@ function hasOwnStringText(
 function handleSignedMessage(
     request: HandleSignedMessageRequest,
     options: HandleSignedMessageOptions
-): HandleSignedMessageResult {
-    const validatedOptions = validateOptions(options);
+): Promise<HandleSignedMessageResult>;
+function handleSignedMessage<TResult>(
+    request: HandleSignedMessageRequest,
+    options: HandleSignedMessageOptionsWithHandler<TResult>
+): Promise<HandleSignedMessageResult<TResult>>;
+function handleSignedMessage<TResult>(
+    request: HandleSignedMessageRequest,
+    options: HandleSignedMessageOptionsWithOptionalHandler<TResult>
+): Promise<HandleSignedMessageResult | HandleSignedMessageResult<TResult>>;
+async function handleSignedMessage<TResult>(
+    request: HandleSignedMessageRequest,
+    options: HandleSignedMessageOptionsWithOptionalHandler<TResult>
+): Promise<HandleSignedMessageResult | HandleSignedMessageResult<TResult>> {
+    const validatedOptions = validateOptions<TResult>(options);
     const validatedRequest = validateRequest(request);
 
     if (validatedRequest.method !== 'POST') {
@@ -296,6 +355,18 @@ function handleSignedMessage(
         status: 'accepted' as const,
         signer: acceptedMessage.signer,
     });
+
+    if (validatedOptions.onAcceptedMessage !== undefined) {
+        const handleSignedMessageResult =
+            await validatedOptions.onAcceptedMessage(acceptedMessage);
+        return Object.freeze({
+            status: 202 as const,
+            body,
+            message: acceptedMessage,
+            handleSignedMessageResult,
+        });
+    }
+
     return Object.freeze({
         status: 202 as const,
         body,
@@ -305,7 +376,10 @@ function handleSignedMessage(
 
 export { handleSignedMessage };
 export type {
+    AcceptedSignedMessageHandler,
     HandleSignedMessageOptions,
+    HandleSignedMessageOptionsWithHandler,
+    HandleSignedMessageOptionsWithOptionalHandler,
     HandleSignedMessageRequest,
     HandleSignedMessageResult,
 };

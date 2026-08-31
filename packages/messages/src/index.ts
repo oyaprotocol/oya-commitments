@@ -24,7 +24,10 @@ export type {
     SignedMessageAuthorizer,
 } from './authorization.js';
 export type {
+    AcceptedSignedMessageHandler,
     HandleSignedMessageOptions,
+    HandleSignedMessageOptionsWithHandler,
+    HandleSignedMessageOptionsWithOptionalHandler,
     HandleSignedMessageRequest,
     HandleSignedMessageResult,
 } from './ingress.js';
