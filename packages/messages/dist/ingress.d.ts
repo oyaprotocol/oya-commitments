@@ -39,7 +39,7 @@ interface RejectedSignedMessage {
         details?: Readonly<Record<string, unknown>>;
     }>;
 }
-type HandleSignedMessageResult<TResult = never> = RejectedSignedMessage | ([TResult] extends [never] ? AcceptedSignedMessage : AcceptedSignedMessageWithHandler<TResult>);
+type HandleSignedMessageResult<TResult = never> = RejectedSignedMessage | ([TResult] extends [never] ? AcceptedSignedMessage : AcceptedSignedMessageWithHandler<Awaited<TResult>>);
 declare function handleSignedMessage(request: HandleSignedMessageRequest, options: HandleSignedMessageOptions): Promise<HandleSignedMessageResult>;
 declare function handleSignedMessage<TResult>(request: HandleSignedMessageRequest, options: HandleSignedMessageOptionsWithHandler<TResult>): Promise<HandleSignedMessageResult<TResult>>;
 declare function handleSignedMessage<TResult>(request: HandleSignedMessageRequest, options: HandleSignedMessageOptionsWithOptionalHandler<TResult>): Promise<HandleSignedMessageResult | HandleSignedMessageResult<TResult>>;

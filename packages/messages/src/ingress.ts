@@ -79,7 +79,7 @@ type HandleSignedMessageResult<TResult = never> =
     | RejectedSignedMessage
     | ([TResult] extends [never]
           ? AcceptedSignedMessage
-          : AcceptedSignedMessageWithHandler<TResult>);
+          : AcceptedSignedMessageWithHandler<Awaited<TResult>>);
 
 function requirePlainObject(
     value: unknown,

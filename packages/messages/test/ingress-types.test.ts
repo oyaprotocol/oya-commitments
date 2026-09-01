@@ -41,6 +41,33 @@ type CallbackPropertyIsRequired = Expect<
     IsRequired<CallbackAcceptedResult, 'handleSignedMessageResult'>
 >;
 
+const explicitlyPromisedHandler: AcceptedSignedMessageHandler<
+    Promise<{ cid: string }>
+> = async (message) => {
+    void message;
+    return { cid: 'bafy-explicit-promise-result' };
+};
+const promisedHandlerResultPromise = handleSignedMessage(request, {
+    authorize,
+    maxBodyBytes: 4096,
+    maxTextBytes: 1024,
+    onAcceptedMessage: explicitlyPromisedHandler,
+});
+type PromisedHandlerResult = Awaited<typeof promisedHandlerResultPromise>;
+type PromisedHandlerAcceptedResult = Extract<
+    PromisedHandlerResult,
+    { status: 202 }
+>;
+type PromisedHandlerValueIsAwaited = Expect<
+    Equal<
+        PromisedHandlerAcceptedResult['handleSignedMessageResult'],
+        { cid: string }
+    >
+>;
+type PromisedHandlerPropertyIsRequired = Expect<
+    IsRequired<PromisedHandlerAcceptedResult, 'handleSignedMessageResult'>
+>;
+
 const undefinedResultPromise = handleSignedMessage(request, {
     authorize,
     maxBodyBytes: 4096,
@@ -114,6 +141,15 @@ async function checkNarrowing(): Promise<void> {
         callbackResult.handleSignedMessageResult;
     }
 
+    const promisedHandlerResult = await promisedHandlerResultPromise;
+    if (promisedHandlerResult.status === 202) {
+        const exactPromisedHandlerValue: { cid: string } =
+            promisedHandlerResult.handleSignedMessageResult;
+        // @ts-expect-error Runtime await removes Promise methods from the value.
+        promisedHandlerResult.handleSignedMessageResult.then;
+        void exactPromisedHandlerValue;
+    }
+
     const dynamicResult = await dynamicResultPromise;
     if (dynamicResult.status === 202) {
         // @ts-expect-error Dynamic options require property-presence narrowing.
@@ -142,9 +178,11 @@ async function checkNarrowing(): Promise<void> {
 const typeAssertions: readonly [
     CallbackValueIsExact,
     CallbackPropertyIsRequired,
+    PromisedHandlerValueIsAwaited,
+    PromisedHandlerPropertyIsRequired,
     UndefinedValueIsExact,
     UndefinedPropertyIsRequired,
-] = [true, true, true, true];
+] = [true, true, true, true, true, true];
 
 void checkNarrowing;
 void typeAssertions;
