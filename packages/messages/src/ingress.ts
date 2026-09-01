@@ -140,7 +140,9 @@ function validateOptions<TResult>(
     if (typeof options.authorize !== 'function') {
         throw new TypeError('options.authorize must be a function.');
     }
-    const onAcceptedMessage = options.onAcceptedMessage;
+    const onAcceptedMessage = Object.hasOwn(options, 'onAcceptedMessage')
+        ? options.onAcceptedMessage
+        : undefined;
     if (
         onAcceptedMessage !== undefined &&
         typeof onAcceptedMessage !== 'function'
@@ -160,12 +162,10 @@ function validateOptions<TResult>(
             options.maxTextBytes,
             'options.maxTextBytes'
         ),
-        ...(onAcceptedMessage === undefined
-            ? {}
-            : {
-                  onAcceptedMessage:
-                      onAcceptedMessage as AcceptedSignedMessageHandler<TResult>,
-              }),
+        onAcceptedMessage:
+            onAcceptedMessage as
+                | AcceptedSignedMessageHandler<TResult>
+                | undefined,
     };
 }
 

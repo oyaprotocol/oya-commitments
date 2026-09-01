@@ -105,7 +105,7 @@ The request must be a plain object with exactly these own properties:
 - `contentType`: a string, or `undefined` when the header is absent; the own property is always required. The accepted media type is `application/json` with an optional unquoted `charset=utf-8` parameter.
 - `body`: a `Uint8Array` containing the raw request bytes.
 
-The options must be a plain object with required `authorize`, `maxBodyBytes`, and `maxTextBytes` properties and an optional `onAcceptedMessage` property. The two limits are required positive integers with no package defaults. `onAcceptedMessage`, when present, must be a function. Malformed request or option containers reject the returned Promise with `TypeError` because they indicate adapter or configuration bugs.
+The options must be a plain object with required own `authorize`, `maxBodyBytes`, and `maxTextBytes` properties and an optional own `onAcceptedMessage` property. The two limits are required positive integers with no package defaults. An own `onAcceptedMessage`, when present, must be a function; inherited values with that name are ignored. Malformed request or option containers reject the returned Promise with `TypeError` because they indicate adapter or configuration bugs.
 
 The handler processes a well-typed request in this order: method, content type, raw body size, fatal UTF-8 decoding and JSON parsing, encoded text size when a string `text` field exists, then signed-message authorization. This order prevents oversized bodies from reaching JSON parsing and oversized text from reaching signature verification.
 

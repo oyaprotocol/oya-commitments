@@ -57,6 +57,7 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
 - [x] 2026-08-31 02:14Z: Added a compile-time test against the emitted package declarations proving callback-result inference, callback-absent property exclusion, and dynamic-option narrowing under `exactOptionalPropertyTypes`.
 - [x] 2026-08-31 02:14Z: Updated package documentation, rebuilt the package area, smoke-imported the public API, and passed all 76 utils, IPFS, and Ethereum regression tests.
 - [x] 2026-09-01 02:36Z: Corrected the callback-result declaration to expose `Awaited<TResult>`, added an explicitly `Promise<T>`-typed handler regression, rebuilt the package, and re-passed all message and package regressions.
+- [x] 2026-09-01 02:52Z: Restricted `onAcceptedMessage` to an own options property, normalized omission to an own `undefined` snapshot, added inherited function/non-function regressions, and passed all 40 message tests.
 
 ## Surprises & Discoveries
 
@@ -92,6 +93,9 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
 
 - Observation: The initial callback declaration was unsound when a consumer explicitly instantiated `AcceptedSignedMessageHandler<Promise<T>>`.
   Evidence: the callback type accepted the async function and the overload exposed `Promise<T>`, while runtime `await` recursively unwrapped the callback value to `T`; the emitted-declaration fixture now covers this case.
+
+- Observation: Checking the external options object for an own callback is insufficient if the normalized package-owned options object omits the property.
+  Evidence: with `Object.prototype.onAcceptedMessage` defined, the first own-property guard ignored it but the later read from a normalized plain object inherited it again; materializing an own `undefined` snapshot closes both reads.
 
 ## Decision Log
 
@@ -263,6 +267,10 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
   Rationale: This is the smallest backward-compatible correction: `AcceptedSignedMessageHandler<T>` continues accepting synchronous `T` and asynchronous `PromiseLike<T>` returns, while explicitly promise-wrapped generic arguments now describe the recursively awaited runtime value accurately.
   Date/Author: 2026-09-01 / Codex.
 
+- Decision: Treat `onAcceptedMessage` as configured only when it is an own options property and always materialize the validated value as an own normalized property.
+  Rationale: The public options contract is own-field based. Ignoring inherited values prevents prototype extensions or pollution from invoking an unintended handler or rejecting an otherwise callback-absent call, while the normalized own snapshot prevents a second prototype-chain lookup inside ingress.
+  Date/Author: 2026-09-01 / Codex.
+
 - Decision: Define `HandleSignedMessageResult<TResult = never>` so its default describes callback-absent handling and its generic form describes callback-present handling.
   Rationale: The prior function signature declared `TResult` without a default, so calls with no callback had no inference candidate and could fall back to `unknown`. The non-generic overload now returns `HandleSignedMessageResult` using its `never` default, while the generic overload infers `TResult` from the required callback and returns `HandleSignedMessageResult<TResult>`.
   Date/Author: 2026-08-30 / user and Codex.
@@ -380,6 +388,8 @@ Validation run on 2026-08-31:
 The build and emitted-declaration type test succeeded, the smoke import printed `function function`, all 39 message tests passed, and all 76 broader package tests passed. The completed milestone remains local to `packages/messages`; it adds no dependency on `@oyaprotocol/ipfs`, does not import from `node/` or `agent/`, and does not implement IPFS publication or onchain Logger behavior.
 
 A focused type-soundness follow-up on 2026-09-01 changed the callback-present accepted property from `TResult` to `Awaited<TResult>`. This preserves ordinary synchronous and asynchronous inference while making an explicit `AcceptedSignedMessageHandler<Promise<T>>` expose `T`, matching the existing runtime `await`. The package build, 39 message tests, emitted-declaration type test, `function function` smoke import, and all 76 broader package regressions passed again.
+
+A prototype-safety follow-up on 2026-09-01 made callback configuration own-property-only. `validateOptions(...)` now reads `onAcceptedMessage` only when `Object.hasOwn(...)` succeeds and returns a normalized object that always owns the snapshotted callback value, including `undefined`. A regression installs inherited function and non-function values on `Object.prototype`, proves neither affects acceptance, and restores the original descriptor. All 40 message tests pass.
 
 ## Context and Orientation
 
@@ -585,7 +595,7 @@ Work from the repository root unless a command says otherwise.
 
     The implementation signature accepts `HandleSignedMessageOptionsWithOptionalHandler<TResult>` and returns the corresponding result union internally; only the three ordered overload signatures are public. A value typed as `HandleSignedMessageOptions | HandleSignedMessageOptionsWithHandler<TResult>` is structurally assignable to the broad fallback. Unlike that union alone, the broad optional-handler shape also accepts an object whose `onAcceptedMessage` property is itself typed as `AcceptedSignedMessageHandler<TResult> | undefined` under `exactOptionalPropertyTypes`. Branch on the validated `onAcceptedMessage` value when constructing the accepted result so the runtime shape matches the selected overload without asserting that an optional property is present.
 
-    `request` and `options` must be plain objects with own properties matching the interfaces above; reject missing or unsupported own properties with `TypeError`. Every request property is required, including `contentType`, whose value is `undefined` when the HTTP header was absent. `authorize`, `maxBodyBytes`, and `maxTextBytes` remain required options. Callback-absent options may omit `onAcceptedMessage` or set it explicitly to `undefined`. Callback-present options require it to be a function. At runtime, reject any other value with `TypeError('options.onAcceptedMessage must be a function or undefined.')`. Add it to the allowed options field set but not the required runtime options field list.
+    `request` and `options` must be plain objects with own properties matching the interfaces above; reject missing or unsupported own properties with `TypeError`. Every request property is required, including `contentType`, whose value is `undefined` when the HTTP header was absent. `authorize`, `maxBodyBytes`, and `maxTextBytes` remain required options. Callback-absent options may omit `onAcceptedMessage` or set it explicitly to `undefined`. Callback-present options require it to be an own function property. Ignore inherited `onAcceptedMessage` values and snapshot omission as an own `undefined` value in the normalized internal options object. At runtime, reject any other own value with `TypeError('options.onAcceptedMessage must be a function or undefined.')`. Add it to the allowed options field set but not the required runtime options field list.
 
     Use `<container>.<field> is required.` for a missing required property. `body` is always the raw request bytes after the host's external adapter has applied any streaming limit. Both byte limits are required positive integers and have no defaults. Validate `options`, including `onAcceptedMessage`, before `request`. Throw `TypeError` for a non-function `options.authorize`, a byte limit that is not a positive integer, a non-string method, a `contentType` value other than string or `undefined`, or a body that is not `Uint8Array`. Use field-specific messages such as `options.maxBodyBytes must be a positive integer.` and `request.body must be a Uint8Array.` Use `Unsupported options field: <field>.` and `Unsupported request field: <field>.` for extra own properties.
 
@@ -662,6 +672,7 @@ Work from the repository root unless a command says otherwise.
     - rejects signatures that do not recover to `signer`;
     - rejects valid signatures from signers outside the allowlist;
     - rejects with `TypeError` for malformed request/options containers, invalid request field types, a non-function authorizer, a non-function/non-`undefined` `onAcceptedMessage`, zero, negative, fractional, `NaN`, or infinite byte limits;
+    - ignores inherited function and non-function `onAcceptedMessage` values instead of invoking or rejecting them;
     - accepts the exact supported content-type forms and rejects missing or unsupported forms with `415` and `unsupported_content_type`;
     - rejects non-`POST` methods with `405` and `method_not_allowed`;
     - maps invalid UTF-8 and JSON syntax to `400` and `invalid_json`;
@@ -737,6 +748,7 @@ The implementation is accepted when all of the following are true:
 - The handler contract fixes request and option field types, requires explicit positive byte limits, defines content-type and UTF-8 behavior, and maps every expected rejection to a stable status and code.
 - `handleSignedMessage(...)` always returns a Promise, including when no accepted-message handler is configured.
 - Omitting `onAcceptedMessage` or setting it to `undefined` selects the callback-absent overload and produces an accepted result with no `handleSignedMessageResult` property.
+- Inherited `onAcceptedMessage` values do not configure a callback; only an own options property can do so.
 - A configured `onAcceptedMessage` receives the frozen authenticated message exactly once and only after successful authorization.
 - Supplying `onAcceptedMessage` selects the generic callback-present overload; after narrowing `status === 202`, `result.handleSignedMessageResult` is a required property with exactly the recursively settled `Awaited<TResult>` type.
 - A callback-present result does not widen `handleSignedMessageResult` to `Awaited<TResult> | undefined` unless `undefined` is itself part of the callback's settled return type.

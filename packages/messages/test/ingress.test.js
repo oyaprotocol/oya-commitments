@@ -669,6 +669,51 @@ test('handleSignedMessage requires plain containers with exact own fields', asyn
     );
 });
 
+test('handleSignedMessage ignores inherited accepted-message handlers', async () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(
+        Object.prototype,
+        'onAcceptedMessage'
+    );
+    let inheritedHandlerCalls = 0;
+
+    try {
+        for (const value of [
+            () => {
+                inheritedHandlerCalls += 1;
+            },
+            'inherited non-function',
+        ]) {
+            Object.defineProperty(Object.prototype, 'onAcceptedMessage', {
+                configurable: true,
+                value,
+            });
+
+            const result = await handleSignedMessage(
+                createRequest(),
+                createOptions()
+            );
+
+            assert.equal(result.status, 202);
+            assert.equal(
+                Object.hasOwn(result, 'handleSignedMessageResult'),
+                false
+            );
+        }
+    } finally {
+        if (originalDescriptor === undefined) {
+            Reflect.deleteProperty(Object.prototype, 'onAcceptedMessage');
+        } else {
+            Object.defineProperty(
+                Object.prototype,
+                'onAcceptedMessage',
+                originalDescriptor
+            );
+        }
+    }
+
+    assert.equal(inheritedHandlerCalls, 0);
+});
+
 test('handleSignedMessage rejects malformed option field values', async () => {
     for (const authorize of [undefined, null, {}, 'authorize']) {
         await assert.rejects(

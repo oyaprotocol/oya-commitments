@@ -47,7 +47,9 @@ function validateOptions(options) {
     if (typeof options.authorize !== 'function') {
         throw new TypeError('options.authorize must be a function.');
     }
-    const onAcceptedMessage = options.onAcceptedMessage;
+    const onAcceptedMessage = Object.hasOwn(options, 'onAcceptedMessage')
+        ? options.onAcceptedMessage
+        : undefined;
     if (onAcceptedMessage !== undefined &&
         typeof onAcceptedMessage !== 'function') {
         throw new TypeError('options.onAcceptedMessage must be a function or undefined.');
@@ -56,11 +58,7 @@ function validateOptions(options) {
         authorize: options.authorize,
         maxBodyBytes: requirePositiveInteger(options.maxBodyBytes, 'options.maxBodyBytes'),
         maxTextBytes: requirePositiveInteger(options.maxTextBytes, 'options.maxTextBytes'),
-        ...(onAcceptedMessage === undefined
-            ? {}
-            : {
-                onAcceptedMessage: onAcceptedMessage,
-            }),
+        onAcceptedMessage: onAcceptedMessage,
     };
 }
 function validateRequest(request) {
