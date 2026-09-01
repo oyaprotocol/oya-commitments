@@ -5,4 +5,4 @@ export { handleSignedMessage } from './ingress.js';
 export type { SignedMessageInput, SignedMessageValidationErrorCode, SignedMessageValidationErrorOptions, } from './schema.js';
 export type { SignedMessageVerificationErrorCode, } from './ethereum-signature.js';
 export type { SignedMessageAuthorizationErrorCode, SignedMessageAuthorizer, } from './authorization.js';
-export type { AcceptedSignedMessageHandler, HandleSignedMessageOptions, HandleSignedMessageOptionsWithHandler, HandleSignedMessageOptionsWithOptionalHandler, HandleSignedMessageRequest, HandleSignedMessageResult, } from './ingress.js';
+export type { AcceptedSignedMessageHandler, HandleSignedMessageOptions, HandleSignedMessageRequest, HandleSignedMessageResult, } from './ingress.js';

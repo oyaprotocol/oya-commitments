@@ -2,8 +2,6 @@ import { handleSignedMessage } from '../dist/index.js';
 import type {
     AcceptedSignedMessageHandler,
     HandleSignedMessageOptions,
-    HandleSignedMessageOptionsWithHandler,
-    HandleSignedMessageOptionsWithOptionalHandler,
     HandleSignedMessageRequest,
     SignedMessageAuthorizer,
 } from '../dist/index.js';
@@ -14,9 +12,10 @@ type Equal<Left, Right> =
         ? true
         : false;
 type Expect<Value extends true> = Value;
-type IsRequired<Value, Key extends keyof Value> = {} extends Pick<Value, Key>
-    ? false
-    : true;
+type AcceptedWithHandler<Result> = Extract<
+    Result,
+    { status: 202; handleSignedMessageResult: unknown }
+>;
 
 declare const request: HandleSignedMessageRequest;
 declare const authorize: SignedMessageAuthorizer;
@@ -30,15 +29,11 @@ const callbackResultPromise = handleSignedMessage(request, {
     },
 });
 type CallbackResult = Awaited<typeof callbackResultPromise>;
-type CallbackAcceptedResult = Extract<CallbackResult, { status: 202 }>;
 type CallbackValueIsExact = Expect<
     Equal<
-        CallbackAcceptedResult['handleSignedMessageResult'],
+        AcceptedWithHandler<CallbackResult>['handleSignedMessageResult'],
         { cid: string }
     >
->;
-type CallbackPropertyIsRequired = Expect<
-    IsRequired<CallbackAcceptedResult, 'handleSignedMessageResult'>
 >;
 
 const explicitlyPromisedHandler: AcceptedSignedMessageHandler<
@@ -54,18 +49,11 @@ const promisedHandlerResultPromise = handleSignedMessage(request, {
     onAcceptedMessage: explicitlyPromisedHandler,
 });
 type PromisedHandlerResult = Awaited<typeof promisedHandlerResultPromise>;
-type PromisedHandlerAcceptedResult = Extract<
-    PromisedHandlerResult,
-    { status: 202 }
->;
 type PromisedHandlerValueIsAwaited = Expect<
     Equal<
-        PromisedHandlerAcceptedResult['handleSignedMessageResult'],
+        AcceptedWithHandler<PromisedHandlerResult>['handleSignedMessageResult'],
         { cid: string }
     >
->;
-type PromisedHandlerPropertyIsRequired = Expect<
-    IsRequired<PromisedHandlerAcceptedResult, 'handleSignedMessageResult'>
 >;
 
 const undefinedResultPromise = handleSignedMessage(request, {
@@ -77,12 +65,11 @@ const undefinedResultPromise = handleSignedMessage(request, {
     },
 });
 type UndefinedResult = Awaited<typeof undefinedResultPromise>;
-type UndefinedAcceptedResult = Extract<UndefinedResult, { status: 202 }>;
 type UndefinedValueIsExact = Expect<
-    Equal<UndefinedAcceptedResult['handleSignedMessageResult'], undefined>
->;
-type UndefinedPropertyIsRequired = Expect<
-    IsRequired<UndefinedAcceptedResult, 'handleSignedMessageResult'>
+    Equal<
+        AcceptedWithHandler<UndefinedResult>['handleSignedMessageResult'],
+        undefined
+    >
 >;
 
 const callbackAbsentPromise = handleSignedMessage(request, {
@@ -100,9 +87,7 @@ const explicitlyUndefinedPromise = handleSignedMessage(request, {
 declare const dynamicHandler:
     | AcceptedSignedMessageHandler<{ cid: string }>
     | undefined;
-const dynamicOptions: HandleSignedMessageOptionsWithOptionalHandler<{
-    cid: string;
-}> = {
+const dynamicOptions: HandleSignedMessageOptions<{ cid: string }> = {
     authorize,
     maxBodyBytes: 4096,
     maxTextBytes: 1024,
@@ -110,39 +95,26 @@ const dynamicOptions: HandleSignedMessageOptionsWithOptionalHandler<{
 };
 const dynamicResultPromise = handleSignedMessage(request, dynamicOptions);
 
-declare const unionOptions:
-    | HandleSignedMessageOptions
-    | HandleSignedMessageOptionsWithHandler<{ cid: string }>;
-const unionResultPromise = handleSignedMessage(request, unionOptions);
-
 async function checkNarrowing(): Promise<void> {
-    const callbackAbsentResult = await callbackAbsentPromise;
-    if (callbackAbsentResult.status === 202) {
-        // @ts-expect-error Callback-absent results do not expose this property.
-        callbackAbsentResult.handleSignedMessageResult;
-    } else {
-        // @ts-expect-error Rejections do not expose this property.
-        callbackAbsentResult.handleSignedMessageResult;
-    }
-
-    const explicitlyUndefinedResult = await explicitlyUndefinedPromise;
-    if (explicitlyUndefinedResult.status === 202) {
-        // @ts-expect-error Explicit undefined selects the callback-absent overload.
-        explicitlyUndefinedResult.handleSignedMessageResult;
-    }
-
     const callbackResult = await callbackResultPromise;
     if (callbackResult.status === 202) {
-        const exactCallbackValue: { cid: string } =
-            callbackResult.handleSignedMessageResult;
-        void exactCallbackValue;
+        // @ts-expect-error Every accepted call requires property-presence narrowing.
+        callbackResult.handleSignedMessageResult;
+        if ('handleSignedMessageResult' in callbackResult) {
+            const exactCallbackValue: { cid: string } =
+                callbackResult.handleSignedMessageResult;
+            void exactCallbackValue;
+        }
     } else {
-        // @ts-expect-error Rejections from callback-present calls have no result value.
+        // @ts-expect-error Rejections do not expose the handler result property.
         callbackResult.handleSignedMessageResult;
     }
 
     const promisedHandlerResult = await promisedHandlerResultPromise;
-    if (promisedHandlerResult.status === 202) {
+    if (
+        promisedHandlerResult.status === 202 &&
+        'handleSignedMessageResult' in promisedHandlerResult
+    ) {
         const exactPromisedHandlerValue: { cid: string } =
             promisedHandlerResult.handleSignedMessageResult;
         // @ts-expect-error Runtime await removes Promise methods from the value.
@@ -150,39 +122,46 @@ async function checkNarrowing(): Promise<void> {
         void exactPromisedHandlerValue;
     }
 
+    const undefinedResult = await undefinedResultPromise;
+    if (undefinedResult.status === 202) {
+        // @ts-expect-error The single options interface requires property narrowing.
+        undefinedResult.handleSignedMessageResult;
+        if ('handleSignedMessageResult' in undefinedResult) {
+            const exactUndefinedValue: undefined =
+                undefinedResult.handleSignedMessageResult;
+            void exactUndefinedValue;
+        }
+    }
+
+    const callbackAbsentResult = await callbackAbsentPromise;
+    if (callbackAbsentResult.status === 202) {
+        // @ts-expect-error Callback absence still requires narrowing the honest union.
+        callbackAbsentResult.handleSignedMessageResult;
+    }
+
+    const explicitlyUndefinedResult = await explicitlyUndefinedPromise;
+    if (explicitlyUndefinedResult.status === 202) {
+        // @ts-expect-error Explicit undefined uses the same optional options shape.
+        explicitlyUndefinedResult.handleSignedMessageResult;
+    }
+
     const dynamicResult = await dynamicResultPromise;
     if (dynamicResult.status === 202) {
-        // @ts-expect-error Dynamic options require property-presence narrowing.
+        // @ts-expect-error Dynamic handlers require property-presence narrowing.
         dynamicResult.handleSignedMessageResult;
         if ('handleSignedMessageResult' in dynamicResult) {
             const exactDynamicValue: { cid: string } =
                 dynamicResult.handleSignedMessageResult;
             void exactDynamicValue;
         }
-    } else {
-        // @ts-expect-error Rejections from dynamic calls have no result value.
-        dynamicResult.handleSignedMessageResult;
-    }
-
-    const unionResult = await unionResultPromise;
-    if (
-        unionResult.status === 202 &&
-        'handleSignedMessageResult' in unionResult
-    ) {
-        const exactUnionValue: { cid: string } =
-            unionResult.handleSignedMessageResult;
-        void exactUnionValue;
     }
 }
 
 const typeAssertions: readonly [
     CallbackValueIsExact,
-    CallbackPropertyIsRequired,
     PromisedHandlerValueIsAwaited,
-    PromisedHandlerPropertyIsRequired,
     UndefinedValueIsExact,
-    UndefinedPropertyIsRequired,
-] = [true, true, true, true, true, true];
+] = [true, true, true];
 
 void checkNarrowing;
 void typeAssertions;

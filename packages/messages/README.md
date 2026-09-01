@@ -95,7 +95,10 @@ The returned function validates and verifies the signed message before checking 
       }
     );
 
-    if (result.status === 202) {
+    if (
+      result.status === 202 &&
+      'handleSignedMessageResult' in result
+    ) {
       inspectConfiguredActionResult(result.handleSignedMessageResult);
     }
 
@@ -143,11 +146,7 @@ The host may provide `onAcceptedMessage` to act on the authenticated message bef
 
 A synchronous throw or rejected Promise from `onAcceptedMessage` rejects `handleSignedMessage(...)` unchanged. The package does not convert a failed action into a status-`202` result. Retrying the same valid request invokes the configured function again, so side-effecting functions remain responsible for any deduplication or idempotency they require.
 
-The public TypeScript declarations correlate configuration and results:
-
-- Omitting `onAcceptedMessage` or setting it to `undefined` returns the callback-absent accepted shape without `handleSignedMessageResult`.
-- Providing a known function infers its settled result type and makes `handleSignedMessageResult` required after narrowing `status === 202`.
-- Runtime-selected functions typed as optional use the broader fallback overload. After narrowing `status === 202`, the host must also check `'handleSignedMessageResult' in result` before reading the property.
+The public TypeScript API uses one `HandleSignedMessageOptions<TResult>` interface whose `onAcceptedMessage` property is optional. Its result type honestly includes both accepted shapes regardless of whether a particular call visibly supplies a function. After narrowing `status === 202`, the host must also check `'handleSignedMessageResult' in result` before reading the property. Inside that branch, the value has the recursively settled `Awaited<TResult>` type inferred from the handler.
 
 The accepted-message function is a host integration point, not an action registry owned by this package. This milestone does not provide an IPFS-specific handler or onchain Logger implementation.
 

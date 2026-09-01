@@ -6,18 +6,10 @@ interface HandleSignedMessageRequest {
     readonly body: Uint8Array;
 }
 type AcceptedSignedMessageHandler<TResult = unknown> = (message: Readonly<SignedMessageInput>) => TResult | PromiseLike<TResult>;
-interface HandleSignedMessageBaseOptions {
+interface HandleSignedMessageOptions<TResult = unknown> {
     readonly authorize: SignedMessageAuthorizer;
     readonly maxBodyBytes: number;
     readonly maxTextBytes: number;
-}
-interface HandleSignedMessageOptions extends HandleSignedMessageBaseOptions {
-    readonly onAcceptedMessage?: undefined;
-}
-interface HandleSignedMessageOptionsWithHandler<TResult> extends HandleSignedMessageBaseOptions {
-    readonly onAcceptedMessage: AcceptedSignedMessageHandler<TResult>;
-}
-interface HandleSignedMessageOptionsWithOptionalHandler<TResult> extends HandleSignedMessageBaseOptions {
     readonly onAcceptedMessage?: AcceptedSignedMessageHandler<TResult> | undefined;
 }
 interface AcceptedSignedMessage {
@@ -39,9 +31,7 @@ interface RejectedSignedMessage {
         details?: Readonly<Record<string, unknown>>;
     }>;
 }
-type HandleSignedMessageResult<TResult = never> = RejectedSignedMessage | ([TResult] extends [never] ? AcceptedSignedMessage : AcceptedSignedMessageWithHandler<Awaited<TResult>>);
-declare function handleSignedMessage(request: HandleSignedMessageRequest, options: HandleSignedMessageOptions): Promise<HandleSignedMessageResult>;
-declare function handleSignedMessage<TResult>(request: HandleSignedMessageRequest, options: HandleSignedMessageOptionsWithHandler<TResult>): Promise<HandleSignedMessageResult<TResult>>;
-declare function handleSignedMessage<TResult>(request: HandleSignedMessageRequest, options: HandleSignedMessageOptionsWithOptionalHandler<TResult>): Promise<HandleSignedMessageResult | HandleSignedMessageResult<TResult>>;
+type HandleSignedMessageResult<TResult = unknown> = RejectedSignedMessage | AcceptedSignedMessage | AcceptedSignedMessageWithHandler<Awaited<TResult>>;
+declare function handleSignedMessage<TResult = unknown>(request: HandleSignedMessageRequest, options: HandleSignedMessageOptions<TResult>): Promise<HandleSignedMessageResult<TResult>>;
 export { handleSignedMessage };
-export type { AcceptedSignedMessageHandler, HandleSignedMessageOptions, HandleSignedMessageOptionsWithHandler, HandleSignedMessageOptionsWithOptionalHandler, HandleSignedMessageRequest, HandleSignedMessageResult, };
+export type { AcceptedSignedMessageHandler, HandleSignedMessageOptions, HandleSignedMessageRequest, HandleSignedMessageResult, };

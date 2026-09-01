@@ -26,8 +26,6 @@ export type {
 export type {
     AcceptedSignedMessageHandler,
     HandleSignedMessageOptions,
-    HandleSignedMessageOptionsWithHandler,
-    HandleSignedMessageOptionsWithOptionalHandler,
     HandleSignedMessageRequest,
     HandleSignedMessageResult,
 } from './ingress.js';
