@@ -228,9 +228,9 @@ const result = await handleSignedMessage(request, {
         logger: {
             config: rpcConfig,
             fetch: rpcFetch,
-            loggerAddress,
-            expectedNode,
-            prepareTransaction,
+            loggerContract,
+            nodeAddress,
+            transactionPreparer,
             timeoutMs: 60_000,
             pollIntervalMs: 1_000,
         },

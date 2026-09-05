@@ -10,7 +10,7 @@ import {
 import { createIpfsConfig, HttpStatusError } from '@oyaprotocol/ipfs';
 import { LogCidError, EthereumTransactionReceiptTimeoutError } from '@oyaprotocol/ethereum';
 import {
-    sample, loggerAddress, node, transactionHash, rawTransaction,
+    sample, loggerContract, node, transactionHash, rawTransaction,
     createReceipt, response, createOptions as createLoggerOptions,
 } from '../../ethereum/test/fixtures/logger-transaction.js';
 
@@ -68,9 +68,9 @@ test('the allowlisted message callback awaits publication, signing, submission, 
         await uploaded.promise;
         return ipfsResponse();
     };
-    options.logger.prepareTransaction = (request) => {
+    options.logger.transactionPreparer = (request) => {
         stages.push('prepare');
-        assert.deepEqual(request, { to: loggerAddress, data: sample.calldata, value: 0n });
+        assert.deepEqual(request, { to: loggerContract, data: sample.calldata, value: 0n });
         signingStarted.resolve();
         return signed.promise;
     };
@@ -124,7 +124,7 @@ test('rejected ingress requests never publish, prepare, or log a message', async
     let calls = 0;
     const options = createOptions();
     options.ipfs.fetch = options.logger.fetch = async () => { calls++; throw new Error('Unexpected fetch'); };
-    options.logger.prepareTransaction = () => { calls++; throw new Error('Unexpected signing'); };
+    options.logger.transactionPreparer = () => { calls++; throw new Error('Unexpected signing'); };
     const cases = [
         [createRequest(), { authorize: createSignedMessageAuthorizer([]) }, 403],
         [createRequest({ ...message, text: `${message.text}!` }), {}, 401],
@@ -145,7 +145,7 @@ test('invalid direct messages and failed IPFS publication prevent all Logger act
     let loggerCalls = 0;
     let uploads = 0;
     const options = createOptions();
-    options.logger.prepareTransaction = () => { loggerCalls++; };
+    options.logger.transactionPreparer = () => { loggerCalls++; };
     options.logger.fetch = async () => { loggerCalls++; };
     options.ipfs.fetch = async () => {
         uploads++;
@@ -167,7 +167,7 @@ test('message logging failures preserve the publication and known transaction ha
         let submissions = 0;
         const cause = new Error(`${stage} failed`);
         options.ipfs.fetch = async () => { uploads++; return ipfsResponse(); };
-        options.logger.prepareTransaction = () => {
+        options.logger.transactionPreparer = () => {
             preparations++;
             if (stage === 'prepare') throw cause;
             return { rawTransaction, transactionHash };
@@ -210,7 +210,7 @@ test('the message callback forwards one cancellation signal through publication 
     let ipfsSignal;
     let submissions = 0;
     options.ipfs.fetch = async (_url, request) => { ipfsSignal = request.signal; return ipfsResponse(); };
-    options.logger.prepareTransaction = (request) => {
+    options.logger.transactionPreparer = (request) => {
         assert.equal(request.signal, controller.signal);
         signingStarted.resolve();
         return signed.promise;
@@ -231,7 +231,7 @@ test('a pre-aborted message callback does not publish or prepare a transaction',
     const options = createOptions({ signal: AbortSignal.abort('Cancelled') });
     let calls = 0;
     options.ipfs.fetch = async () => { calls++; };
-    options.logger.prepareTransaction = () => { calls++; };
+    options.logger.transactionPreparer = () => { calls++; };
     await assert.rejects(handleSignedMessage(createRequest(), createIngress(options)), /aborted/);
     assert.equal(calls, 0);
 });

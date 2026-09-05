@@ -31,10 +31,11 @@ interface LoggerEvent {
 }
 
 interface LogCidOptions extends Omit<EthWaitForTransactionReceiptOptions, 'transactionHash' | 'id'> {
-    loggerAddress: string;
-    /** Logger's immediate caller, which can be a contract wallet. */
-    expectedNode: string;
-    prepareTransaction: TransactionPreparer;
+    /** 20-byte address of the deployed Logger contract. */
+    loggerContract: string;
+    /** Address Logger should record as its immediate caller; can be a contract wallet. */
+    nodeAddress: string;
+    transactionPreparer: TransactionPreparer;
 }
 
 interface LogCidResult {
@@ -83,8 +84,8 @@ function hashLoggerCid(cid: string): string {
 }
 
 /** Returns null for unrelated logs; malformed matching Logger events throw. */
-function decodeLoggerEvent(log: LoggerEventInput, loggerAddress: string): LoggerEvent | null {
-    const expectedAddress = parseBytes(loggerAddress, 'loggerAddress', 20);
+function decodeLoggerEvent(log: LoggerEventInput, loggerContract: string): LoggerEvent | null {
+    const expectedAddress = parseBytes(loggerContract, 'loggerContract', 20);
     if (!isPlainObject(log)) {
         throw new TypeError('log must be a plain object.');
     }
@@ -154,18 +155,18 @@ function decodeLoggerEvent(log: LoggerEventInput, loggerAddress: string): Logger
 async function logCid(
     cid: string,
     {
-        config, fetch, loggerAddress, expectedNode, prepareTransaction,
+        config, fetch, loggerContract, nodeAddress, transactionPreparer,
         timeoutMs, pollIntervalMs, signal,
     }: LogCidOptions
 ): Promise<LogCidResult> {
     const data = encodeLoggerCall(cid);
-    const to = parseBytes(loggerAddress, 'loggerAddress', 20);
-    const node = parseBytes(expectedNode, 'expectedNode', 20);
+    const to = parseBytes(loggerContract, 'loggerContract', 20);
+    const node = parseBytes(nodeAddress, 'nodeAddress', 20);
     const rpcConfig = createHttpConfig(config);
     const deadlineMs = assertTimerMs(timeoutMs, 'timeoutMs');
     const pollDelayMs = assertTimerMs(pollIntervalMs, 'pollIntervalMs');
-    if (typeof fetch !== 'function' || typeof prepareTransaction !== 'function') {
-        throw new TypeError('fetch and prepareTransaction must be functions.');
+    if (typeof fetch !== 'function' || typeof transactionPreparer !== 'function') {
+        throw new TypeError('fetch and transactionPreparer must be functions.');
     }
     const cancellation = signal === undefined ? {} : { signal };
     const abortMessage = 'logCid was aborted by the caller.';
@@ -175,11 +176,11 @@ async function logCid(
     try {
         throwIfSignalAborted(signal, abortMessage, signal?.reason);
         const prepared = await invokeWithAbort(
-            async () => await prepareTransaction(Object.freeze({ to, data, value: 0n, ...cancellation })),
+            async () => await transactionPreparer(Object.freeze({ to, data, value: 0n, ...cancellation })),
             signal
         );
         if (!isPlainObject(prepared)) {
-            throw new TypeError('prepareTransaction must return a plain object.');
+            throw new TypeError('transactionPreparer must return a plain object.');
         }
         transactionHash = parseBytes(prepared.transactionHash, 'transactionHash', 32);
         const rawTransaction = assertHexData(prepared.rawTransaction, 'rawTransaction');

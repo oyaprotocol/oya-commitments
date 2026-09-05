@@ -8,7 +8,7 @@ import {
     ethWaitForTransactionReceipt, decodeLoggerEvent,
 } from '@oyaprotocol/ethereum';
 import {
-    fixtures, sample, loggerAddress, node, transactionHash, rawTransaction,
+    fixtures, sample, loggerContract, node, transactionHash, rawTransaction,
     createLog, createReceipt, response, createOptions,
 } from './fixtures/logger-transaction.js';
 
@@ -16,13 +16,13 @@ test('logCid prepares once, submits, waits, and verifies the expected Logger eve
     const stages = [];
     let polls = 0;
     const result = await logCid(sample.cid, createOptions({
-        loggerAddress: `0x${loggerAddress.slice(2).toUpperCase()}`,
-        expectedNode: `0x${node.slice(2).toUpperCase()}`,
-        prepareTransaction: (request) => {
+        loggerContract: `0x${loggerContract.slice(2).toUpperCase()}`,
+        nodeAddress: `0x${node.slice(2).toUpperCase()}`,
+        transactionPreparer: (request) => {
             stages.push('prepare');
             assert.equal(Object.isFrozen(request), true);
             assert.deepEqual(request, {
-                to: `0x${loggerAddress.slice(2).toUpperCase()}`, data: sample.calldata, value: 0n,
+                to: `0x${loggerContract.slice(2).toUpperCase()}`, data: sample.calldata, value: 0n,
             });
             return { rawTransaction, transactionHash };
         },
@@ -36,7 +36,7 @@ test('logCid prepares once, submits, waits, and verifies the expected Logger eve
             assert.deepEqual(params, [transactionHash]);
             if (++polls === 1) return response(null);
             // A wallet can route the call; the event node is not inferred from receipt.from/to.
-            return response(createReceipt({ from: loggerAddress, to: node, logs: [
+            return response(createReceipt({ from: loggerContract, to: node, logs: [
                 createLog({ address: node, topics: [], data: '0x' }), createLog(),
             ] }));
         },
@@ -52,18 +52,18 @@ test('logCid prepares once, submits, waits, and verifies the expected Logger eve
 test('logCid validates configuration before preparing or broadcasting a transaction', async () => {
     let calls = 0;
     for (const overrides of [
-        { loggerAddress: 'invalid' }, { expectedNode: 'invalid' },
+        { loggerContract: 'invalid' }, { nodeAddress: 'invalid' },
         { timeoutMs: 0 }, { timeoutMs: 2_147_483_648 }, { pollIntervalMs: 0 },
         { pollIntervalMs: 2_147_483_648 }, { config: {} }, { fetch: undefined },
-        { prepareTransaction: undefined },
+        { transactionPreparer: undefined },
     ]) {
         await assert.rejects(logCid(sample.cid, createOptions({
-            prepareTransaction: () => { calls++; throw new Error('Unexpected preparation'); },
+            transactionPreparer: () => { calls++; throw new Error('Unexpected preparation'); },
             fetch: async () => { calls++; throw new Error('Unexpected fetch'); }, ...overrides,
         })));
     }
     await assert.rejects(logCid('bafy-invalid', createOptions({
-        prepareTransaction: () => { calls++; },
+        transactionPreparer: () => { calls++; },
     })), /canonical CIDv1/);
     assert.equal(calls, 0);
 });
@@ -76,17 +76,17 @@ test('logCid preserves preparation failures and rejects malformed signer results
         () => ({ rawTransaction: '0x', transactionHash }),
         () => ({ rawTransaction, transactionHash: '0x12' }),
     ];
-    for (const prepareTransaction of prepareCallbacks) {
+    for (const transactionPreparer of prepareCallbacks) {
         let calls = 0;
         await assert.rejects(logCid(sample.cid, createOptions({
-            prepareTransaction, fetch: async () => { calls++; },
+            transactionPreparer, fetch: async () => { calls++; },
         })), (error) => {
             assert.ok(error instanceof LogCidError);
             assert.equal(error.stage, 'prepare');
             assert.equal(error.cid, sample.cid);
             assert.equal(error.receipt, null);
             assert.ok(error.cause instanceof Error);
-            if (prepareTransaction === prepareCallbacks[0]) assert.equal(error.cause, failure);
+            if (transactionPreparer === prepareCallbacks[0]) assert.equal(error.cause, failure);
             return true;
         });
         assert.equal(calls, 0);
@@ -98,7 +98,7 @@ test('logCid reuses signed bytes and the known hash through submission retry rec
     const sends = [];
     let preparations = 0;
     const options = createOptions({
-        prepareTransaction: () => { preparations++; return prepared; },
+        transactionPreparer: () => { preparations++; return prepared; },
         fetch: async (_url, request) => {
             const { method, params } = JSON.parse(request.body);
             if (method === 'eth_sendRawTransaction') {
@@ -195,7 +195,7 @@ test('logCid receipt timeout retains the hash so observation can resume without 
         },
     });
     assert.equal(observed.receipt.status, 'success');
-    assert.equal(decodeLoggerEvent(observed.receipt.logs[0], loggerAddress).cid, failure.cid);
+    assert.equal(decodeLoggerEvent(observed.receipt.logs[0], loggerContract).cid, failure.cid);
 });
 
 test('logCid aborts preparation without later broadcasting when the signer ignores cancellation', async () => {
@@ -205,7 +205,7 @@ test('logCid aborts preparation without later broadcasting when the signer ignor
     let calls = 0;
     const promise = logCid(sample.cid, createOptions({
         signal: controller.signal,
-        prepareTransaction: (request) => {
+        transactionPreparer: (request) => {
             assert.equal(request.signal, controller.signal);
             started.resolve();
             return signed.promise;
@@ -231,7 +231,7 @@ test('logCid respects cancellation before preparation and during submission or r
         let sends = 0;
         await assert.rejects(logCid(sample.cid, createOptions({
             signal: controller.signal,
-            prepareTransaction: () => { preparations++; return { rawTransaction, transactionHash }; },
+            transactionPreparer: () => { preparations++; return { rawTransaction, transactionHash }; },
             fetch: async (_url, request) => {
                 const { method } = JSON.parse(request.body);
                 if (method === 'eth_sendRawTransaction') sends++;

@@ -15,7 +15,7 @@ Ethereum JSON-RPC utilities for Oya kernel code. This package is a hardened kern
 - `ethWaitForTransactionReceipt(options)`: poll for a receipt with an explicit overall deadline, poll interval, and optional cancellation signal. Returns `{ receipt, pollCount, attemptCount, response }` with a non-null receipt.
 - `encodeLoggerCall(cid)`: encode calldata for the Oya Logger's `log(string)` function.
 - `hashLoggerCid(cid)`: validate a canonical CID and compute its Keccak-256 lookup topic.
-- `decodeLoggerEvent(log, loggerAddress)`: decode a `Log(address indexed node, bytes32 indexed cidKeccak256Hash, string cid)` event from the expected Logger, returning `{ node, cidKeccak256Hash, cid, removed? }` or `null` for an unrelated log.
+- `decodeLoggerEvent(log, loggerContract)`: decode a `Log(address indexed node, bytes32 indexed cidKeccak256Hash, string cid)` event from the expected Logger, returning `{ node, cidKeccak256Hash, cid, removed? }` or `null` for an unrelated log.
 - `logCid(cid, options)`: prepare a Logger transaction through a host callback, submit it, await its receipt, and verify the expected event.
 - `LogCidError`: reports the failed logging stage, CID, known transaction hash, receipt when available, and original cause.
 - `EthereumJsonRpcError`: thrown when an HTTP-successful JSON-RPC response contains an `error` payload.
@@ -91,7 +91,7 @@ The pure, synchronous helpers in `src/logger.ts` target [`Logger.sol`](../../con
 
 `encodeLoggerCall(cid)` returns the complete `0x`-prefixed calldata. Both this helper and `hashLoggerCid(cid)` require CIDv1 in lowercase unpadded Base32 with a 32-byte SHA-256 digest, using `assertCanonicalCid` from `@oyaprotocol/utils`. They preserve the CID exactly and reject alternate representations, whitespace, URIs, paths, and malformed identifiers instead of normalizing them. This is the same format enforced by `@oyaprotocol/ipfs`. The host supplies the Logger address and prepares the remaining transaction fields, signs, and submits the transaction.
 
-`decodeLoggerEvent(log, loggerAddress)` accepts `LoggerEventInput`, which selects `address`, `topics`, `data`, and optional `removed` from `EthereumReceiptLog`. Pass receipt logs directly. The expected address is required and must be 20-byte hex. Other emitter addresses or event signatures, including logs with no topics, return `null`. Malformed input or a matching event with invalid topics, address padding, data offset, length, padding, or UTF-8 throws. Decoding checks lengths before allocating from an untrusted declared length, and requires the canonical layout emitted by Solidity, without extra trailing data.
+`decodeLoggerEvent(log, loggerContract)` accepts `LoggerEventInput`, which selects `address`, `topics`, `data`, and optional `removed` from `EthereumReceiptLog`. Pass receipt logs directly. The expected address is required and must be 20-byte hex. Other emitter addresses or event signatures, including logs with no topics, return `null`. Malformed input or a matching event with invalid topics, address padding, data offset, length, padding, or UTF-8 throws. Decoding checks lengths before allocating from an untrusted declared length, and requires the canonical layout emitted by Solidity, without extra trailing data.
 
 The decoded `LoggerEvent` preserves the indexed node and `cidKeccak256Hash` hex casing and exact canonical CID text. The decoder requires exactly three topics, validates the same strict CID format, and verifies that the supplied 32-byte hash equals `keccak256(bytes(cid))`. A matching event containing a noncanonical CID or a mismatched hash throws. The Solidity contract still accepts arbitrary strings, so historical or external events outside the kernel's CID policy require a separate raw ABI decoder. Address and event-signature matching is case-insensitive. Optional `removed` metadata is preserved, including `true`; decoding alone does not establish successful execution or finality. The expected node is the immediate caller of Logger, which may be a contract wallet and may differ from the signed message's signer.
 
@@ -103,7 +103,7 @@ For example, a host can prepare the call and later verify its receipt:
 import { encodeLoggerCall, decodeLoggerEvent } from '@oyaprotocol/ethereum';
 
 const transaction = {
-    to: loggerAddress,
+    to: loggerContract,
     data: encodeLoggerCall(publication.cid),
     value: 0n,
 };
@@ -113,9 +113,9 @@ if (receipt.status !== 'success') {
     throw new Error('Logger transaction did not succeed.');
 }
 const event = receipt.logs
-    .map((log) => decodeLoggerEvent(log, loggerAddress))
+    .map((log) => decodeLoggerEvent(log, loggerContract))
     .find((entry) => entry !== null && entry.removed !== true &&
-        entry.node.toLowerCase() === expectedNode.toLowerCase() &&
+        entry.node.toLowerCase() === nodeAddress.toLowerCase() &&
         entry.cid === publication.cid);
 if (!event) {
     throw new Error('Receipt did not contain the expected Logger event.');
@@ -134,9 +134,9 @@ import { logCid } from '@oyaprotocol/ethereum';
 const logging = await logCid(publication.cid, {
     config: rpcConfig,
     fetch: rpcFetch,
-    loggerAddress,
-    expectedNode,
-    prepareTransaction,
+    loggerContract,
+    nodeAddress,
+    transactionPreparer,
     timeoutMs: 60_000,
     pollIntervalMs: 1_000,
     signal,
@@ -144,9 +144,9 @@ const logging = await logCid(publication.cid, {
 // logging: { cid, transactionHash, receipt, event }
 ```
 
-`prepareTransaction` is a host-supplied `TransactionPreparer` function. It receives a frozen `{ to, data, value: 0n, signal? }` request describing the Logger call and returns `{ rawTransaction, transactionHash }`, synchronously or asynchronously. It must prepare and sign without broadcasting. The host supplies chain ID, nonce, fees, gas, and key or wallet access, and coordinates nonces across concurrent messages. It must return the correct hash for the signed transaction and preserve the requested call, including when routing through a contract wallet. The helper validates the returned hex shapes and checks the RPC's returned hash; it does not parse or independently verify the signed transaction.
+`transactionPreparer` is a host-supplied `TransactionPreparer` function. It receives a frozen `{ to, data, value: 0n, signal? }` request describing the Logger call and returns `{ rawTransaction, transactionHash }`, synchronously or asynchronously. It must prepare and sign without broadcasting. The host supplies chain ID, nonce, fees, gas, and key or wallet access, and coordinates nonces across concurrent messages. It must return the correct hash for the signed transaction and preserve the requested call, including when routing through a contract wallet. The helper validates the returned hex shapes and checks the RPC's returned hash; it does not parse or independently verify the signed transaction.
 
-The helper snapshots the signed bytes and hash, submits through `ethSendRawTransaction`, then polls through `ethWaitForTransactionReceipt`. It prepares only once and adds no outer retry loop; submission retries reuse the exact signed bytes. `expectedNode` is Logger's immediate caller, not necessarily the message signer or the outer transaction sender. A successful result requires receipt status `success` and a matching event from `loggerAddress`, with the expected node and exact CID, valid CID/hash correspondence, and `removed !== true`.
+The helper snapshots the signed bytes and hash, submits through `ethSendRawTransaction`, then polls through `ethWaitForTransactionReceipt`. It prepares only once and adds no outer retry loop; submission retries reuse the exact signed bytes. `nodeAddress` is Logger's immediate caller, not necessarily the message signer or the outer transaction sender. A successful result requires receipt status `success` and a matching event from `loggerContract`, with the expected node and exact CID, valid CID/hash correspondence, and `removed !== true`.
 
 `timeoutMs` bounds receipt observation after submission; `config.timeoutMs` bounds each RPC request. The host bounds transaction preparation/signing. The optional signal covers preparation, submission, and polling through the existing async utilities. Cancellation stops subsequent stages even if preparation ignores its signal and eventually returns signed bytes. It cannot undo a submitted transaction. The returned receipt establishes mined execution as reported by the RPC, with confirmation depth and reorganization policy left to the host.
 

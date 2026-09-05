@@ -1,6 +1,6 @@
 {
   "generatedBy": "CIDs from packages/test/fixtures/cids.json. ABI data from Foundry cast abi-encode f(bytes) over exact UTF-8, calldata from forge-inspected selector 0x41304fac, topics from cast abi-encode f(address), cast keccak Log(address,bytes32,string), and cast keccak of exact CID bytes.",
-  "loggerAddress": "0x1234567890abcdef1234567890abcdef12345678",
+  "loggerContract": "0x1234567890abcdef1234567890abcdef12345678",
   "node": "0xabcdef0123456789abcdef0123456789abcdef01",
   "topics": [
     "0xce2d845fcf02211a951a2153c1ddf64ec48ef6d54644ea188101f10018b871dc",

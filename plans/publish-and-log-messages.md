@@ -36,6 +36,15 @@ information to resume without blindly sending another transaction.
   to `SignedTransaction` for clarity. Updated imports, exports, docs, and generated
   declarations. Build, both consumer type suites, package imports, and whitespace
   checks passed; emitted runtime JavaScript is unchanged.
+- [x] 2026-09-05: Renamed the Logger callback option to `transactionPreparer` to
+  match its role and `TransactionPreparer` type. Updated usages, docs, and built
+  artifacts. Build, all 119 Ethereum/messages tests, both consumer type suites,
+  package imports, and whitespace checks passed.
+
+- [x] 2026-09-05: Named the Logger contract address `loggerContract` and the
+  caller `nodeAddress` throughout the API, fixtures, and examples. Build, all
+  119 Ethereum/messages tests, both consumer type suites, package imports, and
+  whitespace checks passed.
 
 ## Surprises & Discoveries
 
@@ -67,7 +76,7 @@ information to resume without blindly sending another transaction.
   `TransactionStage`. A request supports a bigint value; Logger still supplies
   zero. The verify stage covers operation-specific receipt checks. The previous
   Logger-prefixed type names are replaced to keep one shared interface.
-- 2026-09-05 / Codex: Require `prepareTransaction` to return signed
+- 2026-09-05 / Codex: Require `transactionPreparer` to return signed
   `rawTransaction` and its `transactionHash`. The trusted host owns chain ID,
   nonce, fees, gas, keys, and wallet routing; the package owns broadcasting.
   Retaining the hash before broadcasting supports recovery from ambiguous failures.

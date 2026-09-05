@@ -9,10 +9,11 @@ interface LoggerEvent {
     readonly removed?: boolean;
 }
 interface LogCidOptions extends Omit<EthWaitForTransactionReceiptOptions, 'transactionHash' | 'id'> {
-    loggerAddress: string;
-    /** Logger's immediate caller, which can be a contract wallet. */
-    expectedNode: string;
-    prepareTransaction: TransactionPreparer;
+    /** 20-byte address of the deployed Logger contract. */
+    loggerContract: string;
+    /** Address Logger should record as its immediate caller; can be a contract wallet. */
+    nodeAddress: string;
+    transactionPreparer: TransactionPreparer;
 }
 interface LogCidResult {
     readonly cid: string;
@@ -32,7 +33,7 @@ declare function encodeLoggerCall(cid: string): string;
 /** Compute the topic used to find Logger events for a canonical CID. */
 declare function hashLoggerCid(cid: string): string;
 /** Returns null for unrelated logs; malformed matching Logger events throw. */
-declare function decodeLoggerEvent(log: LoggerEventInput, loggerAddress: string): LoggerEvent | null;
-declare function logCid(cid: string, { config, fetch, loggerAddress, expectedNode, prepareTransaction, timeoutMs, pollIntervalMs, signal, }: LogCidOptions): Promise<LogCidResult>;
+declare function decodeLoggerEvent(log: LoggerEventInput, loggerContract: string): LoggerEvent | null;
+declare function logCid(cid: string, { config, fetch, loggerContract, nodeAddress, transactionPreparer, timeoutMs, pollIntervalMs, signal, }: LogCidOptions): Promise<LogCidResult>;
 export { encodeLoggerCall, decodeLoggerEvent, hashLoggerCid, logCid, LogCidError };
 export type { LoggerEventInput, LoggerEvent, LogCidOptions, LogCidResult, };

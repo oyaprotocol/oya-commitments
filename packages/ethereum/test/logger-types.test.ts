@@ -6,11 +6,11 @@ import type {
 } from '@oyaprotocol/ethereum';
 
 const calldata: string = encodeLoggerCall('bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e');
-declare const loggerAddress: string;
+declare const loggerContract: string;
 const cidKeccak256Hash: string = hashLoggerCid('bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e');
 declare const receiptLog: EthereumReceiptLog;
 const input: LoggerEventInput = receiptLog;
-const event: LoggerEvent | null = decodeLoggerEvent(input, loggerAddress);
+const event: LoggerEvent | null = decodeLoggerEvent(input, loggerContract);
 if (event !== null) {
     const node: string = event.node;
     const cidKeccak256Hash: string = event.cidKeccak256Hash;
@@ -28,5 +28,5 @@ encodeLoggerCall(1);
 // @ts-expect-error Decoding requires an explicit expected Logger address.
 decodeLoggerEvent(receiptLog);
 // @ts-expect-error Event filtering can return null.
-const matchingEvent: LoggerEvent = decodeLoggerEvent(receiptLog, loggerAddress);
+const matchingEvent: LoggerEvent = decodeLoggerEvent(receiptLog, loggerContract);
 void [calldata, cidKeccak256Hash, matchingEvent];
