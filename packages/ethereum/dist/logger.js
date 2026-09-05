@@ -1,5 +1,4 @@
-import { isPlainObject } from '@oyaprotocol/utils';
-import { parseBytes } from './receipt-utils.js';
+import { isPlainObject, parseBytes } from '@oyaprotocol/utils';
 // Verified against contracts/src/Logger.sol with forge inspect and cast keccak.
 const LOGGER_SELECTOR = '0x41304fac'; // log(string)
 const LOGGER_EVENT_TOPIC = '0x0738f4da267a110d810e6e89fc59e46be6de0c37b1d5cd559b267dc3688e74e0'; // Log(address,string)

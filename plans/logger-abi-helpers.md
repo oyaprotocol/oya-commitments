@@ -17,6 +17,7 @@ an event contains indexed values in topics and other values in its data bytes.
 - [x] 2026-09-04: Added and exported both helpers and their input/result types; reused the existing package-local byte validator.
 - [x] 2026-09-04: Added 11 behavioral tests, 11 independent Foundry fixtures, and TypeScript consumer checks. Logger's eight existing contract tests passed, including 256 fuzz cases.
 - [x] 2026-09-04: Documented host use and regenerated tracked output. Build, all 52 Ethereum tests, TypeScript consumer checks, package-name imports, all eight offline Logger contract tests, and diff checks passed inside the sandbox.
+- [x] 2026-09-05: Moved `parseBytes` unchanged to shared validation utilities and updated Ethereum imports. Build, 63 Ethereum/utils tests, TypeScript consumer checks, package-name imports, and diff checks passed inside the sandbox.
 
 ## Surprises & Discoveries
 
@@ -24,8 +25,9 @@ an event contains indexed values in topics and other values in its data bytes.
   CID syntax policy. UTF-8 byte lengths, rather than JavaScript string lengths,
   determine ABI lengths. JavaScript strings with unpaired surrogates cannot be
   encoded losslessly; the encoder will reject them.
-- Receipt parsing already supplies a strict, variable-size byte validator.
-  Exporting `parseBytes` inside its module allows reuse without a new public API.
+- Receipt parsing supplied a strict, variable-size byte validator. `parseBytes`
+  now lives in `packages/utils/src/validation-utils.ts` and is exported through
+  `@oyaprotocol/utils` for receipt parsing and Logger decoding.
 - Solidity strings can hold invalid UTF-8 bytes. The decoder returns JavaScript
   text and therefore rejects these bytes instead of replacing them silently.
 - Foundry's CLI string coercion strips a trailing newline. The first fixture
@@ -49,14 +51,17 @@ an event contains indexed values in topics and other values in its data bytes.
 - 2026-09-04 / Codex: Preserve optional `removed` metadata in decoded events,
   including true, so callers can handle reorganization notifications. Decoding
   alone does not establish transaction success, finality, or content validity.
+- 2026-09-05 / Codex: Move `parseBytes` to shared validation utilities at the
+  user's request. It has no receipt-specific behavior; preserve its validation
+  and error messages unchanged and reuse the existing utils dependency.
 
 ## Outcomes & Retrospective
 
 Both helpers are implemented in `packages/ethereum/src/logger.ts` and exported
 through the package root. Encoding matches independently generated ABI vectors;
 decoding filters unrelated logs and validates matching events before returning
-their node, CID, and optional removed flag. Shared byte validation is reused
-without exposing it at the package root. No new dependencies were added.
+their node, CID, and optional removed flag. Shared byte validation is imported
+from the utils package root. No new dependencies were added.
 
 Validation passed: the package build, 52 Ethereum runtime tests (11 new Logger
 tests), TypeScript consumer checks, package-name import checks, all eight Logger
@@ -71,7 +76,8 @@ work as intended.
 
 `contracts/src/Logger.sol` and `contracts/test/Logger.t.sol` define and test the
 onchain interface. `packages/ethereum/src/receipt-utils.ts` validates receipt
-logs and hex bytes; `src/index.ts` owns public exports. Tests import the compiled
+logs using the shared byte validator in `packages/utils/src/validation-utils.ts`;
+`packages/ethereum/src/index.ts` owns Ethereum public exports. Tests import the compiled
 package, and `dist` JavaScript/declarations/maps are tracked in Git. Standard
 Web `TextEncoder`/`TextDecoder` and `String.isWellFormed` are available in the
 package's ECMAScript 2025 target. Runtime modules must not import Solidity
@@ -123,7 +129,7 @@ reuse; TypeScript checks must prove receipt logs can be passed directly.
 ## Idempotence and Recovery
 
 Builds, fixtures, and tests are reproducible and have no external effects. Keep
-the change in the Ethereum package and documentation; no signing, publication,
+the change in the Ethereum and utils packages and documentation; no signing, publication,
 deployment, or network mutation is authorized or required. If checks fail, fix
 the local implementation or fixture and rerun the affected checks.
 

@@ -68,5 +68,13 @@ function assertBytes32HexString(value, label) {
     }
     return validated;
 }
-export { assertAsciiBytes, assertBytes32HexString, assertHeadersObject, assertHexData, assertHexString, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, isPlainObject, };
+function parseBytes(value, name, size) {
+    if (typeof value !== 'string' ||
+        !/^0x(?:[0-9a-fA-F]{2})*$/.test(value) ||
+        (size !== undefined && value.length !== 2 + size * 2)) {
+        throw new Error(`${name} must be ${size === undefined ? 'byte-aligned' : `${size}-byte`} hex data.`);
+    }
+    return value;
+}
+export { assertAsciiBytes, assertBytes32HexString, assertHeadersObject, assertHexData, assertHexString, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, isPlainObject, parseBytes, };
 //# sourceMappingURL=validation-utils.js.map

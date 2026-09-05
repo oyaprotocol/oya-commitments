@@ -30,7 +30,6 @@ interface EthereumTransactionReceipt {
     readonly blobGasUsed?: bigint;
     readonly blobGasPrice?: bigint;
 }
-declare function parseBytes(value: unknown, name: string, size?: number): string;
 declare function parseTransactionReceipt(value: unknown, transactionHash: string): EthereumTransactionReceipt;
-export { parseBytes, parseTransactionReceipt };
+export { parseTransactionReceipt };
 export type { EthereumReceiptLog, EthereumTransactionReceipt };

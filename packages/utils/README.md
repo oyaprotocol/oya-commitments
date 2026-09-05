@@ -17,6 +17,7 @@ Small shared utilities for hardened Oya kernel packages.
 - `assertNonNegativeInteger(value, label)`
 - `assertHeadersObject(headers, label, options)`
 - `isPlainObject(value)`
+- `parseBytes(value, name, size?)`: validates `0x`-prefixed, byte-aligned hex, optionally requiring an exact byte count. Returns the original string without trimming; accepts `0x` when no size is required.
 
 ## HTTP Utilities
 

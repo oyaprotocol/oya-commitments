@@ -1,6 +1,5 @@
-import { isPlainObject } from '@oyaprotocol/utils';
+import { isPlainObject, parseBytes } from '@oyaprotocol/utils';
 
-import { parseBytes } from './receipt-utils.js';
 import type { EthereumReceiptLog } from './receipt-utils.js';
 
 // Verified against contracts/src/Logger.sol with forge inspect and cast keccak.
