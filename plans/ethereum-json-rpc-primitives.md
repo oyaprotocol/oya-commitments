@@ -20,6 +20,7 @@ Definitions used in this plan:
 
 ## Progress
 
+- [x] 2026-09-04: Implemented receipt lookup and waiting under the completed follow-on ExecPlan in `plans/ethereum-transaction-receipts.md`, with 21 new behavioral tests and TypeScript consumer checks. All 145 kernel runtime tests passed; other method wrappers remain separate work.
 - [x] 2026-05-02 23:17Z: Created this ExecPlan after reviewing `PLANS.md`, `packages/AGENTS.md`, the completed IPFS kernel package, the placeholder Ethereum package, and reference-only legacy transaction code.
 - [x] 2026-05-03 00:11Z: Updated command instructions to use the repository root rather than a machine-specific absolute clone path.
 - [x] 2026-05-03 00:18Z: Renamed the package shell from `@oyaprotocol/transactions` in `packages/transactions` to `@oyaprotocol/ethereum` in `packages/ethereum`, and updated this ExecPlan to match.
@@ -148,6 +149,13 @@ Definitions used in this plan:
   Date/Author: 2026-05-06 / Codex.
 
 ## Outcomes & Retrospective
+
+The receipt portion of Milestone 2 is complete as of 2026-09-04. The package now
+exports `ethGetTransactionReceipt(...)` and `ethWaitForTransactionReceipt(...)`,
+normalized receipt/log types, and a receipt timeout error. Waiting reuses shared
+async utilities for an overall deadline and cancellation. The focused follow-on
+plan `plans/ethereum-transaction-receipts.md` records the interface, decisions,
+limitations, and validation; the remaining wrappers below are still unfinished.
 
 This section starts empty except for the initial planning outcome. Update it after each milestone with what changed, which commands were run, and what evidence proves the package works.
 

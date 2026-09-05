@@ -17,6 +17,18 @@ export type {
     EthSendRawTransactionResult,
 } from './transactions.js';
 export {
+    EthereumTransactionReceiptTimeoutError,
+    ethGetTransactionReceipt,
+    ethWaitForTransactionReceipt,
+} from './receipts.js';
+export type {
+    EthGetTransactionReceiptOptions,
+    EthGetTransactionReceiptResult,
+    EthWaitForTransactionReceiptOptions,
+    EthWaitForTransactionReceiptResult,
+} from './receipts.js';
+export type { EthereumReceiptLog, EthereumTransactionReceipt } from './receipt-utils.js';
+export {
     EthereumJsonRpcError,
     requestEthereumJsonRpc,
 } from './request-utils.js';
