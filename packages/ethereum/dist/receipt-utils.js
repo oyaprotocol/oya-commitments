@@ -1,12 +1,4 @@
-import { isPlainObject } from '@oyaprotocol/utils';
-function parseBytes(value, name, size) {
-    if (typeof value !== 'string' ||
-        !/^0x(?:[0-9a-fA-F]{2})*$/.test(value) ||
-        (size !== undefined && value.length !== 2 + size * 2)) {
-        throw new Error(`${name} must be ${size === undefined ? 'byte-aligned' : `${size}-byte`} hex data.`);
-    }
-    return value;
-}
+import { isPlainObject, parseBytes } from '@oyaprotocol/utils';
 function parseQuantity(value, name) {
     if (typeof value !== 'string' || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(value)) {
         throw new Error(`${name} must be an Ethereum quantity hex string without leading zeros.`);

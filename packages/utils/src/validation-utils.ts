@@ -83,6 +83,17 @@ function assertBytes32HexString(value: unknown, label: string): string {
     return validated;
 }
 
+function parseBytes(value: unknown, name: string, size?: number): string {
+    if (
+        typeof value !== 'string' ||
+        !/^0x(?:[0-9a-fA-F]{2})*$/.test(value) ||
+        (size !== undefined && value.length !== 2 + size * 2)
+    ) {
+        throw new Error(`${name} must be ${size === undefined ? 'byte-aligned' : `${size}-byte`} hex data.`);
+    }
+    return value;
+}
+
 export {
     assertAsciiBytes,
     assertBytes32HexString,
@@ -93,4 +104,5 @@ export {
     assertNonNegativeInteger,
     assertPositiveInteger,
     isPlainObject,
+    parseBytes,
 };

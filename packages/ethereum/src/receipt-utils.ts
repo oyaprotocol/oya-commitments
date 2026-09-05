@@ -1,4 +1,4 @@
-import { isPlainObject } from '@oyaprotocol/utils';
+import { isPlainObject, parseBytes } from '@oyaprotocol/utils';
 
 interface EthereumReceiptLog {
     readonly address: string;
@@ -32,17 +32,6 @@ interface EthereumTransactionReceipt {
     readonly effectiveGasPrice?: bigint;
     readonly blobGasUsed?: bigint;
     readonly blobGasPrice?: bigint;
-}
-
-function parseBytes(value: unknown, name: string, size?: number): string {
-    if (
-        typeof value !== 'string' ||
-        !/^0x(?:[0-9a-fA-F]{2})*$/.test(value) ||
-        (size !== undefined && value.length !== 2 + size * 2)
-    ) {
-        throw new Error(`${name} must be ${size === undefined ? 'byte-aligned' : `${size}-byte`} hex data.`);
-    }
-    return value;
 }
 
 function parseQuantity(value: unknown, name: string): bigint {

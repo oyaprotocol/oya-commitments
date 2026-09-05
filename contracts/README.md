@@ -9,16 +9,20 @@ Contract source, tests, and deployment tooling belong here. The offchain librari
 [`src/Logger.sol`](src/Logger.sol) exposes:
 
 ```solidity
-event Log(address indexed node, string cid);
+event Log(address indexed node, bytes32 indexed cidKeccak256Hash, string cid);
 
 function log(string calldata cid) external;
 ```
 
-Any caller can submit a string, including an empty string. Each successful call emits exactly one `Log(msg.sender, cid)` event, preserving the string exactly. The function is nonpayable. When a contract wallet or forwarder calls Logger, the event records that contract's address as the node.
+Any caller can submit a string, including an empty string. Each successful call emits exactly one `Log(msg.sender, keccak256(bytes(cid)), cid)` event, preserving the string exactly. The function is nonpayable. When a contract wallet or forwarder calls Logger, the event records that contract's address as the node.
 
 Logger treats the CID as an opaque claim: it does not validate CID syntax, fetch content, check signatures, or prove availability. Empty strings, whitespace, and other strings are accepted without normalization or an application-specific length limit. Hosts should validate the artifact and its CID before submitting a transaction, and consumers should verify content when reading it.
 
-Repeated submissions emit separate events. Consumers can filter by the indexed node address and decode the CID from event data. The chain's canonical block and log positions establish recording order; consumers choose a confirmation policy and handle reorganizations. Logger keeps no onchain storage history or sequence counter.
+Repeated submissions emit separate events. Consumers can filter by the indexed node address or `cidKeccak256Hash` and decode the full CID from event data. The hash is Keccak-256 of the exact CID string bytes, separate from the content hash embedded in a CID. Equivalent CIDs with different text encodings have different lookup hashes; no normalization is performed.
+
+The event has three topics: `keccak256("Log(address,bytes32,string)")`, the padded node address, and `cidKeccak256Hash`. An `eth_getLogs` request can filter by the Logger address and `[eventSignatureTopic, null, cidKeccak256Hash]` to find a known CID from any node. Specify the block range to search. This event replaces the earlier `Log(address,string)` ABI; consumers must use the updated event signature and decoder.
+
+The chain's canonical block and log positions establish recording order; consumers choose a confirmation policy and handle reorganizations. Logger keeps no onchain storage history or sequence counter.
 
 Node integration will compose the existing `publishSignedMessage(...)` IPFS publisher with transaction submission to a deployed Logger. Deployment addresses, transaction signing, and receipt handling are a later milestone.
 

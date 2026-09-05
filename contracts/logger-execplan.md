@@ -4,7 +4,7 @@ This ExecPlan is maintained according to the repository's `PLANS.md`.
 
 ## Purpose / Big Picture
 
-Provide the first hardened onchain contract under `contracts/`. A node can submit an IPFS content identifier (CID) using `log(string)`, and observers can discover the submission through `Log(address indexed node, string cid)`. The event attributes the claim to the immediate caller and preserves the supplied string. This contract completes the onchain primitive only; the existing message publisher will be connected to it in a later host-integration milestone.
+Provide the first hardened onchain contract under `contracts/`. A node can submit an IPFS content identifier (CID) using `log(string)`, and observers can discover the submission through `Log(address indexed node, bytes32 indexed cidKeccak256Hash, string cid)`. The event attributes the claim to the immediate caller, supports topic filtering by the exact CID's Keccak-256 hash, and preserves the supplied string. This contract completes the onchain primitive only; the existing message publisher will be connected to it in a later host-integration milestone. The CID index extension and corresponding offchain decoder are tracked in `plans/logger-abi-helpers.md`.
 
 The user approved the minimal Logger and specifically selected the event name `Log`. The implementation includes a local Foundry project, Solidity tests, documentation, and CI validation, as required by `contracts/AGENTS.md`.
 
@@ -16,6 +16,8 @@ The user approved the minimal Logger and specifically selected the event name `L
 - [x] 2026-09-04: Added eight behavior tests and a dedicated contract CI job; updated local and root documentation for the separate project.
 - [x] 2026-09-04: Formatting and compilation passed; all eight tests, including 256 fuzz cases, passed offline inside the sandbox with the CI profile. Inspected the ABI, validated the contract CI job's YAML and commands, reviewed the diff, and passed whitespace checks. Documented the offline test command.
 - [x] 2026-09-04: Removed the empty-string check and error after gas review, replaced the rejection test with event assertions, and removed the fuzz assumption excluding empty strings. All eight tests, including 256 fuzz cases, passed offline. Build, formatting, ABI inspection, fixed-case gas snapshot, and diff checks passed; the measured call saves 26 gas and runtime bytecode shrank by 34 bytes.
+
+- [x] 2026-09-05: Added `bytes32 indexed cidKeccak256Hash`, computed from the exact CID bytes, and updated event assertions. All eight tests (256 fuzz cases), formatting/build/ABI checks, and the refreshed fixed-case gas snapshot passed offline. The same CID benchmark adds 524 gas per call; the matching Ethereum decoder and fixtures also pass.
 
 ## Surprises & Discoveries
 
@@ -49,11 +51,15 @@ The user approved the minimal Logger and specifically selected the event name `L
   Rationale: The user questioned spending gas on a check that establishes no CID-validity guarantee. All claim validation belongs to consumers; an empty claim is recorded using the same semantics as other opaque strings.
   Date/Author: 2026-09-04 / user and Codex.
 
+- Decision: Add `bytes32 indexed cidKeccak256Hash` between the indexed node and unindexed CID, superseding the original two-topic event above.
+  Rationale: The user approved exact-CID lookups through RPC topic filters and chose the explicit name. The contract computes Keccak-256 of the CID bytes; the full string remains in event data for discovery. No normalization or content validation is added.
+  Date/Author: 2026-09-05 / user and Codex.
+
 ## Outcomes & Retrospective
 
-Logger is implemented and validated with the exact approved `Log(address indexed node, string cid)` event and nonpayable `log(string)` function. It preserves all string data, including empty strings, attributes events to the immediate caller, and permits repeated submissions. Following the gas review, its body is solely `emit Log(msg.sender, cid)`. The contract has no custom error, production imports, or storage state.
+Logger is implemented and validated with the approved `Log(address indexed node, bytes32 indexed cidKeccak256Hash, string cid)` event and nonpayable `log(string)` function. It preserves all string data, including empty strings, attributes events to the immediate caller, and permits repeated submissions. Its body is solely `emit Log(msg.sender, keccak256(bytes(cid)), cid)`. The contract has no custom error, production imports, or storage state.
 
-The standalone Foundry configuration, eight behavior tests, dedicated contract CI job, and documentation are complete. Solidity 0.8.23 now compiles Logger to 355 bytes of runtime code and 387 bytes of initcode with the pinned settings. All eight tests passed, including 256 fuzz cases, using `FOUNDRY_PROFILE=ci forge test --root contracts --offline -vv` inside the sandbox. Formatting, build, ABI inspection, and diff checks also passed. The fixed-CID benchmark saves 26 gas per call; `contracts/.gas-snapshot` records the seven deterministic test cases and excludes random fuzz inputs. The unchanged CI job was validated locally during the initial implementation; a hosted CI run has not been triggered.
+The standalone Foundry configuration, eight behavior tests, dedicated contract CI job, and documentation are complete. Solidity 0.8.23 compiles the indexed-CID Logger to 395 bytes of runtime code and 427 bytes of initcode with the pinned settings. All eight tests passed, including 256 fuzz cases, using `forge test --root contracts --offline -vv` inside the sandbox. Formatting, build, ABI inspection, and diff checks also passed. The fixed 46-character CID benchmark now costs 25,429 gas versus 24,905 before indexing (+524). `contracts/.gas-snapshot` records the seven deterministic test cases and excludes random fuzz inputs; test-level deltas include the additional event assertions. The unchanged CI job was validated locally during the initial implementation; a hosted CI run has not been triggered.
 
 The initial test command hit a Foundry macOS proxy-settings crash before executing tests. Offline mode resolved it without elevated access, and both local guidance and the new CI test step now use that mode. No required work remains in this milestone. Deployment and the host's publish-then-log integration remain separate future work.
 
@@ -89,7 +95,7 @@ CI runs the equivalent commands from `contracts/` with the repository's existing
 
 ## Validation and Acceptance
 
-Compilation must succeed with the pinned compiler. ABI inspection must show exactly `Log(address indexed node, string cid)` and the nonpayable `log(string)` function. Tests must verify the Logger emitter, event signature topic, indexed immediate caller, and exact CID data, including empty strings and duplicate calls as separate events in order. Fuzz tests must preserve any string and caller address. The contract source has no runtime imports or storage state.
+Compilation must succeed with the pinned compiler. ABI inspection must show exactly `Log(address indexed node, bytes32 indexed cidKeccak256Hash, string cid)` and the nonpayable `log(string)` function. Tests must verify the Logger emitter, event signature topic, indexed immediate caller, indexed Keccak-256 hash of the exact CID bytes, and exact CID data, including empty strings and duplicate calls as separate events in order. Fuzz tests must preserve any string and caller address. The contract source has no runtime imports or storage state.
 
 The CI job must run all three contract checks from the right directory and initialize the shared test submodule. Root app and offchain package jobs retain their current scope. Record any checks that cannot run and their cause; do not claim a live deployment or network test.
 
@@ -103,14 +109,14 @@ This change broadcasts no transactions. Source, tests, configuration, CI, and do
 
 Approved interface:
 
-    event Log(address indexed node, string cid);
+    event Log(address indexed node, bytes32 indexed cidKeccak256Hash, string cid);
     function log(string calldata cid) external;
 
 Runtime call:
 
-    emit Log(msg.sender, cid);
+    emit Log(msg.sender, keccak256(bytes(cid)), cid);
 
-Observed ABI after the gas review: `Log(address,string)` (indexed node) and `log(string) nonpayable`. Observed test result: `8 tests passed, 0 failed, 0 skipped`; the fuzz test ran 256 cases, with a separate explicit empty-string test. Gas baseline: `contracts/.gas-snapshot`.
+Observed ABI after CID indexing: `Log(address,bytes32,string)` (indexed node and `cidKeccak256Hash`) and `log(string) nonpayable`. Observed test result: `8 tests passed, 0 failed, 0 skipped`; the fuzz test ran 256 cases, with a separate explicit empty-string test. Gas baseline: `contracts/.gas-snapshot`.
 
 ## Interfaces and Dependencies
 
