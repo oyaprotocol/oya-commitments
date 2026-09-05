@@ -29,7 +29,7 @@ export type {
 } from './receipts.js';
 export type { EthereumReceiptLog, EthereumTransactionReceipt } from './receipt-utils.js';
 export { encodeLoggerLogCall, decodeLoggerLogEvent } from './logger.js';
-export type { LoggerLogEventInput, LoggerLogEvent } from './logger.js';
+export type { LoggerEventInput, LoggerEvent } from './logger.js';
 export {
     EthereumJsonRpcError,
     requestEthereumJsonRpc,

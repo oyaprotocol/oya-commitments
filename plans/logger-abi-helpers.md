@@ -140,9 +140,9 @@ Reference: [Solidity ABI specification](https://docs.soliditylang.org/en/latest/
 ## Interfaces and Dependencies
 
     encodeLoggerLogCall(cid: string): string
-    decodeLoggerLogEvent(log: LoggerLogEventInput, loggerAddress: string): LoggerLogEvent | null
+    decodeLoggerLogEvent(log: LoggerEventInput, loggerAddress: string): LoggerEvent | null
 
-`LoggerLogEventInput` selects `address`, `topics`, `data`, and optional `removed`
-from `EthereumReceiptLog`. `LoggerLogEvent` contains readonly `node`, `cid`, and
+`LoggerEventInput` selects `address`, `topics`, `data`, and optional `removed`
+from `EthereumReceiptLog`. `LoggerEvent` contains readonly `node`, `cid`, and
 optional `removed`. The functions are synchronous and use only standard language
 features and the existing utils dependency.

@@ -8,9 +8,9 @@ const LOGGER_LOG_SELECTOR = '0x41304fac'; // log(string)
 const LOGGER_LOG_TOPIC = '0x0738f4da267a110d810e6e89fc59e46be6de0c37b1d5cd559b267dc3688e74e0'; // Log(address,string)
 const STRING_OFFSET = '20'.padStart(64, '0');
 
-type LoggerLogEventInput = Pick<EthereumReceiptLog, 'address' | 'topics' | 'data' | 'removed'>;
+type LoggerEventInput = Pick<EthereumReceiptLog, 'address' | 'topics' | 'data' | 'removed'>;
 
-interface LoggerLogEvent {
+interface LoggerEvent {
     readonly node: string;
     readonly cid: string;
     readonly removed?: boolean;
@@ -28,7 +28,7 @@ function encodeLoggerLogCall(cid: string): string {
 }
 
 /** Returns null for unrelated logs; malformed matching Logger events throw. */
-function decodeLoggerLogEvent(log: LoggerLogEventInput, loggerAddress: string): LoggerLogEvent | null {
+function decodeLoggerLogEvent(log: LoggerEventInput, loggerAddress: string): LoggerEvent | null {
     const expectedAddress = parseBytes(loggerAddress, 'loggerAddress', 20);
     if (!isPlainObject(log)) {
         throw new TypeError('log must be a plain object.');
@@ -92,4 +92,4 @@ function decodeLoggerLogEvent(log: LoggerLogEventInput, loggerAddress: string): 
 }
 
 export { encodeLoggerLogCall, decodeLoggerLogEvent };
-export type { LoggerLogEventInput, LoggerLogEvent };
+export type { LoggerEventInput, LoggerEvent };
