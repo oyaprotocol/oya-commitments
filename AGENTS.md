@@ -26,7 +26,9 @@
 - For repository-wide or cross-cutting work, keep the ExecPlan in a clearly named Markdown file at the repo root or in a dedicated `plans/` subdirectory. For tightly scoped work, place it near the affected area when that improves locality.
 
 ## Project Structure & Module Organization
-- **`src/`**: Core Solidity contracts (e.g., `Counter.sol`). Keep new modules grouped by domain and include SPDX + pragma headers.
+- **`contracts/`**: Hardened onchain contracts, starting with the planned Logger. Follow `contracts/AGENTS.md` for local organization and validation guidance.
+- **`packages/`**: Hardened offchain libraries consumed by nodes. Follow `packages/AGENTS.md` for package-specific guidance.
+- **`src/`**: Existing Solidity contracts (e.g., `Counter.sol`). Keep modules grouped by domain and include SPDX + pragma headers.
 - **`script/`**: Deployment and automation scripts (e.g., `Counter.s.sol`, `DeploySafeWithOptimisticGovernor.s.sol`). Favor reusable helpers and parameterize via environment variables.
 - **`test/`**: Forge tests using `forge-std`’s `Test` base. Mirror contract names (`<Name>.t.sol`) and co-locate fixtures with the subject under test.
 - **`lib/`**: External dependencies (currently `forge-std`) managed through Foundry.
