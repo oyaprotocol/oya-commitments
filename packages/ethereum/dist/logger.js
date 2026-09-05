@@ -1,7 +1,7 @@
 import { isPlainObject, parseBytes } from '@oyaprotocol/utils';
 // Verified against contracts/src/Logger.sol with forge inspect and cast keccak.
 const LOGGER_SELECTOR = '0x41304fac'; // log(string)
-const LOGGER_EVENT_TOPIC = '0x0738f4da267a110d810e6e89fc59e46be6de0c37b1d5cd559b267dc3688e74e0'; // Log(address,string)
+const LOGGER_EVENT_TOPIC = '0xce2d845fcf02211a951a2153c1ddf64ec48ef6d54644ea188101f10018b871dc'; // Log(address,bytes32,string)
 const STRING_OFFSET = '20'.padStart(64, '0');
 function encodeLoggerCall(cid) {
     if (typeof cid !== 'string' || !cid.isWellFormed()) {
@@ -33,13 +33,14 @@ function decodeLoggerEvent(log, loggerAddress) {
     if (signature.toLowerCase() !== LOGGER_EVENT_TOPIC) {
         return null;
     }
-    if (log.topics.length !== 2) {
-        throw new Error('Logger event must have exactly two topics.');
+    if (log.topics.length !== 3) {
+        throw new Error('Logger event must have exactly three topics.');
     }
     const nodeTopic = parseBytes(log.topics[1], 'log.topics[1]', 32);
     if (nodeTopic.slice(2, 26) !== '0'.repeat(24)) {
         throw new Error('Logger event node address must have zero padding.');
     }
+    const cidKeccak256Hash = parseBytes(log.topics[2], 'log.topics[2]', 32);
     if (log.removed !== undefined && typeof log.removed !== 'boolean') {
         throw new TypeError('log.removed must be a boolean when provided.');
     }
@@ -72,6 +73,7 @@ function decodeLoggerEvent(log, loggerAddress) {
     }
     return {
         node: `0x${nodeTopic.slice(26)}`,
+        cidKeccak256Hash,
         cid,
         ...(log.removed === undefined ? {} : { removed: log.removed }),
     };

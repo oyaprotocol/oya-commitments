@@ -12,11 +12,14 @@ const input: LoggerEventInput = receiptLog;
 const event: LoggerEvent | null = decodeLoggerEvent(input, loggerAddress);
 if (event !== null) {
     const node: string = event.node;
+    const cidKeccak256Hash: string = event.cidKeccak256Hash;
     const cid: string = event.cid;
     const removed: boolean | undefined = event.removed;
     // @ts-expect-error Decoded event values are readonly.
     event.cid = 'changed';
-    void [node, cid, removed];
+    // @ts-expect-error Decoded hash values are readonly.
+    event.cidKeccak256Hash = 'changed';
+    void [node, cidKeccak256Hash, cid, removed];
 }
 
 // @ts-expect-error Call encoding requires a string.

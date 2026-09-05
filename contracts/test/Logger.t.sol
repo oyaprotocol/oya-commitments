@@ -115,9 +115,10 @@ contract LoggerTest is Test {
 
     function assertLog(Vm.Log memory entry, address node, string memory cid) internal view {
         assertEq(entry.emitter, address(logger));
-        assertEq(entry.topics.length, 2);
-        assertEq(entry.topics[0], keccak256("Log(address,string)"));
+        assertEq(entry.topics.length, 3);
+        assertEq(entry.topics[0], keccak256("Log(address,bytes32,string)"));
         assertEq(entry.topics[1], bytes32(uint256(uint160(node))));
+        assertEq(entry.topics[2], keccak256(bytes(cid)));
         assertEq(entry.data, abi.encode(cid));
         assertEq(abi.decode(entry.data, (string)), cid);
     }

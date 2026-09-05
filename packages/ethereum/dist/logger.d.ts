@@ -2,6 +2,7 @@ import type { EthereumReceiptLog } from './receipt-utils.js';
 type LoggerEventInput = Pick<EthereumReceiptLog, 'address' | 'topics' | 'data' | 'removed'>;
 interface LoggerEvent {
     readonly node: string;
+    readonly cidKeccak256Hash: string;
     readonly cid: string;
     readonly removed?: boolean;
 }
