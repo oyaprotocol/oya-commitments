@@ -3,7 +3,7 @@ import {
     assertPositiveInteger,
     combineAbortSignals,
     createTimeoutSignal,
-    invokeWithAbort,
+    throwIfSignalAborted,
     waitForRetryDelay,
 } from '@oyaprotocol/utils';
 import type { AbortSignalHandle, HttpConfig, HttpPostFetchLike } from '@oyaprotocol/utils';
@@ -98,9 +98,7 @@ async function ethWaitForTransactionReceipt({
     const deadlineMs = assertTimerMs(timeoutMs, 'timeoutMs');
     const pollDelayMs = assertTimerMs(pollIntervalMs, 'pollIntervalMs');
     const abortMessage = 'ethWaitForTransactionReceipt was aborted by the caller.';
-    if (signal?.aborted) {
-        throw new Error(abortMessage, { cause: signal.reason });
-    }
+    throwIfSignalAborted(signal, abortMessage, signal?.reason);
     const timeout = createTimeoutSignal(deadlineMs);
     let operation: AbortSignalHandle | undefined;
     let pollCount = 0;
@@ -109,16 +107,16 @@ async function ethWaitForTransactionReceipt({
         operation = combineAbortSignals([signal, timeout.signal]);
         const operationSignal = operation.signal;
         while (true) {
-            const result = await invokeWithAbort(() => {
-                pollCount += 1;
-                return ethGetTransactionReceipt({
-                    config,
-                    fetch,
-                    transactionHash: validatedHash,
-                    ...(id === undefined ? {} : { id }),
-                    ...(operationSignal === undefined ? {} : { signal: operationSignal }),
-                });
-            }, operationSignal);
+            throwIfSignalAborted(operationSignal, abortMessage, operationSignal?.reason);
+            pollCount += 1;
+            const result = await ethGetTransactionReceipt({
+                config,
+                fetch,
+                transactionHash: validatedHash,
+                ...(id === undefined ? {} : { id }),
+                ...(operationSignal === undefined ? {} : { signal: operationSignal }),
+            });
+            throwIfSignalAborted(operationSignal, abortMessage, operationSignal?.reason);
             attemptCount += result.attemptCount;
             if (result.receipt !== null) {
                 return { receipt: result.receipt, pollCount, attemptCount, response: result.response };
@@ -130,9 +128,7 @@ async function ethWaitForTransactionReceipt({
             });
         }
     } catch (error) {
-        if (signal?.aborted) {
-            throw new Error(abortMessage, { cause: signal.reason });
-        }
+        throwIfSignalAborted(signal, abortMessage, signal?.reason);
         if (timeout.signal?.aborted) {
             throw new EthereumTransactionReceiptTimeoutError(validatedHash, deadlineMs, pollCount, { cause: error });
         }
