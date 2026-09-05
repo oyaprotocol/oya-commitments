@@ -1,6 +1,6 @@
 import {
     assertBytes32HexString,
-    assertPositiveInteger,
+    assertTimerMs,
     combineAbortSignals,
     createTimeoutSignal,
     throwIfSignalAborted,
@@ -52,14 +52,6 @@ class EthereumTransactionReceiptTimeoutError extends Error {
         this.timeoutMs = timeoutMs;
         this.pollCount = pollCount;
     }
-}
-
-function assertTimerMs(value: unknown, name: string): number {
-    const duration = assertPositiveInteger(value, name);
-    if (duration > 2_147_483_647) {
-        throw new Error(`${name} must not exceed 2147483647 ms.`);
-    }
-    return duration;
 }
 
 async function ethGetTransactionReceipt({
@@ -139,7 +131,7 @@ async function ethWaitForTransactionReceipt({
     }
 }
 
-export { assertTimerMs, EthereumTransactionReceiptTimeoutError, ethGetTransactionReceipt, ethWaitForTransactionReceipt };
+export { EthereumTransactionReceiptTimeoutError, ethGetTransactionReceipt, ethWaitForTransactionReceipt };
 export type {
     EthGetTransactionReceiptOptions,
     EthGetTransactionReceiptResult,

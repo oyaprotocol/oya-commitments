@@ -25,6 +25,14 @@ interface RunWithRetryOptions<TResult> {
     run(context: RunWithRetryAttemptContext): Promise<TResult>;
 }
 
+function assertTimerMs(value: unknown, name: string): number {
+    const duration = assertPositiveInteger(value, name);
+    if (duration > 2_147_483_647) {
+        throw new Error(`${name} must not exceed 2147483647 ms.`);
+    }
+    return duration;
+}
+
 function createTimeoutSignal(timeoutMs: number): AbortSignalHandle {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error('Request timed out.')), timeoutMs);
@@ -242,6 +250,7 @@ async function runWithRetry<TResult>({
 }
 
 export {
+    assertTimerMs,
     combineAbortSignals,
     createTimeoutSignal,
     invokeWithAbort,

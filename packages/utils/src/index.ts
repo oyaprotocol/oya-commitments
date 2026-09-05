@@ -1,5 +1,6 @@
 export { assertCanonicalCid } from './cid-utils.js';
 export {
+    assertTimerMs,
     combineAbortSignals,
     createTimeoutSignal,
     invokeWithAbort,

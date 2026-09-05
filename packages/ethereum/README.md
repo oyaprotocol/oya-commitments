@@ -10,6 +10,7 @@ Ethereum JSON-RPC utilities for Oya kernel code. This package is a hardened kern
 
 - `createHttpConfig(options)`: validate explicit HTTP transport settings, re-exported from `@oyaprotocol/utils`.
 - `requestEthereumJsonRpc(options)`: send one JSON-RPC POST request with explicit config and injected `fetch`, returning the raw `result`, attempt count, id, and parsed response payload.
+- `createTransactionPreparer(options)`: configure a reusable EIP-1559 preparer that fetches transaction fields and invokes a host signer, without broadcasting.
 - `ethSendRawTransaction(options)`: submit a signed raw transaction and return the transaction hash with attempt metadata. Callers may pass `transactionHash` when they already know the hash, allowing the wrapper to verify duplicate-style retry errors with `eth_getTransactionByHash`.
 - `ethGetTransactionReceipt(options)`: look up a transaction receipt, returning `{ receipt, attemptCount, response }`. The receipt is `null` when unavailable, including pending or unknown transactions.
 - `ethWaitForTransactionReceipt(options)`: poll for a receipt with an explicit overall deadline, poll interval, and optional cancellation signal. Returns `{ receipt, pollCount, attemptCount, response }` with a non-null receipt.
@@ -39,10 +40,50 @@ Hosts own transaction signing, environment configuration, and RPC endpoint disco
 
 - `TransactionRequest`: readonly `to`, `data`, `value: bigint` (wei), and optional `signal`. It describes call intent; the host supplies the remaining transaction fields.
 - `SignedTransaction`: readonly signed `rawTransaction` and its `transactionHash`.
+- `UnsignedTransaction`: readonly `to`, `data`, `value`, `type: 2`, `chainId: bigint`, `nonce: number`, `gasLimit: bigint`, `maxFeePerGas: bigint`, and `maxPriorityFeePerGas: bigint`. The access list is empty. There is no embedded cancellation signal.
+- `TransactionSigner`: a readonly `address` and `signTransaction(transaction, signal?)` method returning `SignedTransaction`, synchronously or asynchronously. The host implements signing and must preserve all supplied fields, use the advertised account, and return without broadcasting.
 - `TransactionPreparer`: a callback from `TransactionRequest` to `SignedTransaction`, synchronously or asynchronously, without broadcasting.
 - `TransactionStage`: `'prepare' | 'submit' | 'receipt' | 'verify'`. Verification means the operation's checks after receiving a receipt, such as execution status and expected events.
 
 Logger uses these shared types and always requests `value: 0n`. Other callers can use the same host preparation callback with a nonzero value. These names replace `LoggerTransactionRequest`, `PreparedLoggerTransaction`, `PrepareLoggerTransaction`, and `LogCidStage`; update type imports accordingly.
+
+## Default Transaction Preparation
+
+`createTransactionPreparer(options)` in `src/transaction-preparer.ts` returns a `TransactionPreparer` compatible with `logCid` and the messages package's `publishAndLogSignedMessage`. The host supplies a `TransactionSigner`; no local wallet adapter, private-key handling, ethers, viem, or new dependency is included.
+
+```ts
+import { createTransactionPreparer, logCid } from '@oyaprotocol/ethereum';
+import type { TransactionSigner } from '@oyaprotocol/ethereum';
+
+declare const signer: TransactionSigner; // Implemented by the host's wallet/signing service.
+const transactionPreparer = createTransactionPreparer({
+    config: rpcConfig,
+    fetch: rpcFetch,
+    chainId: 1n, // The operator's expected network.
+    signer,
+    gasLimitMarginPercent: 20, // Default: 20% above the estimate, rounded up.
+    baseFeeMultiplier: 2, // Default: 2 * base fee + suggested priority fee.
+    limits: { gasLimit: 200_000n, feePerGas: 30_000_000_000n }, // Illustrative operator-chosen caps.
+    timeoutMs: 30_000, // Default: overall preparation deadline, including signing.
+    id: 'prepare-42', // Optional; preparation RPCs default to ID 1.
+});
+
+const logging = await logCid(cid, {
+    config: rpcConfig, fetch: rpcFetch, loggerContract,
+    nodeAddress: signer.address, // Direct account call in this example.
+    transactionPreparer, timeoutMs: 60_000, pollIntervalMs: 1_000, signal,
+});
+```
+
+Construction validates and snapshots configuration without making RPC calls. Each invocation validates and snapshots the call, checks `eth_chainId` against the configured positive bigint chain ID, reads `eth_getTransactionCount(address, "pending")`, obtains the latest block's base fee and gas limit, and reads `eth_maxPriorityFeePerGas`. It then calls `eth_estimateGas` against pending state with the signing address, recipient, calldata, value, chain ID, nonce, and selected fees. These methods follow the [Ethereum execution API](https://github.com/ethereum/execution-apis/tree/main/src/eth); the fee fields follow [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559).
+
+The gas limit is `ceil(estimate * (100 + gasLimitMarginPercent) / 100)`. The maximum fee per gas is `baseFee * baseFeeMultiplier + suggestedPriorityFee`; the priority fee is the RPC suggestion. The multiplier and margin are policy choices, not protocol requirements. Arithmetic uses bigint, and fee values are in wei per gas. Nonces above `Number.MAX_SAFE_INTEGER` reject before conversion for the signer. Both optional `limits` fields are ceilings: the factory rejects a selected value above a ceiling instead of reducing the gas buffer or fee suggestion. Omitting them adds no operator ceiling; the buffered gas limit must still fit the latest block's gas limit. A configured gas cap must be positive; a fee cap of zero is permitted. Networks without EIP-1559 base-fee data, unsupported RPC methods, malformed quantities, estimation errors, and out-of-range values reject before signing.
+
+The signer receives a frozen transaction and a separate signal combining caller cancellation with the overall deadline. Each RPC read uses the existing transport timeout/retry policy. The whole preparation has no retries, and the signer is called at most once per invocation. Signer errors propagate; timeout/cancellation stops waiting even when the signer ignores its signal, and late results are discarded. The host should honor the signal where its signing API permits. Aborting cannot undo an external signing request already started.
+
+The returned result is a frozen snapshot. The factory checks byte formatting, the type-2 prefix, and that the supplied hash equals Keccak-256 of the returned bytes, using the existing `@noble/hashes` dependency. It does not decode the transaction or recover the signing account: the host signer remains responsible for a valid signature, the advertised account, and exact transaction fields. Only ordinary type-2 calls with an empty access list are supported; contract creation, legacy transactions, blobs, and smart-wallet execution wrapping require a custom preparer. A wallet API that only signs and broadcasts together cannot implement this signing contract.
+
+**The host coordinates nonces across the complete prepare/submit/receipt lifecycle for each account.** Serialize that lifecycle for the initial implementation, including other users of the account, and reconcile uncertain submissions before proceeding. The factory does not reserve, cache, or increment nonces and does not coordinate different processes. It refreshes chain values on every call; preparation alone cannot guarantee unique nonces before submission. Existing submission retries resend retained signed bytes rather than calling the preparer again. The factory's `id` applies to its read RPCs; Logger's optional `id` separately controls submission and receipt requests.
 
 ## Transaction Receipts
 
@@ -145,7 +186,7 @@ const logging = await logCid(publication.cid, {
 // logging: { cid, transactionHash, receipt, event }
 ```
 
-`transactionPreparer` is a host-supplied `TransactionPreparer` function. It receives a frozen `{ to, data, value: 0n, signal? }` request describing the Logger call and returns `{ rawTransaction, transactionHash }`, synchronously or asynchronously. It must prepare and sign without broadcasting. The host supplies chain ID, nonce, fees, gas, and key or wallet access, and coordinates nonces across concurrent messages. It must return the correct hash for the signed transaction and preserve the requested call, including when routing through a contract wallet. The helper validates the returned hex shapes and checks the RPC's returned hash; it does not parse or independently verify the signed transaction.
+`transactionPreparer` is a host-supplied `TransactionPreparer` function, which can be created with `createTransactionPreparer` above. It receives a frozen `{ to, data, value: 0n, signal? }` request describing the Logger call and returns `{ rawTransaction, transactionHash }`, synchronously or asynchronously. It must prepare and sign without broadcasting. The host selects the chain and preparation policy, supplies wallet access, and coordinates nonces across concurrent messages. It must return the correct hash for the signed transaction and preserve the requested call, including when routing through a contract wallet. The Logger helper validates the returned hex shapes and checks the RPC's returned hash; it does not parse or independently verify the signed transaction.
 
 The optional `id` accepts a nonempty string or a safe integer, including zero. It uses the existing RPC validation and defaults to `1` when omitted. The same ID is forwarded to submission, retries and recovery lookups, and every receipt poll. Invalid IDs reject before transaction preparation. This identifier is RPC metadata and is separate from the signed transaction's hash.
 

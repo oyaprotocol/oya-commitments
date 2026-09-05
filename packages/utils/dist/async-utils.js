@@ -1,4 +1,11 @@
 import { assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, } from './validation-utils.js';
+function assertTimerMs(value, name) {
+    const duration = assertPositiveInteger(value, name);
+    if (duration > 2_147_483_647) {
+        throw new Error(`${name} must not exceed 2147483647 ms.`);
+    }
+    return duration;
+}
 function createTimeoutSignal(timeoutMs) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error('Request timed out.')), timeoutMs);
@@ -175,5 +182,5 @@ async function runWithRetry({ maxRetries, retryDelayMs, timeoutMs, signal, abort
     }
     throw normalizeError(lastError);
 }
-export { combineAbortSignals, createTimeoutSignal, invokeWithAbort, runWithRetry, throwIfSignalAborted, waitForRetryDelay, };
+export { assertTimerMs, combineAbortSignals, createTimeoutSignal, invokeWithAbort, runWithRetry, throwIfSignalAborted, waitForRetryDelay, };
 //# sourceMappingURL=async-utils.js.map

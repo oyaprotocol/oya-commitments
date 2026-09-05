@@ -3,6 +3,7 @@ import { bytesToHex } from '@noble/hashes/utils.js';
 import {
     assertCanonicalCid,
     assertHexData,
+    assertTimerMs,
     createHttpConfig,
     invokeWithAbort,
     isPlainObject,
@@ -11,7 +12,7 @@ import {
 } from '@oyaprotocol/utils';
 
 import type { EthereumReceiptLog, EthereumTransactionReceipt } from './receipt-utils.js';
-import { assertTimerMs, ethWaitForTransactionReceipt } from './receipts.js';
+import { ethWaitForTransactionReceipt } from './receipts.js';
 import type { EthWaitForTransactionReceiptOptions } from './receipts.js';
 import { normalizeJsonRpcId } from './request-utils.js';
 import { ethSendRawTransaction } from './transactions.js';

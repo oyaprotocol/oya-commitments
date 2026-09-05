@@ -30,8 +30,7 @@ declare class EthereumTransactionReceiptTimeoutError extends Error {
     readonly pollCount: number;
     constructor(transactionHash: string, timeoutMs: number, pollCount: number, options?: ErrorOptions);
 }
-declare function assertTimerMs(value: unknown, name: string): number;
 declare function ethGetTransactionReceipt({ config, fetch, transactionHash, id, signal, }: EthGetTransactionReceiptOptions): Promise<EthGetTransactionReceiptResult>;
 declare function ethWaitForTransactionReceipt({ config, fetch, transactionHash, id, signal, timeoutMs, pollIntervalMs, }: EthWaitForTransactionReceiptOptions): Promise<EthWaitForTransactionReceiptResult>;
-export { assertTimerMs, EthereumTransactionReceiptTimeoutError, ethGetTransactionReceipt, ethWaitForTransactionReceipt };
+export { EthereumTransactionReceiptTimeoutError, ethGetTransactionReceipt, ethWaitForTransactionReceipt };
 export type { EthGetTransactionReceiptOptions, EthGetTransactionReceiptResult, EthWaitForTransactionReceiptOptions, EthWaitForTransactionReceiptResult, };

@@ -37,6 +37,7 @@ Small shared utilities for hardened Oya kernel packages.
 
 ## Async Utilities
 
+- `assertTimerMs(value, name)`: validates a positive integer duration up to 2,147,483,647 ms, avoiding timer overflow.
 - `AbortSignalHandle`
 - `RunWithRetryAttemptContext`
 - `RunWithRetryOptions`

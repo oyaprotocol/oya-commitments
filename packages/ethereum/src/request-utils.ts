@@ -150,6 +150,13 @@ function normalizeJsonRpcId(id: unknown): string | number {
     throw new Error('id must be a non-empty string or safe integer.');
 }
 
+function parseQuantity(value: unknown, name: string): bigint {
+    if (typeof value !== 'string' || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(value)) {
+        throw new Error(`${name} must be an Ethereum quantity hex string without leading zeros.`);
+    }
+    return BigInt(value);
+}
+
 function buildJsonRpcBody({
     id,
     method,
@@ -316,6 +323,7 @@ async function requestEthereumJsonRpc<TResult = unknown>(
 export {
     EthereumJsonRpcError,
     normalizeJsonRpcId,
+    parseQuantity,
     requestEthereumJsonRpc,
     requestEthereumJsonRpcWithCustomRetryPolicy,
 };
