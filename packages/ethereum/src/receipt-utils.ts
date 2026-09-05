@@ -150,5 +150,5 @@ function parseTransactionReceipt(value: unknown, transactionHash: string): Ether
     };
 }
 
-export { parseTransactionReceipt };
+export { parseBytes, parseTransactionReceipt };
 export type { EthereumReceiptLog, EthereumTransactionReceipt };

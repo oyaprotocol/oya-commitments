@@ -104,5 +104,5 @@ function parseTransactionReceipt(value, transactionHash) {
         }),
     };
 }
-export { parseTransactionReceipt };
+export { parseBytes, parseTransactionReceipt };
 //# sourceMappingURL=receipt-utils.js.map
