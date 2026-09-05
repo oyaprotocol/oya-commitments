@@ -12,7 +12,9 @@ declare const error: PublishAndLogSignedMessageError;
 
 const callback: AcceptedSignedMessageHandler<PublishAndLogSignedMessageResult> = (accepted) =>
     publishAndLogSignedMessage(accepted, options);
-const direct: Promise<PublishAndLogSignedMessageResult> = publishAndLogSignedMessage(message, options);
+const direct: Promise<PublishAndLogSignedMessageResult> = publishAndLogSignedMessage(message, {
+    ...options, logger: { ...options.logger, id: 'message-flow' },
+});
 const result = await handleSignedMessage(request, {
     authorize, maxBodyBytes: 4096, maxTextBytes: 1024,
     onAcceptedMessage: (accepted) => publishAndLogSignedMessage(accepted, options),

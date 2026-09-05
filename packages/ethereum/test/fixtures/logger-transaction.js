@@ -26,10 +26,10 @@ export function createReceipt(overrides = {}) {
     };
 }
 
-export function response(result) {
+export function response(result, id = 1) {
     return {
         ok: true, status: 200, statusText: 'OK',
-        text: async () => JSON.stringify({ jsonrpc: '2.0', id: 1, result }),
+        text: async () => JSON.stringify({ jsonrpc: '2.0', id, result }),
     };
 }
 

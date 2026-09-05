@@ -233,6 +233,7 @@ const result = await handleSignedMessage(request, {
             transactionPreparer,
             timeoutMs: 60_000,
             pollIntervalMs: 1_000,
+            id: 'message-42', // Optional JSON-RPC request ID for the logging stage.
         },
         signal,
     }),

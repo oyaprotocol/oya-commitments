@@ -315,6 +315,7 @@ async function requestEthereumJsonRpc<TResult = unknown>(
 
 export {
     EthereumJsonRpcError,
+    normalizeJsonRpcId,
     requestEthereumJsonRpc,
     requestEthereumJsonRpcWithCustomRetryPolicy,
 };

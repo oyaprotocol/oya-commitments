@@ -13,6 +13,7 @@ import {
 import type { EthereumReceiptLog, EthereumTransactionReceipt } from './receipt-utils.js';
 import { assertTimerMs, ethWaitForTransactionReceipt } from './receipts.js';
 import type { EthWaitForTransactionReceiptOptions } from './receipts.js';
+import { normalizeJsonRpcId } from './request-utils.js';
 import { ethSendRawTransaction } from './transactions.js';
 import type { TransactionPreparer, TransactionStage } from './transactions.js';
 
@@ -30,7 +31,7 @@ interface LoggerEvent {
     readonly removed?: boolean;
 }
 
-interface LogCidOptions extends Omit<EthWaitForTransactionReceiptOptions, 'transactionHash' | 'id'> {
+interface LogCidOptions extends Omit<EthWaitForTransactionReceiptOptions, 'transactionHash'> {
     /** 20-byte address of the deployed Logger contract. */
     loggerContract: string;
     /** Address Logger should record as its immediate caller; can be a contract wallet. */
@@ -156,7 +157,7 @@ async function logCid(
     cid: string,
     {
         config, fetch, loggerContract, nodeAddress, transactionPreparer,
-        timeoutMs, pollIntervalMs, signal,
+        timeoutMs, pollIntervalMs, id, signal,
     }: LogCidOptions
 ): Promise<LogCidResult> {
     const data = encodeLoggerCall(cid);
@@ -165,6 +166,7 @@ async function logCid(
     const rpcConfig = createHttpConfig(config);
     const deadlineMs = assertTimerMs(timeoutMs, 'timeoutMs');
     const pollDelayMs = assertTimerMs(pollIntervalMs, 'pollIntervalMs');
+    const requestId = normalizeJsonRpcId(id);
     if (typeof fetch !== 'function' || typeof transactionPreparer !== 'function') {
         throw new TypeError('fetch and transactionPreparer must be functions.');
     }
@@ -188,12 +190,12 @@ async function logCid(
 
         stage = 'submit';
         await ethSendRawTransaction({
-            config: rpcConfig, fetch, rawTransaction, transactionHash, ...cancellation,
+            config: rpcConfig, fetch, rawTransaction, transactionHash, id: requestId, ...cancellation,
         });
 
         stage = 'receipt';
         const observed = await ethWaitForTransactionReceipt({
-            config: rpcConfig, fetch, transactionHash,
+            config: rpcConfig, fetch, transactionHash, id: requestId,
             timeoutMs: deadlineMs, pollIntervalMs: pollDelayMs, ...cancellation,
         });
         receipt = observed.receipt;

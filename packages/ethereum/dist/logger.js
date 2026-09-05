@@ -2,6 +2,7 @@ import { keccak_256 } from '@noble/hashes/sha3.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { assertCanonicalCid, assertHexData, createHttpConfig, invokeWithAbort, isPlainObject, parseBytes, throwIfSignalAborted, } from '@oyaprotocol/utils';
 import { assertTimerMs, ethWaitForTransactionReceipt } from './receipts.js';
+import { normalizeJsonRpcId } from './request-utils.js';
 import { ethSendRawTransaction } from './transactions.js';
 // Verified against contracts/src/Logger.sol with forge inspect and cast keccak.
 const LOGGER_SELECTOR = '0x41304fac'; // log(string)
@@ -103,13 +104,14 @@ function decodeLoggerEvent(log, loggerContract) {
         ...(log.removed === undefined ? {} : { removed: log.removed }),
     };
 }
-async function logCid(cid, { config, fetch, loggerContract, nodeAddress, transactionPreparer, timeoutMs, pollIntervalMs, signal, }) {
+async function logCid(cid, { config, fetch, loggerContract, nodeAddress, transactionPreparer, timeoutMs, pollIntervalMs, id, signal, }) {
     const data = encodeLoggerCall(cid);
     const to = parseBytes(loggerContract, 'loggerContract', 20);
     const node = parseBytes(nodeAddress, 'nodeAddress', 20);
     const rpcConfig = createHttpConfig(config);
     const deadlineMs = assertTimerMs(timeoutMs, 'timeoutMs');
     const pollDelayMs = assertTimerMs(pollIntervalMs, 'pollIntervalMs');
+    const requestId = normalizeJsonRpcId(id);
     if (typeof fetch !== 'function' || typeof transactionPreparer !== 'function') {
         throw new TypeError('fetch and transactionPreparer must be functions.');
     }
@@ -129,11 +131,11 @@ async function logCid(cid, { config, fetch, loggerContract, nodeAddress, transac
         throwIfSignalAborted(signal, abortMessage, signal?.reason);
         stage = 'submit';
         await ethSendRawTransaction({
-            config: rpcConfig, fetch, rawTransaction, transactionHash, ...cancellation,
+            config: rpcConfig, fetch, rawTransaction, transactionHash, id: requestId, ...cancellation,
         });
         stage = 'receipt';
         const observed = await ethWaitForTransactionReceipt({
-            config: rpcConfig, fetch, transactionHash,
+            config: rpcConfig, fetch, transactionHash, id: requestId,
             timeoutMs: deadlineMs, pollIntervalMs: pollDelayMs, ...cancellation,
         });
         receipt = observed.receipt;

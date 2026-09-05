@@ -57,6 +57,7 @@ test('the allowlisted message callback awaits publication, signing, submission, 
     const mined = Promise.withResolvers();
     const stages = [];
     const options = createOptions();
+    options.logger.id = 'message-flow';
     options.ipfs.fetch = async (url, request) => {
         stages.push('publish');
         assert.deepEqual(Object.fromEntries(new URL(url).searchParams), fixtures.options);
@@ -75,16 +76,17 @@ test('the allowlisted message callback awaits publication, signing, submission, 
         return signed.promise;
     };
     options.logger.fetch = async (_url, request) => {
-        const { method, params } = JSON.parse(request.body);
+        const { method, params, id } = JSON.parse(request.body);
+        assert.equal(id, 'message-flow');
         stages.push(method);
         if (method === 'eth_sendRawTransaction') {
             assert.deepEqual(params, [rawTransaction]);
-            return response(transactionHash);
+            return response(transactionHash, id);
         }
         assert.deepEqual(params, [transactionHash]);
         receiptRequested.resolve();
         await mined.promise;
-        return response(createReceipt());
+        return response(createReceipt(), id);
     };
     const request = createRequest();
     // Incoming JSON formatting/order is irrelevant; the authenticated payload is preserved.

@@ -139,12 +139,15 @@ const logging = await logCid(publication.cid, {
     transactionPreparer,
     timeoutMs: 60_000,
     pollIntervalMs: 1_000,
+    id: 'message-42', // Optional JSON-RPC request ID.
     signal,
 });
 // logging: { cid, transactionHash, receipt, event }
 ```
 
 `transactionPreparer` is a host-supplied `TransactionPreparer` function. It receives a frozen `{ to, data, value: 0n, signal? }` request describing the Logger call and returns `{ rawTransaction, transactionHash }`, synchronously or asynchronously. It must prepare and sign without broadcasting. The host supplies chain ID, nonce, fees, gas, and key or wallet access, and coordinates nonces across concurrent messages. It must return the correct hash for the signed transaction and preserve the requested call, including when routing through a contract wallet. The helper validates the returned hex shapes and checks the RPC's returned hash; it does not parse or independently verify the signed transaction.
+
+The optional `id` accepts a nonempty string or a safe integer, including zero. It uses the existing RPC validation and defaults to `1` when omitted. The same ID is forwarded to submission, retries and recovery lookups, and every receipt poll. Invalid IDs reject before transaction preparation. This identifier is RPC metadata and is separate from the signed transaction's hash.
 
 The helper snapshots the signed bytes and hash, submits through `ethSendRawTransaction`, then polls through `ethWaitForTransactionReceipt`. It prepares only once and adds no outer retry loop; submission retries reuse the exact signed bytes. `nodeAddress` is Logger's immediate caller, not necessarily the message signer or the outer transaction sender. A successful result requires receipt status `success` and a matching event from `loggerContract`, with the expected node and exact CID, valid CID/hash correspondence, and `removed !== true`.
 

@@ -26,6 +26,10 @@ const payableRequest: TransactionRequest = {
 };
 const payablePrepared = prepare(payableRequest);
 const result: Promise<LogCidResult> = logCid(cid, { ...options, transactionPreparer: prepare });
+const stringIdOptions: LogCidOptions = { ...options, id: 'message-42' };
+const numericIdOptions: LogCidOptions = { ...options, id: 0 };
+// @ts-expect-error JSON-RPC IDs must be strings or numbers.
+const invalidIdOptions: LogCidOptions = { ...options, id: true };
 const hash: string | null = failure.transactionHash;
 const stage: TransactionStage = failure.stage;
 
@@ -35,4 +39,5 @@ const incompletePrepare: TransactionPreparer = () => ({ rawTransaction: '0x02abc
 logCid(cid, { config: options.config, fetch: options.fetch, loggerContract: options.loggerContract, nodeAddress: options.nodeAddress, timeoutMs: 1000, pollIntervalMs: 1 });
 // @ts-expect-error No implicit expected node is inferred from the message signer.
 logCid(cid, { config: options.config, fetch: options.fetch, loggerContract: options.loggerContract, transactionPreparer: prepare, timeoutMs: 1000, pollIntervalMs: 1 });
-void [asyncPrepare, incompletePrepare, payablePrepared, result, hash, stage];
+void [asyncPrepare, incompletePrepare, payablePrepared, result, hash, stage,
+    stringIdOptions, numericIdOptions, invalidIdOptions];

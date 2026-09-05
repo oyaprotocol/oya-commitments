@@ -49,6 +49,24 @@ test('logCid prepares once, submits, waits, and verifies the expected Logger eve
     assert.deepEqual(result.event, { node, cid: sample.cid, cidKeccak256Hash: sample.cidKeccak256Hash, removed: false });
 });
 
+test('logCid forwards custom string and numeric IDs through submission and every receipt poll', async () => {
+    for (const id of ['message-42', 0, 73, undefined]) {
+        const ids = [];
+        let polls = 0;
+        const result = await logCid(sample.cid, createOptions({
+            ...(id === undefined ? {} : { id }),
+            fetch: async (_url, request) => {
+                const body = JSON.parse(request.body);
+                ids.push(body.id);
+                if (body.method === 'eth_sendRawTransaction') return response(transactionHash, body.id);
+                return response(++polls === 1 ? null : createReceipt(), body.id);
+            },
+        }));
+        assert.deepEqual(ids, [id ?? 1, id ?? 1, id ?? 1]);
+        assert.equal(result.transactionHash, transactionHash);
+    }
+});
+
 test('logCid validates configuration before preparing or broadcasting a transaction', async () => {
     let calls = 0;
     for (const overrides of [
@@ -56,6 +74,8 @@ test('logCid validates configuration before preparing or broadcasting a transact
         { timeoutMs: 0 }, { timeoutMs: 2_147_483_648 }, { pollIntervalMs: 0 },
         { pollIntervalMs: 2_147_483_648 }, { config: {} }, { fetch: undefined },
         { transactionPreparer: undefined },
+        ...[null, '', ' ', true, {}, [], 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]
+            .map((id) => ({ id })),
     ]) {
         await assert.rejects(logCid(sample.cid, createOptions({
             transactionPreparer: () => { calls++; throw new Error('Unexpected preparation'); },
@@ -98,20 +118,22 @@ test('logCid reuses signed bytes and the known hash through submission retry rec
     const sends = [];
     let preparations = 0;
     const options = createOptions({
+        id: 'submission-recovery',
         transactionPreparer: () => { preparations++; return prepared; },
         fetch: async (_url, request) => {
-            const { method, params } = JSON.parse(request.body);
+            const { method, params, id } = JSON.parse(request.body);
+            assert.equal(id, 'submission-recovery');
             if (method === 'eth_sendRawTransaction') {
                 sends.push(params[0]);
                 prepared.rawTransaction = '0xff';
                 prepared.transactionHash = `0x${'ff'.repeat(32)}`;
                 if (sends.length === 1) return { ok: false, status: 503, statusText: 'Unavailable', text: async () => '' };
                 return { ok: true, status: 200, statusText: 'OK', text: async () => JSON.stringify({
-                    jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'already known' },
+                    jsonrpc: '2.0', id, error: { code: -32000, message: 'already known' },
                 }) };
             }
             assert.deepEqual(params, [transactionHash]);
-            return response(method === 'eth_getTransactionByHash' ? { hash: transactionHash } : createReceipt());
+            return response(method === 'eth_getTransactionByHash' ? { hash: transactionHash } : createReceipt(), id);
         },
     });
     options.config = { ...options.config, maxRetries: 1 };

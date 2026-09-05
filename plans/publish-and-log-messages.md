@@ -45,8 +45,17 @@ information to resume without blindly sending another transaction.
   caller `nodeAddress` throughout the API, fixtures, and examples. Build, all
   119 Ethereum/messages tests, both consumer type suites, package imports, and
   whitespace checks passed.
+- [x] 2026-09-05: Exposed optional JSON-RPC `id` in `LogCidOptions`, reused ID
+  validation before signing, and forwarded it through submission, recovery,
+  and polling. All 120 Ethereum/messages tests, build, both consumer type
+  suites, package imports, and whitespace checks passed. Tests cover strings,
+  numeric zero, the omitted default, invalid IDs, and the message callback.
 
 ## Surprises & Discoveries
+
+- `normalizeJsonRpcId` already defines the RPC ID rules and default. Logger
+  reuses it internally before preparation, avoiding duplicate validation and
+  unnecessary signing when a host provides an invalid ID.
 
 - Ingress already freezes the authorized message and invokes its callback once,
   awaiting completion. Rejected requests never reach that callback.
@@ -65,6 +74,12 @@ information to resume without blindly sending another transaction.
   signer rejects the flow and prevents late signed bytes from being broadcast.
 
 ## Decision Log
+
+- 2026-09-05 / user and Codex: Expose optional `id` in `LogCidOptions`, omitting
+  only `transactionHash` from receipt-wait options. Validate the ID with the
+  existing RPC helper and forward it through submission, retries/recovery, and
+  every receipt poll. Omitted IDs retain default `1`; IDs are metadata, separate
+  from signed transaction hashes.
 
 - 2026-09-05 / Codex: Put `logCid(cid, options)` in
   a separate module initially. The user subsequently requested consolidating
@@ -92,6 +107,12 @@ information to resume without blindly sending another transaction.
   No rollback, automatic full-flow retry, or durable storage is introduced.
 
 ## Outcomes & Retrospective
+
+The later request-ID addition is complete. Hosts can supply a nonblank string
+or safe integer through `LogCidOptions.id` or the message handler's `logger.id`.
+The same ID follows all RPC calls in that logging operation; omitting it retains
+default `1`. A new behavioral test and extended recovery/ingress tests pass in
+the 120-test Ethereum/messages suite. Existing signing and event checks are unchanged.
 
 Complete. `logCid` and
 `publishAndLogSignedMessage` are exported with their types and progress-bearing
