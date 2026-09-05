@@ -38,6 +38,7 @@ export {
     assertNonEmptyString,
     assertNonNegativeInteger,
     assertPositiveInteger,
+    assertTimerMs,
     isPlainObject,
     parseBytes,
 } from './validation-utils.js';

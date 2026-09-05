@@ -16,6 +16,7 @@ Small shared utilities for hardened Oya kernel packages.
 - `assertHexString(value, label)`
 - `assertPositiveInteger(value, label)`
 - `assertNonNegativeInteger(value, label)`
+- `assertTimerMs(value, name)`: validates a positive integer duration up to 2,147,483,647 ms, avoiding timer overflow.
 - `assertHeadersObject(headers, label, options)`
 - `isPlainObject(value)`
 - `parseBytes(value, name, size?)`: validates `0x`-prefixed, byte-aligned hex, optionally requiring an exact byte count. Returns the original string without trimming; accepts `0x` when no size is required.

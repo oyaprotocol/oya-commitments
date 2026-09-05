@@ -16,6 +16,13 @@ function assertNonNegativeInteger(value, label) {
     }
     return value;
 }
+function assertTimerMs(value, name) {
+    const duration = assertPositiveInteger(value, name);
+    if (duration > 2_147_483_647) {
+        throw new Error(`${name} must not exceed 2147483647 ms.`);
+    }
+    return duration;
+}
 function isPlainObject(value) {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) {
         return false;
@@ -76,5 +83,5 @@ function parseBytes(value, name, size) {
     }
     return value;
 }
-export { assertAsciiBytes, assertBytes32HexString, assertHeadersObject, assertHexData, assertHexString, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, isPlainObject, parseBytes, };
+export { assertAsciiBytes, assertBytes32HexString, assertHeadersObject, assertHexData, assertHexString, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, assertTimerMs, isPlainObject, parseBytes, };
 //# sourceMappingURL=validation-utils.js.map

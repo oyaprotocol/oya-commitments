@@ -35,6 +35,27 @@ interface SignedTransaction {
     readonly transactionHash: string;
 }
 
+/** Fully specified EIP-1559 call with an empty access list. */
+interface UnsignedTransaction extends Omit<TransactionRequest, 'signal'> {
+    readonly type: 2;
+    readonly chainId: bigint;
+    /** Nonces outside the safe integer range are rejected before signing. */
+    readonly nonce: number;
+    readonly gasLimit: bigint;
+    readonly maxFeePerGas: bigint;
+    readonly maxPriorityFeePerGas: bigint;
+}
+
+interface TransactionSigner {
+    /** Account signing the outer Ethereum transaction. */
+    readonly address: string;
+    /** Preserve all supplied fields and sign without broadcasting. */
+    signTransaction(
+        transaction: Readonly<UnsignedTransaction>,
+        signal?: AbortSignal,
+    ): SignedTransaction | PromiseLike<SignedTransaction>;
+}
+
 /** Prepare and sign the requested call without broadcasting it. */
 type TransactionPreparer = (
     request: TransactionRequest
@@ -277,6 +298,8 @@ export {
 export type {
     TransactionRequest,
     SignedTransaction,
+    UnsignedTransaction,
+    TransactionSigner,
     TransactionPreparer,
     TransactionStage,
     EthSendRawTransactionOptions,

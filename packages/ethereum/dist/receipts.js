@@ -1,4 +1,4 @@
-import { assertBytes32HexString, assertPositiveInteger, combineAbortSignals, createTimeoutSignal, throwIfSignalAborted, waitForRetryDelay, } from '@oyaprotocol/utils';
+import { assertBytes32HexString, assertTimerMs, combineAbortSignals, createTimeoutSignal, throwIfSignalAborted, waitForRetryDelay, } from '@oyaprotocol/utils';
 import { parseTransactionReceipt } from './receipt-utils.js';
 import { requestEthereumJsonRpc } from './request-utils.js';
 class EthereumTransactionReceiptTimeoutError extends Error {
@@ -12,13 +12,6 @@ class EthereumTransactionReceiptTimeoutError extends Error {
         this.timeoutMs = timeoutMs;
         this.pollCount = pollCount;
     }
-}
-function assertTimerMs(value, name) {
-    const duration = assertPositiveInteger(value, name);
-    if (duration > 2_147_483_647) {
-        throw new Error(`${name} must not exceed 2147483647 ms.`);
-    }
-    return duration;
 }
 async function ethGetTransactionReceipt({ config, fetch, transactionHash, id, signal, }) {
     const validatedHash = assertBytes32HexString(transactionHash, 'transactionHash');
@@ -83,5 +76,5 @@ async function ethWaitForTransactionReceipt({ config, fetch, transactionHash, id
         timeout.cleanup?.();
     }
 }
-export { assertTimerMs, EthereumTransactionReceiptTimeoutError, ethGetTransactionReceipt, ethWaitForTransactionReceipt };
+export { EthereumTransactionReceiptTimeoutError, ethGetTransactionReceipt, ethWaitForTransactionReceipt };
 //# sourceMappingURL=receipts.js.map

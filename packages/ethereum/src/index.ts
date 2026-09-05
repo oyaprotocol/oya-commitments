@@ -15,11 +15,15 @@ export {
 export type {
     TransactionRequest,
     SignedTransaction,
+    UnsignedTransaction,
+    TransactionSigner,
     TransactionPreparer,
     TransactionStage,
     EthSendRawTransactionOptions,
     EthSendRawTransactionResult,
 } from './transactions.js';
+export { createTransactionPreparer } from './transaction-preparer.js';
+export type { CreateTransactionPreparerOptions } from './transaction-preparer.js';
 export {
     EthereumTransactionReceiptTimeoutError,
     ethGetTransactionReceipt,
