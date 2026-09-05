@@ -1,11 +1,11 @@
 export { createHttpConfig, HttpStatusError } from '@oyaprotocol/utils';
 export type { CreateHttpConfigOptions, HttpConfig, HttpFetchLike, HttpPostFetchLike, HttpPostFetchOptions, HttpStatusErrorOptions, HttpTextResponse, } from '@oyaprotocol/utils';
 export { EthereumRawTransactionRecoveryError, ethSendRawTransaction, } from './transactions.js';
-export type { EthSendRawTransactionOptions, EthSendRawTransactionResult, } from './transactions.js';
+export type { TransactionRequest, SignedTransaction, TransactionPreparer, TransactionStage, EthSendRawTransactionOptions, EthSendRawTransactionResult, } from './transactions.js';
 export { EthereumTransactionReceiptTimeoutError, ethGetTransactionReceipt, ethWaitForTransactionReceipt, } from './receipts.js';
 export type { EthGetTransactionReceiptOptions, EthGetTransactionReceiptResult, EthWaitForTransactionReceiptOptions, EthWaitForTransactionReceiptResult, } from './receipts.js';
 export type { EthereumReceiptLog, EthereumTransactionReceipt } from './receipt-utils.js';
-export { encodeLoggerCall, decodeLoggerEvent, hashLoggerCid } from './logger.js';
-export type { LoggerEventInput, LoggerEvent } from './logger.js';
+export { encodeLoggerCall, decodeLoggerEvent, hashLoggerCid, logCid, LogCidError } from './logger.js';
+export type { LoggerEventInput, LoggerEvent, LogCidOptions, LogCidResult, } from './logger.js';
 export { EthereumJsonRpcError, requestEthereumJsonRpc, } from './request-utils.js';
 export type { RequestEthereumJsonRpcOptions, RequestEthereumJsonRpcResult, } from './request-utils.js';

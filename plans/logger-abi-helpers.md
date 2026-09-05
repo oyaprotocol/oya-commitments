@@ -203,7 +203,7 @@ Reference: [Solidity ABI specification](https://docs.soliditylang.org/en/latest/
 ## Interfaces and Dependencies
 
     encodeLoggerCall(cid: string): string
-    decodeLoggerEvent(log: LoggerEventInput, loggerAddress: string): LoggerEvent | null
+    decodeLoggerEvent(log: LoggerEventInput, loggerContract: string): LoggerEvent | null
 
 `LoggerEventInput` selects `address`, `topics`, `data`, and optional `removed`
 from `EthereumReceiptLog`. `LoggerEvent` contains readonly `node`, `cidKeccak256Hash`, `cid`, and

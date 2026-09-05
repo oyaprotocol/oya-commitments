@@ -83,5 +83,5 @@ async function ethWaitForTransactionReceipt({ config, fetch, transactionHash, id
         timeout.cleanup?.();
     }
 }
-export { EthereumTransactionReceiptTimeoutError, ethGetTransactionReceipt, ethWaitForTransactionReceipt };
+export { assertTimerMs, EthereumTransactionReceiptTimeoutError, ethGetTransactionReceipt, ethWaitForTransactionReceipt };
 //# sourceMappingURL=receipts.js.map

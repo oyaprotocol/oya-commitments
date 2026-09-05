@@ -13,6 +13,10 @@ export {
     ethSendRawTransaction,
 } from './transactions.js';
 export type {
+    TransactionRequest,
+    SignedTransaction,
+    TransactionPreparer,
+    TransactionStage,
     EthSendRawTransactionOptions,
     EthSendRawTransactionResult,
 } from './transactions.js';
@@ -28,8 +32,11 @@ export type {
     EthWaitForTransactionReceiptResult,
 } from './receipts.js';
 export type { EthereumReceiptLog, EthereumTransactionReceipt } from './receipt-utils.js';
-export { encodeLoggerCall, decodeLoggerEvent, hashLoggerCid } from './logger.js';
-export type { LoggerEventInput, LoggerEvent } from './logger.js';
+export { encodeLoggerCall, decodeLoggerEvent, hashLoggerCid, logCid, LogCidError } from './logger.js';
+export type {
+    LoggerEventInput, LoggerEvent,
+    LogCidOptions, LogCidResult,
+} from './logger.js';
 export {
     EthereumJsonRpcError,
     requestEthereumJsonRpc,

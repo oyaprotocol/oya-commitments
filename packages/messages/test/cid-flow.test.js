@@ -27,9 +27,9 @@ test('a signed message uses the same canonical CID for publication, Logger looku
     assert.equal(encodeLoggerCall(result.cid), event.calldata);
     assert.equal(hashLoggerCid(result.cid), event.cidKeccak256Hash);
     const decoded = decodeLoggerEvent({
-        address: logger.loggerAddress,
+        address: logger.loggerContract,
         topics: [...logger.topics, event.cidKeccak256Hash], data: event.data,
-    }, logger.loggerAddress);
+    }, logger.loggerContract);
     assert.equal(decoded.cid, result.cid);
 
     for (const read of [readIpfsBytes, readIpfsPublicGatewayBytes]) {

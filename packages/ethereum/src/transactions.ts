@@ -21,6 +21,28 @@ const RAW_TRANSACTION_DUPLICATE_MESSAGES = [
     'nonce too low',
 ];
 
+/** Call intent; the host supplies chain, nonce, gas, fees, and signing. */
+interface TransactionRequest {
+    readonly to: string;
+    readonly data: string;
+    /** Native currency amount in wei. */
+    readonly value: bigint;
+    readonly signal?: AbortSignal;
+}
+
+interface SignedTransaction {
+    readonly rawTransaction: string;
+    readonly transactionHash: string;
+}
+
+/** Prepare and sign the requested call without broadcasting it. */
+type TransactionPreparer = (
+    request: TransactionRequest
+) => SignedTransaction | PromiseLike<SignedTransaction>;
+
+/** Verify covers operation-specific checks after receipt observation. */
+type TransactionStage = 'prepare' | 'submit' | 'receipt' | 'verify';
+
 interface EthSendRawTransactionOptions {
     config: HttpConfig;
     fetch: HttpPostFetchLike<string>;
@@ -253,6 +275,10 @@ export {
     ethSendRawTransaction,
 };
 export type {
+    TransactionRequest,
+    SignedTransaction,
+    TransactionPreparer,
+    TransactionStage,
     EthSendRawTransactionOptions,
     EthSendRawTransactionResult,
 };

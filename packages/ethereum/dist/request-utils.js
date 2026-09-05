@@ -223,5 +223,5 @@ async function requestEthereumJsonRpcWithCustomRetryPolicy({ config, fetch, meth
 async function requestEthereumJsonRpc(options) {
     return await requestEthereumJsonRpcWithCustomRetryPolicy(options, shouldRetryMethod);
 }
-export { EthereumJsonRpcError, requestEthereumJsonRpc, requestEthereumJsonRpcWithCustomRetryPolicy, };
+export { EthereumJsonRpcError, normalizeJsonRpcId, requestEthereumJsonRpc, requestEthereumJsonRpcWithCustomRetryPolicy, };
 //# sourceMappingURL=request-utils.js.map

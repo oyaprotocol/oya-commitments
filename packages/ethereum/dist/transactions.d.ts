@@ -1,5 +1,21 @@
 import type { HttpConfig, HttpPostFetchLike } from '@oyaprotocol/utils';
 import { EthereumJsonRpcError } from './request-utils.js';
+/** Call intent; the host supplies chain, nonce, gas, fees, and signing. */
+interface TransactionRequest {
+    readonly to: string;
+    readonly data: string;
+    /** Native currency amount in wei. */
+    readonly value: bigint;
+    readonly signal?: AbortSignal;
+}
+interface SignedTransaction {
+    readonly rawTransaction: string;
+    readonly transactionHash: string;
+}
+/** Prepare and sign the requested call without broadcasting it. */
+type TransactionPreparer = (request: TransactionRequest) => SignedTransaction | PromiseLike<SignedTransaction>;
+/** Verify covers operation-specific checks after receipt observation. */
+type TransactionStage = 'prepare' | 'submit' | 'receipt' | 'verify';
 interface EthSendRawTransactionOptions {
     config: HttpConfig;
     fetch: HttpPostFetchLike<string>;
@@ -29,4 +45,4 @@ declare class EthereumRawTransactionRecoveryError extends Error {
 }
 declare function ethSendRawTransaction({ config, fetch, rawTransaction, transactionHash, id, signal, }: EthSendRawTransactionOptions): Promise<EthSendRawTransactionResult>;
 export { EthereumRawTransactionRecoveryError, ethSendRawTransaction, };
-export type { EthSendRawTransactionOptions, EthSendRawTransactionResult, };
+export type { TransactionRequest, SignedTransaction, TransactionPreparer, TransactionStage, EthSendRawTransactionOptions, EthSendRawTransactionResult, };
