@@ -16,6 +16,7 @@ interface RunWithRetryOptions<TResult> {
     normalizeError(error: unknown): Error;
     run(context: RunWithRetryAttemptContext): Promise<TResult>;
 }
+declare function assertTimerMs(value: unknown, name: string): number;
 declare function createTimeoutSignal(timeoutMs: number): AbortSignalHandle;
 declare function combineAbortSignals(signals: Array<AbortSignal | undefined>): AbortSignalHandle;
 declare function invokeWithAbort<T>(createPromise: () => Promise<T>, signal: AbortSignal | undefined): Promise<T>;
@@ -26,5 +27,5 @@ declare function waitForRetryDelay({ retryDelayMs, signal, abortErrorMessage, }:
     abortErrorMessage: string;
 }): Promise<void>;
 declare function runWithRetry<TResult>({ maxRetries, retryDelayMs, timeoutMs, signal, abortErrorMessage, shouldRetry, normalizeError, run, }: RunWithRetryOptions<TResult>): Promise<TResult>;
-export { combineAbortSignals, createTimeoutSignal, invokeWithAbort, runWithRetry, throwIfSignalAborted, waitForRetryDelay, };
+export { assertTimerMs, combineAbortSignals, createTimeoutSignal, invokeWithAbort, runWithRetry, throwIfSignalAborted, waitForRetryDelay, };
 export type { AbortSignalHandle, RunWithRetryAttemptContext, RunWithRetryOptions, };

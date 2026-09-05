@@ -19,14 +19,6 @@ function assertNonNegativeInteger(value: unknown, label: string): number {
     return value;
 }
 
-function assertTimerMs(value: unknown, name: string): number {
-    const duration = assertPositiveInteger(value, name);
-    if (duration > 2_147_483_647) {
-        throw new Error(`${name} must not exceed 2147483647 ms.`);
-    }
-    return duration;
-}
-
 function isPlainObject(value: unknown): value is Record<string, unknown> {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) {
         return false;
@@ -111,7 +103,6 @@ export {
     assertNonEmptyString,
     assertNonNegativeInteger,
     assertPositiveInteger,
-    assertTimerMs,
     isPlainObject,
     parseBytes,
 };
