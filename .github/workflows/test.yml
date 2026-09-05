@@ -37,6 +37,32 @@ jobs:
       - name: Run Forge tests
         run: forge test -vvv
 
+  contracts:
+    name: Hardened contracts
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Run Forge fmt
+        run: forge fmt --check
+
+      - name: Run Forge build
+        run: forge build --sizes
+
+      - name: Run Forge tests
+        run: forge test --offline -vvv
+
   packages:
     name: Package build freshness
     runs-on: ubuntu-latest

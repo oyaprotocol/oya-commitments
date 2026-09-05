@@ -15,7 +15,7 @@ When instructions conflict:
 
 ## Directory Guidance
 
-- `contracts/`: hardened onchain contracts and their local tests/tooling, starting with the planned Logger; see `contracts/README.md` and `contracts/AGENTS.md`.
+- `contracts/`: hardened onchain contracts and their local tests/tooling, including Logger; see `contracts/README.md` and `contracts/AGENTS.md`.
 - `packages/`: hardened offchain libraries consumed by nodes.
 - `src/`, `script/`, `test/`: existing Solidity contracts, scripts, and tests.
 - `agent/`: shared offchain runner and reusable agent infrastructure.
@@ -31,6 +31,7 @@ Agent-specific behavior belongs in `agent-library/agents/<name>/`.
 Shared runner changes in `agent/` require cross-agent justification.
 3. Run the minimum required checks.
 Solidity changes: `forge fmt`, `forge test`.
+For the separate `contracts/` project, use `forge fmt --root contracts`, `forge build --root contracts`, and `forge test --root contracts --offline` from the repository root.
 Agent changes: relevant module tests/simulations.
 4. In PRs, document:
 What changed and why.

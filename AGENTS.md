@@ -26,7 +26,7 @@
 - For repository-wide or cross-cutting work, keep the ExecPlan in a clearly named Markdown file at the repo root or in a dedicated `plans/` subdirectory. For tightly scoped work, place it near the affected area when that improves locality.
 
 ## Project Structure & Module Organization
-- **`contracts/`**: Hardened onchain contracts, starting with the planned Logger. Follow `contracts/AGENTS.md` for local organization and validation guidance.
+- **`contracts/`**: Hardened onchain contracts, including Logger, in a separate Foundry project. Follow `contracts/AGENTS.md` for local organization and validation guidance.
 - **`packages/`**: Hardened offchain libraries consumed by nodes. Follow `packages/AGENTS.md` for package-specific guidance.
 - **`src/`**: Existing Solidity contracts (e.g., `Counter.sol`). Keep modules grouped by domain and include SPDX + pragma headers.
 - **`script/`**: Deployment and automation scripts (e.g., `Counter.s.sol`, `DeploySafeWithOptimisticGovernor.s.sol`). Favor reusable helpers and parameterize via environment variables.
@@ -36,8 +36,10 @@
 - **`agent-library/`**: Agent-specific implementations under `agent-library/agents/<name>/`.
 
 ## Build, Test, and Development Commands
-- `forge build`: Compile all contracts.
-- `forge test`: Run the full test suite; add `-vv` for logs or `--mt <pattern>` to target specific tests.
+- `forge build`: Compile the existing root Solidity project.
+- `forge test`: Run the root Solidity test suite; add `-vv` for logs or `--mt <pattern>` to target specific tests.
+- `forge build --root contracts`: Compile the hardened onchain contracts.
+- `forge test --root contracts --offline`: Run the hardened contract test suite after building.
 - `forge fmt`: Apply canonical Solidity formatting before committing.
 - `forge snapshot`: Record gas snapshots for regression checks.
 - `anvil`: Start a local Ethereum node for interactive testing.
