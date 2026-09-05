@@ -12,10 +12,7 @@ type Equal<Left, Right> =
         ? true
         : false;
 type Expect<Value extends true> = Value;
-type AcceptedWithHandler<Result> = Extract<
-    Result,
-    { status: 202; handleSignedMessageResult: unknown }
->;
+type AcceptedResult<Result> = Extract<Result, { status: 202 }>;
 
 declare const request: HandleSignedMessageRequest;
 declare const authorize: SignedMessageAuthorizer;
@@ -31,8 +28,8 @@ const callbackResultPromise = handleSignedMessage(request, {
 type CallbackResult = Awaited<typeof callbackResultPromise>;
 type CallbackValueIsExact = Expect<
     Equal<
-        AcceptedWithHandler<CallbackResult>['handleSignedMessageResult'],
-        { cid: string }
+        AcceptedResult<CallbackResult>['handleSignedMessageResult'],
+        { cid: string } | undefined
     >
 >;
 
@@ -51,8 +48,8 @@ const promisedHandlerResultPromise = handleSignedMessage(request, {
 type PromisedHandlerResult = Awaited<typeof promisedHandlerResultPromise>;
 type PromisedHandlerValueIsAwaited = Expect<
     Equal<
-        AcceptedWithHandler<PromisedHandlerResult>['handleSignedMessageResult'],
-        { cid: string }
+        AcceptedResult<PromisedHandlerResult>['handleSignedMessageResult'],
+        { cid: string } | undefined
     >
 >;
 
@@ -67,7 +64,7 @@ const undefinedResultPromise = handleSignedMessage(request, {
 type UndefinedResult = Awaited<typeof undefinedResultPromise>;
 type UndefinedValueIsExact = Expect<
     Equal<
-        AcceptedWithHandler<UndefinedResult>['handleSignedMessageResult'],
+        AcceptedResult<UndefinedResult>['handleSignedMessageResult'],
         undefined
     >
 >;
@@ -98,8 +95,16 @@ const dynamicResultPromise = handleSignedMessage(request, dynamicOptions);
 async function checkNarrowing(): Promise<void> {
     const callbackResult = await callbackResultPromise;
     if (callbackResult.status === 202) {
-        // @ts-expect-error Every accepted call requires property-presence narrowing.
-        callbackResult.handleSignedMessageResult;
+        const optionalCallbackValue: { cid: string } | undefined =
+            callbackResult.handleSignedMessageResult;
+        const optionalCid: string | undefined =
+            callbackResult.handleSignedMessageResult?.cid;
+        // @ts-expect-error Acceptance alone does not guarantee a handler result.
+        const requiredCallbackValue: { cid: string } =
+            callbackResult.handleSignedMessageResult;
+        void optionalCallbackValue;
+        void optionalCid;
+        void requiredCallbackValue;
         if ('handleSignedMessageResult' in callbackResult) {
             const exactCallbackValue: { cid: string } =
                 callbackResult.handleSignedMessageResult;
@@ -124,8 +129,9 @@ async function checkNarrowing(): Promise<void> {
 
     const undefinedResult = await undefinedResultPromise;
     if (undefinedResult.status === 202) {
-        // @ts-expect-error The single options interface requires property narrowing.
-        undefinedResult.handleSignedMessageResult;
+        const optionalUndefinedValue: undefined =
+            undefinedResult.handleSignedMessageResult;
+        void optionalUndefinedValue;
         if ('handleSignedMessageResult' in undefinedResult) {
             const exactUndefinedValue: undefined =
                 undefinedResult.handleSignedMessageResult;
@@ -135,20 +141,19 @@ async function checkNarrowing(): Promise<void> {
 
     const callbackAbsentResult = await callbackAbsentPromise;
     if (callbackAbsentResult.status === 202) {
-        // @ts-expect-error Callback absence still requires narrowing the honest union.
         callbackAbsentResult.handleSignedMessageResult;
     }
 
     const explicitlyUndefinedResult = await explicitlyUndefinedPromise;
     if (explicitlyUndefinedResult.status === 202) {
-        // @ts-expect-error Explicit undefined uses the same optional options shape.
         explicitlyUndefinedResult.handleSignedMessageResult;
     }
 
     const dynamicResult = await dynamicResultPromise;
     if (dynamicResult.status === 202) {
-        // @ts-expect-error Dynamic handlers require property-presence narrowing.
-        dynamicResult.handleSignedMessageResult;
+        const optionalDynamicValue: { cid: string } | undefined =
+            dynamicResult.handleSignedMessageResult;
+        void optionalDynamicValue;
         if ('handleSignedMessageResult' in dynamicResult) {
             const exactDynamicValue: { cid: string } =
                 dynamicResult.handleSignedMessageResult;

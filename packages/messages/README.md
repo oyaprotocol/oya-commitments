@@ -95,11 +95,11 @@ The returned function validates and verifies the signed message before checking 
       }
     );
 
-    if (
-      result.status === 202 &&
-      'handleSignedMessageResult' in result
-    ) {
-      inspectConfiguredActionResult(result.handleSignedMessageResult);
+    if (result.status === 202) {
+      const actionResult = result.handleSignedMessageResult;
+      if (actionResult !== undefined) {
+        inspectConfiguredActionResult(actionResult);
+      }
     }
 
 The request must be a plain object with exactly these own properties:
@@ -142,11 +142,11 @@ Status `202` means the message passed package authentication and authorization. 
 
 ### Optional Accepted-Message Handling
 
-The host may provide `onAcceptedMessage` to act on the authenticated message before `handleSignedMessage(...)` resolves. The package invokes it exactly once for each accepted call, after authorization, with the frozen `result.message` snapshot. Rejected requests bypass it. The function may return synchronously or asynchronously; the package awaits it and adds its exact settled value as the required `handleSignedMessageResult` property on the accepted result. The property is present even when the function returns `undefined`. The package preserves arbitrary host-owned result values by reference rather than cloning or freezing them.
+The host may provide `onAcceptedMessage` to act on the authenticated message before `handleSignedMessage(...)` resolves. The package invokes it exactly once for each accepted call, after authorization, with the frozen `result.message` snapshot. Rejected requests bypass it. The function may return synchronously or asynchronously; the package awaits it and adds its exact settled value as the `handleSignedMessageResult` property on the accepted result. The property is present even when the function returns `undefined`, and absent when no function is configured. The package preserves arbitrary host-owned result values by reference rather than cloning or freezing them.
 
 A synchronous throw or rejected Promise from `onAcceptedMessage` rejects `handleSignedMessage(...)` unchanged. The package does not convert a failed action into a status-`202` result. Retrying the same valid request invokes the configured function again, so side-effecting functions remain responsible for any deduplication or idempotency they require.
 
-The public TypeScript API uses one `HandleSignedMessageOptions<TResult>` interface whose `onAcceptedMessage` property is optional. Its result type honestly includes both accepted shapes regardless of whether a particular call visibly supplies a function. After narrowing `status === 202`, the host must also check `'handleSignedMessageResult' in result` before reading the property. Inside that branch, the value has the recursively settled `Awaited<TResult>` type inferred from the handler.
+The public TypeScript API uses one `HandleSignedMessageOptions<TResult>` interface whose `onAcceptedMessage` property is optional, and one accepted-result interface with an optional `handleSignedMessageResult` property. After narrowing `status === 202`, the host may read the property directly as `Awaited<TResult> | undefined`, with `TResult` inferred from the handler. Check `'handleSignedMessageResult' in result` when distinguishing an omitted handler from one that returned `undefined`. With `exactOptionalPropertyTypes` enabled, this presence check also narrows the property's type to `Awaited<TResult>`.
 
 The accepted-message function is a host integration point, not an action registry owned by this package. This milestone does not provide an IPFS-specific handler or onchain Logger implementation.
 

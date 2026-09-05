@@ -39,18 +39,14 @@ interface HandleSignedMessageOptions<TResult = unknown> {
         | undefined;
 }
 
-interface AcceptedSignedMessage {
+interface AcceptedSignedMessage<TResult = unknown> {
     readonly status: 202;
     readonly body: Readonly<{
         status: 'accepted';
         signer: string;
     }>;
     readonly message: Readonly<SignedMessageInput>;
-}
-
-interface AcceptedSignedMessageWithHandler<TResult>
-    extends AcceptedSignedMessage {
-    readonly handleSignedMessageResult: TResult;
+    readonly handleSignedMessageResult?: Awaited<TResult>;
 }
 
 interface RejectedSignedMessage {
@@ -64,8 +60,7 @@ interface RejectedSignedMessage {
 
 type HandleSignedMessageResult<TResult = unknown> =
     | RejectedSignedMessage
-    | AcceptedSignedMessage
-    | AcceptedSignedMessageWithHandler<Awaited<TResult>>;
+    | AcceptedSignedMessage<TResult>;
 
 function requirePlainObject(
     value: unknown,
