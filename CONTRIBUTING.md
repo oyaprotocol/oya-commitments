@@ -15,7 +15,9 @@ When instructions conflict:
 
 ## Directory Guidance
 
-- `src/`, `script/`, `test/`: Solidity contracts, scripts, and tests.
+- `contracts/`: hardened onchain contracts and their local tests/tooling, starting with the planned Logger; see `contracts/README.md` and `contracts/AGENTS.md`.
+- `packages/`: hardened offchain libraries consumed by nodes.
+- `src/`, `script/`, `test/`: existing Solidity contracts, scripts, and tests.
 - `agent/`: shared offchain runner and reusable agent infrastructure.
 - `agent-library/agents/<name>/`: agent-specific implementations.
 - `agent-library/RULE_TEMPLATES.md`: shared rule templates for drafting new commitment rules.

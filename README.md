@@ -65,8 +65,9 @@ The copied `default` module now starts as a minimal standard scaffold using the 
 
 ## Repo Layout
 
-- `packages/` Hardened production-kernel packages
-- `src/` Solidity contracts
+- `contracts/` Hardened onchain contracts; initial scaffold for the planned Logger
+- `packages/` Hardened offchain libraries consumed by nodes
+- `src/` Existing Solidity contracts
 - `script/` Foundry deployment and ops scripts
 - `test/` Foundry tests
 - `agent/` Offchain agent scaffold
