@@ -15,6 +15,7 @@ The user approved the minimal Logger and specifically selected the event name `L
 - [x] 2026-09-04: Added the Logger with `Log`, `log`, and `EmptyCid`, plus local Foundry configuration using the existing compiler and shared test dependency.
 - [x] 2026-09-04: Added eight behavior tests and a dedicated contract CI job; updated local and root documentation for the separate project.
 - [x] 2026-09-04: Formatting and compilation passed; all eight tests, including 256 fuzz cases, passed offline inside the sandbox with the CI profile. Inspected the ABI, validated the contract CI job's YAML and commands, reviewed the diff, and passed whitespace checks. Documented the offline test command.
+- [x] 2026-09-04: Removed the empty-string check and error after gas review, replaced the rejection test with event assertions, and removed the fuzz assumption excluding empty strings. All eight tests, including 256 fuzz cases, passed offline. Build, formatting, ABI inspection, fixed-case gas snapshot, and diff checks passed; the measured call saves 26 gas and runtime bytecode shrank by 34 bytes.
 
 ## Surprises & Discoveries
 
@@ -24,6 +25,8 @@ The user approved the minimal Logger and specifically selected the event name `L
   Evidence: The checked-out submodule is at `1801b0541f4fda118a10798fd3486bb7051c5dd6`; `Test.sol` supports Solidity >=0.8.13. Solidity 0.8.23 is already installed locally.
 - Observation: Foundry 1.5.1's online test startup constructs an optional signature-lookup client, which crashes while reading macOS proxy settings inside the sandbox. The tests themselves need no network access.
   Evidence: The initial run panicked in `system-configuration` through `OpenChainClient::new` before test execution. The escalation request was cancelled and the user questioned its necessity. `FOUNDRY_PROFILE=ci forge test --root contracts --offline -vv` then passed all eight tests, including 256 fuzz cases, inside the sandbox; outside access was unnecessary.
+- Observation: Removing the empty-string branch saves a small amount of gas on ordinary calls and reduces deployment size.
+  Evidence: With unchanged Solidity 0.8.23/Paris/optimizer settings, `forge test --root contracts --offline --gas-report --match-test test_LogsCallerAndExactCid -vv` reported `log` at 24,931 gas before and 24,905 after. Runtime size fell from 389 to 355 bytes; initcode fell from 421 to 387 bytes. The compared benchmark uses the same 46-character CID in both versions.
 
 ## Decision Log
 
@@ -33,7 +36,7 @@ The user approved the minimal Logger and specifically selected the event name `L
 - Decision: Emit `Log(msg.sender, cid)` once for each successful call; allow all callers and repeated submissions.
   Rationale: A Logger records claims attributed to their actual caller. It does not need administrative authority, a deduplication map, a supplied node address, or a sequence counter. For a contract wallet, the recorded node is that contract's address. Observers use canonical chain block/log positions for ordering and apply their own confirmation policy.
   Date/Author: 2026-09-04 / Codex, following the accepted design.
-- Decision: Reject only a zero-byte string with `EmptyCid()`; otherwise preserve the string exactly.
+- Decision: Reject only a zero-byte string with `EmptyCid()`; otherwise preserve the string exactly. Superseded by the gas review below.
   Rationale: CID codec, multibase, syntax, and content validation belong to offchain consumers. A full onchain parser or an arbitrary maximum length would add policy beyond this logging primitive. Nonempty whitespace, non-ASCII data, and invalid CID encodings are recorded as opaque claims; callers pay the transaction's data/log gas costs. The event does not establish content validity or availability.
   Date/Author: 2026-09-04 / Codex.
 - Decision: Use a standalone `contracts/foundry.toml`, pinned Solidity 0.8.23, Paris EVM target, and optimizer with 200 runs. Reuse `../lib/forge-std` through an explicit remapping.
@@ -42,12 +45,15 @@ The user approved the minimal Logger and specifically selected the event name `L
 - Decision: Run contract tests with `--offline` locally and in CI after the build step.
   Rationale: Local EVM tests need no network service, and offline mode avoids optional signature lookup and the sandbox proxy-settings crash. The preceding build can install the compiler on a fresh CI runner.
   Date/Author: 2026-09-04 / user and Codex.
+- Decision: Accept every string, including empty strings, and remove `EmptyCid()` and its branch.
+  Rationale: The user questioned spending gas on a check that establishes no CID-validity guarantee. All claim validation belongs to consumers; an empty claim is recorded using the same semantics as other opaque strings.
+  Date/Author: 2026-09-04 / user and Codex.
 
 ## Outcomes & Retrospective
 
-Logger is implemented and validated with the exact approved `Log(address indexed node, string cid)` event and nonpayable `log(string)` function. It rejects empty input with `EmptyCid()`, preserves all other string data, attributes events to the immediate caller, and permits repeated submissions. The contract has no production imports or storage state.
+Logger is implemented and validated with the exact approved `Log(address indexed node, string cid)` event and nonpayable `log(string)` function. It preserves all string data, including empty strings, attributes events to the immediate caller, and permits repeated submissions. Following the gas review, its body is solely `emit Log(msg.sender, cid)`. The contract has no custom error, production imports, or storage state.
 
-The standalone Foundry configuration, eight behavior tests, dedicated contract CI job, and documentation are complete. Solidity 0.8.23 compiled Logger to 389 bytes of runtime code and 421 bytes of initcode with the pinned settings. All eight tests passed, including 256 fuzz cases, using `FOUNDRY_PROFILE=ci forge test --root contracts --offline -vv` inside the sandbox. Formatting, build, ABI inspection, CI YAML/command validation, and diff checks also passed. The CI job was checked locally; a hosted CI run has not been triggered.
+The standalone Foundry configuration, eight behavior tests, dedicated contract CI job, and documentation are complete. Solidity 0.8.23 now compiles Logger to 355 bytes of runtime code and 387 bytes of initcode with the pinned settings. All eight tests passed, including 256 fuzz cases, using `FOUNDRY_PROFILE=ci forge test --root contracts --offline -vv` inside the sandbox. Formatting, build, ABI inspection, and diff checks also passed. The fixed-CID benchmark saves 26 gas per call; `contracts/.gas-snapshot` records the seven deterministic test cases and excludes random fuzz inputs. The unchanged CI job was validated locally during the initial implementation; a hosted CI run has not been triggered.
 
 The initial test command hit a Foundry macOS proxy-settings crash before executing tests. Offline mode resolved it without elevated access, and both local guidance and the new CI test step now use that mode. No required work remains in this milestone. Deployment and the host's publish-then-log integration remain separate future work.
 
@@ -61,9 +67,9 @@ Foundry's `forge` command compiles and tests Solidity in a local EVM. `forge-std
 
 ## Plan of Work
 
-Create `contracts/foundry.toml` with local source/test/output paths and the existing shared test dependency. Implement the small nonpayable `Logger` contract with SPDX and pragma headers, one custom error, the approved event, and the approved function.
+Create `contracts/foundry.toml` with local source/test/output paths and the existing shared test dependency. Implement the small nonpayable `Logger` contract with SPDX and pragma headers, the approved event, and the approved function. Its body emits the event without validating the string.
 
-Add focused tests for exact event ABI encoding, attribution to unrelated callers and a forwarding contract, empty-input reversion without events, duplicate acceptance, event ordering, exact opaque-string preservation, fuzzed inputs, and rejection of native-token value. Add a separate CI job that runs formatting, build, and tests using the local project configuration and the recursively checked-out test dependency.
+Add focused tests for exact event ABI encoding, attribution to unrelated callers and a forwarding contract, empty-input acceptance, duplicate acceptance, event ordering, exact opaque-string preservation, fuzzed inputs, and rejection of native-token value. Add a separate CI job that runs formatting, build, and tests using the local project configuration and the recursively checked-out test dependency.
 
 Update local and root documentation so contributors can find the Logger and run its checks without confusing the two Foundry projects. Validate locally and record results here before finishing.
 
@@ -76,13 +82,14 @@ Run from the repository root:
     forge build --root contracts --sizes
     forge test --root contracts --offline -vv
     forge inspect --root contracts --offline Logger abi
+    forge snapshot --root contracts --offline --no-match-test testFuzz_ --snap contracts/.gas-snapshot
     git diff --check
 
 CI runs the equivalent commands from `contracts/` with the repository's existing `FOUNDRY_PROFILE=ci`. A fresh checkout requires `git submodule update --init --recursive` and Foundry; Forge can download the pinned compiler if it is not installed. Local validation uses the existing compiler and test dependency. No secrets, RPC URL, Anvil daemon, testnet, mainnet, or environment file is required.
 
 ## Validation and Acceptance
 
-Compilation must succeed with the pinned compiler. ABI inspection must show exactly `EmptyCid()`, `Log(address indexed node, string cid)`, and the nonpayable `log(string)` function. Tests must verify the Logger emitter, event signature topic, indexed immediate caller, and exact CID data, as well as rejecting empty input and accepting duplicate calls as separate events in order. Fuzz tests must preserve any nonempty string and caller address. The contract source has no runtime imports or storage state.
+Compilation must succeed with the pinned compiler. ABI inspection must show exactly `Log(address indexed node, string cid)` and the nonpayable `log(string)` function. Tests must verify the Logger emitter, event signature topic, indexed immediate caller, and exact CID data, including empty strings and duplicate calls as separate events in order. Fuzz tests must preserve any string and caller address. The contract source has no runtime imports or storage state.
 
 The CI job must run all three contract checks from the right directory and initialize the shared test submodule. Root app and offchain package jobs retain their current scope. Record any checks that cannot run and their cause; do not claim a live deployment or network test.
 
@@ -101,10 +108,9 @@ Approved interface:
 
 Runtime call:
 
-    if (bytes(cid).length == 0) revert EmptyCid();
     emit Log(msg.sender, cid);
 
-Observed ABI: `Log(address,string)` (indexed node), `EmptyCid()`, and `log(string) nonpayable`. Observed test result: `8 tests passed, 0 failed, 0 skipped`; the fuzz test ran 256 cases.
+Observed ABI after the gas review: `Log(address,string)` (indexed node) and `log(string) nonpayable`. Observed test result: `8 tests passed, 0 failed, 0 skipped`; the fuzz test ran 256 cases, with a separate explicit empty-string test. Gas baseline: `contracts/.gas-snapshot`.
 
 ## Interfaces and Dependencies
 

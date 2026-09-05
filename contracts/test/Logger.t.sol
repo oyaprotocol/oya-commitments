@@ -31,11 +31,13 @@ contract LoggerTest is Test {
         assertLog(entries[0], node, CID);
     }
 
-    function test_RejectsEmptyCidWithoutEmitting() public {
+    function test_LogsEmptyCid() public {
         vm.recordLogs();
-        vm.expectRevert(Logger.EmptyCid.selector);
         logger.log("");
-        assertEq(vm.getRecordedLogs().length, 0);
+
+        Vm.Log[] memory entries = vm.getRecordedLogs();
+        assertEq(entries.length, 1);
+        assertLog(entries[0], address(this), "");
     }
 
     function test_RecordsRepeatedSubmissionsSeparately() public {
@@ -80,8 +82,8 @@ contract LoggerTest is Test {
         assertLog(entries[0], address(caller), CID);
     }
 
-    function test_PreservesOpaqueNonemptyStrings() public {
-        // Syntax and content policy belong to the host; Logger only rejects empty strings.
+    function test_PreservesOpaqueStrings() public {
+        // Syntax and content policy belong to the host.
         string memory claim = unicode"  arbitrary claim: café\n";
         vm.recordLogs();
         logger.log(claim);
@@ -101,8 +103,7 @@ contract LoggerTest is Test {
         assertEq(vm.getRecordedLogs().length, 0);
     }
 
-    function testFuzz_PreservesCallerAndNonemptyCid(address node, string memory cid) public {
-        vm.assume(bytes(cid).length > 0);
+    function testFuzz_PreservesCallerAndCid(address node, string memory cid) public {
         vm.recordLogs();
         vm.prank(node);
         logger.log(cid);

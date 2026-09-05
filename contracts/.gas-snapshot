@@ -1,0 +1,7 @@
+LoggerTest:test_AttributesForwardedCallsToTheCallingContract() (gas: 135341)
+LoggerTest:test_LogsCallerAndExactCid() (gas: 18779)
+LoggerTest:test_LogsEmptyCid() (gas: 16326)
+LoggerTest:test_PreservesOpaqueStrings() (gas: 17409)
+LoggerTest:test_RecordsDifferentCallersInSubmissionOrder() (gas: 28127)
+LoggerTest:test_RecordsRepeatedSubmissionsSeparately() (gas: 29049)
+LoggerTest:test_RejectsNativeTokenValue() (gas: 17379)

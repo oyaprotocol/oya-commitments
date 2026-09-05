@@ -14,9 +14,9 @@ event Log(address indexed node, string cid);
 function log(string calldata cid) external;
 ```
 
-Any caller can submit a nonempty string. Each successful call emits exactly one `Log(msg.sender, cid)` event, preserving the string exactly. An empty string reverts with `EmptyCid()`. The function is nonpayable. When a contract wallet or forwarder calls Logger, the event records that contract's address as the node.
+Any caller can submit a string, including an empty string. Each successful call emits exactly one `Log(msg.sender, cid)` event, preserving the string exactly. The function is nonpayable. When a contract wallet or forwarder calls Logger, the event records that contract's address as the node.
 
-Logger treats the CID as an opaque claim: it does not validate CID syntax, fetch content, check signatures, or prove availability. Nonempty whitespace and other strings are accepted without normalization or an application-specific length limit. Hosts should validate the artifact and its CID before submitting a transaction, and consumers should verify content when reading it.
+Logger treats the CID as an opaque claim: it does not validate CID syntax, fetch content, check signatures, or prove availability. Empty strings, whitespace, and other strings are accepted without normalization or an application-specific length limit. Hosts should validate the artifact and its CID before submitting a transaction, and consumers should verify content when reading it.
 
 Repeated submissions emit separate events. Consumers can filter by the indexed node address and decode the CID from event data. The chain's canonical block and log positions establish recording order; consumers choose a confirmation policy and handle reorganizations. Logger keeps no onchain storage history or sequence counter.
 
@@ -42,6 +42,14 @@ forge inspect --root contracts --offline Logger abi
 ```
 
 Use `forge fmt --root contracts` to apply formatting. Equivalently, run Forge from `contracts/` without `--root`. The root project's plain `forge build` and `forge test` commands cover the existing root Solidity application; use the commands above for this project. A dedicated CI job runs its formatting, build, and tests.
+
+For gas-related changes, refresh the fixed-case test snapshot from the repository root:
+
+```sh
+forge snapshot --root contracts --offline --no-match-test testFuzz_ --snap contracts/.gas-snapshot
+```
+
+This snapshot excludes randomized fuzz cases so gas comparisons use fixed inputs.
 
 Tests run in Forge's local EVM without an RPC endpoint or private key. The first build may download the pinned compiler; subsequent tests run offline. `--offline` also avoids optional signature lookups that can trigger a Foundry 1.5.1 macOS proxy-settings crash inside a sandbox. Generated `out/` and `cache/` directories are ignored. See [`logger-execplan.md`](logger-execplan.md) for implementation decisions and validation evidence.
 
