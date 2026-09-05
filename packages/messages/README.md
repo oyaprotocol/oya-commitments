@@ -1,6 +1,6 @@
 # @oyaprotocol/messages
 
-Signed message validation, EIP-191 verification, signer authorization, and HTTP-shaped ingress primitives for Oya nodes.
+Signed message validation, EIP-191 verification, signer authorization, HTTP-shaped ingress, and IPFS publication for Oya nodes.
 
 ## Public Entrypoint
 
@@ -17,7 +17,9 @@ The package is ESM compiled for an ECMAScript 2025-compatible environment. Its p
 - `Object.hasOwn(...)` and `Object.freeze(...)`
 - `Reflect.ownKeys(...)`
 - `Set`
-- `JSON.parse(...)`
+- `JSON.parse(...)` and `JSON.stringify(...)`
+
+The IPFS publication handler additionally uses the Web Platform APIs required by `@oyaprotocol/ipfs`, including `Blob`, `FormData`, `AbortController`, `AbortSignal`, and timers. The host supplies a fetch-compatible implementation explicitly.
 
 The package does not import `node:*` modules or use Node-only globals such as `process` or `Buffer`. It does not declare a Node.js engine requirement. The pinned Noble dependencies publish their own runtime metadata. Current repository validation runs under Node.js; support for other ECMAScript 2025 runtimes should be established with runtime-specific smoke tests.
 
@@ -138,7 +140,7 @@ An accepted result has status `202`, a small response `body`, and a separate tru
       }
     }
 
-Status `202` means the message passed package authentication and authorization. It does not mean a node has completed an IPFS publication, onchain transaction, or other implementation-specific side effect. An HTTP adapter sends only `result.status` and `result.body` to the remote caller; the node consumes `result.message` internally.
+Status `202` means the message passed package authentication and authorization. Any configured accepted-message function has also resolved successfully; guarantees about completed side effects depend on that function. An HTTP adapter sends only `result.status` and `result.body` to the remote caller; the node consumes `result.message` internally.
 
 ### Optional Accepted-Message Handling
 
@@ -148,7 +150,58 @@ A synchronous throw or rejected Promise from `onAcceptedMessage` rejects `handle
 
 The public TypeScript API uses one `HandleSignedMessageOptions<TResult>` interface whose `onAcceptedMessage` property is optional, and one accepted-result interface with an optional `handleSignedMessageResult` property. After narrowing `status === 202`, the host may read the property directly as `Awaited<TResult> | undefined`, with `TResult` inferred from the handler. Check `'handleSignedMessageResult' in result` when distinguishing an omitted handler from one that returned `undefined`. With `exactOptionalPropertyTypes` enabled, this presence check also narrows the property's type to `Awaited<TResult>`.
 
-The accepted-message function is a host integration point, not an action registry owned by this package. This milestone does not provide an IPFS-specific handler or onchain Logger implementation.
+The accepted-message function is a host integration point. The package provides the IPFS publisher below; the host selects and configures a handler. Onchain Logger integration remains separate.
+
+## IPFS Publication Handler
+
+`publishSignedMessage(message, options)` verifies the message's schema and EIP-191 signature, snapshots its three fields, and publishes and pins the resulting JSON through `@oyaprotocol/ipfs`. It is implemented in `src/handlers/publish.ts` and exported through the package root. Direct callers receive the same verification as callback users; allowlist authorization remains the responsibility of ingress or the host.
+
+`PublishSignedMessageOptions` requires `config` and `fetch` from `PublishToIpfsOptions` and accepts its optional `signal`. The host provides an explicit IPFS URL, headers, timeout, retry count, and retry delay through `createIpfsConfig(...)`. Cancellation and retry behavior are delegated to the IPFS primitive.
+
+The uploaded artifact is compact JSON with fields in the fixed order `text`, `signer`, `signature`, no additional fields, and no trailing newline. JSON escaping preserves the original field values, including text whitespace, address/signature casing, and signature recovery encoding. The filename is always `message.json` and its media type is `application/json`. The same exact field values produce the same file bytes regardless of input property order. Different signature bytes or signer casing can produce different artifacts even for identical text.
+
+The Promise resolves to the existing `PublishToIpfsResult`, including `cid`, `uri`, `pinned: true`, filename, media type, content byte length, attempt count, and provider metadata. Schema and signature errors reject before any upload. IPFS failures propagate unchanged from `publishToIpfs(...)`.
+
+The host can call the publisher directly with an authorized message:
+
+    const publication = await publishSignedMessage(message, {
+      config: ipfsConfig,
+      fetch,
+    });
+
+For ingress, close over the host's dependencies in a one-argument callback:
+
+    import {
+      createSignedMessageAuthorizer,
+      handleSignedMessage,
+      publishSignedMessage,
+    } from '@oyaprotocol/messages';
+    import { createIpfsConfig } from '@oyaprotocol/ipfs';
+
+    const ipfsConfig = createIpfsConfig({
+      url: ipfsUrl,
+      headers: ipfsHeaders,
+      timeoutMs,
+      maxRetries,
+      retryDelayMs,
+    });
+
+    const result = await handleSignedMessage(request, {
+      authorize: createSignedMessageAuthorizer(allowedSigners),
+      maxBodyBytes,
+      maxTextBytes,
+      onAcceptedMessage: (message) =>
+        publishSignedMessage(message, { config: ipfsConfig, fetch }),
+    });
+
+    if (result.status === 202 && result.handleSignedMessageResult !== undefined) {
+      const { cid, uri, pinned } = result.handleSignedMessageResult;
+      recordPublication({ cid, uri, pinned });
+    }
+
+The callback wrapper satisfies `AcceptedSignedMessageHandler<PublishToIpfsResult>` and TypeScript infers the publication result in the example above. The host chooses its handler at startup; if selection uses a configured name, validate that name before accepting requests. Omitting `onAcceptedMessage` keeps authentication-only behavior.
+
+When this publisher is configured, ingress waits for publication to succeed before returning an accepted result. Publication metadata is internal to `handleSignedMessageResult`; the HTTP response body remains the small authentication result. Rejected requests do not upload. Each accepted submission invokes publication again, and the publisher adds no deduplication or retry loop beyond the configured IPFS retries.
 
 ## Internet-Facing Limits
 

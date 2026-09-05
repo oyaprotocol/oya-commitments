@@ -11,6 +11,8 @@ export {
     SignedMessageAuthorizationError,
 } from './authorization.js';
 export { handleSignedMessage } from './ingress.js';
+export { publishSignedMessage } from './handlers/publish.js';
+export type { PublishSignedMessageOptions } from './handlers/publish.js';
 export type {
     SignedMessageInput,
     SignedMessageValidationErrorCode,

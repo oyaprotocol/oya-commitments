@@ -2,6 +2,8 @@
 
 This ExecPlan is a living document and must be maintained according to `PLANS.md`.
 
+The ingress and accepted-message callback milestones are complete. The user-authorized IPFS publisher follow-on is tracked in `plans/messages-ipfs-handler.md`; its implementation starts at `packages/messages/src/handlers/publish.ts`.
+
 ## Purpose / Big Picture
 
 Build `@oyaprotocol/messages` from a placeholder package into the first hardened message-ingress kernel for Oya nodes, then extend that kernel with one optional configured function that can act on an authenticated message.
