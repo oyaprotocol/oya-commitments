@@ -5,6 +5,6 @@
     "composite": false
   },
   "include": [
-    "test/ingress-types.test.ts"
+    "test/*-types.test.ts"
   ]
 }
