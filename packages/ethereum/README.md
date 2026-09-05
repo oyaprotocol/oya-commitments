@@ -33,6 +33,17 @@ Ethereum JSON-RPC utilities for Oya kernel code. This package is a hardened kern
 
 Hosts own transaction signing, environment configuration, and RPC endpoint discovery. ABI support is limited to the Logger helpers described below. Callers are responsible for preparing JSON-RPC params, including converting `bigint` values to Ethereum quantity hex before calling the raw request primitive.
 
+## Shared Transaction Types
+
+`src/transactions.ts` defines these types, exported from `@oyaprotocol/ethereum`:
+
+- `TransactionRequest`: readonly `to`, `data`, `value: bigint` (wei), and optional `signal`. It describes call intent; the host supplies the remaining transaction fields.
+- `PreparedTransaction`: readonly signed `rawTransaction` and its `transactionHash`.
+- `PrepareTransaction`: a callback from `TransactionRequest` to `PreparedTransaction`, synchronously or asynchronously, without broadcasting.
+- `TransactionStage`: `'prepare' | 'submit' | 'receipt' | 'verify'`. Verification means the operation's checks after receiving a receipt, such as execution status and expected events.
+
+Logger uses these shared types and always requests `value: 0n`. Other callers can use the same host preparation callback with a nonzero value. These names replace `LoggerTransactionRequest`, `PreparedLoggerTransaction`, `PrepareLoggerTransaction`, and `LogCidStage`; update type imports accordingly.
+
 ## Transaction Receipts
 
 The host passes the hash returned by `ethSendRawTransaction(...)` to either receipt function, with the same explicit RPC config and injected fetch:
@@ -133,7 +144,7 @@ const logging = await logCid(publication.cid, {
 // logging: { cid, transactionHash, receipt, event }
 ```
 
-`prepareTransaction` is a host-supplied `PrepareLoggerTransaction` function. It receives a frozen `{ to, data, value: 0n, signal? }` request describing the Logger call and returns `{ rawTransaction, transactionHash }`, synchronously or asynchronously. It must prepare and sign without broadcasting. The host supplies chain ID, nonce, fees, gas, and key or wallet access, and coordinates nonces across concurrent messages. It must return the correct hash for the signed transaction and preserve the requested call, including when routing through a contract wallet. The helper validates the returned hex shapes and checks the RPC's returned hash; it does not parse or independently verify the signed transaction.
+`prepareTransaction` is a host-supplied `PrepareTransaction` function. It receives a frozen `{ to, data, value: 0n, signal? }` request describing the Logger call and returns `{ rawTransaction, transactionHash }`, synchronously or asynchronously. It must prepare and sign without broadcasting. The host supplies chain ID, nonce, fees, gas, and key or wallet access, and coordinates nonces across concurrent messages. It must return the correct hash for the signed transaction and preserve the requested call, including when routing through a contract wallet. The helper validates the returned hex shapes and checks the RPC's returned hash; it does not parse or independently verify the signed transaction.
 
 The helper snapshots the signed bytes and hash, submits through `ethSendRawTransaction`, then polls through `ethWaitForTransactionReceipt`. It prepares only once and adds no outer retry loop; submission retries reuse the exact signed bytes. `expectedNode` is Logger's immediate caller, not necessarily the message signer or the outer transaction sender. A successful result requires receipt status `success` and a matching event from `loggerAddress`, with the expected node and exact CID, valid CID/hash correspondence, and `removed !== true`.
 

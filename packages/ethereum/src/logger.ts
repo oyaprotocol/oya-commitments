@@ -14,6 +14,7 @@ import type { EthereumReceiptLog, EthereumTransactionReceipt } from './receipt-u
 import { assertTimerMs, ethWaitForTransactionReceipt } from './receipts.js';
 import type { EthWaitForTransactionReceiptOptions } from './receipts.js';
 import { ethSendRawTransaction } from './transactions.js';
+import type { PrepareTransaction, TransactionStage } from './transactions.js';
 
 // Verified against contracts/src/Logger.sol with forge inspect and cast keccak.
 const LOGGER_SELECTOR = '0x41304fac'; // log(string)
@@ -29,28 +30,11 @@ interface LoggerEvent {
     readonly removed?: boolean;
 }
 
-interface LoggerTransactionRequest {
-    readonly to: string;
-    readonly data: string;
-    readonly value: 0n;
-    readonly signal?: AbortSignal;
-}
-
-interface PreparedLoggerTransaction {
-    readonly rawTransaction: string;
-    readonly transactionHash: string;
-}
-
-/** Prepare and sign the requested call without broadcasting it. */
-type PrepareLoggerTransaction = (
-    request: LoggerTransactionRequest
-) => PreparedLoggerTransaction | PromiseLike<PreparedLoggerTransaction>;
-
 interface LogCidOptions extends Omit<EthWaitForTransactionReceiptOptions, 'transactionHash' | 'id'> {
     loggerAddress: string;
     /** Logger's immediate caller, which can be a contract wallet. */
     expectedNode: string;
-    prepareTransaction: PrepareLoggerTransaction;
+    prepareTransaction: PrepareTransaction;
 }
 
 interface LogCidResult {
@@ -60,18 +44,16 @@ interface LogCidResult {
     readonly event: LoggerEvent;
 }
 
-type LogCidStage = 'prepare' | 'submit' | 'receipt' | 'verify';
-
 class LogCidError extends Error {
     readonly cid: string;
-    readonly stage: LogCidStage;
+    readonly stage: TransactionStage;
     /** Known before submission; its presence does not prove acceptance. */
     readonly transactionHash: string | null;
     readonly receipt: EthereumTransactionReceipt | null;
 
     constructor(
         cid: string,
-        stage: LogCidStage,
+        stage: TransactionStage,
         transactionHash: string | null,
         receipt: EthereumTransactionReceipt | null,
         cause: unknown
@@ -187,7 +169,7 @@ async function logCid(
     }
     const cancellation = signal === undefined ? {} : { signal };
     const abortMessage = 'logCid was aborted by the caller.';
-    let stage: LogCidStage = 'prepare';
+    let stage: TransactionStage = 'prepare';
     let transactionHash: string | null = null;
     let receipt: EthereumTransactionReceipt | null = null;
     try {
@@ -235,6 +217,5 @@ async function logCid(
 export { encodeLoggerCall, decodeLoggerEvent, hashLoggerCid, logCid, LogCidError };
 export type {
     LoggerEventInput, LoggerEvent,
-    LogCidOptions, LogCidResult, LogCidStage,
-    LoggerTransactionRequest, PreparedLoggerTransaction, PrepareLoggerTransaction,
+    LogCidOptions, LogCidResult,
 };

@@ -27,6 +27,11 @@ information to resume without blindly sending another transaction.
   in `logger.ts` at the user's request, removing the separate source/generated
   module. Build, all 119 Ethereum/messages tests, both consumer type suites,
   package imports, and whitespace checks passed; public APIs are unchanged.
+- [x] 2026-09-05: Promoted transaction request, prepared transaction, preparation
+  callback, and workflow stage types to shared exports in `transactions.ts`.
+  Logger uses them with unchanged runtime behavior. Build, all 119
+  Ethereum/messages tests, both consumer type suites, package imports, and
+  whitespace checks passed. Type checks cover nonzero values with the same callback.
 
 ## Surprises & Discoveries
 
@@ -51,7 +56,13 @@ information to resume without blindly sending another transaction.
 - 2026-09-05 / Codex: Put `logCid(cid, options)` in
   a separate module initially. The user subsequently requested consolidating
   the workflow with the ABI helpers in `packages/ethereum/src/logger.ts`;
-  that file now owns all Logger functions, types, and errors.
+  that file now owns all Logger functions, Logger-specific types, and errors.
+- 2026-09-05 / user and Codex: Share transaction request, prepared transaction,
+  preparation callback, and workflow stage types in `transactions.ts` as
+  `TransactionRequest`, `PreparedTransaction`, `PrepareTransaction`, and
+  `TransactionStage`. A request supports a bigint value; Logger still supplies
+  zero. The verify stage covers operation-specific receipt checks. The previous
+  Logger-prefixed type names are replaced to keep one shared interface.
 - 2026-09-05 / Codex: Require `prepareTransaction` to return signed
   `rawTransaction` and its `transactionHash`. The trusted host owns chain ID,
   nonce, fees, gas, keys, and wallet routing; the package owns broadcasting.
@@ -158,9 +169,9 @@ types. The signer receives a frozen request containing Logger `to`, encoded
 without broadcasting. The result contains CID, transaction hash, receipt, and
 decoded event. Errors distinguish prepare, submit, receipt, and verify stages.
 
-The named types are `LogCidOptions`, `LogCidResult`, `LogCidStage`,
-`LoggerTransactionRequest`, `PreparedLoggerTransaction`, and
-`PrepareLoggerTransaction`. Configuration errors occur before preparation;
+The Logger types are `LogCidOptions` and `LogCidResult`. Shared types in
+`transactions.ts` are `TransactionRequest`, `PreparedTransaction`,
+`PrepareTransaction`, and `TransactionStage`. Configuration errors occur before preparation;
 `LogCidError` wraps failures from preparation onward. Its `receipt` is populated
 only after successful receipt parsing. Signed transaction content/hash correctness
 is the trusted preparer's responsibility; no new transaction parser was added.
