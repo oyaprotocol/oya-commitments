@@ -1,6 +1,6 @@
 import { normalizeIpfsOperationError, runWithRetry, shouldRetryError, } from './request-utils.js';
 import { readBoundedBytes } from './read-bytes.js';
-import { HttpStatusError, assertHeadersObject, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, } from '@oyaprotocol/utils';
+import { HttpStatusError, assertCanonicalCid, assertHeadersObject, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, } from '@oyaprotocol/utils';
 function buildGatewayReadUrl(gatewayUrl, cid) {
     const url = new URL(gatewayUrl);
     if (url.hash) {
@@ -11,8 +11,8 @@ function buildGatewayReadUrl(gatewayUrl, cid) {
     return url.toString();
 }
 async function readIpfsPublicGatewayBytesWithMessages({ gatewayUrl, headers, timeoutMs, maxRetries, retryDelayMs, fetch, cid, maxBytes, signal, }, messages) {
-    const trimmedCid = assertNonEmptyString(cid, 'cid');
-    const gatewayReadUrl = buildGatewayReadUrl(assertNonEmptyString(gatewayUrl, 'gatewayUrl'), trimmedCid);
+    const validatedCid = assertCanonicalCid(cid, 'cid');
+    const gatewayReadUrl = buildGatewayReadUrl(assertNonEmptyString(gatewayUrl, 'gatewayUrl'), validatedCid);
     const validatedHeaders = assertHeadersObject(headers, 'headers');
     const requestTimeoutMs = assertPositiveInteger(timeoutMs, 'timeoutMs');
     const retryLimit = assertNonNegativeInteger(maxRetries, 'maxRetries');
@@ -50,8 +50,8 @@ async function readIpfsPublicGatewayBytesWithMessages({ gatewayUrl, headers, tim
                 signal: requestSignal,
             });
             return {
-                cid: trimmedCid,
-                uri: `ipfs://${trimmedCid}`,
+                cid: validatedCid,
+                uri: `ipfs://${validatedCid}`,
                 bytes,
                 byteLength: bytes.byteLength,
                 attemptCount: attempt,

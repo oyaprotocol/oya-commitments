@@ -16,6 +16,7 @@
     "README.md"
   ],
   "dependencies": {
+    "@noble/hashes": "2.2.0",
     "@oyaprotocol/utils": "0.0.0"
   }
 }

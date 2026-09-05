@@ -1,6 +1,6 @@
 import { HttpStatusError } from '@oyaprotocol/utils';
 import { invokeWithAbort, normalizeIpfsOperationError, runWithRetry, shouldRetryError, } from './request-utils.js';
-import { assertNonEmptyString, assertPositiveInteger } from '@oyaprotocol/utils';
+import { assertCanonicalCid, assertPositiveInteger } from '@oyaprotocol/utils';
 function combineChunks(chunks, byteLength) {
     const combined = new Uint8Array(byteLength);
     let offset = 0;
@@ -54,7 +54,7 @@ async function readIpfsBytesWithMessages({ config, fetch, cid, maxBytes, signal,
     if (typeof fetch !== 'function') {
         throw new Error('fetch must be provided as a function.');
     }
-    const trimmedCid = assertNonEmptyString(cid, 'cid');
+    const validatedCid = assertCanonicalCid(cid, 'cid');
     const byteLimit = assertPositiveInteger(maxBytes, 'maxBytes');
     return await runWithRetry({
         maxRetries: config.maxRetries,
@@ -65,7 +65,7 @@ async function readIpfsBytesWithMessages({ config, fetch, cid, maxBytes, signal,
         shouldRetry: shouldRetryError,
         normalizeError: (error) => normalizeIpfsOperationError(error, messages),
         run: async ({ attempt, signal: requestSignal }) => {
-            const response = await fetch(`${config.url}/api/v0/cat?arg=${encodeURIComponent(trimmedCid)}`, {
+            const response = await fetch(`${config.url}/api/v0/cat?arg=${validatedCid}`, {
                 method: 'POST',
                 headers: config.headers,
                 signal: requestSignal,
@@ -85,8 +85,8 @@ async function readIpfsBytesWithMessages({ config, fetch, cid, maxBytes, signal,
                 signal: requestSignal,
             });
             return {
-                cid: trimmedCid,
-                uri: `ipfs://${trimmedCid}`,
+                cid: validatedCid,
+                uri: `ipfs://${validatedCid}`,
                 bytes,
                 byteLength: bytes.byteLength,
                 attemptCount: attempt,

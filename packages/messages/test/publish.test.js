@@ -18,7 +18,7 @@ const TEXT = 'Please withdraw 100 USDC.';
 const SIGNATURE =
     '0x36891560b97f673db6931408e45fd3e8ffca26ae50f1c68adbe74e57808b9248' +
     '0f55566cc281099d59dc574c7e444851af9a8978acd55503ca3d2565061e542d1b';
-const CID = 'bafy-message-publication';
+const CID = 'bafkreicn5hwdk56k2qwskml5rfq5oz3fvz6g5blm5vpd4jtlkchbbfibki';
 
 function createMessage(overrides = {}) {
     return { text: TEXT, signer: SIGNER, signature: SIGNATURE, ...overrides };
@@ -67,7 +67,7 @@ test('publishSignedMessage publishes and pins a deterministic, verifiable JSON e
     const options = {
         config: createConfig(),
         fetch: async (url, request) => {
-            assert.equal(url, 'http://ipfs.example:5001/api/v0/add?cid-version=1&pin=true&progress=false');
+            assert.equal(url, 'http://ipfs.example:5001/api/v0/add?cid-version=1&cid-base=base32&hash=sha2-256&chunker=size-1048576&raw-leaves=true&trickle=false&max-file-links=1024&wrap-with-directory=false&inline=false&preserve-mode=false&preserve-mtime=false&pin=true&progress=false');
             assert.equal(request.method, 'POST');
             assert.equal(request.headers.Authorization, 'Bearer test-token');
             const file = request.body.get('file');

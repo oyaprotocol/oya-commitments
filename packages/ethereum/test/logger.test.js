@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { encodeLoggerCall, decodeLoggerEvent } from '../dist/index.js';
+import { encodeLoggerCall, decodeLoggerEvent, hashLoggerCid } from '../dist/index.js';
 
 const fixtures = JSON.parse(readFileSync(new URL('./fixtures/logger-abi.json', import.meta.url), 'utf8'));
 const { loggerAddress, node } = fixtures;
-const sample = fixtures.cases.find(({ cid }) => cid === 'bafy-test');
+const sample = fixtures.cases.find(({ name }) => name === 'hello');
 const topics = [...fixtures.topics, sample.cidKeccak256Hash];
 
 function createLog(overrides = {}) {
@@ -26,25 +26,32 @@ test('Logger event decoding matches independent Foundry ABI fixtures', () => {
     }
 });
 
-test('Logger helpers preserve arbitrary text across byte and ABI word boundaries', () => {
-    for (const length of [0, 1, 30, 31, 32, 33, 63, 64, 65, 255, 1_024]) {
-        for (const character of ['a', 'é', '界', '🚀', '\0']) {
-            const cid = character.repeat(length);
-            const calldata = encodeLoggerCall(cid);
-            const data = `0x${calldata.slice(10)}`;
-            // Synthetic payloads exercise the string codec; Logger's Solidity tests
-            // verify hash correspondence, which the decoder does not recompute.
-            assert.deepEqual(decodeLoggerEvent(createLog({ data }), loggerAddress), {
-                node, cidKeccak256Hash: sample.cidKeccak256Hash, cid,
-            });
-        }
+test('Logger lookup hashes match independent Foundry fixtures', () => {
+    for (const { cid, cidKeccak256Hash } of fixtures.cases) {
+        assert.equal(hashLoggerCid(cid), cidKeccak256Hash);
     }
 });
 
-test('Logger call encoding rejects values that cannot be encoded as exact Unicode text', () => {
-    for (const cid of [undefined, null, 1, {}, [], new String('cid'), '\ud800', '\udc00', 'a\ud800b']) {
-        assert.throws(() => encodeLoggerCall(cid), /cid must be a well-formed Unicode string/);
+test('Logger encoding and lookup hashing reject noncanonical CIDs', () => {
+    for (const cid of [
+        undefined, null, 1, {}, [], new String(sample.cid), '', 'bafy-test',
+        '\ud800', '🚀', ` ${sample.cid}`, sample.cid.toUpperCase(), `${sample.cid}/file`,
+        'QmbFMke1KXqnYyBBWxB74N4c5SBnJMVAiMNRcGu6x1AwQH',
+    ]) {
+        assert.throws(() => encodeLoggerCall(cid), /cid must be a canonical CIDv1/);
+        assert.throws(() => hashLoggerCid(cid), /cid must be a canonical CIDv1/);
     }
+});
+
+test('Logger decoding rejects noncanonical recorded CIDs and mismatched hashes', () => {
+    // The contract remains permissive; the kernel enforces its CID protocol.
+    for (const cid of ['', 'bafy-test', 'café', sample.cid.toUpperCase(), ` ${sample.cid}`, `${sample.cid}/file`]) {
+        const hex = Buffer.from(cid).toString('hex');
+        const data = `0x${'20'.padStart(64, '0')}${(hex.length / 2).toString(16).padStart(64, '0')}${hex.padEnd(Math.ceil(hex.length / 64) * 64, '0')}`;
+        assert.throws(() => decodeLoggerEvent(createLog({ data }), loggerAddress), /canonical CIDv1/);
+    }
+    const log = createLog({ topics: [...fixtures.topics, fixtures.cases[0].cidKeccak256Hash] });
+    assert.throws(() => decodeLoggerEvent(log, loggerAddress), /cidKeccak256Hash must match/);
 });
 
 test('Logger event filtering requires the expected emitter and event signature', () => {
@@ -126,7 +133,7 @@ test('Logger decoder rejects invalid offsets, lengths, sizes, and nonzero paddin
         `0x${word(64)}${raw.slice(64)}`, // Noncanonical gap.
         `0x${'f'.repeat(64)}${raw.slice(64)}`, // Huge offset.
         `0x${raw.slice(0, 64)}${'f'.repeat(64)}${raw.slice(128)}`, // Huge declared length.
-        `0x${raw.slice(0, 64)}${word(33)}${raw.slice(128)}`, // Declared data exceeds buffer.
+        `0x${raw.slice(0, 64)}${word(65)}${raw.slice(128)}`, // Declared data exceeds buffer.
         `0x${raw.slice(0, 64)}${word(8)}${raw.slice(128)}`, // Nonzero byte in declared padding.
         `0x${raw.slice(0, -2)}`, // Truncated padding.
         `0x${raw}00`, // Trailing byte.

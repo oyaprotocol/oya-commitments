@@ -1,12 +1,13 @@
-import { encodeLoggerCall, decodeLoggerEvent } from '@oyaprotocol/ethereum';
+import { encodeLoggerCall, decodeLoggerEvent, hashLoggerCid } from '@oyaprotocol/ethereum';
 import type {
     EthereumReceiptLog,
     LoggerEvent,
     LoggerEventInput,
 } from '@oyaprotocol/ethereum';
 
-const calldata: string = encodeLoggerCall('bafy-test');
+const calldata: string = encodeLoggerCall('bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e');
 declare const loggerAddress: string;
+const cidKeccak256Hash: string = hashLoggerCid('bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e');
 declare const receiptLog: EthereumReceiptLog;
 const input: LoggerEventInput = receiptLog;
 const event: LoggerEvent | null = decodeLoggerEvent(input, loggerAddress);
@@ -28,4 +29,4 @@ encodeLoggerCall(1);
 decodeLoggerEvent(receiptLog);
 // @ts-expect-error Event filtering can return null.
 const matchingEvent: LoggerEvent = decodeLoggerEvent(receiptLog, loggerAddress);
-void [calldata, matchingEvent];
+void [calldata, cidKeccak256Hash, matchingEvent];

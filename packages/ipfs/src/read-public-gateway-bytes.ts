@@ -7,6 +7,7 @@ import type { IpfsOperationErrorMessages } from './request-utils.js';
 import { readBoundedBytes, type ReadIpfsBytesResult } from './read-bytes.js';
 import {
     HttpStatusError,
+    assertCanonicalCid,
     assertHeadersObject,
     assertNonEmptyString,
     assertNonNegativeInteger,
@@ -68,10 +69,10 @@ async function readIpfsPublicGatewayBytesWithMessages(
     }: ReadIpfsPublicGatewayOptions,
     messages: IpfsOperationErrorMessages
 ): Promise<ReadIpfsBytesResult> {
-    const trimmedCid = assertNonEmptyString(cid, 'cid');
+    const validatedCid = assertCanonicalCid(cid, 'cid');
     const gatewayReadUrl = buildGatewayReadUrl(
         assertNonEmptyString(gatewayUrl, 'gatewayUrl'),
-        trimmedCid
+        validatedCid
     );
     const validatedHeaders = assertHeadersObject(headers, 'headers');
     const requestTimeoutMs = assertPositiveInteger(timeoutMs, 'timeoutMs');
@@ -114,8 +115,8 @@ async function readIpfsPublicGatewayBytesWithMessages(
             });
 
             return {
-                cid: trimmedCid,
-                uri: `ipfs://${trimmedCid}`,
+                cid: validatedCid,
+                uri: `ipfs://${validatedCid}`,
                 bytes,
                 byteLength: bytes.byteLength,
                 attemptCount: attempt,

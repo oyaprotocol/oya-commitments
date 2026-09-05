@@ -1,3 +1,4 @@
+export { assertCanonicalCid } from './cid-utils.js';
 export { combineAbortSignals, createTimeoutSignal, invokeWithAbort, runWithRetry, throwIfSignalAborted, waitForRetryDelay, } from './async-utils.js';
 export type { AbortSignalHandle, RunWithRetryAttemptContext, RunWithRetryOptions, } from './async-utils.js';
 export { HttpStatusError, RETRYABLE_HTTP_NETWORK_ERROR_CODES, createHttpConfig, hasRetryableNetworkErrorCode, readErrorStringChain, } from './http-utils.js';

@@ -1,0 +1,69 @@
+{
+  "generatedBy": "IPFS CLI 0.40.1, offline add --only-hash --quieter, with the options below and pin=false. No uploaded data or daemon. Literal UTF-8, hex bytes, or repeated-byte inputs.",
+  "options": {
+    "cid-version": "1",
+    "cid-base": "base32",
+    "hash": "sha2-256",
+    "chunker": "size-1048576",
+    "raw-leaves": "true",
+    "trickle": "false",
+    "max-file-links": "1024",
+    "wrap-with-directory": "false",
+    "inline": "false",
+    "preserve-mode": "false",
+    "preserve-mtime": "false",
+    "pin": "true",
+    "progress": "false"
+  },
+  "cases": [
+    {
+      "name": "empty",
+      "text": "",
+      "cid": "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku"
+    },
+    {
+      "name": "hello",
+      "text": "hello world",
+      "cid": "bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e"
+    },
+    {
+      "name": "bytes",
+      "hex": "010203",
+      "cid": "bafkreiadsbmmn4waznesyuz3bjgrj33xzqhxrk6mz3ksq7meugrachh3qe"
+    },
+    {
+      "name": "retry",
+      "text": "retry me",
+      "cid": "bafkreibnecdvlqg33r72todcgjzfr5gvha5tz2ct4lj2ooxarnm22vglxy"
+    },
+    {
+      "name": "message",
+      "text": "{\"text\":\"Please withdraw 100 USDC.\",\"signer\":\"0x14791697260E4c9A71f18484C9f997B308e59325\",\"signature\":\"0x36891560b97f673db6931408e45fd3e8ffca26ae50f1c68adbe74e57808b92480f55566cc281099d59dc574c7e444851af9a8978acd55503ca3d2565061e542d1b\"}",
+      "cid": "bafkreicn5hwdk56k2qwskml5rfq5oz3fvz6g5blm5vpd4jtlkchbbfibki"
+    },
+    {
+      "name": "zero-1048575",
+      "repeatByte": 0,
+      "byteLength": 1048575,
+      "cid": "bafkreigkp3imjkhgps64iyoezmgsq3jpvo6z6dcbu72cwzs7olv2vcxmky"
+    },
+    {
+      "name": "zero-1048576",
+      "repeatByte": 0,
+      "byteLength": 1048576,
+      "cid": "bafkreibq4fevl27rgurgnxbp7adh42aqiyd6ouflxhj3gzmcxcxzbh6lla"
+    },
+    {
+      "name": "zero-1048577",
+      "repeatByte": 0,
+      "byteLength": 1048577,
+      "cid": "bafybeihd4yzq7n5umhjngdum4r6k2to7egxfkf2jz6thvwzf6djus22cmq"
+    },
+    {
+      "name": "zero-2097153",
+      "repeatByte": 0,
+      "byteLength": 2097153,
+      "cid": "bafybeif3dv52qu4uoqvhg2upq6r7pr5ggh7hwh75dpmoxdux4hmtriybga"
+    }
+  ]
+}

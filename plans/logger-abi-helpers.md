@@ -3,6 +3,12 @@
 This ExecPlan follows `PLANS.md` and implements the next small Logger integration
 step after Ethereum receipt handling, including the approved indexed CID hash.
 
+The milestones below record the original ABI implementation and CID index
+extension. Their permissive offchain string policy, fixture set, and absence of
+runtime hashing are superseded by [Standardize kernel CIDs](standardize-kernel-cids.md).
+Current helpers require canonical CIDs, expose `hashLoggerCid`, and verify the
+event's hash using `@noble/hashes`; the Solidity ABI remains the one recorded here.
+
 ## Purpose / Big Picture
 
 A host can prepare calldata for the deployed Logger and interpret its receipt
@@ -24,13 +30,14 @@ an event contains indexed values in topics and other values in its data bytes.
 - [x] 2026-09-05: Reviewed the approved CID index update and recorded the unchanged 46-character CID call baseline of 24,905 gas with the pinned compiler.
 - [x] 2026-09-05: Added indexed `cidKeccak256Hash` in the contract and decoded event, updated tests and 11 independent fixtures, and documented exact-string lookup behavior.
 - [x] 2026-09-05: Contract formatting/build/ABI checks, eight contract tests (256 fuzz cases), refreshed gas snapshot, package build, 53 Ethereum runtime tests, TypeScript consumer checks, package-root import checks, and diff checks passed inside the sandbox.
+- [x] 2026-09-05: Linked the subsequent CID standardization plan, which replaces the offchain opaque-string policy and adds shared lookup hashing without changing Solidity.
 
 ## Surprises & Discoveries
 
-- Logger permits empty and arbitrary strings. Its codec must not trim or impose
-  CID syntax policy. UTF-8 byte lengths, rather than JavaScript string lengths,
-  determine ABI lengths. JavaScript strings with unpaired surrogates cannot be
-  encoded losslessly; the encoder will reject them.
+- Logger permits empty and arbitrary strings. The initial codec imposed no CID
+  syntax policy; the subsequent standardization plan tightens the offchain
+  boundary. UTF-8 byte lengths, rather than JavaScript string lengths, determine
+  ABI lengths. JavaScript strings with unpaired surrogates cannot be encoded losslessly.
 - Receipt parsing supplied a strict, variable-size byte validator. `parseBytes`
   now lives in `packages/utils/src/validation-utils.ts` and is exported through
   `@oyaprotocol/utils` for receipt parsing and Logger decoding.

@@ -1,4 +1,6 @@
-import { isPlainObject, parseBytes } from '@oyaprotocol/utils';
+import { keccak_256 } from '@noble/hashes/sha3.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
+import { assertCanonicalCid, isPlainObject, parseBytes } from '@oyaprotocol/utils';
 
 import type { EthereumReceiptLog } from './receipt-utils.js';
 
@@ -17,14 +19,18 @@ interface LoggerEvent {
 }
 
 function encodeLoggerCall(cid: string): string {
-    if (typeof cid !== 'string' || !cid.isWellFormed()) {
-        throw new TypeError('cid must be a well-formed Unicode string.');
-    }
+    assertCanonicalCid(cid, 'cid');
     const bytes = new TextEncoder().encode(cid);
     const length = bytes.length.toString(16).padStart(64, '0');
     const content = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
     const paddedContent = content.padEnd(Math.ceil(bytes.length / 32) * 64, '0');
     return `${LOGGER_SELECTOR}${STRING_OFFSET}${length}${paddedContent}`;
+}
+
+/** Compute the topic used to find Logger events for a canonical CID. */
+function hashLoggerCid(cid: string): string {
+    assertCanonicalCid(cid, 'cid');
+    return `0x${bytesToHex(keccak_256(new TextEncoder().encode(cid)))}`;
 }
 
 /** Returns null for unrelated logs; malformed matching Logger events throw. */
@@ -85,6 +91,9 @@ function decodeLoggerEvent(log: LoggerEventInput, loggerAddress: string): Logger
     } catch (error) {
         throw new Error('Logger event cid must contain valid UTF-8.', { cause: error });
     }
+    if (hashLoggerCid(cid).toLowerCase() !== cidKeccak256Hash.toLowerCase()) {
+        throw new Error('Logger event cidKeccak256Hash must match its canonical CID.');
+    }
     return {
         node: `0x${nodeTopic.slice(26)}`,
         cidKeccak256Hash,
@@ -93,5 +102,5 @@ function decodeLoggerEvent(log: LoggerEventInput, loggerAddress: string): Logger
     };
 }
 
-export { encodeLoggerCall, decodeLoggerEvent };
+export { encodeLoggerCall, decodeLoggerEvent, hashLoggerCid };
 export type { LoggerEventInput, LoggerEvent };

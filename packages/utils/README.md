@@ -10,6 +10,7 @@ Small shared utilities for hardened Oya kernel packages.
 
 - `assertAsciiBytes(bytes, message)`
 - `assertBytes32HexString(value, label)`
+- `assertCanonicalCid(value, label)`: requires CIDv1, lowercase unpadded Base32, and a SHA-256 multihash with a 32-byte digest. Returns the original string; rejects whitespace, paths, URIs, CIDv0, alternate bases, nonminimal integer encodings, and invalid Base32 padding bits. Checks codec encoding without maintaining a codec registry allowlist. This validates identifier structure, not content or availability.
 - `assertNonEmptyString(value, label)`
 - `assertHexData(value, label)`
 - `assertHexString(value, label)`

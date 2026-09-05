@@ -18,13 +18,15 @@ Any caller can submit a string, including an empty string. Each successful call 
 
 Logger treats the CID as an opaque claim: it does not validate CID syntax, fetch content, check signatures, or prove availability. Empty strings, whitespace, and other strings are accepted without normalization or an application-specific length limit. Hosts should validate the artifact and its CID before submitting a transaction, and consumers should verify content when reading it.
 
+The offchain kernel enforces a narrower policy without adding onchain checks: `@oyaprotocol/ipfs` and the Logger helpers in `@oyaprotocol/ethereum` require CIDv1 in lowercase unpadded Base32 with a 32-byte SHA-256 digest. `hashLoggerCid(cid)` computes the lookup topic, and `decodeLoggerEvent` rejects matching events outside this format or with a mismatched hash. This policy leaves the Solidity ABI and accepted strings unchanged.
+
 Repeated submissions emit separate events. Consumers can filter by the indexed node address or `cidKeccak256Hash` and decode the full CID from event data. The hash is Keccak-256 of the exact CID string bytes, separate from the content hash embedded in a CID. Equivalent CIDs with different text encodings have different lookup hashes; no normalization is performed.
 
 The event has three topics: `keccak256("Log(address,bytes32,string)")`, the padded node address, and `cidKeccak256Hash`. An `eth_getLogs` request can filter by the Logger address and `[eventSignatureTopic, null, cidKeccak256Hash]` to find a known CID from any node. Specify the block range to search. This event replaces the earlier `Log(address,string)` ABI; consumers must use the updated event signature and decoder.
 
 The chain's canonical block and log positions establish recording order; consumers choose a confirmation policy and handle reorganizations. Logger keeps no onchain storage history or sequence counter.
 
-Node integration will compose the existing `publishSignedMessage(...)` IPFS publisher with transaction submission to a deployed Logger. Deployment addresses, transaction signing, and receipt handling are a later milestone.
+Node integration will compose the existing `publishSignedMessage(...)` IPFS publisher with transaction submission and receipt handling from `@oyaprotocol/ethereum`. Hosts supply deployment addresses and transaction signing.
 
 ## Build and Test
 
