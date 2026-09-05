@@ -13,6 +13,8 @@ export {
 export { handleSignedMessage } from './ingress.js';
 export { publishSignedMessage } from './handlers/publish.js';
 export type { PublishSignedMessageOptions } from './handlers/publish.js';
+export { publishAndLogSignedMessage, PublishAndLogSignedMessageError } from './handlers/publish-and-log.js';
+export type { PublishAndLogSignedMessageOptions, PublishAndLogSignedMessageResult } from './handlers/publish-and-log.js';
 export type {
     SignedMessageInput,
     SignedMessageValidationErrorCode,

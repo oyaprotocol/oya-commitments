@@ -7,5 +7,7 @@ export type { EthGetTransactionReceiptOptions, EthGetTransactionReceiptResult, E
 export type { EthereumReceiptLog, EthereumTransactionReceipt } from './receipt-utils.js';
 export { encodeLoggerCall, decodeLoggerEvent, hashLoggerCid } from './logger.js';
 export type { LoggerEventInput, LoggerEvent } from './logger.js';
+export { logCid, LogCidError } from './log-cid.js';
+export type { LogCidOptions, LogCidResult, LogCidStage, LoggerTransactionRequest, PreparedLoggerTransaction, PrepareLoggerTransaction, } from './log-cid.js';
 export { EthereumJsonRpcError, requestEthereumJsonRpc, } from './request-utils.js';
 export type { RequestEthereumJsonRpcOptions, RequestEthereumJsonRpcResult, } from './request-utils.js';

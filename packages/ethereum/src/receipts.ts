@@ -139,7 +139,7 @@ async function ethWaitForTransactionReceipt({
     }
 }
 
-export { EthereumTransactionReceiptTimeoutError, ethGetTransactionReceipt, ethWaitForTransactionReceipt };
+export { assertTimerMs, EthereumTransactionReceiptTimeoutError, ethGetTransactionReceipt, ethWaitForTransactionReceipt };
 export type {
     EthGetTransactionReceiptOptions,
     EthGetTransactionReceiptResult,

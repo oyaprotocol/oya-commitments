@@ -16,6 +16,8 @@ Ethereum JSON-RPC utilities for Oya kernel code. This package is a hardened kern
 - `encodeLoggerCall(cid)`: encode calldata for the Oya Logger's `log(string)` function.
 - `hashLoggerCid(cid)`: validate a canonical CID and compute its Keccak-256 lookup topic.
 - `decodeLoggerEvent(log, loggerAddress)`: decode a `Log(address indexed node, bytes32 indexed cidKeccak256Hash, string cid)` event from the expected Logger, returning `{ node, cidKeccak256Hash, cid, removed? }` or `null` for an unrelated log.
+- `logCid(cid, options)`: prepare a Logger transaction through a host callback, submit it, await its receipt, and verify the expected event.
+- `LogCidError`: reports the failed logging stage, CID, known transaction hash, receipt when available, and original cause.
 - `EthereumJsonRpcError`: thrown when an HTTP-successful JSON-RPC response contains an `error` payload.
 - `HttpStatusError`: thrown when the HTTP response itself is not successful, re-exported from `@oyaprotocol/utils`.
 - `EthereumRawTransactionRecoveryError`: thrown when raw transaction submission may have succeeded before a retry returned a duplicate-style error, but the wrapper could not verify the supplied transaction hash.
@@ -110,6 +112,43 @@ if (!event) {
 ```
 
 These helpers require standard `TextEncoder` and `TextDecoder`, consistent with the package's ECMAScript 2025 target. Hosts choose confirmation policy and compose publication with transaction submission; the helpers perform no network calls.
+
+## Logging a CID
+
+`logCid(cid, options)` in `src/log-cid.ts` composes the existing ABI, raw submission, and receipt helpers. It validates the canonical CID, Logger address, expected node, HTTP config, and polling durations before asking the host to prepare a transaction:
+
+```ts
+import { logCid } from '@oyaprotocol/ethereum';
+
+const logging = await logCid(publication.cid, {
+    config: rpcConfig,
+    fetch: rpcFetch,
+    loggerAddress,
+    expectedNode,
+    prepareTransaction,
+    timeoutMs: 60_000,
+    pollIntervalMs: 1_000,
+    signal,
+});
+// logging: { cid, transactionHash, receipt, event }
+```
+
+`prepareTransaction` is a host-supplied `PrepareLoggerTransaction` function. It receives a frozen `{ to, data, value: 0n, signal? }` request describing the Logger call and returns `{ rawTransaction, transactionHash }`, synchronously or asynchronously. It must prepare and sign without broadcasting. The host supplies chain ID, nonce, fees, gas, and key or wallet access, and coordinates nonces across concurrent messages. It must return the correct hash for the signed transaction and preserve the requested call, including when routing through a contract wallet. The helper validates the returned hex shapes and checks the RPC's returned hash; it does not parse or independently verify the signed transaction.
+
+The helper snapshots the signed bytes and hash, submits through `ethSendRawTransaction`, then polls through `ethWaitForTransactionReceipt`. It prepares only once and adds no outer retry loop; submission retries reuse the exact signed bytes. `expectedNode` is Logger's immediate caller, not necessarily the message signer or the outer transaction sender. A successful result requires receipt status `success` and a matching event from `loggerAddress`, with the expected node and exact CID, valid CID/hash correspondence, and `removed !== true`.
+
+`timeoutMs` bounds receipt observation after submission; `config.timeoutMs` bounds each RPC request. The host bounds transaction preparation/signing. The optional signal covers preparation, submission, and polling through the existing async utilities. Cancellation stops subsequent stages even if preparation ignores its signal and eventually returns signed bytes. It cannot undo a submitted transaction. The returned receipt establishes mined execution as reported by the RPC, with confirmation depth and reorganization policy left to the host.
+
+Invalid configuration rejects before preparation. Once preparation begins, failures throw `LogCidError` with the original `cause`, `cid`, `transactionHash` (or `null` before a valid hash is known), `receipt` (or `null`), and one of these stages:
+
+| Stage | Operation that failed |
+| --- | --- |
+| `prepare` | Host preparation/signing, returned-value validation, or cancellation before submission |
+| `submit` | Signed transaction submission or its response/recovery checks |
+| `receipt` | Receipt lookup, parsing, cancellation, or deadline |
+| `verify` | Receipt execution status or expected Logger event checks |
+
+The hash is retained before broadcasting, including when submission fails ambiguously. Its presence does not prove that the transaction was accepted. A receipt timeout is available as `error.cause instanceof EthereumTransactionReceiptTimeoutError`; it does not imply transaction failure. Resume observation using the retained hash and `ethWaitForTransactionReceipt`, then apply the status/event checks shown above. Calling `logCid` again prepares a new transaction and can create another event. Hosts must persist progress themselves if recovery must survive a process crash.
 
 ## Validation
 
