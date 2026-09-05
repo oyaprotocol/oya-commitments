@@ -62,7 +62,7 @@ test('the factory creates a frozen EIP-1559 transaction with current RPC values 
     assert.deepEqual(calls.map(({ method, params, id }) => ({ method, params, id })), [
         { method: 'eth_chainId', params: [], id: 1 },
         { method: 'eth_getTransactionCount', params: [node, 'pending'], id: 1 },
-        { method: 'eth_getBlockByNumber', params: ['latest', false], id: 1 },
+        { method: 'eth_getBlockByNumber', params: ['pending', false], id: 1 },
         { method: 'eth_maxPriorityFeePerGas', params: [], id: 1 },
         { method: 'eth_estimateGas', params: [{
             from: node, to: request.to, data: request.data, value: '0x7',
@@ -70,6 +70,41 @@ test('the factory creates a frozen EIP-1559 transaction with current RPC values 
             maxFeePerGas: '0xca', maxPriorityFeePerGas: '0x2',
         }, 'pending'], id: 1 },
     ]);
+});
+
+test('fees and gas limits use the pending block when the base fee multiplier is one', async () => {
+    const { options, signatures } = fixture({ baseFeeMultiplier: 1 });
+    const blocks = {
+        latest: { baseFeePerGas: '0x64', gasLimit: '0x6271' },
+        pending: { baseFeePerGas: '0x6e', gasLimit: '0x6272' },
+    };
+    const blockTags = [];
+    const fetch = options.fetch;
+    options.fetch = async (url, init) => {
+        const { method, params, id } = JSON.parse(init.body);
+        if (method === 'eth_getBlockByNumber') {
+            blockTags.push(params[0]);
+            return response(blocks[params[0]], id);
+        }
+        if (method === 'eth_estimateGas') {
+            assert.equal(params[1], 'pending');
+            if (BigInt(params[0].maxFeePerGas) < BigInt(blocks.pending.baseFeePerGas)) {
+                return { ok: true, text: async () => JSON.stringify({
+                    jsonrpc: '2.0', id, error: { code: -32000, message: 'max fee per gas less than block base fee' },
+                }) };
+            }
+        }
+        return fetch(url, init);
+    };
+    const prepare = createTransactionPreparer(options);
+    await prepare(request);
+    assert.deepEqual(blockTags, ['pending']);
+    assert.equal(signatures[0].transaction.maxFeePerGas, 112n);
+    assert.equal(signatures[0].transaction.gasLimit, 25_202n);
+
+    blocks.pending.gasLimit = '0x6271';
+    await assert.rejects(prepare(request), /pending block gas limit/);
+    assert.equal(signatures.length, 1);
 });
 
 test('policies support exact ceilings, zero fees, empty calldata, large chain IDs, and fresh nonces', async () => {

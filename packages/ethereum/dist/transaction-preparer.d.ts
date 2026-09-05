@@ -7,7 +7,7 @@ interface CreateTransactionPreparerOptions {
     signer: TransactionSigner;
     /** Whole percent added to the estimate, rounded up. Default: 20. */
     gasLimitMarginPercent?: number;
-    /** Integer multiplier for the latest base fee. Default: 2. */
+    /** Integer multiplier for the pending block's base fee. Default: 2. */
     baseFeeMultiplier?: number;
     /** Exceeding either optional ceiling rejects before signing. */
     limits?: {

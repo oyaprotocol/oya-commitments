@@ -20,7 +20,7 @@ interface CreateTransactionPreparerOptions {
     signer: TransactionSigner;
     /** Whole percent added to the estimate, rounded up. Default: 20. */
     gasLimitMarginPercent?: number;
-    /** Integer multiplier for the latest base fee. Default: 2. */
+    /** Integer multiplier for the pending block's base fee. Default: 2. */
     baseFeeMultiplier?: number;
     /** Exceeding either optional ceiling rejects before signing. */
     limits?: { gasLimit?: bigint; feePerGas?: bigint };
@@ -116,9 +116,9 @@ function createTransactionPreparer({
                 if (nonce > BigInt(Number.MAX_SAFE_INTEGER)) {
                     throw new Error('Transaction nonce must fit in a safe integer.');
                 }
-                const block = await rpc('eth_getBlockByNumber', ['latest', false]);
+                const block = await rpc('eth_getBlockByNumber', ['pending', false]);
                 if (!isPlainObject(block) || block.baseFeePerGas === undefined || block.baseFeePerGas === null) {
-                    throw new Error('Latest block must include baseFeePerGas for EIP-1559 transaction preparation.');
+                    throw new Error('Pending block must include baseFeePerGas for EIP-1559 transaction preparation.');
                 }
                 const baseFee = parseTransactionQuantity(block.baseFeePerGas, 'block.baseFeePerGas');
                 const blockGasLimit = parseTransactionQuantity(block.gasLimit, 'block.gasLimit');
@@ -147,7 +147,7 @@ function createTransactionPreparer({
                 }
                 const gasLimit = (estimate * (100n + BigInt(gasLimitMarginPercent)) + 99n) / 100n;
                 if (gasLimit > blockGasLimit) {
-                    throw new Error('Buffered gas limit exceeds the latest block gas limit.');
+                    throw new Error('Buffered gas limit exceeds the pending block gas limit.');
                 }
                 if (gasLimitCap !== undefined && gasLimit > gasLimitCap) {
                     throw new Error('Buffered gas limit exceeds limits.gasLimit.');
