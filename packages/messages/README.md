@@ -71,7 +71,7 @@ The returned function validates and verifies the signed message before checking 
 
 ## HTTP-Shaped Ingress
 
-`handleSignedMessage(request, options)` accepts raw request bytes and returns frozen HTTP-shaped values without owning a server, router, socket, or process lifecycle. A node can mount it behind an endpoint such as `POST /v1/messages`:
+`handleSignedMessage(request, options)` accepts raw request bytes and returns a Promise of frozen HTTP-shaped values without owning a server, router, socket, or process lifecycle. A node can mount it behind an endpoint such as `POST /v1/messages` and optionally configure one function to handle each authenticated message:
 
     import {
       createSignedMessageAuthorizer,
@@ -79,7 +79,7 @@ The returned function validates and verifies the signed message before checking 
     } from '@oyaprotocol/messages';
 
     const authorize = createSignedMessageAuthorizer(allowedSigners);
-    const result = handleSignedMessage(
+    const result = await handleSignedMessage(
       {
         method,
         contentType,
@@ -89,11 +89,17 @@ The returned function validates and verifies the signed message before checking 
         authorize,
         maxBodyBytes,
         maxTextBytes,
+        async onAcceptedMessage(message) {
+          return await configuredAction(message);
+        },
       }
     );
 
     if (result.status === 202) {
-      await processAuthenticatedMessage(result.message);
+      const actionResult = result.handleSignedMessageResult;
+      if (actionResult !== undefined) {
+        inspectConfiguredActionResult(actionResult);
+      }
     }
 
 The request must be a plain object with exactly these own properties:
@@ -102,7 +108,7 @@ The request must be a plain object with exactly these own properties:
 - `contentType`: a string, or `undefined` when the header is absent; the own property is always required. The accepted media type is `application/json` with an optional unquoted `charset=utf-8` parameter.
 - `body`: a `Uint8Array` containing the raw request bytes.
 
-The options must be a plain object with exactly `authorize`, `maxBodyBytes`, and `maxTextBytes`. The two limits are required positive integers with no package defaults. Malformed request or option containers throw `TypeError` because they indicate adapter or configuration bugs.
+The options must be a plain object with required own `authorize`, `maxBodyBytes`, and `maxTextBytes` properties and an optional own `onAcceptedMessage` property. The two limits are required positive integers with no package defaults. An own `onAcceptedMessage`, when present, must be a function; inherited values with that name are ignored. Malformed request or option containers reject the returned Promise with `TypeError` because they indicate adapter or configuration bugs.
 
 The handler processes a well-typed request in this order: method, content type, raw body size, fatal UTF-8 decoding and JSON parsing, encoded text size when a string `text` field exists, then signed-message authorization. This order prevents oversized bodies from reaching JSON parsing and oversized text from reaching signature verification.
 
@@ -115,7 +121,7 @@ Expected request failures return structured bodies with stable HTTP statuses and
 - `401 invalid_signature` from `SignedMessageVerificationError`
 - `403 unauthorized_signer` from `SignedMessageAuthorizationError`
 
-Unexpected authorizer exceptions propagate so infrastructure and programming failures remain visible.
+Unexpected authorizer exceptions reject the returned Promise unchanged so infrastructure and programming failures remain visible.
 
 An accepted result has status `202`, a small response `body`, and a separate trusted `message` handoff:
 
@@ -133,6 +139,16 @@ An accepted result has status `202`, a small response `body`, and a separate tru
     }
 
 Status `202` means the message passed package authentication and authorization. It does not mean a node has completed an IPFS publication, onchain transaction, or other implementation-specific side effect. An HTTP adapter sends only `result.status` and `result.body` to the remote caller; the node consumes `result.message` internally.
+
+### Optional Accepted-Message Handling
+
+The host may provide `onAcceptedMessage` to act on the authenticated message before `handleSignedMessage(...)` resolves. The package invokes it exactly once for each accepted call, after authorization, with the frozen `result.message` snapshot. Rejected requests bypass it. The function may return synchronously or asynchronously; the package awaits it and adds its exact settled value as the `handleSignedMessageResult` property on the accepted result. The property is present even when the function returns `undefined`, and absent when no function is configured. The package preserves arbitrary host-owned result values by reference rather than cloning or freezing them.
+
+A synchronous throw or rejected Promise from `onAcceptedMessage` rejects `handleSignedMessage(...)` unchanged. The package does not convert a failed action into a status-`202` result. Retrying the same valid request invokes the configured function again, so side-effecting functions remain responsible for any deduplication or idempotency they require.
+
+The public TypeScript API uses one `HandleSignedMessageOptions<TResult>` interface whose `onAcceptedMessage` property is optional, and one accepted-result interface with an optional `handleSignedMessageResult` property. After narrowing `status === 202`, the host may read the property directly as `Awaited<TResult> | undefined`, with `TResult` inferred from the handler. Check `'handleSignedMessageResult' in result` when distinguishing an omitted handler from one that returned `undefined`. With `exactOptionalPropertyTypes` enabled, this presence check also narrows the property's type to `Awaited<TResult>`.
+
+The accepted-message function is a host integration point, not an action registry owned by this package. This milestone does not provide an IPFS-specific handler or onchain Logger implementation.
 
 ## Internet-Facing Limits
 

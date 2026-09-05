@@ -52,10 +52,15 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
 - [x] 2026-08-30: Standardized the configured function's returned-value field as `handleSignedMessageResult` throughout this plan.
 - [x] 2026-08-30: Corrected the proposed type contract so overloads correlate callback presence with a required callback-result property and callback-absent calls do not infer `unknown`.
 - [x] 2026-08-30: Added a last-position fallback overload for runtime-selected callbacks without weakening the two precise overloads.
-- [ ] Add the callback-present, callback-absent, and dynamically optional option shapes, the three ordered `handleSignedMessage(...)` overloads, and the consistently asynchronous implementation.
-- [ ] Add focused ingress tests for callback ordering, awaiting, result propagation, rejection bypass, repeated invocation, and failure propagation.
-- [ ] Add a compile-time declaration test proving callback-result inference and callback-absent property exclusion.
-- [ ] Update package documentation, rebuild the package area, smoke-import the public API, and run package regressions.
+- [x] 2026-08-31 02:14Z: Added the callback-present, callback-absent, and dynamically optional option shapes, the three ordered `handleSignedMessage(...)` overloads, and the consistently asynchronous implementation.
+- [x] 2026-08-31 02:14Z: Added focused ingress tests for callback ordering, awaiting, result propagation, rejection bypass, repeated invocation, and failure propagation; all 39 message tests pass.
+- [x] 2026-08-31 02:14Z: Added a compile-time test against the emitted package declarations proving callback-result inference, callback-absent property exclusion, and dynamic-option narrowing under `exactOptionalPropertyTypes`.
+- [x] 2026-08-31 02:14Z: Updated package documentation, rebuilt the package area, smoke-imported the public API, and passed all 76 utils, IPFS, and Ethereum regression tests.
+- [x] 2026-09-01 02:36Z: Corrected the callback-result declaration to expose `Awaited<TResult>`, added an explicitly `Promise<T>`-typed handler regression, rebuilt the package, and re-passed all message and package regressions.
+- [x] 2026-09-01 02:52Z: Restricted `onAcceptedMessage` to an own options property, normalized omission to an own `undefined` snapshot, added inherited function/non-function regressions, and passed all 40 message tests.
+- [x] 2026-09-01 03:06Z: Replaced the three correlated options interfaces and overloads with one optional `HandleSignedMessageOptions<TResult>` interface, one function signature, and one honest accepted-result union requiring property-presence narrowing.
+- [x] 2026-09-01 03:06Z: Rewrote the emitted-declaration fixture and README for the single-interface API, rebuilt and smoke-imported the package, passed all 40 message tests and the declaration test, and passed all 76 broader package regressions.
+- [x] 2026-09-04: Replaced the two accepted-result interfaces with one generic `AcceptedSignedMessage<TResult>` interface whose `handleSignedMessageResult?: Awaited<TResult>` property permits direct reads after acceptance. Updated declaration tests and documentation; the package build, declaration test, package-root smoke import, and all 40 message tests passed.
 
 ## Surprises & Discoveries
 
@@ -83,11 +88,20 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
 - Observation: The existing shared ASCII policy accepts the full ASCII byte range.
   Evidence: `assertAsciiBytes(...)` accepts every byte through `0x7f`, including control bytes and `0x7f`, and rejects higher UTF-8 byte values just like the IPFS text readers.
 
-- Observation: The current ingress helper is synchronous and accepts an exact three-field options object.
-  Evidence: `packages/messages/src/ingress.ts` currently allows only `authorize`, `maxBodyBytes`, and `maxTextBytes`, then returns immediately after creating the frozen accepted result.
+- Observation: Before the accepted-message milestone, the ingress helper was synchronous and accepted an exact three-field options object.
+  Evidence: The prior `packages/messages/src/ingress.ts` allowed only `authorize`, `maxBodyBytes`, and `maxTextBytes`; the completed milestone adds the optional handler and makes every path Promise-based.
 
 - Observation: The existing authenticated message snapshot is already the narrow trust boundary needed by a configurable downstream function.
   Evidence: successful ingress copies `text`, `signer`, and `signature` into a new frozen object before returning it, so the callback does not need the parsed request body or an authorizer-owned reference.
+
+- Observation: The initial callback declaration was unsound when a consumer explicitly instantiated `AcceptedSignedMessageHandler<Promise<T>>`.
+  Evidence: the callback type accepted the async function and the overload exposed `Promise<T>`, while runtime `await` recursively unwrapped the callback value to `T`; the emitted-declaration fixture now covers this case.
+
+- Observation: Checking the external options object for an own callback is insufficient if the normalized package-owned options object omits the property.
+  Evidence: with `Object.prototype.onAcceptedMessage` defined, the first own-property guard ignored it but the later read from a normalized plain object inherited it again; materializing an own `undefined` snapshot closes both reads.
+
+- Observation: An optional accepted-result property preserves precise handler-result inference without requiring a second accepted interface.
+  Evidence: The emitted-declaration fixture permits direct reads as `Awaited<TResult> | undefined`, rejects assigning an unchecked optional result to a required value, and preserves exact inference after a presence check under `exactOptionalPropertyTypes`.
 
 ## Decision Log
 
@@ -247,21 +261,37 @@ The signed message is intentionally text-only. Its wire body contains exactly `t
   Rationale: Omitting the function preserves authentication-only usage. When it is configured, ingress should not add deduplication, publication ordering, or action-specific policy; repeated valid submissions each produce one callback invocation, and future onchain Logger behavior remains responsible for the public publication record.
   Date/Author: 2026-08-26 / user and Codex.
 
-- Decision: Export the generic `AcceptedSignedMessageHandler<TResult>` function type and make `HandleSignedMessageOptions<TResult>` and `HandleSignedMessageResult<TResult>` generic over its return value. The generic-options portion of this decision was superseded on 2026-08-30 by correlated callback-present and callback-absent option shapes.
-  Rationale: Future package-root functions such as an IPFS publisher should be able to declare compatibility with the configured hook without duplicating its signature, and host integrations should retain the concrete type of publication metadata or another configured-handler result. Making the callback optional on one generic options interface did not preserve whether the callback-result property exists.
-  Date/Author: 2026-08-26; superseded in part 2026-08-30 / user and Codex.
+- Decision: Export the generic `AcceptedSignedMessageHandler<TResult>` function type and make `HandleSignedMessageOptions<TResult>` and `HandleSignedMessageResult<TResult>` generic over its return value.
+  Rationale: Future package-root functions such as an IPFS publisher should be able to declare compatibility with the configured hook without duplicating its signature, and host integrations should retain the concrete type of publication metadata or another configured-handler result after property-presence narrowing. The generic options design was temporarily superseded by correlated option shapes on 2026-08-30 and restored as the single public options interface on 2026-09-01.
+  Date/Author: 2026-08-26; restored 2026-09-01 / user and Codex.
 
 - Decision: Correlate statically known callback presence with accepted-result shape through two option types and two precise public `handleSignedMessage(...)` overloads.
-  Rationale: A callback-present call has a runtime guarantee that the accepted result owns `handleSignedMessageResult`, so that property must be required and exactly `TResult` after narrowing `status === 202`. A callback-absent call must use the non-generic overload and return an accepted variant with no such property. The source retains one implementation signature, while emitted declarations expose these correlated overloads before the broader fallback.
-  Date/Author: 2026-08-30 / user and Codex.
+  Rationale: A callback-present call has a runtime guarantee that the accepted result owns `handleSignedMessageResult`, so that property must be required and exactly the recursively settled `Awaited<TResult>` after narrowing `status === 202`. A callback-absent call must use the non-generic overload and return an accepted variant with no such property. The source retains one implementation signature, while emitted declarations expose these correlated overloads before the broader fallback.
+  Date/Author: 2026-08-30; clarified and superseded 2026-09-01 / user and Codex.
+
+- Decision: Apply `Awaited<TResult>` at the accepted-result boundary without changing the accepted-message handler signature.
+  Rationale: This is the smallest backward-compatible correction: `AcceptedSignedMessageHandler<T>` continues accepting synchronous `T` and asynchronous `PromiseLike<T>` returns, while explicitly promise-wrapped generic arguments now describe the recursively awaited runtime value accurately.
+  Date/Author: 2026-09-01 / Codex.
+
+- Decision: Treat `onAcceptedMessage` as configured only when it is an own options property and always materialize the validated value as an own normalized property.
+  Rationale: The public options contract is own-field based. Ignoring inherited values prevents prototype extensions or pollution from invoking an unintended handler or rejecting an otherwise callback-absent call, while the normalized own snapshot prevents a second prototype-chain lookup inside ingress.
+  Date/Author: 2026-09-01 / Codex.
 
 - Decision: Define `HandleSignedMessageResult<TResult = never>` so its default describes callback-absent handling and its generic form describes callback-present handling.
   Rationale: The prior function signature declared `TResult` without a default, so calls with no callback had no inference candidate and could fall back to `unknown`. The non-generic overload now returns `HandleSignedMessageResult` using its `never` default, while the generic overload infers `TResult` from the required callback and returns `HandleSignedMessageResult<TResult>`.
-  Date/Author: 2026-08-30 / user and Codex.
+  Date/Author: 2026-08-30; superseded 2026-09-01 / user and Codex.
 
 - Decision: Add a third, last-position overload for dynamically optional accepted-message handlers.
   Rationale: A host may select its callback from runtime configuration, leaving either the options object typed as a callback-present/callback-absent union or its `onAcceptedMessage` property typed as `AcceptedSignedMessageHandler<TResult> | undefined`. Neither value satisfies one specific overload even though the implementation supports both runtime branches. The fallback accepts the broader optional-handler shape and truthfully returns the union of the two possible result shapes. Keeping it after the precise overloads preserves exact inference for statically callback-present and callback-absent calls.
-  Date/Author: 2026-08-30 / user and Codex.
+  Date/Author: 2026-08-30; superseded 2026-09-01 / user and Codex.
+
+- Decision: Use one optional `HandleSignedMessageOptions<TResult = unknown>` interface and one `handleSignedMessage(...)` signature.
+  Rationale: The narrower interfaces and overloads improved call-site precision but added public surface, conditional default machinery, overload tests, and maintenance risk without changing runtime safety. The single interface truthfully returns both accepted shapes for every call. Hosts narrow `status === 202` and then property presence before reading the exact `Awaited<TResult>` value.
+  Date/Author: 2026-09-01; result-shape requirement superseded 2026-09-04 / user and Codex.
+
+- Decision: Use one generic accepted-result interface with optional `handleSignedMessageResult?: Awaited<TResult>`.
+  Rationale: Callers may read the property after checking acceptance and handle `undefined` normally. A presence check remains available to distinguish an omitted handler from a handler that returned `undefined`. The generic preserves the settled handler-result type, and the runtime behavior does not change.
+  Date/Author: 2026-09-04 / user and Codex.
 
 ## Outcomes & Retrospective
 
@@ -359,7 +389,25 @@ Final validation run on 2026-08-20:
 
 The build succeeded, the smoke import printed `function function`, and all 109 hardened-kernel package tests passed: 33 messages, 11 utils, 45 IPFS, and 20 Ethereum. The 15 ingress tests cover successful authenticated handoff, repeated submissions, separately signed identical text, exact content-type handling, processing order, byte limits, invalid UTF-8 and JSON, body-shape delegation, structured error preservation, unexpected exception propagation, strict container fields and types, positive integer configuration, and frozen results.
 
-The original synchronous HTTP-shaped ingress milestone is complete. This ExecPlan is now reopened for the focused optional accepted-message handler milestone. No callback implementation or validation evidence has been recorded yet. The follow-up remains local to `packages/messages`; it does not import reference code from `node/` or `agent/`, and it does not yet implement IPFS publication or onchain Logger behavior.
+The initial accepted-message handler milestone made `handleSignedMessage(...)` always return a Promise. A configured handler receives the frozen authenticated snapshot after authorization, is awaited exactly once per accepted call, and contributes its exact settled value through the required `handleSignedMessageResult` property. Rejections bypass the handler, while authorizer and handler failures reject the Promise unchanged. The initial public type surface used three correlated overloads; the later simplification recorded below replaced them with one optional interface and one honest union result.
+
+Validation run on 2026-08-31:
+
+    npm --prefix packages run build
+    node --test packages/messages/test/*.test.js
+    node packages/node_modules/typescript/bin/tsc -p packages/messages/tsconfig.type-test.json
+    node --input-type=module -e "import('./packages/messages/dist/index.js').then((m) => console.log(typeof m.verifySignedMessage, typeof m.handleSignedMessage))"
+    node --test packages/utils/test/*.js packages/ipfs/test/*.js packages/ethereum/test/*.js
+
+The build and emitted-declaration type test succeeded, the smoke import printed `function function`, all 39 message tests passed, and all 76 broader package tests passed. The completed milestone remains local to `packages/messages`; it adds no dependency on `@oyaprotocol/ipfs`, does not import from `node/` or `agent/`, and does not implement IPFS publication or onchain Logger behavior.
+
+A focused type-soundness follow-up on 2026-09-01 changed the callback-present accepted property from `TResult` to `Awaited<TResult>`. This preserves ordinary synchronous and asynchronous inference while making an explicit `AcceptedSignedMessageHandler<Promise<T>>` expose `T`, matching the existing runtime `await`. The package build, 39 message tests, emitted-declaration type test, `function function` smoke import, and all 76 broader package regressions passed again.
+
+A prototype-safety follow-up on 2026-09-01 made callback configuration own-property-only. `validateOptions(...)` now reads `onAcceptedMessage` only when `Object.hasOwn(...)` succeeds and returns a normalized object that always owns the snapshotted callback value, including `undefined`. A regression installs inherited function and non-function values on `Object.prototype`, proves neither affects acceptance, and restores the original descriptor. All 40 message tests pass.
+
+A public-surface simplification on 2026-09-01 removed `HandleSignedMessageBaseOptions`, `HandleSignedMessageOptionsWithHandler`, `HandleSignedMessageOptionsWithOptionalHandler`, all three overload declarations, the `never` default, and the conditional result branch. At that stage, the package exported one `HandleSignedMessageOptions<TResult = unknown>` interface and one generic function signature returning the rejection branch plus both accepted shapes. Every accepted call therefore required property-presence narrowing before reading `handleSignedMessageResult`, while the narrowed value retained its exact `Awaited<TResult>` type. The build, 40 message tests, emitted-declaration type test, `function function` smoke import, and all 76 broader package regressions passed.
+
+The accepted-result simplification on 2026-09-04 replaced both accepted interfaces with `AcceptedSignedMessage<TResult = unknown>` and an optional `handleSignedMessageResult?: Awaited<TResult>`. Callers can now read the property immediately after narrowing acceptance, including through optional chaining. Presence checks still distinguish callback omission from an explicit `undefined` result, and retain precise inference with `exactOptionalPropertyTypes`. Runtime code was unchanged. The package build, emitted-declaration fixture, package-root smoke import from `packages/`, and all 40 message tests passed. No work remains for this follow-up.
 
 ## Context and Orientation
 
@@ -371,7 +419,7 @@ The relevant files at the start of this plan are:
 - `packages/messages/src/schema.ts`: validates the v1 signed text message shape and defines structured schema errors.
 - `packages/messages/src/ethereum-signature.ts`: verifies EIP-191 text signatures and defines structured cryptographic verification errors.
 - `packages/messages/src/authorization.ts`: prevalidates and snapshots allowlists into reusable authorizers that verify signed messages and authorize their recovered signers.
-- `packages/messages/src/ingress.ts`: validates HTTP-shaped request/configuration input, enforces transport and text limits, maps expected message errors, and currently returns frozen acceptance or rejection results synchronously. This focused milestone will add the optional accepted-message handler here.
+- `packages/messages/src/ingress.ts`: validates HTTP-shaped request/configuration input, enforces transport and text limits, maps expected message errors, optionally awaits the host-configured accepted-message handler, and returns frozen acceptance or rejection results through a Promise.
 - `packages/messages/test/schema.test.js`: covers schema acceptance, exact text preservation, unknown-field rejection, text limits, Ethereum address shape, and signature shape.
 - `packages/messages/test/signature.test.js`: covers fixed ASCII EIP-191 vectors, recovery-value normalization, mismatch failures, and malformed signature scalars.
 - `packages/messages/test/authorization.test.js`: covers configuration-time validation, policy snapshotting, private normalized membership, composed verification and authorization, fail-closed empty lists, preserved validation and verification errors, and structured authorization failures.
@@ -392,7 +440,7 @@ Reference implementation files:
 Definitions:
 
 - Message sender: the remote party that submits the signed HTTP request. The message sender does not configure or invoke the accepted-message handler.
-- Host: the trusted runtime code—normally the Oya node—that constructs callback-absent, callback-present, or dynamically optional handler options, invokes `handleSignedMessage(...)`, and selects any `onAcceptedMessage` function.
+- Host: the trusted runtime code—normally the Oya node—that constructs the optional handler options, invokes `handleSignedMessage(...)`, and selects any `onAcceptedMessage` function.
 - Text message: the user-authored string in the `text` field. The package preserves it exactly for host-defined interpretation.
 - Signer: the Ethereum account address claimed in the request body.
 - Signature: the Ethereum signed-message signature over exactly the `text` string.
@@ -487,24 +535,12 @@ Work from the repository root unless a command says otherwise.
 
 5. Extend the HTTP-shaped message helper with optional accepted-message handling.
 
-    The existing public function becomes consistently asynchronous and exposes two precise correlated overloads followed by one dynamically optional fallback overload. Keep this order so statically known cases select the narrowest return type:
+    The public function is consistently asynchronous and exposes one generic signature whose result truthfully includes rejection, callback-absent acceptance, and callback-present acceptance:
 
-        function handleSignedMessage(
+        function handleSignedMessage<TResult = unknown>(
           request: HandleSignedMessageRequest,
-          options: HandleSignedMessageOptions
-        ): Promise<HandleSignedMessageResult>;
-
-        function handleSignedMessage<TResult>(
-          request: HandleSignedMessageRequest,
-          options: HandleSignedMessageOptionsWithHandler<TResult>
+          options: HandleSignedMessageOptions<TResult>
         ): Promise<HandleSignedMessageResult<TResult>>;
-
-        function handleSignedMessage<TResult>(
-          request: HandleSignedMessageRequest,
-          options: HandleSignedMessageOptionsWithOptionalHandler<TResult>
-        ): Promise<
-          HandleSignedMessageResult | HandleSignedMessageResult<TResult>
-        >;
 
     Use these exact input shapes:
 
@@ -518,54 +554,34 @@ Work from the repository root unless a command says otherwise.
           message: Readonly<SignedMessageInput>
         ) => TResult | PromiseLike<TResult>;
 
-        interface HandleSignedMessageBaseOptions {
+        interface HandleSignedMessageOptions<TResult = unknown> {
           readonly authorize: SignedMessageAuthorizer;
           readonly maxBodyBytes: number;
           readonly maxTextBytes: number;
-        }
-
-        interface HandleSignedMessageOptions
-          extends HandleSignedMessageBaseOptions {
-          readonly onAcceptedMessage?: undefined;
-        }
-
-        interface HandleSignedMessageOptionsWithHandler<TResult>
-          extends HandleSignedMessageBaseOptions {
-          readonly onAcceptedMessage: AcceptedSignedMessageHandler<TResult>;
-        }
-
-        interface HandleSignedMessageOptionsWithOptionalHandler<TResult>
-          extends HandleSignedMessageBaseOptions {
           readonly onAcceptedMessage?:
             | AcceptedSignedMessageHandler<TResult>
             | undefined;
         }
 
-        interface AcceptedSignedMessage {
+        interface AcceptedSignedMessage<TResult = unknown> {
           readonly status: 202;
           readonly body: Readonly<{
             status: "accepted";
             signer: string;
           }>;
           readonly message: Readonly<SignedMessageInput>;
+          readonly handleSignedMessageResult?: Awaited<TResult>;
         }
 
-        interface AcceptedSignedMessageWithHandler<TResult>
-          extends AcceptedSignedMessage {
-          readonly handleSignedMessageResult: TResult;
-        }
-
-        type HandleSignedMessageResult<TResult = never> =
+        type HandleSignedMessageResult<TResult = unknown> =
           | RejectedSignedMessage
-          | ([TResult] extends [never]
-              ? AcceptedSignedMessage
-              : AcceptedSignedMessageWithHandler<TResult>);
+          | AcceptedSignedMessage<TResult>;
 
-    Export `AcceptedSignedMessageHandler`, `HandleSignedMessageOptions`, `HandleSignedMessageOptionsWithHandler`, `HandleSignedMessageOptionsWithOptionalHandler`, and `HandleSignedMessageResult` from `packages/messages/src/index.ts` with the existing request type. Keep the shared base options plus accepted and rejected result variants internal. The tuple form `[TResult] extends [never]` prevents conditional-type distribution and makes the default `HandleSignedMessageResult` resolve to the callback-absent accepted variant rather than to `never`.
+    Export `AcceptedSignedMessageHandler`, `HandleSignedMessageOptions`, and `HandleSignedMessageResult` from `packages/messages/src/index.ts` with the existing request type. Keep the accepted and rejected result variants internal. Do not add separate callback-present, callback-absent, base, or dynamically optional option types.
 
-    The implementation signature accepts `HandleSignedMessageOptionsWithOptionalHandler<TResult>` and returns the corresponding result union internally; only the three ordered overload signatures are public. A value typed as `HandleSignedMessageOptions | HandleSignedMessageOptionsWithHandler<TResult>` is structurally assignable to the broad fallback. Unlike that union alone, the broad optional-handler shape also accepts an object whose `onAcceptedMessage` property is itself typed as `AcceptedSignedMessageHandler<TResult> | undefined` under `exactOptionalPropertyTypes`. Branch on the validated `onAcceptedMessage` value when constructing the accepted result so the runtime shape matches the selected overload without asserting that an optional property is present.
+    The single options interface accepts omitted, present, and runtime-selected handlers, including an `onAcceptedMessage` property typed as `AcceptedSignedMessageHandler<TResult> | undefined` under `exactOptionalPropertyTypes`. The accepted-result interface represents callback optionality with one optional property. After narrowing `status === 202`, the host may read `handleSignedMessageResult` directly as `Awaited<TResult> | undefined`. A presence check distinguishes an omitted callback from one returning `undefined`, and narrows the property to `Awaited<TResult>` when `exactOptionalPropertyTypes` is enabled.
 
-    `request` and `options` must be plain objects with own properties matching the interfaces above; reject missing or unsupported own properties with `TypeError`. Every request property is required, including `contentType`, whose value is `undefined` when the HTTP header was absent. `authorize`, `maxBodyBytes`, and `maxTextBytes` remain required options. Callback-absent options may omit `onAcceptedMessage` or set it explicitly to `undefined`. Callback-present options require it to be a function. At runtime, reject any other value with `TypeError('options.onAcceptedMessage must be a function or undefined.')`. Add it to the allowed options field set but not the required runtime options field list.
+    `request` and `options` must be plain objects with own properties matching the interfaces above; reject missing or unsupported own properties with `TypeError`. Every request property is required, including `contentType`, whose value is `undefined` when the HTTP header was absent. `authorize`, `maxBodyBytes`, and `maxTextBytes` remain required options. Callback-absent options may omit `onAcceptedMessage` or set it explicitly to `undefined`. Callback-present options require it to be an own function property. Ignore inherited `onAcceptedMessage` values and snapshot omission as an own `undefined` value in the normalized internal options object. At runtime, reject any other own value with `TypeError('options.onAcceptedMessage must be a function or undefined.')`. Add it to the allowed options field set but not the required runtime options field list.
 
     Use `<container>.<field> is required.` for a missing required property. `body` is always the raw request bytes after the host's external adapter has applied any streaming limit. Both byte limits are required positive integers and have no defaults. Validate `options`, including `onAcceptedMessage`, before `request`. Throw `TypeError` for a non-function `options.authorize`, a byte limit that is not a positive integer, a non-string method, a `contentType` value other than string or `undefined`, or a body that is not `Uint8Array`. Use field-specific messages such as `options.maxBodyBytes must be a positive integer.` and `request.body must be a Uint8Array.` Use `Unsupported options field: <field>.` and `Unsupported request field: <field>.` for extra own properties.
 
@@ -642,6 +658,7 @@ Work from the repository root unless a command says otherwise.
     - rejects signatures that do not recover to `signer`;
     - rejects valid signatures from signers outside the allowlist;
     - rejects with `TypeError` for malformed request/options containers, invalid request field types, a non-function authorizer, a non-function/non-`undefined` `onAcceptedMessage`, zero, negative, fractional, `NaN`, or infinite byte limits;
+    - ignores inherited function and non-function `onAcceptedMessage` values instead of invoking or rejecting them;
     - accepts the exact supported content-type forms and rejects missing or unsupported forms with `415` and `unsupported_content_type`;
     - rejects non-`POST` methods with `405` and `method_not_allowed`;
     - maps invalid UTF-8 and JSON syntax to `400` and `invalid_json`;
@@ -665,20 +682,18 @@ Work from the repository root unless a command says otherwise.
 
     `packages/messages/test/ingress-types.test.ts` must import from the built `packages/messages/dist/index.js` entrypoint so it tests the emitted public declarations rather than source-internal types. Add compile-time assertions proving:
 
-    - a callback returning `{ cid: string }` produces a status-`202` branch whose required `handleSignedMessageResult` is exactly `{ cid: string }`, not `{ cid: string } | undefined` or `unknown`;
-    - a callback returning `undefined` still produces a status-`202` branch with a required property whose value type is `undefined`;
-    - omitting `onAcceptedMessage` or setting it explicitly to `undefined` selects the non-generic overload and produces a status-`202` branch with no `handleSignedMessageResult` property;
-    - `@ts-expect-error` assertions fail the type test if callback-absent accepted results accidentally expose the property;
-    - an options value typed as `HandleSignedMessageOptions | HandleSignedMessageOptionsWithHandler<{ cid: string }>` is accepted by the fallback overload and returns the union of the callback-absent and callback-present result shapes;
-    - an options object whose `onAcceptedMessage` property is typed as `AcceptedSignedMessageHandler<{ cid: string }> | undefined` is also accepted by the fallback overload, including with `exactOptionalPropertyTypes` enabled;
-    - after a dynamic call narrows to status `202`, direct access to `handleSignedMessageResult` remains a type error until property presence is narrowed, after which the value is exactly `{ cid: string }`;
-    - the common rejection branch remains available from all three overloads and does not expose the property.
+    - every accepted call permits reading `handleSignedMessageResult` directly as `Awaited<TResult> | undefined`, including through optional chaining; assigning the unchecked optional value to a required callback-result type is rejected;
+    - after property-presence narrowing, a callback returning `{ cid: string }` exposes exactly `{ cid: string }`, not `{ cid: string } | undefined` or `unknown`;
+    - a handler explicitly typed as `AcceptedSignedMessageHandler<Promise<{ cid: string }>>` exposes `{ cid: string }` after narrowing, matching runtime recursive awaiting rather than exposing `Promise<{ cid: string }>`;
+    - a callback returning `undefined` exposes an optional property whose value type is `undefined`, before and after a presence check;
+    - omitting `onAcceptedMessage`, setting it explicitly to `undefined`, and supplying a runtime-selected optional handler all use the same options and accepted-result interfaces;
+    - the common rejection branch does not expose the handler-result property.
 
     Add `packages/messages/tsconfig.type-test.json` extending `packages/tsconfig.base.json`, with `noEmit: true`, `composite: false`, and only `test/ingress-types.test.ts` included. This keeps the compile-time fixture out of the package build output while using the same strict and `exactOptionalPropertyTypes` settings as the package.
 
 7. Update documentation.
 
-    Update `packages/messages/README.md` and, if needed, `packages/README.md` to document that `handleSignedMessage(...)` always returns a Promise, provides precise callback-present and callback-absent overloads plus a dynamically optional fallback, awaits `onAcceptedMessage` after authorization, exposes its return value as the required `handleSignedMessageResult` property for callback-present acceptance, bypasses it for rejections, and propagates its failures. Explain that the fallback returns both possible accepted shapes, so the host must narrow property presence before reading `handleSignedMessageResult`. Include one small configuration example with a placeholder action function. Do not document IPFS publication as implemented in this milestone.
+    Update `packages/messages/README.md` and, if needed, `packages/README.md` to document that `handleSignedMessage(...)` always returns a Promise, accepts one optional `onAcceptedMessage` function, awaits it after authorization, exposes its return value on the accepted result when configured, bypasses it for rejections, and propagates its failures. Explain direct access to the optional result property after checking acceptance, and how a presence check distinguishes callback omission from an explicit `undefined` result. Include one small configuration example with a placeholder action function. Do not document IPFS publication as implemented in this milestone.
 
 8. Build and smoke-import.
 
@@ -715,12 +730,12 @@ The implementation is accepted when all of the following are true:
 - An external HTTP adapter caps request bytes while reading, and the handler applies configured body and text limits before JSON parsing and signature verification.
 - The handler contract fixes request and option field types, requires explicit positive byte limits, defines content-type and UTF-8 behavior, and maps every expected rejection to a stable status and code.
 - `handleSignedMessage(...)` always returns a Promise, including when no accepted-message handler is configured.
-- Omitting `onAcceptedMessage` or setting it to `undefined` selects the callback-absent overload and produces an accepted result with no `handleSignedMessageResult` property.
+- Omitting `onAcceptedMessage` or setting it to `undefined` produces the runtime callback-absent accepted shape with no own `handleSignedMessageResult` property.
+- Inherited `onAcceptedMessage` values do not configure a callback; only an own options property can do so.
 - A configured `onAcceptedMessage` receives the frozen authenticated message exactly once and only after successful authorization.
-- Supplying `onAcceptedMessage` selects the generic callback-present overload; after narrowing `status === 202`, `result.handleSignedMessageResult` is a required property with exactly the inferred `TResult` type.
-- A callback-present result does not widen `handleSignedMessageResult` to `TResult | undefined` unless `undefined` is itself part of the callback's declared return type.
-- An options union or an `onAcceptedMessage` value typed as `AcceptedSignedMessageHandler<TResult> | undefined` selects the last-position fallback overload without a cast or caller-side branch and returns the union of the callback-present and callback-absent result shapes.
-- A dynamically optional call requires both acceptance and property-presence narrowing before reading `handleSignedMessageResult`; once narrowed, the property has exactly the inferred `TResult` type.
+- `HandleSignedMessageOptions<TResult>` accepts omitted, present, and runtime-selected optional handlers without separate public option types.
+- Every accepted result permits direct access to `handleSignedMessageResult` as `Awaited<TResult> | undefined` after narrowing `status === 202`.
+- With `exactOptionalPropertyTypes` enabled, a presence check narrows `handleSignedMessageResult` to exactly `Awaited<TResult>`, including `undefined` only when it is part of the callback's settled return type.
 - The handler awaits synchronous or asynchronous callback results and exposes the exact settled value separately from the ingress-owned HTTP `body`.
 - A configured callback is never called for rejected ingress, and its throws or rejected promises propagate without an accepted result.
 - Repeating the same valid request without a callback returns an equivalent acceptance result; repeating it with a callback invokes that callback once for each successful submission; separately signed identical text remains accepted.
@@ -728,7 +743,7 @@ The implementation is accepted when all of the following are true:
 - Package source dependencies resolve through hardened package-root exports.
 - The package README documents exact text preservation, Internet-facing request-body and text limits, optional accepted-message handling, callback result/error semantics, and the boundary between message authentication and future onchain publication ordering.
 - The focused milestone adds no dependency on `@oyaprotocol/ipfs` and no package-specific action registry.
-- The emitted public declarations pass the compile-time overload/inference fixture under the package's strict TypeScript settings.
+- The emitted public declarations pass the compile-time single-interface inference and narrowing fixture under the package's strict TypeScript settings.
 
 Required commands from the repository root:
 
@@ -826,9 +841,7 @@ Target exported functions and types after the focused milestone:
 - `validateSignedMessage(input)`
 - `verifySignedMessage(input)`
 - `createSignedMessageAuthorizer(allowedSigners)`
-- `handleSignedMessage(request, options: HandleSignedMessageOptions)`, returning `Promise<HandleSignedMessageResult>`
-- `handleSignedMessage<TResult>(request, options: HandleSignedMessageOptionsWithHandler<TResult>)`, returning `Promise<HandleSignedMessageResult<TResult>>`
-- `handleSignedMessage<TResult>(request, options: HandleSignedMessageOptionsWithOptionalHandler<TResult>)`, returning `Promise<HandleSignedMessageResult | HandleSignedMessageResult<TResult>>`; this fallback overload appears last
+- `handleSignedMessage<TResult = unknown>(request, options: HandleSignedMessageOptions<TResult>)`, returning `Promise<HandleSignedMessageResult<TResult>>`
 - `SignedMessageAuthorizer`
 - `AcceptedSignedMessageHandler<TResult>`, receiving `Readonly<SignedMessageInput>` and returning `TResult | PromiseLike<TResult>`
 - `SignedMessageInput`
@@ -836,10 +849,8 @@ Target exported functions and types after the focused milestone:
 - `SignedMessageVerificationError`
 - `SignedMessageAuthorizationError`
 - `HandleSignedMessageRequest`, with required `method: string`, `contentType: string | undefined`, and `body: Uint8Array`
-- `HandleSignedMessageOptions`, with required `authorize: SignedMessageAuthorizer`, `maxBodyBytes: number`, and `maxTextBytes: number`, plus absent-or-`undefined` `onAcceptedMessage`
-- `HandleSignedMessageOptionsWithHandler<TResult>`, with the same required base options and a required `onAcceptedMessage: AcceptedSignedMessageHandler<TResult>`
-- `HandleSignedMessageOptionsWithOptionalHandler<TResult>`, with the same required base options and an optional `onAcceptedMessage: AcceptedSignedMessageHandler<TResult> | undefined` for runtime-selected callbacks
-- `HandleSignedMessageResult<TResult = never>`, whose default callback-absent accepted branch has no `handleSignedMessageResult` property and whose callback-present accepted branch has a required `handleSignedMessageResult: TResult`; both forms include the same status `400 | 401 | 403 | 405 | 413 | 415` structured rejection branch
+- `HandleSignedMessageOptions<TResult = unknown>`, with required `authorize: SignedMessageAuthorizer`, `maxBodyBytes: number`, and `maxTextBytes: number`, plus optional `onAcceptedMessage: AcceptedSignedMessageHandler<TResult> | undefined`
+- `HandleSignedMessageResult<TResult = unknown>`, containing one accepted branch with optional `handleSignedMessageResult?: Awaited<TResult>` and the shared status `400 | 401 | 403 | 405 | 413 | 415` structured rejection branch
 
 Runtime dependency:
 

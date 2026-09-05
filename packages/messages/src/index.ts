@@ -24,6 +24,7 @@ export type {
     SignedMessageAuthorizer,
 } from './authorization.js';
 export type {
+    AcceptedSignedMessageHandler,
     HandleSignedMessageOptions,
     HandleSignedMessageRequest,
     HandleSignedMessageResult,

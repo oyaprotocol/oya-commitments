@@ -10,6 +10,7 @@ const OPTION_FIELDS = new Set<PropertyKey>([
     'authorize',
     'maxBodyBytes',
     'maxTextBytes',
+    'onAcceptedMessage',
 ]);
 const REQUEST_FIELDS = new Set<PropertyKey>([
     'method',
@@ -25,19 +26,27 @@ interface HandleSignedMessageRequest {
     readonly body: Uint8Array;
 }
 
-interface HandleSignedMessageOptions {
+type AcceptedSignedMessageHandler<TResult = unknown> = (
+    message: Readonly<SignedMessageInput>
+) => TResult | PromiseLike<TResult>;
+
+interface HandleSignedMessageOptions<TResult = unknown> {
     readonly authorize: SignedMessageAuthorizer;
     readonly maxBodyBytes: number;
     readonly maxTextBytes: number;
+    readonly onAcceptedMessage?:
+        | AcceptedSignedMessageHandler<TResult>
+        | undefined;
 }
 
-interface AcceptedSignedMessage {
+interface AcceptedSignedMessage<TResult = unknown> {
     readonly status: 202;
     readonly body: Readonly<{
         status: 'accepted';
         signer: string;
     }>;
     readonly message: Readonly<SignedMessageInput>;
+    readonly handleSignedMessageResult?: Awaited<TResult>;
 }
 
 interface RejectedSignedMessage {
@@ -49,7 +58,9 @@ interface RejectedSignedMessage {
     }>;
 }
 
-type HandleSignedMessageResult = AcceptedSignedMessage | RejectedSignedMessage;
+type HandleSignedMessageResult<TResult = unknown> =
+    | RejectedSignedMessage
+    | AcceptedSignedMessage<TResult>;
 
 function requirePlainObject(
     value: unknown,
@@ -92,7 +103,9 @@ function requirePositiveInteger(value: unknown, fieldName: string): number {
     return value;
 }
 
-function validateOptions(options: unknown): HandleSignedMessageOptions {
+function validateOptions<TResult>(
+    options: unknown
+): HandleSignedMessageOptions<TResult> {
     requirePlainObject(options, 'options');
     requireOnlyFields(
         options,
@@ -108,6 +121,17 @@ function validateOptions(options: unknown): HandleSignedMessageOptions {
     if (typeof options.authorize !== 'function') {
         throw new TypeError('options.authorize must be a function.');
     }
+    const onAcceptedMessage = Object.hasOwn(options, 'onAcceptedMessage')
+        ? options.onAcceptedMessage
+        : undefined;
+    if (
+        onAcceptedMessage !== undefined &&
+        typeof onAcceptedMessage !== 'function'
+    ) {
+        throw new TypeError(
+            'options.onAcceptedMessage must be a function or undefined.'
+        );
+    }
 
     return {
         authorize: options.authorize as SignedMessageAuthorizer,
@@ -119,6 +143,10 @@ function validateOptions(options: unknown): HandleSignedMessageOptions {
             options.maxTextBytes,
             'options.maxTextBytes'
         ),
+        onAcceptedMessage:
+            onAcceptedMessage as
+                | AcceptedSignedMessageHandler<TResult>
+                | undefined,
     };
 }
 
@@ -204,11 +232,11 @@ function hasOwnStringText(
     );
 }
 
-function handleSignedMessage(
+async function handleSignedMessage<TResult = unknown>(
     request: HandleSignedMessageRequest,
-    options: HandleSignedMessageOptions
-): HandleSignedMessageResult {
-    const validatedOptions = validateOptions(options);
+    options: HandleSignedMessageOptions<TResult>
+): Promise<HandleSignedMessageResult<TResult>> {
+    const validatedOptions = validateOptions<TResult>(options);
     const validatedRequest = validateRequest(request);
 
     if (validatedRequest.method !== 'POST') {
@@ -296,6 +324,18 @@ function handleSignedMessage(
         status: 'accepted' as const,
         signer: acceptedMessage.signer,
     });
+
+    if (validatedOptions.onAcceptedMessage !== undefined) {
+        const handleSignedMessageResult =
+            await validatedOptions.onAcceptedMessage(acceptedMessage);
+        return Object.freeze({
+            status: 202 as const,
+            body,
+            message: acceptedMessage,
+            handleSignedMessageResult,
+        });
+    }
+
     return Object.freeze({
         status: 202 as const,
         body,
@@ -305,6 +345,7 @@ function handleSignedMessage(
 
 export { handleSignedMessage };
 export type {
+    AcceptedSignedMessageHandler,
     HandleSignedMessageOptions,
     HandleSignedMessageRequest,
     HandleSignedMessageResult,
