@@ -52,18 +52,6 @@ function parseQuantity(value: unknown, name: string): bigint {
     return BigInt(value);
 }
 
-function parseNullableAddress(value: unknown, name: string): string | null {
-    return value === null ? null : parseBytes(value, name, 20);
-}
-
-function parseTransactionType(value: unknown): bigint {
-    const type = parseQuantity(value, 'receipt.type');
-    if (type > 255n) {
-        throw new Error('receipt.type must fit in one byte.');
-    }
-    return type;
-}
-
 function assertMatchingHash(actual: string, expected: string, name: string): void {
     if (actual.toLowerCase() !== expected.toLowerCase()) {
         throw new Error(`${name} did not match the expected hash.`);
@@ -132,18 +120,24 @@ function parseTransactionReceipt(value: unknown, transactionHash: string): Ether
         blockHash: parseBytes(value.blockHash, 'receipt.blockHash', 32),
         blockNumber: parseQuantity(value.blockNumber, 'receipt.blockNumber'),
     };
+    const type = value.type === undefined ? undefined : parseQuantity(value.type, 'receipt.type');
+    if (type !== undefined && type > 255n) {
+        throw new Error('receipt.type must fit in one byte.');
+    }
     return {
         ...location,
         from: parseBytes(value.from, 'receipt.from', 20),
-        to: parseNullableAddress(value.to, 'receipt.to'),
-        contractAddress: parseNullableAddress(value.contractAddress, 'receipt.contractAddress'),
+        to: value.to === null ? null : parseBytes(value.to, 'receipt.to', 20),
+        contractAddress: value.contractAddress === null
+            ? null
+            : parseBytes(value.contractAddress, 'receipt.contractAddress', 20),
         cumulativeGasUsed: parseQuantity(value.cumulativeGasUsed, 'receipt.cumulativeGasUsed'),
         gasUsed: parseQuantity(value.gasUsed, 'receipt.gasUsed'),
         logs: value.logs.map((log, index) => parseReceiptLog(log, index, location)),
         logsBloom: parseBytes(value.logsBloom, 'receipt.logsBloom', 256),
         status,
         ...(value.root === undefined ? {} : { root: parseBytes(value.root, 'receipt.root', 32) }),
-        ...(value.type === undefined ? {} : { type: parseTransactionType(value.type) }),
+        ...(type === undefined ? {} : { type }),
         ...(value.effectiveGasPrice === undefined ? {} : {
             effectiveGasPrice: parseQuantity(value.effectiveGasPrice, 'receipt.effectiveGasPrice'),
         }),
