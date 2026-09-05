@@ -1,5 +1,6 @@
 import type { HttpConfig, HttpPostFetchLike } from '@oyaprotocol/utils';
-import { HttpStatusError } from '@oyaprotocol/utils';
+import { assertCanonicalCid, HttpStatusError } from '@oyaprotocol/utils';
+import { IPFS_ADD_QUERY } from './import-profile.js';
 import {
     runWithRetry,
     shouldRetryError,
@@ -99,7 +100,7 @@ function extractNonEmptyString(value: unknown): string | null {
     if (typeof value !== 'string' || !value.trim()) {
         return null;
     }
-    return value.trim();
+    return value;
 }
 
 function extractSlashLink(value: unknown): string | null {
@@ -166,7 +167,12 @@ async function publishToIpfs({
         throw new Error('mediaType must be a non-empty string.');
     }
     const trimmedFilename = filename.trim();
+    if (/[\\/\u0000\r\n]/.test(filename) || trimmedFilename === '.' || trimmedFilename === '..') {
+        throw new Error('filename must be a single filename without a path or control separators.');
+    }
     const trimmedMediaType = mediaType.trim();
+    // Snapshot mutable inputs once so retries publish the same bytes and CID.
+    const { blob } = normalizeContent(content);
     const abortErrorMessage = 'publishToIpfs was aborted by the caller.';
 
     return await runWithRetry({
@@ -179,12 +185,12 @@ async function publishToIpfs({
         normalizeError: normalizePublishError,
         run: async ({ attempt, signal: requestSignal }) => {
             const { form, contentByteLength } = buildFormData({
-                content,
+                content: blob,
                 filename: trimmedFilename,
                 mediaType: trimmedMediaType,
             });
             const response = await fetch(
-                `${config.url}/api/v0/add?cid-version=1&pin=true&progress=false`,
+                `${config.url}/api/v0/add?${IPFS_ADD_QUERY}`,
                 {
                     method: 'POST',
                     headers: config.headers,
@@ -209,6 +215,7 @@ async function publishToIpfs({
             if (!cid) {
                 throw new Error('IPFS add response did not include a CID.');
             }
+            assertCanonicalCid(cid, 'IPFS add response CID');
 
             return {
                 cid,

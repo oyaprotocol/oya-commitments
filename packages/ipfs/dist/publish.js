@@ -1,4 +1,5 @@
-import { HttpStatusError } from '@oyaprotocol/utils';
+import { assertCanonicalCid, HttpStatusError } from '@oyaprotocol/utils';
+import { IPFS_ADD_QUERY } from './import-profile.js';
 import { runWithRetry, shouldRetryError, } from './request-utils.js';
 function normalizeContent(content) {
     if (typeof content === 'string') {
@@ -57,7 +58,7 @@ function extractNonEmptyString(value) {
     if (typeof value !== 'string' || !value.trim()) {
         return null;
     }
-    return value.trim();
+    return value;
 }
 function extractSlashLink(value) {
     if (!value || typeof value !== 'object') {
@@ -110,7 +111,12 @@ async function publishToIpfs({ config, fetch, content, filename, mediaType, sign
         throw new Error('mediaType must be a non-empty string.');
     }
     const trimmedFilename = filename.trim();
+    if (/[\\/\u0000\r\n]/.test(filename) || trimmedFilename === '.' || trimmedFilename === '..') {
+        throw new Error('filename must be a single filename without a path or control separators.');
+    }
     const trimmedMediaType = mediaType.trim();
+    // Snapshot mutable inputs once so retries publish the same bytes and CID.
+    const { blob } = normalizeContent(content);
     const abortErrorMessage = 'publishToIpfs was aborted by the caller.';
     return await runWithRetry({
         maxRetries: config.maxRetries,
@@ -122,11 +128,11 @@ async function publishToIpfs({ config, fetch, content, filename, mediaType, sign
         normalizeError: normalizePublishError,
         run: async ({ attempt, signal: requestSignal }) => {
             const { form, contentByteLength } = buildFormData({
-                content,
+                content: blob,
                 filename: trimmedFilename,
                 mediaType: trimmedMediaType,
             });
-            const response = await fetch(`${config.url}/api/v0/add?cid-version=1&pin=true&progress=false`, {
+            const response = await fetch(`${config.url}/api/v0/add?${IPFS_ADD_QUERY}`, {
                 method: 'POST',
                 headers: config.headers,
                 body: form,
@@ -147,6 +153,7 @@ async function publishToIpfs({ config, fetch, content, filename, mediaType, sign
             if (!cid) {
                 throw new Error('IPFS add response did not include a CID.');
             }
+            assertCanonicalCid(cid, 'IPFS add response CID');
             return {
                 cid,
                 uri: `ipfs://${cid}`,

@@ -68,12 +68,12 @@ test('readIpfsBytes reads bounded arbitrary bytes and returns normalized details
             calls.push({ url, options });
             return createStreamResponse(200, ['hi', new Uint8Array([0x00, 0xff])]);
         },
-        cid: 'bafy-bytes-ok',
+        cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
         maxBytes: 64,
     });
 
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'http://ipfs.example:5001/api/v0/cat?arg=bafy-bytes-ok');
+    assert.equal(calls[0].url, 'http://ipfs.example:5001/api/v0/cat?arg=bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e');
     assert.equal(calls[0].options.method, 'POST');
     assert.equal(calls[0].options.headers.Authorization, 'Bearer test-token');
     assert.deepEqual(Array.from(result.bytes), [0x68, 0x69, 0x00, 0xff]);
@@ -85,8 +85,8 @@ test('readIpfsBytes reads bounded arbitrary bytes and returns normalized details
             attemptCount: result.attemptCount,
         },
         {
-            cid: 'bafy-bytes-ok',
-            uri: 'ipfs://bafy-bytes-ok',
+            cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
+            uri: 'ipfs://bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
             byteLength: 4,
             attemptCount: 1,
         }
@@ -98,7 +98,7 @@ test('readIpfsBytes rejects responses that exceed maxBytes', async () => {
         readIpfsBytes({
             config: createConfig(),
             fetch: async () => createStreamResponse(200, [new Uint8Array([0x00, 0x01, 0x02])]),
-            cid: 'bafy-bytes-too-large',
+            cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
             maxBytes: 2,
         }),
         /exceeded maxBytes \(2\)/
@@ -112,7 +112,7 @@ test('readIpfsBytes normalizes empty thrown values to the fallback error', async
             fetch: async () => {
                 throw null;
             },
-            cid: 'bafy-bytes-null-error',
+            cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
             maxBytes: 64,
         }),
         /IPFS bytes read failed\./
@@ -133,12 +133,12 @@ test('readIpfsPublicGatewayBytes reads bounded bytes with a gateway GET request'
             calls.push({ url, options });
             return createStreamResponse(200, ['gw', new Uint8Array([0xff])]);
         },
-        cid: 'bafy-public-ok',
+        cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
         maxBytes: 64,
     });
 
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://gateway.example/ipfs/bafy-public-ok');
+    assert.equal(calls[0].url, 'https://gateway.example/ipfs/bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e');
     assert.equal(calls[0].options.method, 'GET');
     assert.equal(calls[0].options.headers.Accept, 'application/octet-stream');
     assert.deepEqual(Array.from(result.bytes), [0x67, 0x77, 0xff]);
@@ -150,8 +150,8 @@ test('readIpfsPublicGatewayBytes reads bounded bytes with a gateway GET request'
             attemptCount: result.attemptCount,
         },
         {
-            cid: 'bafy-public-ok',
-            uri: 'ipfs://bafy-public-ok',
+            cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
+            uri: 'ipfs://bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
             byteLength: 3,
             attemptCount: 1,
         }
@@ -170,12 +170,12 @@ test('readIpfsPublicGatewayBytes preserves gateway query strings', async () => {
             calls.push({ url, options });
             return createStreamResponse(200, ['ok']);
         },
-        cid: 'bafy-public-signed-url',
+        cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
         maxBytes: 64,
     });
 
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://gateway.example/ipfs/bafy-public-signed-url?token=abc');
+    assert.equal(calls[0].url, 'https://gateway.example/ipfs/bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e?token=abc');
 });
 
 test('readIpfsPublicGatewayBytes rejects gateway fragments before calling fetch', async () => {
@@ -191,7 +191,7 @@ test('readIpfsPublicGatewayBytes rejects gateway fragments before calling fetch'
                 attempts += 1;
                 return createStreamResponse(200, ['never']);
             },
-            cid: 'bafy-public-fragment',
+            cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
             maxBytes: 64,
         }),
         /gatewayUrl must not include a fragment/
@@ -222,7 +222,7 @@ test('readIpfsPublicGatewayBytes retries retryable HTTP failures and cancels bod
             }
             return createStreamResponse(200, ['gateway retry ok']);
         },
-        cid: 'bafy-public-retry',
+        cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
         maxBytes: 64,
     });
 
@@ -248,7 +248,7 @@ test('readIpfsPublicGatewayBytes validates gateway options before calling fetch'
             maxRetries: 1,
             retryDelayMs: 0,
             fetch,
-            cid: 'bafy-public-invalid',
+            cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
             maxBytes: 64,
         }),
         /gatewayUrl must be a non-empty string/
@@ -264,7 +264,7 @@ test('readIpfsPublicGatewayBytes validates gateway options before calling fetch'
             maxRetries: 1,
             retryDelayMs: 0,
             fetch,
-            cid: 'bafy-public-invalid',
+            cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
             maxBytes: 64,
         }),
         /headers.Authorization must be a string/
@@ -288,7 +288,7 @@ test('readIpfsPublicGatewayBytes rejects Headers instances before calling fetch'
                 attempts += 1;
                 return createStreamResponse(200, ['never']);
             },
-            cid: 'bafy-public-headers-instance',
+            cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
             maxBytes: 64,
         }),
         /headers must be a plain object/
@@ -310,7 +310,7 @@ test('readIpfsPublicGatewayBytes allows content-type gateway headers', async () 
             calls.push({ url, options });
             return createStreamResponse(200, ['ok']);
         },
-        cid: 'bafy-public-content-type',
+        cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
         maxBytes: 64,
     });
 
@@ -329,7 +329,7 @@ test('readIpfsPublicGatewayBytes normalizes empty thrown values to the fallback 
             fetch: async () => {
                 throw null;
             },
-            cid: 'bafy-public-null-error',
+            cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
             maxBytes: 64,
         }),
         /IPFS public gateway bytes read failed\./
@@ -350,17 +350,17 @@ test('readIpfsPublicGatewayText reads bounded ASCII text through the gateway byt
             calls.push({ url, options });
             return createStreamResponse(200, ['gateway ', 'text\n']);
         },
-        cid: 'bafy-public-text-ok',
+        cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
         maxBytes: 64,
     });
 
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://gateway.example/ipfs/bafy-public-text-ok');
+    assert.equal(calls[0].url, 'https://gateway.example/ipfs/bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e');
     assert.equal(calls[0].options.method, 'GET');
     assert.equal(calls[0].options.headers.Accept, 'text/plain');
     assert.deepEqual(result, {
-        cid: 'bafy-public-text-ok',
-        uri: 'ipfs://bafy-public-text-ok',
+        cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
+        uri: 'ipfs://bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
         text: 'gateway text\n',
         byteLength: 13,
         attemptCount: 1,
@@ -376,7 +376,7 @@ test('readIpfsPublicGatewayText rejects non-ASCII bytes', async () => {
             maxRetries: 1,
             retryDelayMs: 0,
             fetch: async () => createStreamResponse(200, [new Uint8Array([0x68, 0x69, 0x80])]),
-            cid: 'bafy-public-text-non-ascii',
+            cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
             maxBytes: 64,
         }),
         /public gateway response contained non-ASCII bytes/
@@ -399,7 +399,7 @@ test('readIpfsPublicGatewayText uses text-specific caller abort errors', async (
                 attempts += 1;
                 return createStreamResponse(200, ['never']);
             },
-            cid: 'bafy-public-text-abort',
+            cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
             maxBytes: 64,
             signal: controller.signal,
         }),
@@ -416,26 +416,26 @@ test('readIpfsText reads bounded ASCII text and returns normalized details', asy
             calls.push({ url, options });
             return createStreamResponse(200, ['hello ', 'world\n']);
         },
-        cid: 'bafy-read-ok',
+        cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
         maxBytes: 64,
     });
 
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'http://ipfs.example:5001/api/v0/cat?arg=bafy-read-ok');
+    assert.equal(calls[0].url, 'http://ipfs.example:5001/api/v0/cat?arg=bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e');
     assert.equal(calls[0].options.method, 'POST');
     assert.equal(calls[0].options.headers.Authorization, 'Bearer test-token');
     assert.deepEqual(result, {
-        cid: 'bafy-read-ok',
-        uri: 'ipfs://bafy-read-ok',
+        cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
+        uri: 'ipfs://bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
         text: 'hello world\n',
         byteLength: 12,
         attemptCount: 1,
     });
 });
 
-test('readIpfsText encodes the cid path argument', async () => {
+test('readIpfsText rejects a path instead of a canonical CID before fetching', async () => {
     const calls = [];
-    await readIpfsText({
+    await assert.rejects(readIpfsText({
         config: createConfig(),
         fetch: async (url, options) => {
             calls.push({ url, options });
@@ -443,9 +443,9 @@ test('readIpfsText encodes the cid path argument', async () => {
         },
         cid: 'bafy/with/slash',
         maxBytes: 64,
-    });
+    }), /cid must be a canonical CIDv1/);
 
-    assert.equal(calls[0].url, 'http://ipfs.example:5001/api/v0/cat?arg=bafy%2Fwith%2Fslash');
+    assert.equal(calls.length, 0);
 });
 
 test('readIpfsText retries retryable HTTP failures and succeeds', async () => {
@@ -459,7 +459,7 @@ test('readIpfsText retries retryable HTTP failures and succeeds', async () => {
             }
             return createStreamResponse(200, ['retry ok']);
         },
-        cid: 'bafy-retry-ok',
+        cid: 'bafkreiadsbmmn4waznesyuz3bjgrj33xzqhxrk6mz3ksq7meugrachh3qe',
         maxBytes: 64,
     });
 
@@ -487,7 +487,7 @@ test('readIpfsText cancels retryable HTTP failure bodies before retrying', async
             }
             return createStreamResponse(200, ['retry ok']);
         },
-        cid: 'bafy-retry-cancel',
+        cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
         maxBytes: 64,
     });
 
@@ -510,7 +510,7 @@ test('readIpfsText retries retryable network errors and succeeds', async () => {
             }
             return createStreamResponse(200, ['network retry ok']);
         },
-        cid: 'bafy-network-ok',
+        cid: 'bafkreibnecdvlqg33r72todcgjzfr5gvha5tz2ct4lj2ooxarnm22vglxy',
         maxBytes: 64,
     });
 
@@ -536,7 +536,7 @@ test('readIpfsText does not retry non-retryable HTTP failures', async () => {
                     }),
                 };
             },
-            cid: 'bafy-missing',
+            cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
             maxBytes: 64,
         }),
         /404 Not Found/
@@ -551,7 +551,7 @@ test('readIpfsText rejects responses that exceed maxBytes', async () => {
         readIpfsText({
             config: createConfig(),
             fetch: async () => createStreamResponse(200, ['hello', ' world']),
-            cid: 'bafy-too-large',
+            cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
             maxBytes: 8,
         }),
         /exceeded maxBytes \(8\)/
@@ -563,7 +563,7 @@ test('readIpfsText rejects non-ASCII bytes', async () => {
         readIpfsText({
             config: createConfig(),
             fetch: async () => createStreamResponse(200, [new Uint8Array([0x68, 0x69, 0x80])]),
-            cid: 'bafy-non-ascii',
+            cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
             maxBytes: 64,
         }),
         /non-ASCII/
@@ -580,7 +580,7 @@ test('readIpfsText requires a stream response body', async () => {
                 statusText: 'OK',
                 body: null,
             }),
-            cid: 'bafy-no-body',
+            cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
             maxBytes: 64,
         }),
         /body must be a ReadableStream/
@@ -599,7 +599,7 @@ test('readIpfsText validates cid and maxBytes before calling fetch', async () =>
             cid: '   ',
             maxBytes: 64,
         }),
-        /cid must be a non-empty string/
+        /cid must be a canonical CIDv1/
     );
     await assert.rejects(
         readIpfsText({
@@ -608,7 +608,7 @@ test('readIpfsText validates cid and maxBytes before calling fetch', async () =>
                 attempts += 1;
                 return createStreamResponse(200, ['never']);
             },
-            cid: 'bafy-invalid-limit',
+            cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
             maxBytes: 0,
         }),
         /maxBytes must be a positive integer/
@@ -621,7 +621,7 @@ test('readIpfsText enforces timeout even when the injected fetch ignores signal'
         readIpfsText({
             config: createConfig({ timeoutMs: 10, maxRetries: 0 }),
             fetch: async () => await new Promise(() => {}),
-            cid: 'bafy-timeout',
+            cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
             maxBytes: 64,
         }),
         /timed out/
@@ -640,7 +640,7 @@ test('readIpfsText does not call fetch when the caller signal is already aborted
                 attempts += 1;
                 return createStreamResponse(200, ['never']);
             },
-            cid: 'bafy-pre-aborted',
+            cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
             maxBytes: 64,
             signal: controller.signal,
         }),
@@ -668,7 +668,7 @@ test('readIpfsText aborts while waiting for the response body', async () => {
                 }),
             };
         },
-        cid: 'bafy-abort-read',
+        cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
         maxBytes: 64,
         signal: controller.signal,
     });

@@ -7,7 +7,7 @@ import {
     shouldRetryError,
 } from './request-utils.js';
 import type { IpfsOperationErrorMessages } from './request-utils.js';
-import { assertNonEmptyString, assertPositiveInteger } from '@oyaprotocol/utils';
+import { assertCanonicalCid, assertPositiveInteger } from '@oyaprotocol/utils';
 
 export type ReadIpfsFetchLike = (
     url: string,
@@ -116,7 +116,7 @@ async function readIpfsBytesWithMessages(
     if (typeof fetch !== 'function') {
         throw new Error('fetch must be provided as a function.');
     }
-    const trimmedCid = assertNonEmptyString(cid, 'cid');
+    const validatedCid = assertCanonicalCid(cid, 'cid');
     const byteLimit = assertPositiveInteger(maxBytes, 'maxBytes');
 
     return await runWithRetry({
@@ -129,7 +129,7 @@ async function readIpfsBytesWithMessages(
         normalizeError: (error) => normalizeIpfsOperationError(error, messages),
         run: async ({ attempt, signal: requestSignal }) => {
             const response = await fetch(
-                `${config.url}/api/v0/cat?arg=${encodeURIComponent(trimmedCid)}`,
+                `${config.url}/api/v0/cat?arg=${validatedCid}`,
                 {
                     method: 'POST',
                     headers: config.headers,
@@ -154,8 +154,8 @@ async function readIpfsBytesWithMessages(
             });
 
             return {
-                cid: trimmedCid,
-                uri: `ipfs://${trimmedCid}`,
+                cid: validatedCid,
+                uri: `ipfs://${validatedCid}`,
                 bytes,
                 byteLength: bytes.byteLength,
                 attemptCount: attempt,

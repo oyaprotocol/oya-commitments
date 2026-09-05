@@ -31,7 +31,7 @@ test('publishToIpfs publishes content and returns normalized details', async () 
             calls.push({ url, options });
             return createTextResponse(
                 200,
-                '\n{"Name":"note.txt","Hash":"bafy-publish-ok","Size":"11"}\n'
+                '\n{"Name":"note.txt","Hash":"bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e","Size":"11"}\n'
             );
         },
         content: 'hello world',
@@ -42,15 +42,15 @@ test('publishToIpfs publishes content and returns normalized details', async () 
     assert.equal(calls.length, 1);
     assert.equal(
         calls[0].url,
-        'http://ipfs.example:5001/api/v0/add?cid-version=1&pin=true&progress=false'
+        'http://ipfs.example:5001/api/v0/add?cid-version=1&cid-base=base32&hash=sha2-256&chunker=size-1048576&raw-leaves=true&trickle=false&max-file-links=1024&wrap-with-directory=false&inline=false&preserve-mode=false&preserve-mtime=false&pin=true&progress=false'
     );
     assert.equal(calls[0].options.method, 'POST');
     assert.equal(calls[0].options.headers.Authorization, 'Bearer test-token');
     assert.ok(calls[0].options.body instanceof FormData);
 
     assert.deepEqual(result, {
-        cid: 'bafy-publish-ok',
-        uri: 'ipfs://bafy-publish-ok',
+        cid: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
+        uri: 'ipfs://bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
         pinned: true,
         filename: 'note.txt',
         mediaType: 'text/plain; charset=utf-8',
@@ -59,7 +59,7 @@ test('publishToIpfs publishes content and returns normalized details', async () 
         attemptCount: 1,
         providerResponse: {
             Name: 'note.txt',
-            Hash: 'bafy-publish-ok',
+            Hash: 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
             Size: '11',
         },
     });
@@ -81,7 +81,7 @@ test('publishToIpfs retries retryable HTTP failures and succeeds', async () => {
             if (attempts === 1) {
                 return createTextResponse(503, '{"error":"temporary outage"}', 'Service Unavailable');
             }
-            return createTextResponse(200, '{"Hash":"bafy-retry-ok","Size":"3"}');
+            return createTextResponse(200, '{"Hash":"bafkreiadsbmmn4waznesyuz3bjgrj33xzqhxrk6mz3ksq7meugrachh3qe","Size":"3"}');
         },
         content: new Uint8Array([1, 2, 3]),
         filename: 'artifact.bin',
@@ -89,7 +89,7 @@ test('publishToIpfs retries retryable HTTP failures and succeeds', async () => {
     });
 
     assert.equal(attempts, 2);
-    assert.equal(result.cid, 'bafy-retry-ok');
+    assert.equal(result.cid, 'bafkreiadsbmmn4waznesyuz3bjgrj33xzqhxrk6mz3ksq7meugrachh3qe');
     assert.equal(result.attemptCount, 2);
     assert.equal(result.contentByteLength, 3);
 });
@@ -112,7 +112,7 @@ test('publishToIpfs retries retryable network errors and succeeds', async () => 
                 error.code = 'ECONNRESET';
                 throw error;
             }
-            return createTextResponse(200, '{"Hash":"bafy-network-ok","Size":"8"}');
+            return createTextResponse(200, '{"Hash":"bafkreibnecdvlqg33r72todcgjzfr5gvha5tz2ct4lj2ooxarnm22vglxy","Size":"8"}');
         },
         content: 'retry me',
         filename: 'retry.txt',
@@ -120,7 +120,7 @@ test('publishToIpfs retries retryable network errors and succeeds', async () => 
     });
 
     assert.equal(attempts, 2);
-    assert.equal(result.cid, 'bafy-network-ok');
+    assert.equal(result.cid, 'bafkreibnecdvlqg33r72todcgjzfr5gvha5tz2ct4lj2ooxarnm22vglxy');
     assert.equal(result.attemptCount, 2);
 });
 
@@ -144,7 +144,7 @@ test('publishToIpfs retries fetch errors when a retryable network code is nested
                     }),
                 });
             }
-            return createTextResponse(200, '{"Hash":"bafy-cause-ok","Size":"8"}');
+            return createTextResponse(200, '{"Hash":"bafkreibnecdvlqg33r72todcgjzfr5gvha5tz2ct4lj2ooxarnm22vglxy","Size":"8"}');
         },
         content: 'retry me',
         filename: 'retry-cause.txt',
@@ -152,7 +152,7 @@ test('publishToIpfs retries fetch errors when a retryable network code is nested
     });
 
     assert.equal(attempts, 2);
-    assert.equal(result.cid, 'bafy-cause-ok');
+    assert.equal(result.cid, 'bafkreibnecdvlqg33r72todcgjzfr5gvha5tz2ct4lj2ooxarnm22vglxy');
     assert.equal(result.attemptCount, 2);
 });
 
@@ -194,7 +194,7 @@ test('publishToIpfs does not call fetch when the caller signal is already aborte
             config,
             fetch: async () => {
                 attempts += 1;
-                return createTextResponse(200, '{"Hash":"bafy-never-called","Size":"5"}');
+                return createTextResponse(200, '{"Hash":"bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e","Size":"5"}');
             },
             content: 'do not send',
             filename: 'cancelled.txt',
@@ -465,13 +465,13 @@ test('publishToIpfs clears the fallback timeout timer after a successful request
 
         const result = await publishToIpfs({
             config,
-            fetch: async () => createTextResponse(200, '{"Hash":"bafy-timeout-cleanup","Size":"5"}'),
+            fetch: async () => createTextResponse(200, '{"Hash":"bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e","Size":"5"}'),
             content: 'hello',
             filename: 'cleanup.txt',
             mediaType: 'text/plain; charset=utf-8',
         });
 
-        assert.equal(result.cid, 'bafy-timeout-cleanup');
+        assert.equal(result.cid, 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e');
         assert.equal(clearedTimers.length, 1);
         assert.deepEqual(clearedTimers[0], { fn: clearedTimers[0].fn, ms: 1_000, kind: 'fallback-timeout' });
     } finally {
@@ -583,14 +583,14 @@ test('publishToIpfs removes fallback combined abort listeners after a successful
 
         const result = await publishToIpfs({
             config,
-            fetch: async () => createTextResponse(200, '{"Hash":"bafy-cleanup-ok","Size":"5"}'),
+            fetch: async () => createTextResponse(200, '{"Hash":"bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e","Size":"5"}'),
             content: 'hello',
             filename: 'cleanup-listeners.txt',
             mediaType: 'text/plain; charset=utf-8',
             signal,
         });
 
-        assert.equal(result.cid, 'bafy-cleanup-ok');
+        assert.equal(result.cid, 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e');
         assert.equal(listenerCount, 0);
     } finally {
         Object.defineProperty(AbortSignal, 'any', {
