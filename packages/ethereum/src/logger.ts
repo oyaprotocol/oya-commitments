@@ -14,7 +14,7 @@ import type { EthereumReceiptLog, EthereumTransactionReceipt } from './receipt-u
 import { assertTimerMs, ethWaitForTransactionReceipt } from './receipts.js';
 import type { EthWaitForTransactionReceiptOptions } from './receipts.js';
 import { ethSendRawTransaction } from './transactions.js';
-import type { PrepareTransaction, TransactionStage } from './transactions.js';
+import type { TransactionPreparer, TransactionStage } from './transactions.js';
 
 // Verified against contracts/src/Logger.sol with forge inspect and cast keccak.
 const LOGGER_SELECTOR = '0x41304fac'; // log(string)
@@ -34,7 +34,7 @@ interface LogCidOptions extends Omit<EthWaitForTransactionReceiptOptions, 'trans
     loggerAddress: string;
     /** Logger's immediate caller, which can be a contract wallet. */
     expectedNode: string;
-    prepareTransaction: PrepareTransaction;
+    prepareTransaction: TransactionPreparer;
 }
 
 interface LogCidResult {

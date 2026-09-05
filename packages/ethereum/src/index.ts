@@ -14,8 +14,8 @@ export {
 } from './transactions.js';
 export type {
     TransactionRequest,
-    PreparedTransaction,
-    PrepareTransaction,
+    SignedTransaction,
+    TransactionPreparer,
     TransactionStage,
     EthSendRawTransactionOptions,
     EthSendRawTransactionResult,

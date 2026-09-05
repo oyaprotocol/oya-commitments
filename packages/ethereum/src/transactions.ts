@@ -30,15 +30,15 @@ interface TransactionRequest {
     readonly signal?: AbortSignal;
 }
 
-interface PreparedTransaction {
+interface SignedTransaction {
     readonly rawTransaction: string;
     readonly transactionHash: string;
 }
 
 /** Prepare and sign the requested call without broadcasting it. */
-type PrepareTransaction = (
+type TransactionPreparer = (
     request: TransactionRequest
-) => PreparedTransaction | PromiseLike<PreparedTransaction>;
+) => SignedTransaction | PromiseLike<SignedTransaction>;
 
 /** Verify covers operation-specific checks after receipt observation. */
 type TransactionStage = 'prepare' | 'submit' | 'receipt' | 'verify';
@@ -276,8 +276,8 @@ export {
 };
 export type {
     TransactionRequest,
-    PreparedTransaction,
-    PrepareTransaction,
+    SignedTransaction,
+    TransactionPreparer,
     TransactionStage,
     EthSendRawTransactionOptions,
     EthSendRawTransactionResult,

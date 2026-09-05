@@ -1,15 +1,15 @@
 import { logCid, LogCidError } from '@oyaprotocol/ethereum';
 import type {
-    LogCidOptions, LogCidResult, PrepareTransaction,
-    PreparedTransaction, TransactionRequest, TransactionStage,
+    LogCidOptions, LogCidResult, TransactionPreparer,
+    SignedTransaction, TransactionRequest, TransactionStage,
 } from '@oyaprotocol/ethereum';
 
 declare const cid: string;
 declare const options: LogCidOptions;
-declare const prepared: PreparedTransaction;
+declare const prepared: SignedTransaction;
 declare const failure: LogCidError;
 
-const prepare: PrepareTransaction = (request: TransactionRequest) => {
+const prepare: TransactionPreparer = (request: TransactionRequest) => {
     const value: bigint = request.value;
     const to: string = request.to;
     const data: string = request.data;
@@ -19,7 +19,7 @@ const prepare: PrepareTransaction = (request: TransactionRequest) => {
     void [value, to, data, signal];
     return prepared;
 };
-const asyncPrepare: PrepareTransaction = async () => prepared;
+const asyncPrepare: TransactionPreparer = async () => prepared;
 // The same host callback supports other calls with a nonzero native value.
 const payableRequest: TransactionRequest = {
     to: options.loggerAddress, data: '0x', value: 1n,
@@ -30,7 +30,7 @@ const hash: string | null = failure.transactionHash;
 const stage: TransactionStage = failure.stage;
 
 // @ts-expect-error The host must return the hash along with the signed bytes.
-const incompletePrepare: PrepareTransaction = () => ({ rawTransaction: '0x02abcd' });
+const incompletePrepare: TransactionPreparer = () => ({ rawTransaction: '0x02abcd' });
 // @ts-expect-error Logger submission requires explicit preparation/signing.
 logCid(cid, { config: options.config, fetch: options.fetch, loggerAddress: options.loggerAddress, expectedNode: options.expectedNode, timeoutMs: 1000, pollIntervalMs: 1 });
 // @ts-expect-error No implicit expected node is inferred from the message signer.

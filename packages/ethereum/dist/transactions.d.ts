@@ -8,12 +8,12 @@ interface TransactionRequest {
     readonly value: bigint;
     readonly signal?: AbortSignal;
 }
-interface PreparedTransaction {
+interface SignedTransaction {
     readonly rawTransaction: string;
     readonly transactionHash: string;
 }
 /** Prepare and sign the requested call without broadcasting it. */
-type PrepareTransaction = (request: TransactionRequest) => PreparedTransaction | PromiseLike<PreparedTransaction>;
+type TransactionPreparer = (request: TransactionRequest) => SignedTransaction | PromiseLike<SignedTransaction>;
 /** Verify covers operation-specific checks after receipt observation. */
 type TransactionStage = 'prepare' | 'submit' | 'receipt' | 'verify';
 interface EthSendRawTransactionOptions {
@@ -45,4 +45,4 @@ declare class EthereumRawTransactionRecoveryError extends Error {
 }
 declare function ethSendRawTransaction({ config, fetch, rawTransaction, transactionHash, id, signal, }: EthSendRawTransactionOptions): Promise<EthSendRawTransactionResult>;
 export { EthereumRawTransactionRecoveryError, ethSendRawTransaction, };
-export type { TransactionRequest, PreparedTransaction, PrepareTransaction, TransactionStage, EthSendRawTransactionOptions, EthSendRawTransactionResult, };
+export type { TransactionRequest, SignedTransaction, TransactionPreparer, TransactionStage, EthSendRawTransactionOptions, EthSendRawTransactionResult, };

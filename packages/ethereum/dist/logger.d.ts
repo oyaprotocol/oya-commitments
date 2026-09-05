@@ -1,6 +1,6 @@
 import type { EthereumReceiptLog, EthereumTransactionReceipt } from './receipt-utils.js';
 import type { EthWaitForTransactionReceiptOptions } from './receipts.js';
-import type { PrepareTransaction, TransactionStage } from './transactions.js';
+import type { TransactionPreparer, TransactionStage } from './transactions.js';
 type LoggerEventInput = Pick<EthereumReceiptLog, 'address' | 'topics' | 'data' | 'removed'>;
 interface LoggerEvent {
     readonly node: string;
@@ -12,7 +12,7 @@ interface LogCidOptions extends Omit<EthWaitForTransactionReceiptOptions, 'trans
     loggerAddress: string;
     /** Logger's immediate caller, which can be a contract wallet. */
     expectedNode: string;
-    prepareTransaction: PrepareTransaction;
+    prepareTransaction: TransactionPreparer;
 }
 interface LogCidResult {
     readonly cid: string;

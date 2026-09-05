@@ -32,6 +32,10 @@ information to resume without blindly sending another transaction.
   Logger uses them with unchanged runtime behavior. Build, all 119
   Ethereum/messages tests, both consumer type suites, package imports, and
   whitespace checks passed. Type checks cover nonzero values with the same callback.
+- [x] 2026-09-05: Renamed the callback type to `TransactionPreparer` and its result
+  to `SignedTransaction` for clarity. Updated imports, exports, docs, and generated
+  declarations. Build, both consumer type suites, package imports, and whitespace
+  checks passed; emitted runtime JavaScript is unchanged.
 
 ## Surprises & Discoveries
 
@@ -59,7 +63,7 @@ information to resume without blindly sending another transaction.
   that file now owns all Logger functions, Logger-specific types, and errors.
 - 2026-09-05 / user and Codex: Share transaction request, prepared transaction,
   preparation callback, and workflow stage types in `transactions.ts` as
-  `TransactionRequest`, `PreparedTransaction`, `PrepareTransaction`, and
+  `TransactionRequest`, `SignedTransaction`, `TransactionPreparer`, and
   `TransactionStage`. A request supports a bigint value; Logger still supplies
   zero. The verify stage covers operation-specific receipt checks. The previous
   Logger-prefixed type names are replaced to keep one shared interface.
@@ -170,8 +174,8 @@ without broadcasting. The result contains CID, transaction hash, receipt, and
 decoded event. Errors distinguish prepare, submit, receipt, and verify stages.
 
 The Logger types are `LogCidOptions` and `LogCidResult`. Shared types in
-`transactions.ts` are `TransactionRequest`, `PreparedTransaction`,
-`PrepareTransaction`, and `TransactionStage`. Configuration errors occur before preparation;
+`transactions.ts` are `TransactionRequest`, `SignedTransaction`,
+`TransactionPreparer`, and `TransactionStage`. Configuration errors occur before preparation;
 `LogCidError` wraps failures from preparation onward. Its `receipt` is populated
 only after successful receipt parsing. Signed transaction content/hash correctness
 is the trusted preparer's responsibility; no new transaction parser was added.
