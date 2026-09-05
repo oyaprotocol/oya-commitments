@@ -28,7 +28,7 @@ export type {
     EthWaitForTransactionReceiptResult,
 } from './receipts.js';
 export type { EthereumReceiptLog, EthereumTransactionReceipt } from './receipt-utils.js';
-export { encodeLoggerLogCall, decodeLoggerLogEvent } from './logger.js';
+export { encodeLoggerCall, decodeLoggerEvent } from './logger.js';
 export type { LoggerEventInput, LoggerEvent } from './logger.js';
 export {
     EthereumJsonRpcError,

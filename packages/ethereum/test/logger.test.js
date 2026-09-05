@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { encodeLoggerLogCall, decodeLoggerLogEvent } from '../dist/index.js';
+import { encodeLoggerCall, decodeLoggerEvent } from '../dist/index.js';
 
 const fixtures = JSON.parse(readFileSync(new URL('./fixtures/logger-abi.json', import.meta.url), 'utf8'));
 const { loggerAddress, node, topics } = fixtures;
@@ -14,13 +14,13 @@ function createLog(overrides = {}) {
 
 test('Logger call encoding matches independent Foundry ABI fixtures', () => {
     for (const { cid, calldata } of fixtures.cases) {
-        assert.equal(encodeLoggerLogCall(cid), calldata, JSON.stringify(cid));
+        assert.equal(encodeLoggerCall(cid), calldata, JSON.stringify(cid));
     }
 });
 
 test('Logger event decoding matches independent Foundry ABI fixtures', () => {
     for (const { cid, data } of fixtures.cases) {
-        assert.deepEqual(decodeLoggerLogEvent(createLog({ data }), loggerAddress), { node, cid });
+        assert.deepEqual(decodeLoggerEvent(createLog({ data }), loggerAddress), { node, cid });
     }
 });
 
@@ -28,67 +28,67 @@ test('Logger helpers preserve arbitrary text across byte and ABI word boundaries
     for (const length of [0, 1, 30, 31, 32, 33, 63, 64, 65, 255, 1_024]) {
         for (const character of ['a', 'é', '界', '🚀', '\0']) {
             const cid = character.repeat(length);
-            const calldata = encodeLoggerLogCall(cid);
+            const calldata = encodeLoggerCall(cid);
             const data = `0x${calldata.slice(10)}`;
-            assert.deepEqual(decodeLoggerLogEvent(createLog({ data }), loggerAddress), { node, cid });
+            assert.deepEqual(decodeLoggerEvent(createLog({ data }), loggerAddress), { node, cid });
         }
     }
 });
 
 test('Logger call encoding rejects values that cannot be encoded as exact Unicode text', () => {
     for (const cid of [undefined, null, 1, {}, [], new String('cid'), '\ud800', '\udc00', 'a\ud800b']) {
-        assert.throws(() => encodeLoggerLogCall(cid), /cid must be a well-formed Unicode string/);
+        assert.throws(() => encodeLoggerCall(cid), /cid must be a well-formed Unicode string/);
     }
 });
 
 test('Logger event filtering requires the expected emitter and event signature', () => {
-    assert.equal(decodeLoggerLogEvent(createLog({ address: node }), loggerAddress), null);
-    assert.equal(decodeLoggerLogEvent(createLog({ topics: [] }), loggerAddress), null);
-    assert.equal(decodeLoggerLogEvent(createLog({ topics: [`0x${'00'.repeat(32)}`] }), loggerAddress), null);
+    assert.equal(decodeLoggerEvent(createLog({ address: node }), loggerAddress), null);
+    assert.equal(decodeLoggerEvent(createLog({ topics: [] }), loggerAddress), null);
+    assert.equal(decodeLoggerEvent(createLog({ topics: [`0x${'00'.repeat(32)}`] }), loggerAddress), null);
     // Unrelated contracts or events need not use the Logger event's data layout.
-    assert.equal(decodeLoggerLogEvent(createLog({ address: node, data: '0x' }), loggerAddress), null);
-    assert.equal(decodeLoggerLogEvent(createLog({ topics: [`0x${'11'.repeat(32)}`], data: '0x' }), loggerAddress), null);
+    assert.equal(decodeLoggerEvent(createLog({ address: node, data: '0x' }), loggerAddress), null);
+    assert.equal(decodeLoggerEvent(createLog({ topics: [`0x${'11'.repeat(32)}`], data: '0x' }), loggerAddress), null);
 });
 
 test('Logger event matching ignores hex casing and preserves the indexed node casing', () => {
     const upper = (hex) => `0x${hex.slice(2).toUpperCase()}`;
-    assert.deepEqual(decodeLoggerLogEvent(createLog({
+    assert.deepEqual(decodeLoggerEvent(createLog({
         address: upper(loggerAddress),
         topics: topics.map(upper),
         data: upper(sample.data),
     }), loggerAddress), { node: upper(node), cid: sample.cid });
-    assert.deepEqual(decodeLoggerLogEvent(createLog(), upper(loggerAddress)), { node, cid: sample.cid });
+    assert.deepEqual(decodeLoggerEvent(createLog(), upper(loggerAddress)), { node, cid: sample.cid });
 });
 
 test('Logger event decoding preserves optional removed metadata', () => {
     for (const removed of [false, true]) {
-        assert.deepEqual(decodeLoggerLogEvent(createLog({ removed }), loggerAddress), {
+        assert.deepEqual(decodeLoggerEvent(createLog({ removed }), loggerAddress), {
             node, cid: sample.cid, removed,
         });
     }
-    assert.equal('removed' in decodeLoggerLogEvent(createLog(), loggerAddress), false);
+    assert.equal('removed' in decodeLoggerEvent(createLog(), loggerAddress), false);
     for (const removed of [null, 0, 'false']) {
-        assert.throws(() => decodeLoggerLogEvent(createLog({ removed }), loggerAddress), /log.removed/);
+        assert.throws(() => decodeLoggerEvent(createLog({ removed }), loggerAddress), /log.removed/);
     }
 });
 
 test('Logger decoder validates the expected address and matching log envelope', () => {
     for (const address of [undefined, null, 12, '0x', node.slice(0, -2), ` ${node}`]) {
-        assert.throws(() => decodeLoggerLogEvent(createLog(), address), /loggerAddress/);
-        assert.throws(() => decodeLoggerLogEvent(createLog({ address }), loggerAddress), /log.address/);
+        assert.throws(() => decodeLoggerEvent(createLog(), address), /loggerAddress/);
+        assert.throws(() => decodeLoggerEvent(createLog({ address }), loggerAddress), /log.address/);
     }
     for (const log of [undefined, null, [], true]) {
-        assert.throws(() => decodeLoggerLogEvent(log, loggerAddress), /log must be a plain object/);
+        assert.throws(() => decodeLoggerEvent(log, loggerAddress), /log must be a plain object/);
     }
     for (const invalidTopics of [undefined, null, '0x']) {
-        assert.throws(() => decodeLoggerLogEvent(createLog({ topics: invalidTopics }), loggerAddress), /log.topics/);
+        assert.throws(() => decodeLoggerEvent(createLog({ topics: invalidTopics }), loggerAddress), /log.topics/);
     }
     for (const invalidTopics of [
         [topics[0]], [...topics, topics[0]], [null], ['0x'],
         [topics[0], '0x'], [topics[0], null],
         [topics[0], `0x01${topics[1].slice(4)}`],
     ]) {
-        assert.throws(() => decodeLoggerLogEvent(createLog({ topics: invalidTopics }), loggerAddress), /topics|padding/);
+        assert.throws(() => decodeLoggerEvent(createLog({ topics: invalidTopics }), loggerAddress), /topics|padding/);
     }
 });
 
@@ -110,7 +110,7 @@ test('Logger decoder rejects invalid offsets, lengths, sizes, and nonzero paddin
         `0x${raw.slice(0, -2)}01`, // Nonzero padding.
     ];
     for (const data of invalidData) {
-        assert.throws(() => decodeLoggerLogEvent(createLog({ data }), loggerAddress), /log.data|Logger Log event/);
+        assert.throws(() => decodeLoggerEvent(createLog({ data }), loggerAddress), /log.data|Logger event/);
     }
 });
 
@@ -119,7 +119,7 @@ test('Logger decoder rejects invalid UTF-8 instead of silently replacing bytes',
     for (const content of ['ff', 'c0af', 'eda080', 'e282', 'f4908080']) {
         const length = (content.length / 2).toString(16).padStart(64, '0');
         const data = `0x${'20'.padStart(64, '0')}${length}${content.padEnd(64, '0')}`;
-        assert.throws(() => decodeLoggerLogEvent(createLog({ data }), loggerAddress), /valid UTF-8/);
+        assert.throws(() => decodeLoggerEvent(createLog({ data }), loggerAddress), /valid UTF-8/);
     }
 });
 
@@ -130,6 +130,6 @@ test('Logger decoder accepts receipt logs without changing their data', () => {
         transactionHash: `0x${'bb'.repeat(32)}`,
         blockNumber: 123n, transactionIndex: 0n, logIndex: 1n,
     });
-    assert.deepEqual(decodeLoggerLogEvent(log, loggerAddress), { node, cid: sample.cid, removed: false });
+    assert.deepEqual(decodeLoggerEvent(log, loggerAddress), { node, cid: sample.cid, removed: false });
     assert.equal(log.data, sample.data);
 });

@@ -1,15 +1,15 @@
-import { encodeLoggerLogCall, decodeLoggerLogEvent } from '@oyaprotocol/ethereum';
+import { encodeLoggerCall, decodeLoggerEvent } from '@oyaprotocol/ethereum';
 import type {
     EthereumReceiptLog,
     LoggerEvent,
     LoggerEventInput,
 } from '@oyaprotocol/ethereum';
 
-const calldata: string = encodeLoggerLogCall('bafy-test');
+const calldata: string = encodeLoggerCall('bafy-test');
 declare const loggerAddress: string;
 declare const receiptLog: EthereumReceiptLog;
 const input: LoggerEventInput = receiptLog;
-const event: LoggerEvent | null = decodeLoggerLogEvent(input, loggerAddress);
+const event: LoggerEvent | null = decodeLoggerEvent(input, loggerAddress);
 if (event !== null) {
     const node: string = event.node;
     const cid: string = event.cid;
@@ -20,9 +20,9 @@ if (event !== null) {
 }
 
 // @ts-expect-error Call encoding requires a string.
-encodeLoggerLogCall(1);
+encodeLoggerCall(1);
 // @ts-expect-error Decoding requires an explicit expected Logger address.
-decodeLoggerLogEvent(receiptLog);
+decodeLoggerEvent(receiptLog);
 // @ts-expect-error Event filtering can return null.
-const matchingEvent: LoggerEvent = decodeLoggerLogEvent(receiptLog, loggerAddress);
+const matchingEvent: LoggerEvent = decodeLoggerEvent(receiptLog, loggerAddress);
 void [calldata, matchingEvent];

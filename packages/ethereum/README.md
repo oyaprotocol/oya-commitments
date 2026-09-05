@@ -13,8 +13,8 @@ Ethereum JSON-RPC utilities for Oya kernel code. This package is a hardened kern
 - `ethSendRawTransaction(options)`: submit a signed raw transaction and return the transaction hash with attempt metadata. Callers may pass `transactionHash` when they already know the hash, allowing the wrapper to verify duplicate-style retry errors with `eth_getTransactionByHash`.
 - `ethGetTransactionReceipt(options)`: look up a transaction receipt, returning `{ receipt, attemptCount, response }`. The receipt is `null` when unavailable, including pending or unknown transactions.
 - `ethWaitForTransactionReceipt(options)`: poll for a receipt with an explicit overall deadline, poll interval, and optional cancellation signal. Returns `{ receipt, pollCount, attemptCount, response }` with a non-null receipt.
-- `encodeLoggerLogCall(cid)`: encode calldata for the Oya Logger's `log(string)` function.
-- `decodeLoggerLogEvent(log, loggerAddress)`: decode a `Log(address indexed node, string cid)` event from the expected Logger, returning `{ node, cid, removed? }` or `null` for an unrelated log.
+- `encodeLoggerCall(cid)`: encode calldata for the Oya Logger's `log(string)` function.
+- `decodeLoggerEvent(log, loggerAddress)`: decode a `Log(address indexed node, string cid)` event from the expected Logger, returning `{ node, cid, removed? }` or `null` for an unrelated log.
 - `EthereumJsonRpcError`: thrown when an HTTP-successful JSON-RPC response contains an `error` payload.
 - `HttpStatusError`: thrown when the HTTP response itself is not successful, re-exported from `@oyaprotocol/utils`.
 - `EthereumRawTransactionRecoveryError`: thrown when raw transaction submission may have succeeded before a retry returned a duplicate-style error, but the wrapper could not verify the supplied transaction hash.
@@ -75,20 +75,20 @@ The wait returns the first mined receipt reported by the RPC endpoint. It does n
 
 The pure, synchronous helpers in `src/logger.ts` target [`Logger.sol`](../../contracts/src/Logger.sol). They use its fixed function selector and event signature, checked with Foundry, and implement its single-string ABI layout without additional dependencies. The encoding follows the [Solidity ABI specification](https://docs.soliditylang.org/en/latest/abi-spec.html).
 
-`encodeLoggerLogCall(cid)` returns the complete `0x`-prefixed calldata. It preserves empty strings, whitespace, Unicode, and embedded null characters, using UTF-8 byte lengths and ABI padding. It imposes no CID syntax policy. JavaScript strings containing unpaired surrogates throw because encoding them would silently change the text. The host supplies the Logger address and prepares the remaining transaction fields, signs, and submits the transaction.
+`encodeLoggerCall(cid)` returns the complete `0x`-prefixed calldata. It preserves empty strings, whitespace, Unicode, and embedded null characters, using UTF-8 byte lengths and ABI padding. It imposes no CID syntax policy. JavaScript strings containing unpaired surrogates throw because encoding them would silently change the text. The host supplies the Logger address and prepares the remaining transaction fields, signs, and submits the transaction.
 
-`decodeLoggerLogEvent(log, loggerAddress)` accepts `LoggerEventInput`, which selects `address`, `topics`, `data`, and optional `removed` from `EthereumReceiptLog`. Pass receipt logs directly. The expected address is required and must be 20-byte hex. Other emitter addresses or event signatures, including logs with no topics, return `null`. Malformed input or a matching event with invalid topics, address padding, data offset, length, padding, or UTF-8 throws. Decoding checks lengths before allocating from an untrusted declared length, and requires the canonical layout emitted by Solidity, without extra trailing data.
+`decodeLoggerEvent(log, loggerAddress)` accepts `LoggerEventInput`, which selects `address`, `topics`, `data`, and optional `removed` from `EthereumReceiptLog`. Pass receipt logs directly. The expected address is required and must be 20-byte hex. Other emitter addresses or event signatures, including logs with no topics, return `null`. Malformed input or a matching event with invalid topics, address padding, data offset, length, padding, or UTF-8 throws. Decoding checks lengths before allocating from an untrusted declared length, and requires the canonical layout emitted by Solidity, without extra trailing data.
 
 The decoded `LoggerEvent` preserves the indexed node's hex casing and exact CID text, including a leading Unicode BOM. Address and event-signature matching is case-insensitive. Optional `removed` metadata is preserved, including `true`; decoding alone does not establish successful execution or finality. The expected node is the immediate caller of Logger, which may be a contract wallet and may differ from the signed message's signer.
 
 For example, a host can prepare the call and later verify its receipt:
 
 ```ts
-import { encodeLoggerLogCall, decodeLoggerLogEvent } from '@oyaprotocol/ethereum';
+import { encodeLoggerCall, decodeLoggerEvent } from '@oyaprotocol/ethereum';
 
 const transaction = {
     to: loggerAddress,
-    data: encodeLoggerLogCall(publication.cid),
+    data: encodeLoggerCall(publication.cid),
     value: 0n,
 };
 // The host prepares, signs, and submits transaction, then obtains its receipt.
@@ -97,7 +97,7 @@ if (receipt.status !== 'success') {
     throw new Error('Logger transaction did not succeed.');
 }
 const event = receipt.logs
-    .map((log) => decodeLoggerLogEvent(log, loggerAddress))
+    .map((log) => decodeLoggerEvent(log, loggerAddress))
     .find((entry) => entry !== null && entry.removed !== true &&
         entry.node.toLowerCase() === expectedNode.toLowerCase() &&
         entry.cid === publication.cid);

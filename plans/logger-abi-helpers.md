@@ -36,8 +36,8 @@ an event contains indexed values in topics and other values in its data bytes.
 
 ## Decision Log
 
-- 2026-09-04 / Codex: Implement only `encodeLoggerLogCall` and
-  `decodeLoggerLogEvent` in `packages/ethereum/src/logger.ts`. Fixed signatures
+- 2026-09-04 / Codex: Implement only `encodeLoggerCall` and
+  `decodeLoggerEvent` in `packages/ethereum/src/logger.ts`. Fixed signatures
   allow checked constants and a small ABI codec without runtime hashing or a
   general ABI dependency. Signing, RPC submission, polling, finality policy, and
   IPFS composition remain with their existing helpers or future host integration.
@@ -103,7 +103,7 @@ Run from the repository root:
     forge test --root contracts --offline
     git diff --check
 
-Smoke-import `encodeLoggerLogCall` and `decodeLoggerLogEvent` by package name
+Smoke-import `encodeLoggerCall` and `decodeLoggerEvent` by package name
 from a Node process with `packages/` as its working directory. Fixture inputs
 are listed in `test/fixtures/logger-abi.json`. Encode each CID's exact UTF-8 bytes
 as hex and pass them to `cast abi-encode 'f(bytes)'`. That output is event data;
@@ -139,8 +139,8 @@ Reference: [Solidity ABI specification](https://docs.soliditylang.org/en/latest/
 
 ## Interfaces and Dependencies
 
-    encodeLoggerLogCall(cid: string): string
-    decodeLoggerLogEvent(log: LoggerEventInput, loggerAddress: string): LoggerEvent | null
+    encodeLoggerCall(cid: string): string
+    decodeLoggerEvent(log: LoggerEventInput, loggerAddress: string): LoggerEvent | null
 
 `LoggerEventInput` selects `address`, `topics`, `data`, and optional `removed`
 from `EthereumReceiptLog`. `LoggerEvent` contains readonly `node`, `cid`, and

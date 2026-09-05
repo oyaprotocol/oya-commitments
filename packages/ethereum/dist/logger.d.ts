@@ -5,8 +5,8 @@ interface LoggerEvent {
     readonly cid: string;
     readonly removed?: boolean;
 }
-declare function encodeLoggerLogCall(cid: string): string;
+declare function encodeLoggerCall(cid: string): string;
 /** Returns null for unrelated logs; malformed matching Logger events throw. */
-declare function decodeLoggerLogEvent(log: LoggerEventInput, loggerAddress: string): LoggerEvent | null;
-export { encodeLoggerLogCall, decodeLoggerLogEvent };
+declare function decodeLoggerEvent(log: LoggerEventInput, loggerAddress: string): LoggerEvent | null;
+export { encodeLoggerCall, decodeLoggerEvent };
 export type { LoggerEventInput, LoggerEvent };
