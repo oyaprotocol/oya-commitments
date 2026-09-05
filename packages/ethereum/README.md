@@ -115,7 +115,7 @@ These helpers require standard `TextEncoder` and `TextDecoder`, consistent with 
 
 ## Logging a CID
 
-`logCid(cid, options)` in `src/log-cid.ts` composes the existing ABI, raw submission, and receipt helpers. It validates the canonical CID, Logger address, expected node, HTTP config, and polling durations before asking the host to prepare a transaction:
+`logCid(cid, options)` in `src/logger.ts` composes the existing ABI, raw submission, and receipt helpers. It validates the canonical CID, Logger address, expected node, HTTP config, and polling durations before asking the host to prepare a transaction:
 
 ```ts
 import { logCid } from '@oyaprotocol/ethereum';

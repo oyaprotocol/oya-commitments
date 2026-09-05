@@ -23,6 +23,10 @@ information to resume without blindly sending another transaction.
 - [x] 2026-09-05: Updated docs and tracked output; all 184 package tests, both
   TypeScript consumer suites, package-root import checks, and whitespace checks
   passed inside the sandbox. Reviewed runtime, tests, dependency changes, and docs.
+- [x] 2026-09-05: Consolidated the Logger workflow, ABI helpers, types, and errors
+  in `logger.ts` at the user's request, removing the separate source/generated
+  module. Build, all 119 Ethereum/messages tests, both consumer type suites,
+  package imports, and whitespace checks passed; public APIs are unchanged.
 
 ## Surprises & Discoveries
 
@@ -45,8 +49,9 @@ information to resume without blindly sending another transaction.
 ## Decision Log
 
 - 2026-09-05 / Codex: Put `logCid(cid, options)` in
-  `packages/ethereum/src/log-cid.ts` to keep network orchestration separate from
-  the pure ABI helpers in `logger.ts`.
+  a separate module initially. The user subsequently requested consolidating
+  the workflow with the ABI helpers in `packages/ethereum/src/logger.ts`;
+  that file now owns all Logger functions, types, and errors.
 - 2026-09-05 / Codex: Require `prepareTransaction` to return signed
   `rawTransaction` and its `transactionHash`. The trusted host owns chain ID,
   nonce, fees, gas, keys, and wallet routing; the package owns broadcasting.

@@ -1,10 +1,27 @@
 import { keccak_256 } from '@noble/hashes/sha3.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
-import { assertCanonicalCid, isPlainObject, parseBytes } from '@oyaprotocol/utils';
+import { assertCanonicalCid, assertHexData, createHttpConfig, invokeWithAbort, isPlainObject, parseBytes, throwIfSignalAborted, } from '@oyaprotocol/utils';
+import { assertTimerMs, ethWaitForTransactionReceipt } from './receipts.js';
+import { ethSendRawTransaction } from './transactions.js';
 // Verified against contracts/src/Logger.sol with forge inspect and cast keccak.
 const LOGGER_SELECTOR = '0x41304fac'; // log(string)
 const LOGGER_EVENT_TOPIC = '0xce2d845fcf02211a951a2153c1ddf64ec48ef6d54644ea188101f10018b871dc'; // Log(address,bytes32,string)
 const STRING_OFFSET = '20'.padStart(64, '0');
+class LogCidError extends Error {
+    cid;
+    stage;
+    /** Known before submission; its presence does not prove acceptance. */
+    transactionHash;
+    receipt;
+    constructor(cid, stage, transactionHash, receipt, cause) {
+        super(`Logging CID failed during ${stage}.`, { cause });
+        this.name = 'LogCidError';
+        this.cid = cid;
+        this.stage = stage;
+        this.transactionHash = transactionHash;
+        this.receipt = receipt;
+    }
+}
 function encodeLoggerCall(cid) {
     assertCanonicalCid(cid, 'cid');
     const bytes = new TextEncoder().encode(cid);
@@ -86,5 +103,56 @@ function decodeLoggerEvent(log, loggerAddress) {
         ...(log.removed === undefined ? {} : { removed: log.removed }),
     };
 }
-export { encodeLoggerCall, decodeLoggerEvent, hashLoggerCid };
+async function logCid(cid, { config, fetch, loggerAddress, expectedNode, prepareTransaction, timeoutMs, pollIntervalMs, signal, }) {
+    const data = encodeLoggerCall(cid);
+    const to = parseBytes(loggerAddress, 'loggerAddress', 20);
+    const node = parseBytes(expectedNode, 'expectedNode', 20);
+    const rpcConfig = createHttpConfig(config);
+    const deadlineMs = assertTimerMs(timeoutMs, 'timeoutMs');
+    const pollDelayMs = assertTimerMs(pollIntervalMs, 'pollIntervalMs');
+    if (typeof fetch !== 'function' || typeof prepareTransaction !== 'function') {
+        throw new TypeError('fetch and prepareTransaction must be functions.');
+    }
+    const cancellation = signal === undefined ? {} : { signal };
+    const abortMessage = 'logCid was aborted by the caller.';
+    let stage = 'prepare';
+    let transactionHash = null;
+    let receipt = null;
+    try {
+        throwIfSignalAborted(signal, abortMessage, signal?.reason);
+        const prepared = await invokeWithAbort(async () => await prepareTransaction(Object.freeze({ to, data, value: 0n, ...cancellation })), signal);
+        if (!isPlainObject(prepared)) {
+            throw new TypeError('prepareTransaction must return a plain object.');
+        }
+        transactionHash = parseBytes(prepared.transactionHash, 'transactionHash', 32);
+        const rawTransaction = assertHexData(prepared.rawTransaction, 'rawTransaction');
+        throwIfSignalAborted(signal, abortMessage, signal?.reason);
+        stage = 'submit';
+        await ethSendRawTransaction({
+            config: rpcConfig, fetch, rawTransaction, transactionHash, ...cancellation,
+        });
+        stage = 'receipt';
+        const observed = await ethWaitForTransactionReceipt({
+            config: rpcConfig, fetch, transactionHash,
+            timeoutMs: deadlineMs, pollIntervalMs: pollDelayMs, ...cancellation,
+        });
+        receipt = observed.receipt;
+        stage = 'verify';
+        if (receipt.status !== 'success') {
+            throw new Error(`Logger transaction execution status: ${receipt.status ?? 'unknown'}.`);
+        }
+        const event = receipt.logs
+            .map((log) => decodeLoggerEvent(log, to))
+            .find((entry) => entry !== null && entry.removed !== true &&
+            entry.node.toLowerCase() === node.toLowerCase() && entry.cid === cid);
+        if (!event) {
+            throw new Error('Receipt did not contain the expected Logger event.');
+        }
+        return { cid, transactionHash, receipt, event };
+    }
+    catch (cause) {
+        throw new LogCidError(cid, stage, transactionHash, receipt, cause);
+    }
+}
+export { encodeLoggerCall, decodeLoggerEvent, hashLoggerCid, logCid, LogCidError };
 //# sourceMappingURL=logger.js.map
