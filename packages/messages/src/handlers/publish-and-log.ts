@@ -34,9 +34,16 @@ async function publishAndLogSignedMessage(
     message: Readonly<SignedMessageInput>,
     { ipfs, logger, signal }: PublishAndLogSignedMessageOptions
 ): Promise<PublishAndLogSignedMessageResult> {
-    const cancellation = signal === undefined ? {} : { signal };
-    const loggerOptions = { ...logger, ...cancellation };
-    const publication = await publishSignedMessage(message, { ...ipfs, ...cancellation });
+    const ipfsOptions: PublishSignedMessageOptions = { ...ipfs };
+    const loggerOptions: LogCidOptions = { ...logger };
+    // Omit only narrows types; reused stage options may still contain signals.
+    delete ipfsOptions.signal;
+    delete loggerOptions.signal;
+    if (signal !== undefined) {
+        ipfsOptions.signal = signal;
+        loggerOptions.signal = signal;
+    }
+    const publication = await publishSignedMessage(message, ipfsOptions);
     try {
         const logging = await logCid(publication.cid, loggerOptions);
         return { publication, logging };

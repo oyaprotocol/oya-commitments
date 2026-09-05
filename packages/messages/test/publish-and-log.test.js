@@ -203,10 +203,33 @@ test('message logging failures preserve the publication and known transaction ha
     }
 });
 
+for (const stage of ['ipfs', 'logger']) {
+    test(`an aborted nested ${stage} signal is ignored when the top-level signal is absent`, async () => {
+        const options = createOptions();
+        const nestedSignal = AbortSignal.abort('Stale stage cancellation');
+        options[stage].signal = nestedSignal;
+        options.logger.transactionPreparer = (request) => {
+            assert.equal('signal' in request, false);
+            return { rawTransaction, transactionHash };
+        };
+        Object.freeze(options.ipfs);
+        Object.freeze(options.logger);
+
+        const result = await handleSignedMessage(createRequest(), createIngress(options));
+
+        assert.equal(result.status, 202);
+        assert.equal(result.handleSignedMessageResult.publication.cid, envelope.cid);
+        assert.equal(result.handleSignedMessageResult.logging.transactionHash, transactionHash);
+        assert.equal(options[stage].signal, nestedSignal);
+    });
+}
+
 test('the message callback forwards one cancellation signal through publication and signing', async () => {
     const options = createOptions();
     const controller = new AbortController();
     options.signal = controller.signal;
+    options.ipfs.signal = AbortSignal.abort('Stale IPFS cancellation');
+    options.logger.signal = AbortSignal.abort('Stale Logger cancellation');
     const signingStarted = Promise.withResolvers();
     const signed = Promise.withResolvers();
     let ipfsSignal;
@@ -218,6 +241,8 @@ test('the message callback forwards one cancellation signal through publication 
         return signed.promise;
     };
     options.logger.fetch = async () => { submissions++; };
+    Object.freeze(options.ipfs);
+    Object.freeze(options.logger);
     const promise = handleSignedMessage(createRequest(), createIngress(options));
     await signingStarted.promise;
     controller.abort(new Error('Host cancelled'));
