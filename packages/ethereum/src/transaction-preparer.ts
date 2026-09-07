@@ -2,6 +2,7 @@ import { keccak_256 } from '@noble/hashes/sha3.js';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import {
     assertTimerMs,
+    assertUint256,
     createHttpConfig,
     isPlainObject,
     parseBytes,
@@ -10,7 +11,7 @@ import {
 } from '@oyaprotocol/utils';
 import type { HttpConfig, HttpPostFetchLike } from '@oyaprotocol/utils';
 
-import { normalizeJsonRpcId, parseQuantity, requestEthereumJsonRpc } from './request-utils.js';
+import { normalizeJsonRpcId, parseTransactionQuantity, requestEthereumJsonRpc } from './request-utils.js';
 import type { SignedTransaction, TransactionPreparer, TransactionSigner, UnsignedTransaction } from './transactions.js';
 
 interface CreateTransactionPreparerOptions {
@@ -29,22 +30,6 @@ interface CreateTransactionPreparerOptions {
     timeoutMs?: number;
     /** JSON-RPC ID for preparation reads. Default: 1. */
     id?: string | number;
-}
-
-const UINT256_MAX = (1n << 256n) - 1n;
-
-function assertUint256(value: unknown, name: string): bigint {
-    if (typeof value !== 'bigint' || value < 0n || value > UINT256_MAX) {
-        throw new Error(`${name} must be a non-negative bigint fitting in 256 bits.`);
-    }
-    return value;
-}
-
-function parseTransactionQuantity(value: unknown, name: string): bigint {
-    if (typeof value === 'string' && value.length > 66) {
-        throw new Error(`${name} must fit in 256 bits.`);
-    }
-    return parseQuantity(value, name);
 }
 
 /** Prepare direct account calls; the host coordinates nonces through submission. */

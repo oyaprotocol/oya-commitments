@@ -1,3 +1,5 @@
+const UINT256_MAX = (1n << 256n) - 1n;
+
 function assertNonEmptyString(value: unknown, label: string): string {
     if (typeof value !== 'string' || !value.trim()) {
         throw new Error(`${label} must be a non-empty string.`);
@@ -15,6 +17,13 @@ function assertPositiveInteger(value: unknown, label: string): number {
 function assertNonNegativeInteger(value: unknown, label: string): number {
     if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
         throw new Error(`${label} must be a non-negative integer.`);
+    }
+    return value;
+}
+
+function assertUint256(value: unknown, name: string): bigint {
+    if (typeof value !== 'bigint' || value < 0n || value > UINT256_MAX) {
+        throw new Error(`${name} must be a non-negative bigint fitting in 256 bits.`);
     }
     return value;
 }
@@ -103,6 +112,7 @@ export {
     assertNonEmptyString,
     assertNonNegativeInteger,
     assertPositiveInteger,
+    assertUint256,
     isPlainObject,
     parseBytes,
 };

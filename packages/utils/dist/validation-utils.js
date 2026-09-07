@@ -1,3 +1,4 @@
+const UINT256_MAX = (1n << 256n) - 1n;
 function assertNonEmptyString(value, label) {
     if (typeof value !== 'string' || !value.trim()) {
         throw new Error(`${label} must be a non-empty string.`);
@@ -13,6 +14,12 @@ function assertPositiveInteger(value, label) {
 function assertNonNegativeInteger(value, label) {
     if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
         throw new Error(`${label} must be a non-negative integer.`);
+    }
+    return value;
+}
+function assertUint256(value, name) {
+    if (typeof value !== 'bigint' || value < 0n || value > UINT256_MAX) {
+        throw new Error(`${name} must be a non-negative bigint fitting in 256 bits.`);
     }
     return value;
 }
@@ -76,5 +83,5 @@ function parseBytes(value, name, size) {
     }
     return value;
 }
-export { assertAsciiBytes, assertBytes32HexString, assertHeadersObject, assertHexData, assertHexString, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, isPlainObject, parseBytes, };
+export { assertAsciiBytes, assertBytes32HexString, assertHeadersObject, assertHexData, assertHexString, assertNonEmptyString, assertNonNegativeInteger, assertPositiveInteger, assertUint256, isPlainObject, parseBytes, };
 //# sourceMappingURL=validation-utils.js.map

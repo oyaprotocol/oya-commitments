@@ -33,6 +33,7 @@ declare class EthereumJsonRpcError extends Error {
 }
 declare function normalizeJsonRpcId(id: unknown): string | number;
 declare function parseQuantity(value: unknown, name: string): bigint;
+declare function parseTransactionQuantity(value: unknown, name: string): bigint;
 declare function requestEthereumJsonRpcWithCustomRetryPolicy<TResult = unknown>({ config, fetch, method, params, id, signal, }: RequestEthereumJsonRpcOptions, shouldRetryJsonRpcMethod: (method: string) => boolean): Promise<RequestEthereumJsonRpcResult<TResult>>;
 declare function requestEthereumJsonRpc<TResult = unknown>(options: RequestEthereumJsonRpcOptions): Promise<RequestEthereumJsonRpcResult<TResult>>;
-export { EthereumJsonRpcError, normalizeJsonRpcId, parseQuantity, requestEthereumJsonRpc, requestEthereumJsonRpcWithCustomRetryPolicy, };
+export { EthereumJsonRpcError, normalizeJsonRpcId, parseQuantity, parseTransactionQuantity, requestEthereumJsonRpc, requestEthereumJsonRpcWithCustomRetryPolicy, };

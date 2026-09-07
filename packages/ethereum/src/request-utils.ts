@@ -157,6 +157,13 @@ function parseQuantity(value: unknown, name: string): bigint {
     return BigInt(value);
 }
 
+function parseTransactionQuantity(value: unknown, name: string): bigint {
+    if (typeof value === 'string' && value.length > 66) {
+        throw new Error(`${name} must fit in 256 bits.`);
+    }
+    return parseQuantity(value, name);
+}
+
 function buildJsonRpcBody({
     id,
     method,
@@ -324,6 +331,7 @@ export {
     EthereumJsonRpcError,
     normalizeJsonRpcId,
     parseQuantity,
+    parseTransactionQuantity,
     requestEthereumJsonRpc,
     requestEthereumJsonRpcWithCustomRetryPolicy,
 };

@@ -108,6 +108,12 @@ function parseQuantity(value, name) {
     }
     return BigInt(value);
 }
+function parseTransactionQuantity(value, name) {
+    if (typeof value === 'string' && value.length > 66) {
+        throw new Error(`${name} must fit in 256 bits.`);
+    }
+    return parseQuantity(value, name);
+}
 function buildJsonRpcBody({ id, method, params, }) {
     try {
         return JSON.stringify({
@@ -229,5 +235,5 @@ async function requestEthereumJsonRpcWithCustomRetryPolicy({ config, fetch, meth
 async function requestEthereumJsonRpc(options) {
     return await requestEthereumJsonRpcWithCustomRetryPolicy(options, shouldRetryMethod);
 }
-export { EthereumJsonRpcError, normalizeJsonRpcId, parseQuantity, requestEthereumJsonRpc, requestEthereumJsonRpcWithCustomRetryPolicy, };
+export { EthereumJsonRpcError, normalizeJsonRpcId, parseQuantity, parseTransactionQuantity, requestEthereumJsonRpc, requestEthereumJsonRpcWithCustomRetryPolicy, };
 //# sourceMappingURL=request-utils.js.map

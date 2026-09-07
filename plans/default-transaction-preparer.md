@@ -15,6 +15,7 @@ Nodes will be able to configure a reusable Ethereum transaction preparer once, p
 - [x] 2026-09-05 21:06Z: Aligned the block fee/gas-limit lookup with pending gas estimation. Added a regression for differing latest/pending fees with multiplier 1, updated documentation/errors, rebuilt output, and passed all 137 Ethereum/messages runtime tests, both type suites, package import, and whitespace checks.
 - [x] 2026-09-07 01:43Z: Audited public chain ID usage and changed factory/signing types to positive safe integer numbers while preserving bigint RPC parsing/comparison. Updated runtime/type coverage and documentation.
 - [x] 2026-09-07 01:44Z: Rebuilt tracked output and reviewed the final diff. All 140 Ethereum/messages runtime tests, both type suites, package import, and whitespace checks passed for the chain ID change.
+- [x] 2026-09-07 02:02Z: Moved `assertUint256` to shared validation utilities and `parseTransactionQuantity` to Ethereum request utilities without changing behavior. Rebuilt output; all 98 utils/Ethereum runtime tests, Ethereum type checks, both package imports, uint256 export boundary checks, and whitespace checks passed.
 
 ## Surprises & Discoveries
 
@@ -23,6 +24,7 @@ Nodes will be able to configure a reusable Ethereum transaction preparer once, p
 - A preparer cannot coordinate nonce reuse through submission because its callback finishes before broadcasting starts. An internal queue would not solve this lifecycle constraint.
 - Reading latest-block fees while estimating pending state can underprice the estimate with multiplier 1. The regression reproduced `max fee per gas less than block base fee` before the fix; reading the pending block fixes that mismatch. Separate RPC calls can still observe advancing pending state.
 - Public chain IDs only occur in the Ethereum factory and unsigned transaction interface. Keeping the existing bigint RPC comparison against the validated configured ID rejects unsupported RPC IDs without converting or rounding them; the signer receives the configured number.
+- The two preparer-local validation helpers have no orchestration dependency. Their existing tests continue to cover them after relocation; the new public `assertUint256` export also passed direct boundary checks.
 
 ## Decision Log
 
@@ -31,12 +33,15 @@ Nodes will be able to configure a reusable Ethereum transaction preparer once, p
 - 2026-09-05 / Codex, updated after user-approved review fix: Read chain ID, pending nonce, pending block base fee/gas limit, suggested priority fee, then estimate gas against pending state with the completed call/fee fields. Using pending for both the block lookup and estimate avoids the original latest/pending mismatch. Check chain ID on every invocation. Default maximum fee is twice the current base fee plus the suggested priority fee. Default gas margin is 20%, rounded up. Configurable integer base-fee multiplier and margin, optional gas/fee ceilings, and block gas limit checks reject before signing rather than silently reducing values.
 - 2026-09-05 / Codex: A configurable 30-second overall preparation deadline and the per-call abort signal cover RPC work and signing. Reuse `runWithRetry` with zero outer retries; individual RPC reads retain their existing retry policy. Sign only once and discard late results after cancellation. The signer is trusted to preserve the requested transaction and account; validate returned byte shapes, type-2 prefix, and hash correspondence with existing noble Keccak, without adding transaction decoding or key recovery.
 - 2026-09-05 / Codex: Do not reserve or increment nonces locally. Document serialization of the complete transaction lifecycle per account, including reconciliation of uncertain submissions, and the lack of coordination across processes. RPC IDs default to 1 and are configurable at factory creation; they are not signed fields.
+- 2026-09-07 / Codex, requested by the user: Export generic `assertUint256` from `packages/utils/src/validation-utils.ts` through `@oyaprotocol/utils`. Keep `parseTransactionQuantity` beside `parseQuantity` in `packages/ethereum/src/request-utils.ts` as an internal Ethereum helper. Preserve their original validation and errors, including the length check before bigint parsing.
 
 ## Outcomes & Retrospective
 
 The factory and signer interface are implemented with no new dependencies or concrete wallet adapter. Initial validation passed all 201 runtime tests across utils, IPFS, Ethereum, and messages, including 14 new factory tests. The pending-block follow-up passed all 137 Ethereum/messages runtime tests, including the now 15 factory tests, both type suites, package import, the build, and `git diff --check`. The regression demonstrates successful preparation with differing block fees and multiplier 1, and rejection against the pending block's gas limit before signing. The Logger integration test demonstrates preparation followed by one submission and the expected receipt/event verification. No live RPC, production key, deployment, or wallet adapter was used. The remaining operational responsibility is intentionally the host's signer implementation and coordination of the complete transaction lifecycle per account; no implementation work remains for this task.
 
 The chain ID follow-up changes public configuration and signing fields to `number`, with positive safe integer validation and lossless bigint RPC comparison. Tests cover the largest safe ID, rejected configuration values, and exact errors for unsupported RPC IDs through the uint256 maximum. Tracked output is rebuilt, all 140 Ethereum/messages runtime tests (including 18 factory tests) passed, and both type suites, package import, and whitespace checks passed. No work remains for this follow-up.
+
+The utility relocation is complete with unchanged runtime behavior and no new dependencies. The build, `node --test --test-reporter=dot packages/utils/test/*.test.js packages/ethereum/test/*.test.js` (98 tests), Ethereum type suite, utils/Ethereum package imports, uint256 export boundary checks, and `git diff --check` all passed.
 
 ## Context and Orientation
 
