@@ -102,6 +102,18 @@ function normalizeJsonRpcId(id) {
     }
     throw new Error('id must be a non-empty string or safe integer.');
 }
+function parseQuantity(value, name) {
+    if (typeof value !== 'string' || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(value)) {
+        throw new Error(`${name} must be an Ethereum quantity hex string without leading zeros.`);
+    }
+    return BigInt(value);
+}
+function parseTransactionQuantity(value, name) {
+    if (typeof value === 'string' && value.length > 66) {
+        throw new Error(`${name} must fit in 256 bits.`);
+    }
+    return parseQuantity(value, name);
+}
 function buildJsonRpcBody({ id, method, params, }) {
     try {
         return JSON.stringify({
@@ -223,5 +235,5 @@ async function requestEthereumJsonRpcWithCustomRetryPolicy({ config, fetch, meth
 async function requestEthereumJsonRpc(options) {
     return await requestEthereumJsonRpcWithCustomRetryPolicy(options, shouldRetryMethod);
 }
-export { EthereumJsonRpcError, normalizeJsonRpcId, requestEthereumJsonRpc, requestEthereumJsonRpcWithCustomRetryPolicy, };
+export { EthereumJsonRpcError, normalizeJsonRpcId, parseQuantity, parseTransactionQuantity, requestEthereumJsonRpc, requestEthereumJsonRpcWithCustomRetryPolicy, };
 //# sourceMappingURL=request-utils.js.map

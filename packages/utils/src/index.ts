@@ -1,5 +1,6 @@
 export { assertCanonicalCid } from './cid-utils.js';
 export {
+    assertTimerMs,
     combineAbortSignals,
     createTimeoutSignal,
     invokeWithAbort,
@@ -38,6 +39,7 @@ export {
     assertNonEmptyString,
     assertNonNegativeInteger,
     assertPositiveInteger,
+    assertUint256,
     isPlainObject,
     parseBytes,
 } from './validation-utils.js';

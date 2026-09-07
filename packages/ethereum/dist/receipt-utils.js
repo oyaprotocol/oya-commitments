@@ -1,10 +1,5 @@
 import { isPlainObject, parseBytes } from '@oyaprotocol/utils';
-function parseQuantity(value, name) {
-    if (typeof value !== 'string' || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(value)) {
-        throw new Error(`${name} must be an Ethereum quantity hex string without leading zeros.`);
-    }
-    return BigInt(value);
-}
+import { parseQuantity } from './request-utils.js';
 function assertMatchingHash(actual, expected, name) {
     if (actual.toLowerCase() !== expected.toLowerCase()) {
         throw new Error(`${name} did not match the expected hash.`);

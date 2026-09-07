@@ -16,6 +16,7 @@ Small shared utilities for hardened Oya kernel packages.
 - `assertHexString(value, label)`
 - `assertPositiveInteger(value, label)`
 - `assertNonNegativeInteger(value, label)`
+- `assertUint256(value, name)`: requires a bigint from `0n` through `(1n << 256n) - 1n`, returning the original value.
 - `assertHeadersObject(headers, label, options)`
 - `isPlainObject(value)`
 - `parseBytes(value, name, size?)`: validates `0x`-prefixed, byte-aligned hex, optionally requiring an exact byte count. Returns the original string without trimming; accepts `0x` when no size is required.
@@ -37,6 +38,7 @@ Small shared utilities for hardened Oya kernel packages.
 
 ## Async Utilities
 
+- `assertTimerMs(value, name)`: validates a positive integer duration up to 2,147,483,647 ms, avoiding timer overflow.
 - `AbortSignalHandle`
 - `RunWithRetryAttemptContext`
 - `RunWithRetryOptions`

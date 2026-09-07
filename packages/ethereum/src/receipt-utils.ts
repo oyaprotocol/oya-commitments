@@ -1,4 +1,5 @@
 import { isPlainObject, parseBytes } from '@oyaprotocol/utils';
+import { parseQuantity } from './request-utils.js';
 
 interface EthereumReceiptLog {
     readonly address: string;
@@ -32,13 +33,6 @@ interface EthereumTransactionReceipt {
     readonly effectiveGasPrice?: bigint;
     readonly blobGasUsed?: bigint;
     readonly blobGasPrice?: bigint;
-}
-
-function parseQuantity(value: unknown, name: string): bigint {
-    if (typeof value !== 'string' || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(value)) {
-        throw new Error(`${name} must be an Ethereum quantity hex string without leading zeros.`);
-    }
-    return BigInt(value);
 }
 
 function assertMatchingHash(actual: string, expected: string, name: string): void {
