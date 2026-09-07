@@ -3,7 +3,8 @@ import type { TransactionPreparer, TransactionSigner } from './transactions.js';
 interface CreateTransactionPreparerOptions {
     config: HttpConfig;
     fetch: HttpPostFetchLike<string>;
-    chainId: bigint;
+    /** Expected network ID; must be a positive safe integer. */
+    chainId: number;
     signer: TransactionSigner;
     /** Whole percent added to the estimate, rounded up. Default: 20. */
     gasLimitMarginPercent?: number;

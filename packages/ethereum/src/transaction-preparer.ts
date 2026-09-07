@@ -16,7 +16,8 @@ import type { SignedTransaction, TransactionPreparer, TransactionSigner, Unsigne
 interface CreateTransactionPreparerOptions {
     config: HttpConfig;
     fetch: HttpPostFetchLike<string>;
-    chainId: bigint;
+    /** Expected network ID; must be a positive safe integer. */
+    chainId: number;
     signer: TransactionSigner;
     /** Whole percent added to the estimate, rounded up. Default: 20. */
     gasLimitMarginPercent?: number;
@@ -54,10 +55,10 @@ function createTransactionPreparer({
     const rpcConfig = createHttpConfig(config);
     assertTimerMs(rpcConfig.timeoutMs, 'config.timeoutMs');
     const deadlineMs = assertTimerMs(timeoutMs, 'timeoutMs');
-    const expectedChainId = assertUint256(chainId, 'chainId');
-    if (expectedChainId === 0n) {
-        throw new Error('chainId must be positive.');
+    if (!Number.isSafeInteger(chainId) || chainId < 1) {
+        throw new Error('chainId must be a positive safe integer.');
     }
+    const expectedChainId = BigInt(chainId);
     const requestId = normalizeJsonRpcId(id);
     if (typeof fetch !== 'function') {
         throw new TypeError('fetch must be provided as a function.');
@@ -153,7 +154,7 @@ function createTransactionPreparer({
                     throw new Error('Buffered gas limit exceeds limits.gasLimit.');
                 }
                 const transaction: Readonly<UnsignedTransaction> = Object.freeze({
-                    ...call, type: 2, chainId: expectedChainId, nonce: Number(nonce),
+                    ...call, type: 2, chainId, nonce: Number(nonce),
                     gasLimit, maxFeePerGas, maxPriorityFeePerGas,
                 });
                 throwIfSignalAborted(operationSignal, abortMessage, operationSignal?.reason);

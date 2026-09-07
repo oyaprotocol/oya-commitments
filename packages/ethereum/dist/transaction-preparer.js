@@ -20,10 +20,10 @@ function createTransactionPreparer({ config, fetch, chainId, signer, gasLimitMar
     const rpcConfig = createHttpConfig(config);
     assertTimerMs(rpcConfig.timeoutMs, 'config.timeoutMs');
     const deadlineMs = assertTimerMs(timeoutMs, 'timeoutMs');
-    const expectedChainId = assertUint256(chainId, 'chainId');
-    if (expectedChainId === 0n) {
-        throw new Error('chainId must be positive.');
+    if (!Number.isSafeInteger(chainId) || chainId < 1) {
+        throw new Error('chainId must be a positive safe integer.');
     }
+    const expectedChainId = BigInt(chainId);
     const requestId = normalizeJsonRpcId(id);
     if (typeof fetch !== 'function') {
         throw new TypeError('fetch must be provided as a function.');
@@ -111,7 +111,7 @@ function createTransactionPreparer({ config, fetch, chainId, signer, gasLimitMar
                     throw new Error('Buffered gas limit exceeds limits.gasLimit.');
                 }
                 const transaction = Object.freeze({
-                    ...call, type: 2, chainId: expectedChainId, nonce: Number(nonce),
+                    ...call, type: 2, chainId, nonce: Number(nonce),
                     gasLimit, maxFeePerGas, maxPriorityFeePerGas,
                 });
                 throwIfSignalAborted(operationSignal, abortMessage, operationSignal?.reason);

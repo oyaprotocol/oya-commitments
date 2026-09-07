@@ -38,7 +38,8 @@ interface SignedTransaction {
 /** Fully specified EIP-1559 call with an empty access list. */
 interface UnsignedTransaction extends Omit<TransactionRequest, 'signal'> {
     readonly type: 2;
-    readonly chainId: bigint;
+    /** Positive safe integer identifying the expected network. */
+    readonly chainId: number;
     /** Nonces outside the safe integer range are rejected before signing. */
     readonly nonce: number;
     readonly gasLimit: bigint;

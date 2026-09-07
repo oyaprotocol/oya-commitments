@@ -31,7 +31,7 @@ function fixture(overrides = {}) {
             assert.ok(body.method in results, `Unexpected RPC method ${body.method}`);
             return response(results[body.method], body.id);
         },
-        chainId: 1n,
+        chainId: 1,
         signer: {
             address: node,
             signTransaction(transaction, signal) {
@@ -56,7 +56,7 @@ test('the factory creates a frozen EIP-1559 transaction with current RPC values 
     assert.ok(Object.isFrozen(signatures[0].transaction));
     assert.equal('signal' in signatures[0].transaction, false);
     assert.deepEqual(signatures[0].transaction, {
-        ...request, type: 2, chainId: 1n, nonce: 3,
+        ...request, type: 2, chainId: 1, nonce: 3,
         gasLimit: 25_202n, maxFeePerGas: 202n, maxPriorityFeePerGas: 2n,
     });
     assert.deepEqual(calls.map(({ method, params, id }) => ({ method, params, id })), [
@@ -107,12 +107,11 @@ test('fees and gas limits use the pending block when the base fee multiplier is 
     assert.equal(signatures.length, 1);
 });
 
-test('policies support exact ceilings, zero fees, empty calldata, large chain IDs, and fresh nonces', async () => {
+test('policies support exact ceilings, zero fees, empty calldata, and fresh nonces', async () => {
     const { options, results, calls, signatures } = fixture({
-        chainId: 9_007_199_254_740_993n, id: 'prepare-42', gasLimitMarginPercent: 0, baseFeeMultiplier: 3,
+        id: 'prepare-42', gasLimitMarginPercent: 0, baseFeeMultiplier: 3,
         limits: { gasLimit: 21_001n, feePerGas: 302n },
     });
-    results.eth_chainId = '0x20000000000001';
     const prepare = createTransactionPreparer(options);
     await prepare({ ...request, data: '0x', value: 0n });
     assert.equal(signatures[0].transaction.maxFeePerGas, 302n);
@@ -129,9 +128,47 @@ test('policies support exact ceilings, zero fees, empty calldata, large chain ID
     assert.equal(signatures.length, 2);
 });
 
+test('the largest safe chain ID is passed exactly to estimation and signing', async () => {
+    const { options, results, calls, signatures } = fixture({ chainId: Number.MAX_SAFE_INTEGER });
+    results.eth_chainId = '0x1fffffffffffff';
+    await createTransactionPreparer(options)(request);
+    assert.equal(signatures[0].transaction.chainId, Number.MAX_SAFE_INTEGER);
+    assert.equal(calls.find(({ method }) => method === 'eth_estimateGas').params[0].chainId,
+        '0x1fffffffffffff');
+});
+
+test('unsupported configured chain IDs reject before RPC or signing', () => {
+    for (const chainId of [
+        0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity, -Infinity,
+        1n, '1', '0x1', null, undefined,
+    ]) {
+        const { options, calls, signatures } = fixture({ chainId });
+        assert.throws(() => createTransactionPreparer(options), /chainId must be a positive safe integer/);
+        assert.equal(calls.length, 0);
+        assert.equal(signatures.length, 0);
+    }
+});
+
+test('unsupported RPC chain IDs reject losslessly before further RPC calls or signing', async () => {
+    for (const [rpcChainId, exactChainId] of [
+        ['0x0', '0'],
+        ['0x20000000000000', '9007199254740992'],
+        ['0x20000000000001', '9007199254740993'],
+        ['0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
+            '115792089237316195423570985008687907853269984665640564039457584007913129639935'],
+    ]) {
+        const { options, results, calls, signatures } = fixture({ chainId: Number.MAX_SAFE_INTEGER });
+        results.eth_chainId = rpcChainId;
+        await assert.rejects(createTransactionPreparer(options)(request), {
+            message: `RPC chain ID ${exactChainId} did not match configured chainId ${Number.MAX_SAFE_INTEGER}.`,
+        });
+        assert.deepEqual(calls.map(({ method }) => method), ['eth_chainId']);
+        assert.equal(signatures.length, 0);
+    }
+});
+
 test('invalid factory configuration is rejected before RPC or signing', () => {
     const invalid = [
-        { chainId: 1 }, { chainId: 0n }, { chainId: -1n }, { chainId: 1n << 256n },
         { signer: null }, { signer: { address: node } },
         { signer: { address: '0x1234', signTransaction() {} } }, { fetch: null },
         { id: '' }, { id: 1.5 }, { id: Number.MAX_SAFE_INTEGER + 1 },
@@ -167,6 +204,7 @@ test('malformed RPC results, unsupported fees, and unsafe quantities never reach
     const cases = [
         ['eth_chainId', '0x2', /did not match configured chainId/],
         ['eth_chainId', '0x01', /without leading zeros/],
+        ['eth_chainId', '0x' + 'f'.repeat(65), /256 bits/],
         ['eth_getTransactionCount', '0x20000000000000', /safe integer/],
         ['eth_getTransactionCount', '-0x1', /quantity/],
         ['eth_getBlockByNumber', null, /baseFeePerGas/],
@@ -253,6 +291,7 @@ test('configuration and call fields are snapshotted before asynchronous work', a
         return fetch(url, init);
     };
     const prepare = createTransactionPreparer(options);
+    options.chainId = 2;
     options.config.url = 'https://changed.example';
     options.config.headers.Authorization = 'changed';
     options.limits.gasLimit = 1n;
@@ -267,6 +306,7 @@ test('configuration and call fields are snapshotted before asynchronous work', a
     mutableRequest.value = 99n;
     release.resolve();
     await promise;
+    assert.equal(signatures[0].transaction.chainId, 1);
     assert.equal(signatures[0].transaction.to, request.to);
     assert.equal(signatures[0].transaction.data, request.data);
     assert.equal(signatures[0].transaction.value, request.value);

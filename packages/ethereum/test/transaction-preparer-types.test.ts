@@ -12,7 +12,7 @@ declare const loggerOptions: LogCidOptions;
 const signer: TransactionSigner = {
     address: '0x1111111111111111111111111111111111111111',
     signTransaction(transaction, signal) {
-        const fields: readonly [2, bigint, number, bigint, bigint, bigint] = [
+        const fields: readonly [2, number, number, bigint, bigint, bigint] = [
             transaction.type, transaction.chainId, transaction.nonce, transaction.gasLimit,
             transaction.maxFeePerGas, transaction.maxPriorityFeePerGas,
         ];
@@ -27,15 +27,17 @@ const signer: TransactionSigner = {
 };
 const asynchronousSigner: TransactionSigner = { ...signer, signTransaction: async () => signed };
 const preparer: TransactionPreparer = createTransactionPreparer({
-    ...options, signer, chainId: 1n, gasLimitMarginPercent: 20, baseFeeMultiplier: 2,
+    ...options, signer, chainId: 1, gasLimitMarginPercent: 20, baseFeeMultiplier: 2,
     limits: { gasLimit: 100_000n, feePerGas: 30_000_000_000n }, timeoutMs: 30_000, id: 'prepare',
 });
 const result: SignedTransaction = await preparer(request);
 const logging = logCid('cid', { ...loggerOptions, transactionPreparer: preparer });
 declare const transaction: UnsignedTransaction;
 const call: Omit<TransactionRequest, 'signal'> = transaction;
-// @ts-expect-error Chain IDs use bigint to preserve precision.
-createTransactionPreparer({ ...options, chainId: 1 });
+// @ts-expect-error Public chain IDs use numbers, validated at runtime as positive safe integers.
+createTransactionPreparer({ ...options, chainId: 1n });
+// @ts-expect-error Chain ID strings must be converted and validated before use.
+createTransactionPreparer({ ...options, chainId: '1' });
 // @ts-expect-error A signing adapter must provide its address and signing method.
 createTransactionPreparer({ ...options, signer: { address: signer.address } });
 // @ts-expect-error Fee limits are denominated in integer wei.

@@ -40,7 +40,7 @@ Hosts own transaction signing, environment configuration, and RPC endpoint disco
 
 - `TransactionRequest`: readonly `to`, `data`, `value: bigint` (wei), and optional `signal`. It describes call intent; the host supplies the remaining transaction fields.
 - `SignedTransaction`: readonly signed `rawTransaction` and its `transactionHash`.
-- `UnsignedTransaction`: readonly `to`, `data`, `value`, `type: 2`, `chainId: bigint`, `nonce: number`, `gasLimit: bigint`, `maxFeePerGas: bigint`, and `maxPriorityFeePerGas: bigint`. The access list is empty. There is no embedded cancellation signal.
+- `UnsignedTransaction`: readonly `to`, `data`, `value`, `type: 2`, `chainId: number` (positive safe integer), `nonce: number`, `gasLimit: bigint`, `maxFeePerGas: bigint`, and `maxPriorityFeePerGas: bigint`. The access list is empty. There is no embedded cancellation signal.
 - `TransactionSigner`: a readonly `address` and `signTransaction(transaction, signal?)` method returning `SignedTransaction`, synchronously or asynchronously. The host implements signing and must preserve all supplied fields, use the advertised account, and return without broadcasting.
 - `TransactionPreparer`: a callback from `TransactionRequest` to `SignedTransaction`, synchronously or asynchronously, without broadcasting.
 - `TransactionStage`: `'prepare' | 'submit' | 'receipt' | 'verify'`. Verification means the operation's checks after receiving a receipt, such as execution status and expected events.
@@ -59,7 +59,7 @@ declare const signer: TransactionSigner; // Implemented by the host's wallet/sig
 const transactionPreparer = createTransactionPreparer({
     config: rpcConfig,
     fetch: rpcFetch,
-    chainId: 1n, // The operator's expected network.
+    chainId: 1, // The operator's expected network; a positive safe integer.
     signer,
     gasLimitMarginPercent: 20, // Default: 20% above the estimate, rounded up.
     baseFeeMultiplier: 2, // Default: 2 * base fee + suggested priority fee.
@@ -75,7 +75,9 @@ const logging = await logCid(cid, {
 });
 ```
 
-Construction validates and snapshots configuration without making RPC calls. Each invocation validates and snapshots the call, checks `eth_chainId` against the configured positive bigint chain ID, reads `eth_getTransactionCount(address, "pending")`, obtains the pending block's base fee and gas limit, and reads `eth_maxPriorityFeePerGas`. It then calls `eth_estimateGas` against pending state with the signing address, recipient, calldata, value, chain ID, nonce, and selected fees. Fee selection and gas estimation both use pending state, although that state can advance between separate RPC calls. These methods follow the [Ethereum execution API](https://github.com/ethereum/execution-apis/tree/main/src/eth); the fee fields follow [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559).
+Construction validates and snapshots configuration without making RPC calls. `chainId` must be a `number` satisfying `Number.isSafeInteger(chainId) && chainId > 0`; bigint, string, fractional, nonpositive, and unsafe values are rejected. Update previous configurations such as `chainId: 1n` to `chainId: 1`. The signer receives the validated number and can use `BigInt(transaction.chainId)` if its wallet API requires bigint.
+
+Each invocation validates and snapshots the call, parses `eth_chainId` losslessly as bigint, and requires an exact match with `BigInt(chainId)`. Unsupported or mismatched RPC chain IDs reject before further RPC calls or signing; they are never rounded to a number. The preparer then reads `eth_getTransactionCount(address, "pending")`, obtains the pending block's base fee and gas limit, and reads `eth_maxPriorityFeePerGas`. It calls `eth_estimateGas` against pending state with the signing address, recipient, calldata, value, chain ID, nonce, and selected fees. Fee selection and gas estimation both use pending state, although that state can advance between separate RPC calls. These methods follow the [Ethereum execution API](https://github.com/ethereum/execution-apis/tree/main/src/eth); the fee fields follow [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559).
 
 The gas limit is `ceil(estimate * (100 + gasLimitMarginPercent) / 100)`. The maximum fee per gas is `baseFee * baseFeeMultiplier + suggestedPriorityFee`; the priority fee is the RPC suggestion. The multiplier and margin are policy choices, not protocol requirements. Arithmetic uses bigint, and fee values are in wei per gas. Nonces above `Number.MAX_SAFE_INTEGER` reject before conversion for the signer. Both optional `limits` fields are ceilings: the factory rejects a selected value above a ceiling instead of reducing the gas buffer or fee suggestion. Omitting them adds no operator ceiling; the buffered gas limit must still fit the pending block's gas limit. A configured gas cap must be positive; a fee cap of zero is permitted. Networks without EIP-1559 base-fee data, unsupported RPC methods, malformed quantities, estimation errors, and out-of-range values reject before signing.
 
