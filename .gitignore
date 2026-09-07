@@ -30,3 +30,8 @@ agent/node_modules
 agent-library/agents/**/.swap-state*.json
 agent-library/agents/**/config.local.json
 agent/.state/
+
+# Kernel node local configuration, keys, state, and deployment broadcasts
+node/kernel/config.local.json
+node/kernel/.state/
+contracts/broadcast/

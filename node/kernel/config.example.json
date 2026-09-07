@@ -1,0 +1,12 @@
+{
+  "host": "127.0.0.1",
+  "port": 8787,
+  "chainId": 31337,
+  "loggerContract": "0x1111111111111111111111111111111111111111",
+  "allowedSigners": ["0x2222222222222222222222222222222222222222"],
+  "rpcUrl": "http://127.0.0.1:8545",
+  "ipfsUrl": "http://127.0.0.1:5001",
+  "stateDir": ".state",
+  "gasLimit": 200000,
+  "maxFeePerGasWei": "30000000000"
+}
