@@ -1,4 +1,4 @@
-# Oya kernel message node
+# Oya production node
 
 This standalone runtime accepts an agent's signed text, publishes the signed JSON to IPFS, and submits its CID to Logger using the node's own account. A `202` response includes the CID, transaction hash, block number, and node address after the kernel verifies a successful receipt and the matching Logger event.
 
@@ -12,11 +12,11 @@ Use Node 22 or newer, npm, Foundry, and Kubo/IPFS for the local smoke. From the 
 git submodule update --init lib/forge-std
 npm --prefix packages ci
 npm --prefix packages run build
-npm --prefix node/kernel ci
-npm --prefix node/kernel test
+npm --prefix node/production ci
+npm --prefix node/production test
 forge build --root contracts --sizes
 forge test --root contracts --offline -vv
-npm --prefix node/kernel run smoke:local
+npm --prefix node/production run smoke:local
 ```
 
 The smoke starts isolated Anvil and offline Kubo processes on loopback ports, deploys Logger through `contracts/script/DeployLogger.s.sol`, and exercises real signed HTTP requests. It checks IPFS retrieval, Logger receipts, rejected signatures, duplicates, concurrent submissions, and restart recovery both before broadcast and after mining. It also rejects startup on a wrong chain or missing contract. It stops its services when finished and prints a temporary directory containing `evidence.json` and service logs.
@@ -24,7 +24,7 @@ The smoke starts isolated Anvil and offline Kubo processes on loopback ports, de
 To leave a working local stack running:
 
 ```sh
-npm --prefix node/kernel run smoke:local -- --keep-running
+npm --prefix node/production run smoke:local -- --keep-running
 ```
 
 This prints the actual node URL, RPC URL, IPFS URL, Logger address, and state directory. The temporary `.env` contains generated local-only node and agent keys with mode `0600`; the keys are not printed. The local chain is disposable, and offline Kubo makes content available through its local API only. Press Ctrl-C to stop all three services.
@@ -33,19 +33,19 @@ This prints the actual node URL, RPC URL, IPFS URL, Logger address, and state di
 
 Copy `config.example.json` to the ignored `config.local.json`. Replace the example Logger and agent addresses with your deployment and allowlisted signer addresses. Set `chainId`, `rpcUrl`, and `ipfsUrl` for the intended environment. `ipfsUrl` must be a Kubo-compatible API, with `/api/v0/add` support; a read-only gateway or unrelated pinning API is insufficient.
 
-The node account must have gas funds and be dedicated to one runtime. The agent signing key is distinct; it does not need gas to sign a message. Store `OYA_NODE_PRIVATE_KEY` in the ignored `node/kernel/.env`, or inject it through your process supervisor. Optional `OYA_RPC_AUTHORIZATION` and `OYA_IPFS_AUTHORIZATION` contain complete HTTP Authorization header values. Keep RPC URLs containing credentials in private local config too.
+The node account must have gas funds and be dedicated to one runtime. The agent signing key is distinct; it does not need gas to sign a message. Store `OYA_NODE_PRIVATE_KEY` in the ignored `node/production/.env`, or inject it through your process supervisor. Optional `OYA_RPC_AUTHORIZATION` and `OYA_IPFS_AUTHORIZATION` contain complete HTTP Authorization header values. Keep RPC URLs containing credentials in private local config too.
 
 From the repository root:
 
 ```sh
-node --env-file=node/kernel/.env node/kernel/src/main.mjs node/kernel/config.local.json
+node --env-file=node/production/.env node/production/src/main.mjs node/production/config.local.json
 curl http://127.0.0.1:8787/healthz
 ```
 
 Alternatively, with environment variables already loaded:
 
 ```sh
-npm --prefix node/kernel start -- /absolute/path/to/config.json
+npm --prefix node/production start -- /absolute/path/to/config.json
 ```
 
 Config paths in `stateDir` are relative to the config file. Keep that directory across restarts and on a filesystem that supports atomic rename and fsync. Startup checks the RPC chain and deployed bytecode, checks the state directory's chain/Logger/account identity, acquires its process lock, and attempts to resume an unfinished publication before serving traffic.
@@ -65,7 +65,7 @@ The signature must be EIP-191 over exactly `text`; the signer must be in `allowe
 Put ASCII text in a file, load the agent's key as `OYA_AGENT_PRIVATE_KEY`, and run:
 
 ```sh
-node --env-file=node/kernel/.env node/kernel/scripts/send-message.mjs http://127.0.0.1:8787 /absolute/path/to/message.txt
+node --env-file=node/production/.env node/production/scripts/send-message.mjs http://127.0.0.1:8787 /absolute/path/to/message.txt
 ```
 
 The script signs the complete file, including any final newline. A successful response looks like:

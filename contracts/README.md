@@ -77,4 +77,4 @@ forge script --root contracts contracts/script/DeployLogger.s.sol:DeployLogger -
 
 The script rejects a chain that differs from `LOGGER_CHAIN_ID`. Record the contract address and successful receipt from `contracts/broadcast/DeployLogger.s.sol/<chainId>/run-latest.json`; reuse that address in the node's `loggerContract` config. Each fresh deployment creates another Logger. `--offline` disables compiler downloads, not RPC access, so run the build first.
 
-For a complete local deployment plus signed-message/IPFS/Logger verification, run `npm --prefix node/kernel run smoke:local` after following the [kernel runtime setup](../node/kernel/README.md). This deploys only to its isolated Anvil chain (31337), using generated local accounts.
+For a complete local deployment plus signed-message/IPFS/Logger verification, run `npm --prefix node/production run smoke:local` after following the [production node setup](../node/production/README.md). This deploys only to its isolated Anvil chain (31337), using generated local accounts.

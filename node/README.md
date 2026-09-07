@@ -2,7 +2,7 @@
 
 `node/` is the primary home for standalone Oya node daemons.
 
-The Oya kernel runtime lives in [`kernel/`](kernel/README.md). It installs independently, accepts signed messages over HTTP, publishes to IPFS, and logs CIDs through the hardened Logger integration, with durable transaction recovery. See its guide for setup and local end-to-end deployment. The daemons described below use the earlier shared agent infrastructure.
+The Oya production runtime lives in [`production/`](production/README.md). It installs independently, accepts signed messages over HTTP, publishes to IPFS, and logs CIDs through the hardened kernel packages, with durable transaction recovery. See its guide for setup and local end-to-end deployment. The experimental daemons described below use the earlier shared agent infrastructure.
 
 These daemons are separate from the commitment-serving agent loop in `agent/`:
 

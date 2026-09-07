@@ -17,37 +17,42 @@ An operator can start an Oya HTTP node, submit an allowlisted agent's Ethereum-s
 - [x] 2026-09-07: Final runtime tests and formatting/whitespace checks passed; a fresh validated local stack is running through the real CLI entrypoint.
 - [x] 2026-09-07: Recorded the running local endpoints and deployment evidence below.
 - [x] 2026-09-07: Reworded documentation and sample messages around kernel-node behavior for reuse in the upstream repository.
+- [x] 2026-09-07: Moved the standalone runtime to `node/production/` and updated documentation, CI, CLI startup paths, and ignore rules.
+- [x] 2026-09-07: All seven runtime tests and the full local smoke, including CLI startup, passed from `node/production/`. Verified ignore rules and removed all old directory references.
 - [ ] If public deployment is desired, obtain the selected chain, host, funded signer, RPC, and IPFS access; the deployment-scope question remains unanswered.
 
 ## Surprises & Discoveries
 
-- Existing `node/` daemons import legacy `agent/` infrastructure. Kernel code explicitly excludes that dependency direction. A separate package under `node/kernel/` lets this runtime install and run independently.
+- Existing `node/` daemons import legacy `agent/` infrastructure. Kernel code explicitly excludes that dependency direction. A separate package under `node/production/` lets this runtime install and run independently.
 - `createTransactionPreparer` already reads chain, nonce, gas, and fee data. The host only needs a signing adapter. Its documentation requires serialization through receipt observation and reconciliation of ambiguous submissions.
 - `publishAndLogSignedMessage` does not persist intermediate progress. The host can compose `publishSignedMessage` and `logCid` to save the CID before signing, and wrap the transaction preparer to save signed bytes before broadcasting.
 - Deployment target is pending user input. Local Anvil and an isolated Kubo repository provide a complete validation path without external credentials.
 - Foundry's script target is relative to the invoking working directory even with `--root contracts`: use `contracts/script/DeployLogger.s.sol:DeployLogger` from the repository root. An initial smoke failed before deployment with `No such file or directory`; the corrected smoke passed.
-- The kernel's raw-transaction duplicate recovery applies to retries within one invocation. Host restart recovery must first inspect an existing receipt and handle an already-known rebroadcast by observing the retained hash. This is implemented locally in `node/kernel/src/publication.mjs`.
+- The kernel's raw-transaction duplicate recovery applies to retries within one invocation. Host restart recovery must first inspect an existing receipt and handle an already-known rebroadcast by observing the retained hash. This is implemented locally in `node/production/src/publication.mjs`.
 - The sandbox blocks loopback listeners and some dependency downloads. Dependency setup and HTTP/local integration tests required command escalation; all were run successfully after access was granted.
 - HTTP connection shutdown alone does not prove a disconnected client's publication finished. The host explicitly waits for the publication lifecycle before releasing its state lock.
 
 ## Decision Log
 
-- Decision: Add an independent ESM Node package at `node/kernel/`, importing all hardened libraries through package roots. Rationale: runtime wiring belongs in host code, and installing it must not require the legacy agent. Date/Author: 2026-09-07 / Codex.
+- Decision: Add an independent ESM Node package at `node/production/`, importing all hardened libraries through package roots. Rationale: runtime wiring belongs in host code, and installing it must not require the legacy agent. Date/Author: 2026-09-07 / Codex.
 - Decision: Serialize accepted publication work and persist signed transactions before submission. Rationale: one dedicated node account needs nonce coordination, and retrying retained signed bytes supports recovery without creating new transactions. Date/Author: 2026-09-07 / Codex.
 - Decision: Validate against real Anvil and Kubo first while the user chooses deployment scope. Rationale: provides observable end-to-end evidence without guessing a public chain or funded account. Date/Author: 2026-09-07 / Codex.
 - Decision: Complete and leave running the local milestone while deployment scope is unanswered. Rationale: the local flow is fully usable, and choosing a public chain or accessing funds requires concrete environment details. Date/Author: 2026-09-07 / Codex.
+- Decision: Name the standalone runtime directory `node/production/`. Rationale: the directory identifies the intended production node, while `packages/` contains its hardened kernel dependencies and older daemons remain experimental. Existing operational limitations remain documented. Date/Author: 2026-09-07 / Codex.
 
 ## Outcomes & Retrospective
 
 The local milestone is implemented and running. Seven host tests and eight Logger contract tests pass, as do contract formatting and `git diff --check`. A real smoke deployed Logger, published/retrieved signed JSON through Kubo, checked Logger events, deduplicated requests, recovered both prepared and mined transactions, and rejected concurrent new work. The final smoke leaves Anvil, offline Kubo, and the actual node CLI running; its health check returned success after CLI startup. CI now installs the standalone runtime and runs its host tests after checking package build freshness. No public network deployment has been attempted because its chain, credentials, and hosting are not selected.
 
-Remaining limitations are explicit in `node/kernel/README.md`: a dedicated single-process signer, one in-flight publication, local durable journal without a repair API, operator handling of stale crash locks and persistently unresolved transactions, and receipt verification without additional confirmation depth. Public hosting and integration-specific verification remain separate work.
+Remaining limitations are explicit in `node/production/README.md`: a dedicated single-process signer, one in-flight publication, local durable journal without a repair API, operator handling of stale crash locks and persistently unresolved transactions, and receipt verification without additional confirmation depth. Public hosting and integration-specific verification remain separate work.
+
+The runtime now lives under `node/production/`, distinguishing its intended role from the experimental daemons. CI, docs, CLI startup, and ignore rules use that path. Package dependencies and their relative paths did not change. The rename passed all seven runtime tests plus the full local deployment/publication/recovery smoke and CLI health check. The temporary stack used for rename validation was stopped afterward.
 
 ## Context and Orientation
 
 `packages/messages` authenticates EIP-191 signatures over exact ASCII text. Its ingress function takes raw HTTP-shaped data; it does not own a server. `packages/ipfs` publishes deterministic message JSON using a Kubo-compatible API and returns a canonical CID (content identifier). `packages/ethereum` prepares, submits, and verifies Logger transactions; signing remains the host's responsibility. `contracts/src/Logger.sol` emits `Log(address indexed node, bytes32 indexed cidKeccak256Hash, string cid)` and stores no history. The node address in the event is the account calling Logger, distinct from the agent who signs text.
 
-`node/kernel/` will own configuration, an HTTP adapter, a local-key signer, durable state, startup, tests, and local smoke tooling. `contracts/script/DeployLogger.s.sol` will own contract deployment. No kernel package functionality or agent-specific behavior needs to change.
+`node/production/` will own configuration, an HTTP adapter, a local-key signer, durable state, startup, tests, and local smoke tooling. `contracts/script/DeployLogger.s.sol` will own contract deployment. No kernel package functionality or agent-specific behavior needs to change.
 
 ## Plan of Work
 
@@ -63,15 +68,15 @@ Run commands from the repository root:
 
     npm --prefix packages ci
     npm --prefix packages run build
-    npm --prefix node/kernel ci
-    npm --prefix node/kernel test
+    npm --prefix node/production ci
+    npm --prefix node/production test
     forge fmt --root contracts
     forge build --root contracts --sizes
     forge test --root contracts --offline -vv
-    npm --prefix node/kernel run smoke:local
-    npm --prefix node/kernel run smoke:local -- --keep-running
+    npm --prefix node/production run smoke:local
+    npm --prefix node/production run smoke:local -- --keep-running
 
-The local smoke script uses Anvil, offline Kubo, and a temporary directory without touching the operator's existing IPFS repository. The last command keeps the validated stack running until SIGINT/SIGTERM. Exact operator startup and deployment commands are in `node/kernel/README.md` and `contracts/README.md`. Dependency installation and loopback sockets require network escalation in this workspace.
+The local smoke script uses Anvil, offline Kubo, and a temporary directory without touching the operator's existing IPFS repository. The last command keeps the validated stack running until SIGINT/SIGTERM. Exact operator startup and deployment commands are in `node/production/README.md` and `contracts/README.md`. Dependency installation and loopback sockets require network escalation in this workspace.
 
 ## Validation and Acceptance
 
@@ -85,9 +90,13 @@ Builds and tests are repeatable. The local smoke uses isolated directories and p
 
 ## Artifacts and Notes
 
+Commands in this plan use the current `node/production/` location. The earlier local deployment artifacts below were recorded before the directory rename; their historical temporary paths, addresses, and hashes are preserved.
+
+Rename validation used `npm --prefix node/production test` and `npm --prefix node/production run smoke:local -- --keep-running`. Both passed; the temporary smoke stack was stopped after confirming CLI startup. Its evidence is recorded at `/var/folders/l4/r069cwsn6gv75xdvj4r28gw40000gn/T/oya-kernel-local-SE5wvZ/evidence.json`. Logger was deployed at `0x70d927deff90141ec1d5eed5aa4231e764fa13f9` on that disposable Anvil chain.
+
 Initial successful smoke evidence: `/var/folders/l4/r069cwsn6gv75xdvj4r28gw40000gn/T/oya-kernel-local-BoC2F7/evidence.json`. That isolated chain has stopped. Logger address was `0x6fda21f1158b344477dfec3218519b0e9bb5b7f5`; deployment transaction `0xb83fa27a3141ac916dcec0539027afb11c184bca568f0edfee4661edee05cdc4`; first message log transaction `0x830d5b5382cd93ab115154d3be67ab5d731dff614e118e634a117f21328543bb`; CID `bafkreifnizzetmyn3uayctnsn6ozym6m5xj7tf57cbl7pay2phvigpzqua`. Each smoke generates different accounts and ports. Record the final running stack separately. Secret material must never appear in this document.
 
-Final running local stack, started 2026-09-07 using `npm --prefix node/kernel run smoke:local -- --keep-running`:
+Final running local stack, started 2026-09-07 using `npm --prefix node/production run smoke:local -- --keep-running`:
 
 - Node: `http://127.0.0.1:61723`; health: `GET /healthz`; message ingress: `POST /v1/messages`.
 - Anvil RPC: `http://127.0.0.1:61720`, chain ID `31337`.

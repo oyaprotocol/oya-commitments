@@ -200,7 +200,7 @@ try {
     if (process.argv.includes('--keep-running')) {
         await runtime.close(); runtime = undefined;
         const daemon = background('node', [
-            `--env-file=${join(directory, '.env')}`, 'node/kernel/src/main.mjs', join(directory, 'config.json'),
+            `--env-file=${join(directory, '.env')}`, 'node/production/src/main.mjs', join(directory, 'config.json'),
         ]);
         await until(async () => (await fetch(`${nodeUrl}/healthz`)).ok, daemon);
         console.log('Local node, Anvil, and isolated IPFS remain running. Press Ctrl-C to stop.');
