@@ -56,6 +56,7 @@ The copied `default` module now starts as a minimal standard scaffold using the 
 - Agent module layout and new-commitment workflow: `agent-library/README.md`
 - Runner config, message APIs, publication nodes, and harness usage: `agent/README.md`
 - Standalone node daemons and startup commands: `node/README.md`
+- Oya production node, Logger deployment, and local end-to-end smoke: `node/production/README.md`
 - Deployment and configuration: `docs/deployment.md`
 - Signer options and `with-signer` helper: `docs/signers.md`
 - Offchain agent usage: `docs/agent.md`

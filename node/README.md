@@ -2,6 +2,8 @@
 
 `node/` is the primary home for standalone Oya node daemons.
 
+The Oya production runtime lives in [`production/`](production/README.md). It installs independently, accepts signed messages over HTTP, publishes to IPFS, and logs CIDs through the hardened kernel packages, with durable transaction recovery. See its guide for setup and local end-to-end deployment. The experimental daemons described below use the earlier shared agent infrastructure.
+
 These daemons are separate from the commitment-serving agent loop in `agent/`:
 
 - the message publication node archives signed agent-authored messages to IPFS

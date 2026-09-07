@@ -64,7 +64,7 @@ jobs:
         run: forge test --offline -vvv
 
   packages:
-    name: Package build freshness
+    name: Kernel packages and production node
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -90,3 +90,9 @@ jobs:
 
       - name: Verify package build output is fresh
         run: git diff --exit-code -- packages
+
+      - name: Install production node dependencies
+        run: npm --prefix node/production ci --ignore-scripts
+
+      - name: Test production node
+        run: npm --prefix node/production test
