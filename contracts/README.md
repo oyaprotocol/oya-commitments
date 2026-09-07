@@ -60,21 +60,3 @@ This snapshot excludes randomized fuzz cases so gas comparisons use fixed inputs
 Tests run in Forge's local EVM without an RPC endpoint or private key. The first build may download the pinned compiler; subsequent tests run offline. `--offline` also avoids optional signature lookups that can trigger a Foundry 1.5.1 macOS proxy-settings crash inside a sandbox. Generated `out/` and `cache/` directories are ignored. See [`logger-execplan.md`](logger-execplan.md) for implementation decisions and validation evidence.
 
 See [AGENTS.md](AGENTS.md) for local agent instructions and [CONTRIBUTING.md](../CONTRIBUTING.md) for the shared contributor workflow.
-
-## Deploy Logger
-
-[`script/DeployLogger.s.sol`](script/DeployLogger.s.sol) deploys Logger and requires an explicit expected chain ID. Load `LOGGER_DEPLOYER_PK` securely into the environment, set `LOGGER_CHAIN_ID` to the target network ID, and set `LOGGER_RPC_URL` to its RPC endpoint. The deployer needs native currency for deployment gas. From the repository root, simulate first:
-
-```sh
-forge script --root contracts contracts/script/DeployLogger.s.sol:DeployLogger --rpc-url "$LOGGER_RPC_URL" --offline
-```
-
-After checking the intended chain and simulation, deploy:
-
-```sh
-forge script --root contracts contracts/script/DeployLogger.s.sol:DeployLogger --rpc-url "$LOGGER_RPC_URL" --broadcast --offline
-```
-
-The script rejects a chain that differs from `LOGGER_CHAIN_ID`. Record the contract address and successful receipt from `contracts/broadcast/DeployLogger.s.sol/<chainId>/run-latest.json`; reuse that address in the node's `loggerContract` config. Each fresh deployment creates another Logger. `--offline` disables compiler downloads, not RPC access, so run the build first.
-
-For a complete local deployment plus signed-message/IPFS/Logger verification, run `npm --prefix node/production run smoke:local` after following the [production node setup](../node/production/README.md). This deploys only to its isolated Anvil chain (31337), using generated local accounts.

@@ -30,8 +30,3 @@ agent/node_modules
 agent-library/agents/**/.swap-state*.json
 agent-library/agents/**/config.local.json
 agent/.state/
-
-# Production node local configuration, keys, state, and deployment broadcasts
-node/production/config.local.json
-node/production/.state/
-contracts/broadcast/
