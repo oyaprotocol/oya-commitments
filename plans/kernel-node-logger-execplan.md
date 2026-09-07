@@ -4,7 +4,7 @@ This ExecPlan is a living document maintained according to `PLANS.md`.
 
 ## Purpose / Big Picture
 
-An operator can start an Oya HTTP node, submit an allowlisted agent's Ethereum-signed text message, retrieve the published JSON from IPFS, and observe its CID in a mined Logger event attributed to the node's account. This is the first ETHOnline milestone. Commitments will continue to use Safe and Optimistic Governor, but reimbursement verification and DeFi integrations are subsequent work.
+An operator can start an Oya HTTP node, submit an allowlisted agent's Ethereum-signed text message, retrieve the published JSON from IPFS, and observe its CID in a mined Logger event attributed to the node's account. This establishes a running node built on the hardened kernel packages and a deployed Logger. Commitments continue to use Safe and Optimistic Governor; reimbursement verification and DeFi integrations are subsequent work.
 
 ## Progress
 
@@ -16,6 +16,7 @@ An operator can start an Oya HTTP node, submit an allowlisted agent's Ethereum-s
 - [x] 2026-09-07: Deployed Logger on isolated Anvil; real Kubo/HTTP/chain smoke passed including two restart-recovery paths and concurrency.
 - [x] 2026-09-07: Final runtime tests and formatting/whitespace checks passed; a fresh validated local stack is running through the real CLI entrypoint.
 - [x] 2026-09-07: Recorded the running local endpoints and deployment evidence below.
+- [x] 2026-09-07: Reworded documentation and sample messages around kernel-node behavior for reuse in the upstream repository.
 - [ ] If public deployment is desired, obtain the selected chain, host, funded signer, RPC, and IPFS access; the deployment-scope question remains unanswered.
 
 ## Surprises & Discoveries

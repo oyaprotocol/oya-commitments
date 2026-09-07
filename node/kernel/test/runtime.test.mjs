@@ -16,7 +16,7 @@ const configInput = {
     chainId: 31337, loggerContract: '0x1111111111111111111111111111111111111111',
     allowedSigners: [agent.address], rpcUrl: 'http://127.0.0.1:8545', ipfsUrl: 'http://127.0.0.1:5001', stateDir: './state',
 };
-const signedMessage = async (wallet, text = 'ETHOnline signed message') => ({
+const signedMessage = async (wallet, text = 'Oya kernel signed message') => ({
     text, signer: wallet.address, signature: await wallet.signMessage(text),
 });
 

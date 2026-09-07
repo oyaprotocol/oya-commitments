@@ -116,7 +116,7 @@ try {
     await assert.rejects(startNode({ ...config, loggerContract: agent.address }, signer), /bytecode/);
     runtime = await startNode(config, signer);
     assert.equal((await fetch(`${nodeUrl}/healthz`)).status, 200);
-    const text = 'ETHOnline: first message through the Oya kernel node and deployed Logger.';
+    const text = 'First message through the Oya kernel node and deployed Logger.';
     const message = { text, signer: agent.address, signature: await agent.signMessage(text) };
     const post = (body) => fetch(`${nodeUrl}/v1/messages`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
@@ -149,7 +149,7 @@ try {
     await runtime.close(); runtime = undefined;
 
     // Simulate a crash after durable preparation, before broadcast. Recovery must use those exact bytes.
-    const recoveryText = 'ETHOnline: resume a prepared Logger transaction after restart.';
+    const recoveryText = 'Resume a prepared Logger transaction after restart.';
     const recoveryMessage = { text: recoveryText, signer: agent.address, signature: await agent.signMessage(recoveryText) };
     const recoveryPublication = await publishSignedMessage(recoveryMessage, { config: config.ipfs, fetch });
     const prepare = createTransactionPreparer({ config: config.rpc, fetch, chainId: config.chainId, signer, limits: config.limits });
@@ -166,14 +166,14 @@ try {
 
     // Hold mining to demonstrate one lifecycle at a time without nonce collisions.
     await rawRpc('evm_setAutomine', [false]);
-    const concurrentText = 'ETHOnline: serialize node signing while a transaction is pending.';
+    const concurrentText = 'Serialize node signing while a transaction is pending.';
     const concurrentMessage = { text: concurrentText, signer: agent.address, signature: await agent.signMessage(concurrentText) };
     const pendingResponse = post(concurrentMessage);
     await until(async () => (await (await fetch(`${nodeUrl}/healthz`)).json()).busy);
     const busyResponse = await post({ ...message, text: recoveryText, signature: recoveryMessage.signature });
     // Previously completed requests can return their durable result even while a new one is active.
     assert.equal(busyResponse.status, 202);
-    const newText = 'ETHOnline: concurrent new message';
+    const newText = 'Concurrent new message through the Oya kernel node.';
     const rejected = await post({ text: newText, signer: agent.address, signature: await agent.signMessage(newText) });
     assert.equal(rejected.status, 503);
     assert.equal((await rejected.json()).code, 'node_busy');
