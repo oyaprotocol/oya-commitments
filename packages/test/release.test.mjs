@@ -21,12 +21,24 @@ function listFiles(directory, prefix = '') {
     }).sort();
 }
 
-test('packed kernels work in an independent consumer', () => {
+test('released kernels work in an independent consumer', () => {
     assert.ok(process.env.npm_execpath, 'Run npm --prefix packages run test:release');
+    const source = process.env.OYA_RELEASE_SOURCE ?? 'archives';
+    assert.ok(['archives', 'registry'].includes(source), 'OYA_RELEASE_SOURCE must be archives or registry');
+    let reviewed;
+    let referencePath;
+    if (source === 'registry') {
+        assert.ok(process.env.OYA_RELEASE_INVENTORY, 'Registry verification requires OYA_RELEASE_INVENTORY');
+        referencePath = resolve(process.env.OYA_RELEASE_INVENTORY);
+        reviewed = readJson(referencePath);
+        assert.equal(reviewed.validation, 'passed', 'The reference inventory must have passed validation');
+        assert.ok(Array.isArray(reviewed.archives), 'The reference inventory must list its archives');
+    }
     const artifacts = realpathSync(mkdtempSync(join(tmpdir(), 'oya-kernel-release-')));
     assert.ok(!artifacts.startsWith(`${resolve(packages, '..')}${sep}`), 'Use a temporary directory outside the checkout');
     console.log(`Release artifacts: ${artifacts}`);
     const consumer = join(artifacts, 'consumer');
+    const archiveDirectory = reviewed ? dirname(referencePath) : artifacts;
     mkdirSync(consumer);
     // No external module search path or preload hooks may supply missing package files.
     const env = { ...process.env, NODE_PATH: '', NODE_OPTIONS: '' };
@@ -40,13 +52,15 @@ test('packed kernels work in an independent consumer', () => {
     ], cwd);
     const manifests = names.map((name) => readJson(join(packages, name, 'package.json')));
     const inventory = {
+        source,
+        referenceInventory: referencePath,
         node: process.version,
         npm: npm(['--version'], packages).trim(),
         typescript: readJson(join(packages, 'node_modules/typescript/package.json')).version,
         sourceCommit: run('git', ['rev-parse', 'HEAD'], packages).trim(),
         packageChanges: run('git', ['status', '--short', '--', '.'], packages).trim(),
         validation: 'pending',
-        archives: JSON.parse(npm(['pack', '--workspaces', '--ignore-scripts', '--json',
+        archives: source === 'registry' ? reviewed.archives : JSON.parse(npm(['pack', '--workspaces', '--ignore-scripts', '--json',
             '--pack-destination', artifacts], packages)),
     };
     const inventoryPath = join(artifacts, 'inventory.json');
@@ -54,17 +68,29 @@ test('packed kernels work in an independent consumer', () => {
     try {
         assert.deepEqual(inventory.archives.map(({ name }) => name).sort(), manifests.map(({ name }) => name).sort());
         for (const archive of inventory.archives) {
+            assert.equal(archive.version, manifests.find(({ name }) => name === archive.name).version);
             assert.equal(archive.filename, `${archive.name.replace('@', '').replace('/', '-')}-${archive.version}.tgz`);
-            const integrity = `sha512-${createHash('sha512').update(readFileSync(join(artifacts, archive.filename))).digest('base64')}`;
+            const integrity = `sha512-${createHash('sha512').update(readFileSync(join(archiveDirectory, archive.filename))).digest('base64')}`;
             assert.equal(integrity, archive.integrity);
             for (const { path } of archive.files) {
                 assert.match(path, /^(?:package\.json|README\.md|LICENSE|dist\/.+\.(?:js|js\.map|d\.ts))$/);
                 assert.ok(!path.split('/').includes('..'), `Unexpected archive path: ${path}`);
             }
         }
+        if (source === 'registry') {
+            inventory.registry = [];
+            for (const archive of inventory.archives) {
+                const metadata = JSON.parse(npm(['view', `${archive.name}@${archive.version}`,
+                    'version', 'dist.integrity', '--json'], consumer));
+                assert.equal(metadata.version, archive.version, `Registry version mismatch: ${archive.name}`);
+                assert.equal(metadata['dist.integrity'], archive.integrity, `Registry integrity mismatch: ${archive.name}`);
+                inventory.registry.push({ name: archive.name, ...metadata });
+            }
+        }
         writeJson(join(consumer, 'package.json'), { name: 'oya-release-consumer', private: true, type: 'module' });
         npm(['install', '--ignore-scripts', '--save-exact', '--no-audit', '--no-fund',
-            ...inventory.archives.map(({ filename }) => join(artifacts, filename))], consumer);
+            ...inventory.archives.map(({ name, version, filename }) => source === 'registry'
+                ? `${name}@${version}` : join(archiveDirectory, filename))], consumer);
 
         const expectedVersions = Object.fromEntries(manifests.map(({ name, version }) => [name, version]));
         for (const manifest of manifests) {
@@ -109,6 +135,13 @@ test('packed kernels work in an independent consumer', () => {
             const installed = lock.packages[`node_modules/${name}`];
             assert.equal(installed.version, version);
             assert.ok(!installed.link && !installed.hasInstallScript);
+            const archive = inventory.archives.find((entry) => entry.name === name);
+            if (archive) {
+                assert.equal(installed.integrity, archive.integrity, `Installed integrity mismatch: ${name}`);
+                if (source === 'registry') {
+                    assert.ok(installed.resolved.startsWith('https://registry.npmjs.org/'), `Expected registry installation: ${name}`);
+                }
+            }
             const directory = join(consumer, 'node_modules', name);
             assert.equal(realpathSync(directory), directory);
         }

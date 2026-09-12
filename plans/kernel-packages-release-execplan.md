@@ -1,6 +1,6 @@
 # Package and publish the Oya kernels
 
-This ExecPlan follows `PLANS.md`. Status: stage 1 reviewed; stage 2 implementation and validation are complete for review. Continue one small stage at a time, stopping for the user's line-by-line review. Publication awaits review of the final artifacts and confirmation of npm access. Node changes follow publication.
+This ExecPlan follows `PLANS.md`. Status: stages 1 and 2 accepted; stage 3a registry verification is implemented for review. Continue one small stage at a time, stopping for the user's line-by-line review. Publication awaits review and npm authentication/access; the current login check returned HTTP 401. Node changes follow publication.
 
 ## Purpose / Big Picture
 
@@ -16,9 +16,11 @@ Publish the four existing `@oyaprotocol` kernels so independent nodes can instal
 - [x] 2026-09-12: User accepted moving on from stage 1 and authorized stage 2.
 - [x] 2026-09-12: Under temporary Node.js 24.21.0, the build, all 205 existing kernel tests, and both type checks passed.
 - [x] 2026-09-12: Stage 2: Added the maintained release test and instructions, excluded build caches, and validated all four archives in an independent consumer under Node.js 24.21.0/npm 11.19.0.
-- [ ] User reviews stage 2 code and the exact archives before publication.
+- [x] 2026-09-12: User accepted proceeding from stage 2 to the registry-verification change, with review before publication.
+- [x] 2026-09-12: Stage 3a: Added registry mode using a retained passing inventory; archive validation and registry-mode fixture checks passed under Node.js 24.21.0.
+- [ ] User reviews stage 3a and the exact release archives before publication.
 - [ ] Confirm npm scope/publishing access before release; public lookups do not establish access rights.
-- [ ] Stage 3: Publish and verify registry installation.
+- [ ] Stage 3b: Publish and verify actual registry installation.
 - [ ] Record the handoff to the node operations plan.
 
 ## Surprises & Discoveries
@@ -26,6 +28,8 @@ Publish the four existing `@oyaprotocol` kernels so independent nodes can instal
 The packages started with exports, declarations, archive allowlists, and version `0.0.0`, but no license files. Initial package metadata used the checkout's origin; the user subsequently selected `https://github.com/oyaprotocol/oya-commitments` as the canonical repository. Registry checks first failed with sandbox DNS errors, then returned E404 with network access. This means no visible release was found, not that scope ownership was verified. Stage 1 used Node 23.10.0/npm 11.18.0; stage 2 used a verified temporary Node 24.21.0/npm 11.19.0 installation. Kernels retain their ECMAScript 2025 requirements.
 
 The stage 2 file allowlist rejected `dist/.tsbuildinfo` in every archive. The earlier broad `dist` inclusion shipped TypeScript's incremental build metadata even though Git ignores it. Each manifest now limits `files` to JavaScript, declarations, source maps, README, and LICENSE. The release test validates archive contents through npm's inventory and an installed external consumer, without adding a tar parser or dependency. Registry installation required sandbox network approval. The declaration check caught a missing label argument in the new consumer fixture's `assertCanonicalCid` call; correcting that fixture made the full release test pass.
+
+Stage 3a public lookups returned E404 for all four `0.1.0` packages. `npm whoami --registry=https://registry.npmjs.org/` returned E401 with network access, so the configured login is not currently authorized and scope access remains unconfirmed. A real `npm view @noble/hashes@2.2.0 version dist.integrity --json` confirmed the metadata response shape used by the registry check. The new archive run produced the same four hashes recorded in stage 2.
 
 ## Decision Log
 
@@ -38,6 +42,8 @@ The stage 2 file allowlist rejected `dist/.tsbuildinfo` in every archive. The ea
 - 2026-09-12 / user: Use `https://github.com/oyaprotocol/oya-commitments` for package metadata and documentation links so they identify the upstream project. This supersedes the initial choice of the checkout's origin.
 - 2026-09-12 / Codex: Exclude incremental build caches with explicit file globs after archive validation exposed them. Preserve kernel implementation and dependency versions.
 - 2026-09-12 / Codex: Launch the release test through `npm run test:release`; invoke the npm CLI supplied by `npm_execpath` with the current Node executable, avoiding platform-specific shell wrappers. Keep registry verification for stage 3.
+- 2026-09-12 / Codex: Require `OYA_RELEASE_INVENTORY` in registry mode so verification stays tied to retained, validated archives. Compare registry metadata and the installed lockfile's integrity/source before reusing the consumer checks; do not repack in this mode.
+- 2026-09-12 / user review workflow: Implement and review stage 3a before publication. Validate the unavailable registry success path with an isolated npm CLI fixture; reserve the actual public-registry installation check for after release.
 
 ## Outcomes & Retrospective
 
@@ -46,6 +52,8 @@ Stage 1 prepared package metadata, licenses, documentation, and the package work
 Stage 2 adds `packages/test/release.test.mjs`, the private workspace's `test:release` command, and README instructions. Its first run identified build caches in the archives; four small file-list changes exclude those caches. The external consumer passed runtime checks for all package roots, signed-message validation/rejection, injected IPFS publication, and Logger encoding/hashing. TypeScript compiled its declaration imports with `skipLibCheck: false` and no ambient Node types. Its lockfile contains exactly the four Oya packages and `@noble/curves`/`@noble/hashes` at `2.2.0`.
 
 The build, 205 existing tests, both existing type checks, and the new release test passed under Node.js 24.21.0. Archive inspection and `git diff --check` passed. No dependencies, kernel implementations/build outputs, node code, or lockfiles changed in stage 2. Nothing was published. User review and npm publishing access remain pending; runtime-specific validation outside Node.js remains future work.
+
+Stage 3a extends the existing test and README. Registry mode verifies retained archive bytes against their recorded hashes, checks each exact npm version and hash, installs by name/version, and checks installed integrity and registry origin. The same file, dependency, runtime, and declaration checks follow. Default archive validation passed; a temporary npm CLI fixture exercised success and rejection cases. Actual public-registry verification is still pending publication, and E401 prevents confirming publishing access. The release archives are unchanged, and nothing was published.
 
 ## Context and Orientation
 
@@ -59,7 +67,9 @@ The node uses local `file:` dependencies. Resume `plans/local-log-node-operation
 
 **Stage 2 — Archive validation (complete for review).** `packages/test/release.test.mjs` uses Node built-ins and the existing TypeScript compiler. It packs compressed `.tgz` archives into a temporary directory, records file lists and SHA-512 integrity values, and installs all four together in an external temporary consumer. It clears `NODE_PATH`/`NODE_OPTIONS`, disables install scripts, rejects workspace symlinks, and verifies root imports, a known CID/Logger vector, signature validation, and declaration imports using existing fixtures. Shipped files are compared byte-for-byte with the checkout; source maps must reference package-local source without embedded contents. File allowlists and recognizable private-key/npm-token patterns supplement manual review. `packages/README.md` documents the command and retained artifacts. No blockchain, IPFS service, or real keys are needed.
 
-**Stage 3 — Publish and verify.** Obtain approval of the exact versions, archives, integrity values, and test evidence before publishing. The owner authenticates privately; no tokens enter source, arguments, or plans. Publish the same archives in order: `utils`, `ethereum`, `ipfs`, `messages`, verifying each registry version and integrity. Install exact registry versions into a new consumer and repeat stage 2 checks. Record releases and update the node operations plan's handoff; node implementation remains a subsequent stage.
+**Stage 3a — Registry verification (implemented for review).** Add `OYA_RELEASE_SOURCE=registry` and require `OYA_RELEASE_INVENTORY` to reference a passing archive inventory with its `.tgz` files alongside it. Verify local archive hashes, exact registry metadata, installed hashes/origins, and the existing consumer checks. Record a separate inventory that identifies its source and reference inventory. Test success and rejection paths with an npm CLI fixture while public packages are unavailable.
+
+**Stage 3b — Publish and verify.** Obtain approval of the exact versions, archives, integrity values, and test evidence before publishing. The owner refreshes npm authentication privately with `npm login --registry=https://registry.npmjs.org/`; confirm identity with `npm whoami` and organization membership with `npm org ls oyaprotocol <npm-username> --json`, using the public registry. No tokens enter source, arguments, or plans. Recheck package/version availability, then publish the same archives in order: `utils`, `ethereum`, `ipfs`, `messages`, verifying each registry version and integrity. Run registry-mode validation against the retained archive inventory. Record releases and update the node operations plan's handoff; node implementation remains a subsequent stage.
 
 ## Concrete Steps
 
@@ -85,7 +95,11 @@ Repeat explicitly for `ethereum`, `ipfs`, and `messages` in that order. Check ea
 
     npm install --ignore-scripts --save-exact --registry=https://registry.npmjs.org/ @oyaprotocol/utils@0.1.0 @oyaprotocol/ethereum@0.1.0 @oyaprotocol/ipfs@0.1.0 @oyaprotocol/messages@0.1.0
 
-In stage 3, add a registry-validation mode to `release.test.mjs` selected by `OYA_RELEASE_SOURCE=registry`; it uses the finalized manifest versions and repeats the same consumer checks. Run `OYA_RELEASE_SOURCE=registry npm --prefix packages run test:release` after publishing. Stage 2 implements archive validation only.
+After publication, run the implemented registry mode from the same checkout:
+
+    OYA_RELEASE_SOURCE=registry OYA_RELEASE_INVENTORY=/absolute/path/to/reviewed-artifacts/inventory.json npm --prefix packages run test:release
+
+Replace the inventory path with the retained passing archive inventory; keep the four archives beside it. The current manifests must still describe those versions. The command creates separate evidence and does not publish or repack anything.
 
 ## Validation and Acceptance
 
@@ -113,6 +127,8 @@ The passing release run retained `/private/var/folders/l4/r069cwsn6gv75xdvj4r28g
 | messages | 16170 | 24 | `sha512-fvU+uSZK8rI/eSQWz0d9NBE6uwNNSQGi2mpCa9q9SleLDMRSWxaZ9GrcDHxf4S9cEf/oKLwu903I9v/VDQIjFA==` |
 
 The final release run passed in about 3.6 seconds. Failed earlier runs remain separate temporary directories with a failed inventory status. Retain approved artifacts outside OS-managed temporary storage before publication; if they disappear or change, regenerate and revalidate them. Registry publication/installation verification and npm publishing access remain pending.
+
+Stage 3a began from `e8c006a` with a clean working tree. The archive-mode regression passed under Node.js 24.21.0/npm 11.19.0; its artifact directory is `oya-kernel-release-2LhD1o` alongside the retained stage 2 directory. All four archive hashes match the table above. Temporary fixture evidence is in `/private/tmp/oya-registry-check.S7R1Fz`: `npm-fixture.cjs`, case logs/call records, and `results.json`. Nine cases cover success, wrong registry version, wrong registry hash, wrong installed hash, file installation, invalid source selection, missing inventory, failed inventory, and missing archive list. These are simulated npm responses/installations; they do not establish successful publication or installation from npm. Syntax and diff checks passed. Read-only public version lookups returned E404; the authenticated identity endpoint returned E401. No package publication was attempted.
 
 [npm pack](https://docs.npmjs.com/cli/v11/commands/npm-pack) creates installable archives; [scoped publication](https://docs.npmjs.com/creating-and-publishing-scoped-public-packages/) requires explicit public access. Packing needs no publication credentials; dependency installation needs registry connectivity.
 

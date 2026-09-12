@@ -42,6 +42,14 @@ The test checks archive file lists, SHA-512 hashes, metadata, licenses, source m
 
 Each run prints its temporary artifact directory and preserves the four `.tgz` archives, `inventory.json`, and the consumer project with its installation lockfile. Successful validation records `"validation": "passed"` in the inventory. Review those files and retain the exact archives and hashes for publication; temporary directories may be removed by the operating system. This command does not publish packages. Complete the existing kernel tests and type checks listed in the [release ExecPlan](../plans/kernel-packages-release-execplan.md) before approving a release.
 
+After publishing the reviewed archives, verify the registry installation from the same checkout:
+
+```sh
+OYA_RELEASE_SOURCE=registry OYA_RELEASE_INVENTORY=/absolute/path/to/reviewed-artifacts/inventory.json npm --prefix packages run test:release
+```
+
+Replace the inventory path with the retained file from the passing archive run; keep its four `.tgz` files beside it. Registry mode verifies those archive hashes, checks npm's exact versions and integrity values, installs by name and version, and repeats the same content, dependency, runtime, and declaration checks. It creates a separate evidence directory containing the reference inventory path and registry results. It does not repack or publish. Missing versions or mismatched hashes fail validation.
+
 ## Current Constraints
 
 - `@oyaprotocol/ipfs`, `@oyaprotocol/ethereum`, and `@oyaprotocol/utils` expose functional kernel APIs.
