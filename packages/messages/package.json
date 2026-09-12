@@ -1,7 +1,17 @@
 {
   "name": "@oyaprotocol/messages",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Oya signed message validation, ingress, IPFS publication, and CID logging.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pemulis/ethonline-2026.git",
+    "directory": "packages/messages"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -13,13 +23,14 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "dependencies": {
     "@noble/curves": "2.2.0",
     "@noble/hashes": "2.2.0",
-    "@oyaprotocol/ethereum": "0.0.0",
-    "@oyaprotocol/ipfs": "0.0.0",
-    "@oyaprotocol/utils": "0.0.0"
+    "@oyaprotocol/ethereum": "0.1.0",
+    "@oyaprotocol/ipfs": "0.1.0",
+    "@oyaprotocol/utils": "0.1.0"
   }
 }

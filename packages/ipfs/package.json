@@ -1,7 +1,17 @@
 {
   "name": "@oyaprotocol/ipfs",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Oya IPFS utilities.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pemulis/ethonline-2026.git",
+    "directory": "packages/ipfs"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -13,9 +23,10 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "dependencies": {
-    "@oyaprotocol/utils": "0.0.0"
+    "@oyaprotocol/utils": "0.1.0"
   }
 }

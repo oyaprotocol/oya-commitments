@@ -2,12 +2,14 @@
 
 `packages/` contains the production-kernel package surfaces for Oya.
 
-## Package Shells
+## Packages
 
 - `packages/utils` -> `@oyaprotocol/utils`
 - `packages/messages` -> `@oyaprotocol/messages`
 - `packages/ipfs` -> `@oyaprotocol/ipfs`
 - `packages/ethereum` -> `@oyaprotocol/ethereum`
+
+All four packages are licensed under MIT, copyright 2026 John Shutt. Each package includes its own `LICENSE` file. Their repository metadata points to this repository and the corresponding package directory.
 
 ## Import Strategy
 

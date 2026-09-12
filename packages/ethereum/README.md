@@ -130,7 +130,7 @@ The wait returns the first mined receipt reported by the RPC endpoint. It does n
 
 ## Logger ABI Helpers
 
-The pure, synchronous helpers in `src/logger.ts` target [`Logger.sol`](../../contracts/src/Logger.sol). They use its fixed function selector and event signature, checked with Foundry, and implement its single-string ABI layout directly. Keccak-256 uses `@noble/hashes` 2.2.0, also used by the messages package. The encoding follows the [Solidity ABI specification](https://docs.soliditylang.org/en/latest/abi-spec.html).
+The pure, synchronous helpers in `src/logger.ts` target [`Logger.sol`](https://github.com/pemulis/ethonline-2026/blob/main/contracts/src/Logger.sol). They use its fixed function selector and event signature, checked with Foundry, and implement its single-string ABI layout directly. Keccak-256 uses `@noble/hashes` 2.2.0, also used by the messages package. The encoding follows the [Solidity ABI specification](https://docs.soliditylang.org/en/latest/abi-spec.html).
 
 `encodeLoggerCall(cid)` returns the complete `0x`-prefixed calldata. Both this helper and `hashLoggerCid(cid)` require CIDv1 in lowercase unpadded Base32 with a 32-byte SHA-256 digest, using `assertCanonicalCid` from `@oyaprotocol/utils`. They preserve the CID exactly and reject alternate representations, whitespace, URIs, paths, and malformed identifiers instead of normalizing them. This is the same format enforced by `@oyaprotocol/ipfs`. The host supplies the Logger address and prepares the remaining transaction fields, signs, and submits the transaction.
 
