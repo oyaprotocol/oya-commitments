@@ -1,6 +1,6 @@
 {
   "name": "@oyaprotocol/ethereum",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Oya Ethereum JSON-RPC utilities.",
   "license": "MIT",
   "repository": {
@@ -30,6 +30,6 @@
   ],
   "dependencies": {
     "@noble/hashes": "2.2.0",
-    "@oyaprotocol/utils": "0.1.0"
+    "@oyaprotocol/utils": "0.1.1"
   }
 }

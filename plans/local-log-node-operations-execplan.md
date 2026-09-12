@@ -21,6 +21,8 @@ Verification, Safe/Governor proposals, agent strategy implementation, and new ke
 - [x] 2026-09-12: Milestone 1a implementation: `local setup`, path overrides, private template creation, focused tests, and usage instructions. Validated actual locked installs/build and template creation with temporary files; fixed Node's handling of the CLI's `--env-file` argument.
 - [x] 2026-09-12: Milestone 1a validation: all 23 host tests passed after the real setup; `git diff --check` passed and no lockfiles or kernel build outputs changed.
 - [ ] User reviews milestone 1a before implementation continues.
+- [x] 2026-09-12: Kernel release handoff received: all four npm `@oyaprotocol` packages are public at `0.1.1`, with clean metadata, matching archive hashes, and a passing fresh registry-consumer check under Node.js 24.
+- [ ] Release handoff: pin the production host to the four npm kernels at `0.1.1`, simplify setup, and validate this dependency change as a separate review stage before 1b.
 - [ ] Milestone 1b: Configuration/environment loading and read-only readiness checks.
 - [ ] Milestone 1c: Foreground running, status, and graceful shutdown validation.
 - [ ] Milestone 2: Explicit Logger deployment and reuse.
@@ -29,7 +31,7 @@ Verification, Safe/Governor proposals, agent strategy implementation, and new ke
 ## Surprises & Discoveries
 
 - `node/production/src/main.mjs` already supports a supplied config file, chain and Logger bytecode checks, and SIGINT/SIGTERM draining. These are reusable runtime capabilities; a second server or shutdown implementation is unnecessary.
-- `node/production/package.json` uses local `file:../../packages/...` dependencies. Setup must build the kernel packages and install the production package in the repository layout; copying only `node/production/` is insufficient.
+- `node/production/package.json` currently uses local `file:../../packages/...` dependencies, so the implemented setup builds kernels from the checkout. All four kernels are now published and verified at npm version `0.1.1`; the next review stage will switch the host to those releases and remove kernel building from operator setup.
 - `scripts/smoke-local.mjs --keep-running` starts a complete disposable Anvil/Kubo/node demonstration. It generates accounts, deploys a fresh Logger, and uses temporary artifacts. It is a test fixture rather than the operating configuration for a durable node identity.
 - The existing runtime deliberately has no publication journal, deduplication, or automatic restart recovery. A health result of `transaction_outcome_unknown` must not trigger a management-script restart that clears that flag.
 - A local agent already has a usable wire protocol and example client in `node/production/scripts/send-message.mjs`. Receiving messages does not require an agent-specific package or reimbursement logic.
@@ -46,12 +48,15 @@ Verification, Safe/Governor proposals, agent strategy implementation, and new ke
 - Decision: Keep dependencies, kernel interfaces, contract ABI, and runtime message semantics unchanged. Rationale: the scripts can use Node built-ins, the existing host dependencies, and Foundry. Add no compatibility options or migration layer. Date/Author: 2026-09-11 / Codex, following the user's constraints.
 - Decision: Split milestone 1 into setup, readiness, and lifecycle review stages. Rationale: the user reaffirmed that each change must be small enough for personal line-by-line review. Date/Author: 2026-09-12 / Codex, following the user's instruction.
 - Decision: Include existing development dependencies when installing the kernel workspace for setup (`ci --include=dev`). Rationale: its TypeScript compiler is required to build even when the caller has `NODE_ENV=production`; this adds no dependency or lockfile change. Date/Author: 2026-09-12 / Codex.
+- Decision: After kernel publication and registry validation, migrate the host's existing kernel dependencies to exact npm `0.1.1` versions in a separate small review stage. That change supersedes the kernel build step in operator setup; kernel development retains its own build/test workflow. Date/Author: 2026-09-12 / Codex, following the user's packaging-first workflow.
 
 ## Outcomes & Retrospective
 
 Milestone 1a adds the maintained `local setup` command using Node built-ins, three focused tests, a package command, and brief operating instructions. Setup installs/builds from the existing lockfiles and creates private templates without overwriting existing regular files or their permissions. The actual command completed successfully with temporary config/environment destinations, followed by all 23 host tests passing. Existing operator node configuration files were not read or changed. No dependencies, lockfiles, runtime message handling, or contracts changed; no Ethereum or IPFS services were started and no blockchain transaction was submitted. Full milestone 1 still requires configuration loading, readiness checks, and lifecycle commands.
 
 The intended outcome is a usable local node with a stable operator-selected identity and Logger address, exercised by a separate local client process. It does not claim unattended recovery after a crash or persistent availability after the terminal closes. Record each milestone's actual validation and remaining work here when implemented.
+
+The kernel release plan completed on 2026-09-12 with `0.1.1`, superseding `0.1.0` as the host migration target. Published archives match the reviewed files and pass runtime/declaration checks in a fresh npm consumer. This makes the dependency migration below possible; that host change and milestones 1b onward remain unimplemented.
 
 ## Context and Orientation
 
@@ -63,11 +68,13 @@ The standalone runtime is `node/production/`. `src/config.mjs` validates configu
 
 ### Operator interface
 
+The setup behavior below is the target after the release handoff. The currently implemented command still installs and builds the local kernel workspace until that separately reviewed change lands.
+
 Add one package command, `npm --prefix node/production run local -- <action>`, backed by `node/production/scripts/local-node.mjs`. Support `--config <path>` and `--env-file <path>` for commands that consume settings. Their defaults are `node/production/config.local.json` and `node/production/.env`, resolved from the package location. Resolve supplied relative paths against the caller's original working directory (`INIT_CWD` under npm, otherwise `process.cwd()`), and show absolute paths in examples with overrides. Running from another directory must not break repository-relative build or deployment commands.
 
 | Action | Behavior |
 | --- | --- |
-| `setup` | Install/build the existing kernel and production packages, then create missing config/environment files from the templates. Never overwrite existing files or generate real-network keys. |
+| `setup` | Install the production package and its pinned npm kernels from the host lockfile, then create missing config/environment files from the templates. Never overwrite existing files or generate real-network keys. |
 | `check` | Validate settings, derive the node's public address, check Ethereum chain ID, Logger bytecode, node gas balance, and IPFS API reachability. Read-only and bounded by timeouts. |
 | `run` | Check the configured environment and launch the existing node CLI in the foreground. Print its local URL and public identity; preserve terminal logs and graceful signal handling. |
 | `status` | Query the configured local `/healthz`, check the returned identity against configuration, and report ready, busy, unavailable, unreachable, or identity mismatch. Never start or restart anything. |
@@ -89,13 +96,19 @@ Use one new ignored `node/production/deployment.local.json` for successful Logge
 
 The local node requires Node 22 or newer, npm, configured Ethereum RPC access, a funded node account, and a Kubo-compatible IPFS API with publication access. Foundry and the `lib/forge-std` submodule are required only when deploying Logger or running the full local integration fixture. Anvil and Kubo executables are required only for the all-local test path.
 
-`setup` runs `npm --prefix packages ci --include=dev`, `npm --prefix packages run build`, and `npm --prefix node/production ci` from the repository root. Use only built-in imports for setup, and lazy imports for later actions that need the kernel or ethers packages, so setup can run before production dependencies are installed. Do not install global tools, upgrade packages, rewrite lockfiles, or reinstall packages during `run`. A failed setup exits nonzero with the failed step identified; repeating it is permitted.
+After the release handoff, `setup` runs only `npm --prefix node/production ci` from the repository root; operators need no kernel source build or TypeScript installation. Use only built-in imports for setup, and lazy imports for later actions that need the kernel or ethers packages, so setup can run before production dependencies are installed. Do not install global tools, upgrade packages, rewrite lockfiles, or reinstall packages during `run`. A failed setup exits nonzero with the failed step identified; repeating it is permitted.
 
 The `check` action uses configured authorization headers. Check chain ID and Logger code through the existing Ethereum RPC API, inspect the node's native balance, and query the IPFS API's version endpoint without uploading. A zero gas balance is a readiness failure; a positive balance is not a guarantee that every later transaction fits the budget. Reachability does not prove IPFS write permission or long-term content availability; the explicit integration test proves publication. These checks must not depend on Anvil-specific RPC methods.
 
 The operator owns the supplied Ethereum and IPFS processes. This CLI must not stop them, reset them, fund accounts through development RPC methods, or overwrite their data. For a disposable demonstration, retain the existing `smoke:local -- --keep-running` workflow and label it clearly. A persistent IPFS service retains the uploaded data independently of this node's process lifetime.
 
 ## Plan of Work
+
+### Release handoff: Install published kernels
+
+Use the verified `0.1.1` releases recorded in the completed `plans/kernel-packages-release-execplan.md`. In the next separately reviewed implementation stage, replace the production host's four local `file:` dependencies with exact `@oyaprotocol/{utils,ethereum,ipfs,messages}` versions `0.1.1` and regenerate its lockfile without upgrading ethers or other external dependencies. Remove kernel installation/building from `local setup`; update affected host instructions, tests, and CI only where they assume local kernel dependencies. This does not change kernel APIs or HTTP runtime behavior.
+
+Validate a fresh locked host install and the real setup command with temporary config/environment destinations, confirming that setup does not build kernels or install TypeScript. Run all host tests and `git diff --check`, then present that stage for line-by-line review before readiness work. The publication stage only records this handoff; it does not implement it.
 
 ### Milestone 1: Prepare and run a configured local node
 
@@ -170,15 +183,13 @@ An alternate config uses explicit paths, for example:
 
 Underlying build/deployment commands used by the wrapper are:
 
-    npm --prefix packages ci --include=dev
-    npm --prefix packages run build
     npm --prefix node/production ci
     git submodule update --init lib/forge-std
     forge build --root contracts --sizes
     forge script --root contracts contracts/script/DeployLogger.s.sol:DeployLogger --offline
     forge script --root contracts contracts/script/DeployLogger.s.sol:DeployLogger --broadcast --offline
 
-The Forge invocations receive `LOGGER_CHAIN_ID`, `LOGGER_DEPLOYER_PK`, and selected Foundry RPC settings through the child environment. `--offline` prevents compiler downloads; it does not prevent RPC access. Build before deployment. The tooling must make the selected chain and deployer address visible without printing secrets.
+These commands describe setup after the release handoff; the current setup still builds local kernels. The Forge invocations receive `LOGGER_CHAIN_ID`, `LOGGER_DEPLOYER_PK`, and selected Foundry RPC settings through the child environment. `--offline` prevents compiler downloads; it does not prevent RPC access. Build before deployment. The tooling must make the selected chain and deployer address visible without printing secrets.
 
 Milestone 1 validation:
 
@@ -238,4 +249,6 @@ During implementation, record the exact commands and outcomes at each milestone.
 
 Expected changed/new files are `node/production/scripts/local-node.mjs`, an optional small `scripts/local-config.mjs`, `test/local-operations.test.mjs`, `scripts/test-local-operations.mjs`, `node/production/package.json` for command entries only, `.env.example` for the empty deployment-key setting, relevant READMEs, and `.gitignore` for local deployment metadata. Reuse `src/config.mjs`, `src/main.mjs`, `src/signer.mjs`, and `scripts/send-message.mjs`. Existing contracts remain in `contracts/`, and deployment is performed by `contracts/script/DeployLogger.s.sol`.
 
-Use Node built-ins for argument handling, process execution, filesystem operations, and environment parsing; reuse the existing kernel Ethereum calls and signer for read-only checks. Keep child-process invocation structured and environment-scoped. Retain ethers as already accepted; add no npm dependencies and change no lockfiles or kernel interfaces. No agent-specific module, commitment verifier, proposal endpoint, supervisor, compatibility shim, or background process manager is introduced by this draft.
+The release handoff additionally changes `node/production/package.json` and its lockfile to pin published kernels, with focused updates to setup, host tests/docs, and affected CI assumptions. This is the planned exception to retaining the existing lockfile; subsequent operating commands must use it without rewriting it.
+
+Use Node built-ins for argument handling, process execution, filesystem operations, and environment parsing; reuse the existing kernel Ethereum calls and signer for read-only checks. Keep child-process invocation structured and environment-scoped. Retain ethers as already accepted; add no external npm dependencies and change no kernel interfaces. No agent-specific module, commitment verifier, proposal endpoint, supervisor, compatibility shim, or background process manager is introduced by this draft.

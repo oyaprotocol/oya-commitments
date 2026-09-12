@@ -81,9 +81,11 @@ test('released kernels work in an independent consumer', () => {
             inventory.registry = [];
             for (const archive of inventory.archives) {
                 const metadata = JSON.parse(npm(['view', `${archive.name}@${archive.version}`,
-                    'version', 'dist.integrity', '--json'], consumer));
+                    'version', 'dist.integrity', '_from', '_resolved', '--json'], consumer));
                 assert.equal(metadata.version, archive.version, `Registry version mismatch: ${archive.name}`);
                 assert.equal(metadata['dist.integrity'], archive.integrity, `Registry integrity mismatch: ${archive.name}`);
+                assert.equal(metadata._from, undefined, `Unexpected publication source: ${archive.name}`);
+                assert.equal(metadata._resolved, undefined, `Unexpected publication path: ${archive.name}`);
                 inventory.registry.push({ name: archive.name, ...metadata });
             }
         }
