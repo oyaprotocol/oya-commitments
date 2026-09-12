@@ -11,6 +11,8 @@ Publish the four existing `@oyaprotocol` kernels so independent nodes can instal
 - [x] 2026-09-12: Inspected package manifests, exports, build configuration, tests, and repository guidance at `a4421f7`; drafted this plan.
 - [x] 2026-09-12: User authorized packaging with MIT, specified John Shutt as copyright holder, and selected the existing repository URL. Prepared version `0.1.0`; npm returned E404 for all four package lookups.
 - [x] 2026-09-12: Stage 1: Updated metadata, added four MIT license files, refreshed the workspace lockfile, and fixed three README links for external readers. Build, 205 tests, both type checks, and four root imports passed; created and inspected four archives.
+- [x] 2026-09-12: Set CI's Node.js baseline to 24 and documented that kernels have no Node.js runtime or engine-version requirement.
+- [x] 2026-09-12: Updated all four package repository URLs and package documentation links to the user-selected canonical repository, `oyaprotocol/oya-commitments`.
 - [ ] User reviews stage 1 before implementation continues.
 - [ ] Stage 2: Validate and review the exact package archives.
 - [ ] Confirm npm scope/publishing access before release; public lookups do not establish access rights.
@@ -19,19 +21,25 @@ Publish the four existing `@oyaprotocol` kernels so independent nodes can instal
 
 ## Surprises & Discoveries
 
-The packages started with exports, declarations, archive allowlists, and version `0.0.0`, but no license files. The repository origin is `https://github.com/pemulis/ethonline-2026`, with `origin/HEAD` pointing to `main`; the user confirmed using it for package metadata. Registry checks first failed with sandbox DNS errors, then returned E404 with network access. This means no visible release was found, not that scope ownership was verified. Local validation used Node 23.10.0/npm 11.18.0; repeat the consumer checks under CI's Node 22 before publication. Kernels retain their ECMAScript 2025 requirements.
+The packages started with exports, declarations, archive allowlists, and version `0.0.0`, but no license files. Initial package metadata used the checkout's origin; the user subsequently selected `https://github.com/oyaprotocol/oya-commitments` as the canonical repository. Registry checks first failed with sandbox DNS errors, then returned E404 with network access. This means no visible release was found, not that scope ownership was verified. Local validation used Node 23.10.0/npm 11.18.0; repeat the consumer checks under CI's Node 24 before publication. Kernels retain their ECMAScript 2025 requirements.
 
 ## Decision Log
 
 - 2026-09-12 / Codex: Keep four packages with exact internal versions and existing dependencies; avoid unnecessary restructuring.
 - 2026-09-12 / Codex: Prepare coordinated `0.1.0` metadata and exact internal dependencies after no visible registry releases were found; reconfirm availability when publishing.
-- 2026-09-12 / user: Use MIT, copyright 2026 John Shutt, and the existing repository. Each manifest identifies its package directory within that repo.
+- 2026-09-12 / user: Use MIT, copyright 2026 John Shutt. Each manifest identifies its package directory within the repository.
 - 2026-09-12 / Codex: Publish reviewed archives through an owner-operated npm session; keep the first release process small.
 - 2026-09-12 / user requirement: Finish packaging/publication before changing the node; preserve small review stages.
+- 2026-09-12 / user: Use Node.js 24 as the CI build/test baseline, without requiring Node.js or a particular Node.js version for the kernels, since they do not depend on that runtime.
+- 2026-09-12 / user: Use `https://github.com/oyaprotocol/oya-commitments` for package metadata and documentation links so they identify the upstream project. This supersedes the initial choice of the checkout's origin.
 
 ## Outcomes & Retrospective
 
 Stage 1 changed only manifests, license files, documentation, the package workspace lockfile, and this plan. Existing tests and archive inspection passed. No kernel implementations, dependencies, node files, or release scripts changed, and nothing was published. Stage 2 still needs the maintained external consumer test; stage 1's temporary archives are review artifacts, not an approved release.
+
+The subsequent CI adjustment selects Node.js 24 and records the distinction between the test environment and kernel runtime requirements. Configuration checks confirmed that CI selects 24 and all four kernel manifests have no Node.js engine requirement; `git diff --check` passed. A Node.js 24 validation run remains pending; the local runtime is still Node.js 23.10.0.
+
+Package metadata and documentation now identify `oyaprotocol/oya-commitments`. The build, repository metadata checks, all four package-root imports and export checks, and `git diff --check` passed under the local Node.js 23.10.0 runtime. Stage 1's temporary archives predate this correction and must be regenerated and reviewed during stage 2.
 
 ## Context and Orientation
 
@@ -59,7 +67,7 @@ Future commands, from the repository root unless stated otherwise:
     node --test packages/test/release.test.mjs
     git diff --check
 
-Use Node 22, matching CI, and record Node/npm versions. Check available versions with `npm view @oyaprotocol/utils versions --json --registry=https://registry.npmjs.org/`, repeating for all packages. Distinguish missing packages from access/network failures. Refresh the workspace lockfile without upgrading dependencies.
+Use Node 24 for these build/test commands, matching CI, and record Node/npm versions. This is a validation baseline, not a kernel runtime requirement; keep kernel manifests free of a Node.js engine constraint. Check available versions with `npm view @oyaprotocol/utils versions --json --registry=https://registry.npmjs.org/`, repeating for all packages. Distinguish missing packages from access/network failures. Refresh the workspace lockfile without upgrading dependencies.
 
 Stage 2 runs `npm pack --workspaces --json --pack-destination <absolute-artifact-directory>` from `packages/`, then `npm install --ignore-scripts --save-exact <four-absolute-archive-paths>` from its empty consumer. Replace placeholders with actual paths; print the retained evidence location.
 
@@ -85,7 +93,7 @@ Clean up only test-owned resources. Publication is not atomic across packages: a
 
 Stage 1 began from `73c0734885fb9387d08e4553f0b44f635f30d0c0`. `npm --prefix packages install --package-lock-only --ignore-scripts --offline --no-audit --no-fund` refreshed only Oya versions/license fields. The build, existing JavaScript test command above (205 passes), both type-check commands, and imports of all four package roots passed. A dry run of `npm --prefix node/production ci --ignore-scripts --dry-run --offline --no-audit --no-fund` also passed without node changes. Final diff review and `git diff --check` passed; kernel source/build outputs and external dependency versions are unchanged.
 
-From `packages/`, `npm pack --workspaces --ignore-scripts --json --pack-destination /private/tmp/oya-kernel-release.D8kvra --cache /private/tmp/oya-kernel-release.D8kvra/npm-cache` created four `0.1.0` archives. `inventory.json` in that directory records full file lists, integrity values, and tool versions. Inspection verified each archived MIT license credits John Shutt, the archived manifest matches its source, dependencies retain their pins, only `dist/`, README, LICENSE, and package metadata ship, and archive hashes match npm's report. Node 22 validation and npm publishing access remain pending.
+From `packages/`, `npm pack --workspaces --ignore-scripts --json --pack-destination /private/tmp/oya-kernel-release.D8kvra --cache /private/tmp/oya-kernel-release.D8kvra/npm-cache` created four `0.1.0` archives. `inventory.json` in that directory records full file lists, integrity values, and tool versions. Inspection verified each archived MIT license credits John Shutt, the archived manifest matches its source, dependencies retain their pins, only `dist/`, README, LICENSE, and package metadata ship, and archive hashes match npm's report. Node 24 validation and npm publishing access remain pending.
 
 [npm pack](https://docs.npmjs.com/cli/v11/commands/npm-pack) creates installable archives; [scoped publication](https://docs.npmjs.com/creating-and-publishing-scoped-public-packages/) requires explicit public access. Packing needs no publication credentials; dependency installation needs registry connectivity.
 

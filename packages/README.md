@@ -9,7 +9,7 @@
 - `packages/ipfs` -> `@oyaprotocol/ipfs`
 - `packages/ethereum` -> `@oyaprotocol/ethereum`
 
-All four packages are licensed under MIT, copyright 2026 John Shutt. Each package includes its own `LICENSE` file. Their repository metadata points to this repository and the corresponding package directory.
+All four packages are licensed under MIT, copyright 2026 John Shutt. Each package includes its own `LICENSE` file. Their repository metadata points to [oyaprotocol/oya-commitments](https://github.com/oyaprotocol/oya-commitments) and the corresponding package directory.
 
 ## Import Strategy
 
@@ -23,6 +23,7 @@ All four packages are licensed under MIT, copyright 2026 John Shutt. Each packag
 - Package manifests export built files from `dist/`, not raw source paths.
 - `packages/package.json` owns the local TypeScript toolchain for this area.
 - Kernel packages target ECMAScript 2025 and expect an ECMAScript 2025-compatible execution environment.
+- Node.js 24 is the CI baseline for building and testing. The kernels do not require Node.js or declare a Node.js engine version; compatibility with other runtimes needs runtime-specific validation.
 - Build the kernel packages with `npm --prefix packages run build`.
 
 ## Current Constraints
