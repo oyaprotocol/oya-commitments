@@ -64,7 +64,7 @@ jobs:
         run: forge test --offline -vvv
 
   packages:
-    name: Kernel packages and production node
+    name: Kernel packages
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -90,6 +90,23 @@ jobs:
 
       - name: Verify package build output is fresh
         run: git diff --exit-code -- packages
+
+  production-node:
+    name: Production node
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: node/production/package-lock.json
 
       - name: Install production node dependencies
         run: npm --prefix node/production ci --ignore-scripts

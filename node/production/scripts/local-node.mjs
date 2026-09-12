@@ -17,7 +17,7 @@ export async function main(args, {
             config: { type: 'string' }, 'env-file': { type: 'string' }, help: { type: 'boolean' },
         } });
         if (values.help) {
-            log(`${usage}\nInstall/build locked dependencies and create missing private config files.\n`
+            log(`${usage}\nInstall locked dependencies and create missing private config files.\n`
                 + 'Defaults: node/production/config.local.json and node/production/.env.\n'
                 + 'Relative overrides use the directory where you invoked the command.\n'
                 + 'Existing files are preserved. Exit status: 0 on success, 1 on failure.');
@@ -34,17 +34,12 @@ export async function main(args, {
 
         failure = 'Setup requires Node.js 22 or newer.';
         if (Number(process.versions.node.split('.')[0]) < 22) throw new Error();
-        for (const command of [
-            ['--prefix', 'packages', 'ci', '--include=dev'],
-            ['--prefix', 'packages', 'run', 'build'],
-            ['--prefix', 'node/production', 'ci'],
-        ]) {
-            const label = `npm ${command.join(' ')}`;
-            failure = `${label} failed. Check npm access and build prerequisites, then rerun setup.`;
-            log(`Running ${label}`);
-            // Capture child output: package manager failures can contain registry credentials.
-            await execute('npm', command, { cwd: root });
-        }
+        const command = ['--prefix', 'node/production', 'ci'];
+        const label = `npm ${command.join(' ')}`;
+        failure = `${label} failed. Check npm access, then rerun setup.`;
+        log(`Running ${label}`);
+        // Capture child output: package manager failures can contain registry credentials.
+        await execute('npm', command, { cwd: root });
         for (const [template, destination] of [
             ['config.example.json', configPath], ['.env.example', envPath],
         ]) {

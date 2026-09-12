@@ -20,9 +20,11 @@ Verification, Safe/Governor proposals, agent strategy implementation, and new ke
 - [x] 2026-09-12: User accepted the plan and requested smaller stages, personal review of every line, and strict dependency discipline for a production-quality local instance.
 - [x] 2026-09-12: Milestone 1a implementation: `local setup`, path overrides, private template creation, focused tests, and usage instructions. Validated actual locked installs/build and template creation with temporary files; fixed Node's handling of the CLI's `--env-file` argument.
 - [x] 2026-09-12: Milestone 1a validation: all 23 host tests passed after the real setup; `git diff --check` passed and no lockfiles or kernel build outputs changed.
-- [ ] User reviews milestone 1a before implementation continues.
+- [x] 2026-09-12: User authorized continuing with the small host dependency migration stage after kernel publication.
 - [x] 2026-09-12: Kernel release handoff received: all four npm `@oyaprotocol` packages are public at `0.1.1`, with clean metadata, matching archive hashes, and a passing fresh registry-consumer check under Node.js 24.
-- [ ] Release handoff: pin the production host to the four npm kernels at `0.1.1`, simplify setup, and validate this dependency change as a separate review stage before 1b.
+- [x] 2026-09-12: Release handoff implementation: pin the production host to the four npm kernels at `0.1.1`, simplify setup and its existing tests, and separate the production CI job from the kernel build.
+- [x] 2026-09-12: Release handoff validation: all existing external lock entries remain unchanged; real setup succeeded in an isolated copy containing no kernel implementation or build output; all 23 host tests passed under Node 24.21.0. The working checkout also completed a fresh locked host install, and `git diff --check` passed.
+- [ ] User reviews the dependency migration before milestone 1b.
 - [ ] Milestone 1b: Configuration/environment loading and read-only readiness checks.
 - [ ] Milestone 1c: Foreground running, status, and graceful shutdown validation.
 - [ ] Milestone 2: Explicit Logger deployment and reuse.
@@ -31,7 +33,9 @@ Verification, Safe/Governor proposals, agent strategy implementation, and new ke
 ## Surprises & Discoveries
 
 - `node/production/src/main.mjs` already supports a supplied config file, chain and Logger bytecode checks, and SIGINT/SIGTERM draining. These are reusable runtime capabilities; a second server or shutdown implementation is unnecessary.
-- `node/production/package.json` currently uses local `file:../../packages/...` dependencies, so the implemented setup builds kernels from the checkout. All four kernels are now published and verified at npm version `0.1.1`; the next review stage will switch the host to those releases and remove kernel building from operator setup.
+- The original host used local `file:../../packages/...` dependencies and built kernels during setup. It now installs the four npm kernels at exact version `0.1.1` from its own lockfile.
+- npm initially retained the former local links after the manifest changed because the local packages already reported `0.1.1`. Removing only the old local-package/link entries before regenerating the lockfile resolved this. The final lock contains registry URLs and integrity hashes for all four kernels; every existing external package entry is unchanged. Noble `2.2.0`, formerly supplied by the kernel workspace, is now recorded under the consuming kernels in the host lockfile.
+- The host tests share one static Logger ABI JSON fixture with `packages/ethereum/test/fixtures/`; they do not require kernel source or build output. A temporary copy containing only tracked host files and that fixture passed setup and all 23 tests. The first sandboxed test run could not bind localhost (`listen EPERM`); the same suite passed with permission to open its temporary HTTP listeners.
 - `scripts/smoke-local.mjs --keep-running` starts a complete disposable Anvil/Kubo/node demonstration. It generates accounts, deploys a fresh Logger, and uses temporary artifacts. It is a test fixture rather than the operating configuration for a durable node identity.
 - The existing runtime deliberately has no publication journal, deduplication, or automatic restart recovery. A health result of `transaction_outcome_unknown` must not trigger a management-script restart that clears that flag.
 - A local agent already has a usable wire protocol and example client in `node/production/scripts/send-message.mjs`. Receiving messages does not require an agent-specific package or reimbursement logic.
@@ -49,6 +53,7 @@ Verification, Safe/Governor proposals, agent strategy implementation, and new ke
 - Decision: Split milestone 1 into setup, readiness, and lifecycle review stages. Rationale: the user reaffirmed that each change must be small enough for personal line-by-line review. Date/Author: 2026-09-12 / Codex, following the user's instruction.
 - Decision: Include existing development dependencies when installing the kernel workspace for setup (`ci --include=dev`). Rationale: its TypeScript compiler is required to build even when the caller has `NODE_ENV=production`; this adds no dependency or lockfile change. Date/Author: 2026-09-12 / Codex.
 - Decision: After kernel publication and registry validation, migrate the host's existing kernel dependencies to exact npm `0.1.1` versions in a separate small review stage. That change supersedes the kernel build step in operator setup; kernel development retains its own build/test workflow. Date/Author: 2026-09-12 / Codex, following the user's packaging-first workflow.
+- Decision: Give the production host its own Node 24 CI job, with its own lockfile cache key and no kernel install/build step. Rationale: validate the published dependency boundary on every run while retaining the existing kernel build job. Date/Author: 2026-09-12 / Codex, implementing the authorized dependency migration.
 
 ## Outcomes & Retrospective
 
@@ -56,7 +61,9 @@ Milestone 1a adds the maintained `local setup` command using Node built-ins, thr
 
 The intended outcome is a usable local node with a stable operator-selected identity and Logger address, exercised by a separate local client process. It does not claim unattended recovery after a crash or persistent availability after the terminal closes. Record each milestone's actual validation and remaining work here when implemented.
 
-The kernel release plan completed on 2026-09-12 with `0.1.1`, superseding `0.1.0` as the host migration target. Published archives match the reviewed files and pass runtime/declaration checks in a fresh npm consumer. This makes the dependency migration below possible; that host change and milestones 1b onward remain unimplemented.
+The kernel release plan completed on 2026-09-12 with `0.1.1`, superseding `0.1.0` as the host migration target. Published archives match the reviewed files and pass runtime/declaration checks in a fresh npm consumer.
+
+The host dependency migration is implemented and validated for review. All four dependencies use exact npm `0.1.1` versions, setup runs only the host's locked install, existing setup tests cover the single install and its failure, and host CI runs independently of kernel building. The real setup and all 23 host tests passed under Node 24.21.0 in an isolated copy with no kernel source, compiled output, or TypeScript. Newly created template files have mode `0600`; the host lockfile was preserved by setup and installation. Existing external dependency versions and runtime source files are unchanged. No operator configuration or credentials were used. Milestones 1b onward remain unimplemented pending review of this stage.
 
 ## Context and Orientation
 
@@ -68,7 +75,7 @@ The standalone runtime is `node/production/`. `src/config.mjs` validates configu
 
 ### Operator interface
 
-The setup behavior below is the target after the release handoff. The currently implemented command still installs and builds the local kernel workspace until that separately reviewed change lands.
+The `setup` action is implemented with published dependencies. The other actions below remain planned for subsequent review stages.
 
 Add one package command, `npm --prefix node/production run local -- <action>`, backed by `node/production/scripts/local-node.mjs`. Support `--config <path>` and `--env-file <path>` for commands that consume settings. Their defaults are `node/production/config.local.json` and `node/production/.env`, resolved from the package location. Resolve supplied relative paths against the caller's original working directory (`INIT_CWD` under npm, otherwise `process.cwd()`), and show absolute paths in examples with overrides. Running from another directory must not break repository-relative build or deployment commands.
 
@@ -96,7 +103,7 @@ Use one new ignored `node/production/deployment.local.json` for successful Logge
 
 The local node requires Node 22 or newer, npm, configured Ethereum RPC access, a funded node account, and a Kubo-compatible IPFS API with publication access. Foundry and the `lib/forge-std` submodule are required only when deploying Logger or running the full local integration fixture. Anvil and Kubo executables are required only for the all-local test path.
 
-After the release handoff, `setup` runs only `npm --prefix node/production ci` from the repository root; operators need no kernel source build or TypeScript installation. Use only built-in imports for setup, and lazy imports for later actions that need the kernel or ethers packages, so setup can run before production dependencies are installed. Do not install global tools, upgrade packages, rewrite lockfiles, or reinstall packages during `run`. A failed setup exits nonzero with the failed step identified; repeating it is permitted.
+`setup` runs only `npm --prefix node/production ci` from the repository root; operators need no kernel source build or TypeScript installation. Use only built-in imports for setup, and lazy imports for later actions that need the kernel or ethers packages, so setup can run before production dependencies are installed. Do not install global tools, upgrade packages, rewrite lockfiles, or reinstall packages during `run`. A failed setup exits nonzero with the failed step identified; repeating it is permitted.
 
 The `check` action uses configured authorization headers. Check chain ID and Logger code through the existing Ethereum RPC API, inspect the node's native balance, and query the IPFS API's version endpoint without uploading. A zero gas balance is a readiness failure; a positive balance is not a guarantee that every later transaction fits the budget. Reachability does not prove IPFS write permission or long-term content availability; the explicit integration test proves publication. These checks must not depend on Anvil-specific RPC methods.
 
@@ -106,9 +113,9 @@ The operator owns the supplied Ethereum and IPFS processes. This CLI must not st
 
 ### Release handoff: Install published kernels
 
-Use the verified `0.1.1` releases recorded in the completed `plans/kernel-packages-release-execplan.md`. In the next separately reviewed implementation stage, replace the production host's four local `file:` dependencies with exact `@oyaprotocol/{utils,ethereum,ipfs,messages}` versions `0.1.1` and regenerate its lockfile without upgrading ethers or other external dependencies. Remove kernel installation/building from `local setup`; update affected host instructions, tests, and CI only where they assume local kernel dependencies. This does not change kernel APIs or HTTP runtime behavior.
+This stage is implemented using the verified `0.1.1` releases recorded in `plans/kernel-packages-release-execplan.md`. The production host's four local `file:` dependencies have been replaced with exact `@oyaprotocol/{utils,ethereum,ipfs,messages}` versions `0.1.1`. Its regenerated lockfile preserves all existing external entries. Kernel installation/building was removed from `local setup`; affected host instructions and existing tests were updated. The production CI job now installs and tests independently of the kernel build job. Kernel APIs and HTTP runtime behavior are unchanged.
 
-Validate a fresh locked host install and the real setup command with temporary config/environment destinations, confirming that setup does not build kernels or install TypeScript. Run all host tests and `git diff --check`, then present that stage for line-by-line review before readiness work. The publication stage only records this handoff; it does not implement it.
+Fresh locked installation, real setup with temporary config/environment destinations, and all 23 host tests passed under Node 24.21.0. The isolated validation copy contained no kernel source or compiled output, and no TypeScript was installed. See Artifacts and Notes for commands and evidence. Present this stage for line-by-line review before readiness work.
 
 ### Milestone 1: Prepare and run a configured local node
 
@@ -189,7 +196,7 @@ Underlying build/deployment commands used by the wrapper are:
     forge script --root contracts contracts/script/DeployLogger.s.sol:DeployLogger --offline
     forge script --root contracts contracts/script/DeployLogger.s.sol:DeployLogger --broadcast --offline
 
-These commands describe setup after the release handoff; the current setup still builds local kernels. The Forge invocations receive `LOGGER_CHAIN_ID`, `LOGGER_DEPLOYER_PK`, and selected Foundry RPC settings through the child environment. `--offline` prevents compiler downloads; it does not prevent RPC access. Build before deployment. The tooling must make the selected chain and deployer address visible without printing secrets.
+Setup uses the host install shown above. The planned Forge invocations receive `LOGGER_CHAIN_ID`, `LOGGER_DEPLOYER_PK`, and selected Foundry RPC settings through the child environment. `--offline` prevents compiler downloads; it does not prevent RPC access. Build before deployment. The tooling must make the selected chain and deployer address visible without printing secrets.
 
 Milestone 1 validation:
 
@@ -242,6 +249,13 @@ Milestone 1a began from clean commit `beda816`. The actual setup validation comm
     npm --prefix node/production run local -- setup --config /private/tmp/oya-local-setup-validation.IUlP6Y/config.json --env-file /private/tmp/oya-local-setup-validation.IUlP6Y/node.env
 
 After adding the Node argument separator, it exited 0 after both locked installs, the kernel build, and template creation. Both files have mode `0600` and contain only example configuration and empty credential fields. No operator node configuration or signing credentials were used. The focused tests inject an installer to prove failure handling and file preservation without repeatedly reinstalling; a separate process test exercises the real npm entry and argument parsing. `npm --prefix node/production test` then passed all 23 tests (zero failures or skips), and `git diff --check` passed. Git status confirmed that no lockfiles or kernel build outputs changed. Stage 1a is ready for review; 1b has not started.
+
+The release handoff was validated using Node 24.21.0 and npm 11.19.0 on `PATH`. A temporary copy at `/private/tmp/oya-node-handoff-yj0w5wli` contains only tracked production host files and the static `packages/ethereum/test/fixtures/logger-abi.json` fixture. From that copy's root:
+
+    npm --prefix node/production run local -- setup --config /private/tmp/oya-node-handoff-yj0w5wli/operator/config.json --env-file /private/tmp/oya-node-handoff-yj0w5wli/operator/node.env
+    npm --prefix node/production test
+
+Setup exited 0 after one host install and created both matching templates with mode `0600`. All four installed kernel directories are real npm packages at `0.1.1`, not local links; neither TypeScript nor kernel implementation/build files exist in the copy. All 23 tests passed (zero failures or skips). The host lockfile still matches the reviewed working copy. The working checkout also completed `npm --prefix node/production ci --ignore-scripts --offline --no-audit --no-fund --cache=/private/tmp/oya-release-011-cache` using the same Node/npm versions and the populated validation cache. These checks used no operator credentials or Ethereum/IPFS services.
 
 During implementation, record the exact commands and outcomes at each milestone. Final evidence should include the local node URL, chain ID, Logger address, deployment and publication hashes, agent/node public addresses, successful stop/restart checks, and confirmation that temporary services were stopped. Never include environment file contents, private keys, provider credentials, or signed raw transaction bytes in the plan.
 

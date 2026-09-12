@@ -28,8 +28,6 @@ test('setup creates private templates relative to the caller and preserves edits
     const args = ['setup', '--config', 'config.json', '--env-file', 'node.env'];
     assert.equal(await main(args, options), 0);
     assert.deepEqual(commands, [
-        ['npm', ['--prefix', 'packages', 'ci', '--include=dev']],
-        ['npm', ['--prefix', 'packages', 'run', 'build']],
         ['npm', ['--prefix', 'node/production', 'ci']],
     ]);
     for (const [name, template] of [['config.json', 'config.example.json'], ['node.env', '.env.example']]) {
@@ -55,12 +53,12 @@ test('setup stops on installation failure without exposing child output or creat
     const result = await main(['setup', '--config', 'config.json', '--env-file', 'node.env'], {
         cwd, log: (line) => output.push(line), execute: async () => {
             calls += 1;
-            if (calls === 2) throw new Error('https://registry.invalid/secret-marker');
+            throw new Error('https://registry.invalid/secret-marker');
         },
     });
     assert.equal(result, 1);
-    assert.equal(calls, 2);
-    assert.match(output.at(-1), /npm --prefix packages run build failed/);
+    assert.equal(calls, 1);
+    assert.match(output.at(-1), /npm --prefix node\/production ci failed/);
     assert.equal(output.some((line) => line.includes('secret-marker')), false);
     for (const name of ['config.json', 'node.env']) {
         await assert.rejects(stat(join(cwd, name)), { code: 'ENOENT' });

@@ -4,7 +4,7 @@ This standalone runtime accepts an agent's signed text, publishes the signed JSO
 
 After signature and allowlist checks, the HTTP handler calls the kernel's `publishAndLogSignedMessage` directly. One complete operation runs at a time, from IPFS publication through the verified receipt. Additional authenticated requests receive `503 node_busy`; there is no waiting queue.
 
-The runtime imports the hardened libraries through their package roots and uses ethers in `src/signer.mjs` for local transaction signing. The kernels handle publication, transaction preparation, broadcasting, and receipt verification. Kernel signing support remains future work. Reimbursement verification, Safe proposals, and DeFi actions are later integrations.
+The runtime installs the four hardened `@oyaprotocol` kernels from npm at version `0.1.1` and uses ethers in `src/signer.mjs` for local transaction signing. The kernels handle publication, transaction preparation, broadcasting, and receipt verification. Kernel signing support remains future work. Reimbursement verification, Safe proposals, and DeFi actions are later integrations.
 
 ## Install and validate
 
@@ -12,8 +12,6 @@ Use Node 22 or newer, npm, Foundry, and Kubo/IPFS for the local smoke. From the 
 
 ```sh
 git submodule update --init lib/forge-std
-npm --prefix packages ci
-npm --prefix packages run build
 npm --prefix node/production ci
 npm --prefix node/production test
 forge build --root contracts --sizes
@@ -41,7 +39,7 @@ Prepare dependencies and private configuration templates from the repository roo
 npm --prefix node/production run local -- setup
 ```
 
-Setup installs from the existing lockfiles, builds the kernel packages, and creates missing `config.local.json` and `.env` files with mode `0600`. Repeating it preserves existing files and their permissions. It uses Node.js built-ins and needs Node 22 or newer and npm; it does not deploy Logger or start services. Template addresses and empty keys must be filled before use. For different file locations, add `--config /absolute/path/to/node.json --env-file /absolute/path/to/node.env`; parent directories must already exist. Relative paths resolve from the directory where you invoked the command. Keep custom files outside the checkout or ignore them in Git.
+Setup installs the host and published kernels from `node/production/package-lock.json` and creates missing `config.local.json` and `.env` files with mode `0600`. No kernel source build or TypeScript installation is needed. Repeating it preserves existing files and their permissions. It uses Node.js built-ins and needs Node 22 or newer and npm; it does not deploy Logger or start services. Template addresses and empty keys must be filled before use. For different file locations, add `--config /absolute/path/to/node.json --env-file /absolute/path/to/node.env`; parent directories must already exist. Relative paths resolve from the directory where you invoked the command. Keep custom files outside the checkout or ignore them in Git.
 
 Edit the ignored `config.local.json` (or copy `config.example.json` there when configuring manually). Replace the example Logger and agent addresses with your deployment and allowlisted signer addresses. Set `chainId`, `rpcUrl`, and `ipfsUrl` for the intended environment. `ipfsUrl` must be a Kubo-compatible API, with `/api/v0/add` support; a read-only gateway or unrelated pinning API is insufficient.
 
