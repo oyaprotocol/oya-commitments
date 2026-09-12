@@ -10,6 +10,7 @@
   ],
   "scripts": {
     "build": "tsc -b",
+    "test:release": "node --test test/release.test.mjs",
     "typecheck": "tsc -b --pretty false"
   },
   "devDependencies": {

@@ -26,6 +26,22 @@ All four packages are licensed under MIT, copyright 2026 John Shutt. Each packag
 - Node.js 24 is the CI baseline for building and testing. The kernels do not require Node.js or declare a Node.js engine version; compatibility with other runtimes needs runtime-specific validation.
 - Build the kernel packages with `npm --prefix packages run build`.
 
+## Validate a Release
+
+From the repository root, using Node.js 24 and npm:
+
+```sh
+npm --prefix packages ci --include=dev
+npm --prefix packages run build
+npm --prefix packages run test:release
+```
+
+The release test packs all four kernels and installs their archives together in a new temporary project outside the checkout. It uses Node.js built-ins and the existing TypeScript compiler. Installation disables lifecycle scripts and requires npm registry access for the pinned Noble dependencies. Signature, IPFS publication, and Logger checks use existing fixtures and an injected transport; they need no keys, blockchain, or IPFS service.
+
+The test checks archive file lists, SHA-512 hashes, metadata, licenses, source maps, dependency versions, package-root imports, and TypeScript declarations. Only compiled JavaScript, declarations, source maps, package metadata, READMEs, and licenses ship; TypeScript's incremental build caches are excluded.
+
+Each run prints its temporary artifact directory and preserves the four `.tgz` archives, `inventory.json`, and the consumer project with its installation lockfile. Successful validation records `"validation": "passed"` in the inventory. Review those files and retain the exact archives and hashes for publication; temporary directories may be removed by the operating system. This command does not publish packages. Complete the existing kernel tests and type checks listed in the [release ExecPlan](../plans/kernel-packages-release-execplan.md) before approving a release.
+
 ## Current Constraints
 
 - `@oyaprotocol/ipfs`, `@oyaprotocol/ethereum`, and `@oyaprotocol/utils` expose functional kernel APIs.
