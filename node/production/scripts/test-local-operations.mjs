@@ -8,11 +8,13 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
+import { parseArgs, promisify } from 'node:util';
 import { Interface, Wallet, keccak256, toUtf8Bytes } from 'ethers';
 
 const execute = promisify(execFile);
 const production = fileURLToPath(new URL('../', import.meta.url));
+const { values: { verbose } } = parseArgs({ options: { verbose: { type: 'boolean', default: false } } });
+const progress = (message) => { if (verbose) console.log(`[local] ${message}`); };
 
 async function freePort() {
     const server = createServer();
@@ -83,6 +85,7 @@ test('local CLI deploys Logger, publishes from a separate agent, and preserves i
         return running.exited;
     };
     const port = await freePort();
+    progress('Starting disposable Anvil...');
     const anvil = background('anvil', ['--host', '127.0.0.1', '--port', String(port), '--chain-id', '31337', '--silent']);
     const rpcUrl = `http://127.0.0.1:${port}`;
     const rpc = async (method, params = []) => {
@@ -93,12 +96,14 @@ test('local CLI deploys Logger, publishes from a separate agent, and preserves i
         return body.result;
     };
     await until(async () => await rpc('eth_chainId') === '0x7a69', anvil);
+    progress(`Anvil ready at ${rpcUrl}; chain 31337.`);
 
     const deployer = Wallet.createRandom();
     const nodeWallet = Wallet.createRandom();
     const agent = Wallet.createRandom();
     const disallowed = Wallet.createRandom();
     const inherited = Wallet.createRandom();
+    progress(`Deployer: ${deployer.address}; node: ${nodeWallet.address}; agent: ${agent.address}.`);
     await rpc('anvil_setBalance', [deployer.address, '0x56bc75e2d63100000']);
     const configPath = join(directory, 'config.local.json');
     const envPath = join(directory, 'node.env');
@@ -131,12 +136,16 @@ test('local CLI deploys Logger, publishes from a separate agent, and preserves i
     checked(await cli('deploy-logger', '--broadcast'), 1, /FAIL.*chainId/);
     assert.equal(await rpc('eth_getTransactionCount', [deployer.address, 'latest']), '0x0');
     await writeFile(configPath, original);
+    progress('Wrong-chain deployment rejected without a transaction.');
 
+    progress('Simulating Logger deployment...');
     checked(await cli('deploy-logger'), 0, /Simulation passed/);
     assert.equal(await rpc('eth_getTransactionCount', [deployer.address, 'latest']), '0x0');
     assert.equal(await readFile(configPath, 'utf8'), original);
     await assert.rejects(readFile(metadataPath), { code: 'ENOENT' });
+    progress('Simulation passed; no transaction or config changes.');
 
+    progress('Broadcasting Logger deployment...');
     const deployed = await cli('deploy-logger', '--broadcast');
     checked(deployed, 0, /Deployment recorded/);
     const metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
@@ -147,6 +156,7 @@ test('local CLI deploys Logger, publishes from a separate agent, and preserves i
         transactionHash: receipt.transactionHash, blockNumber: BigInt(receipt.blockNumber).toString(), deployer: deployer.address });
     assert.equal(receipt.status, '0x1');
     assert.notEqual(await rpc('eth_getCode', [metadata.loggerContract, 'latest']), '0x');
+    progress(`Logger verified at ${metadata.loggerContract}; transaction ${metadata.transactionHash}.`);
     assert.equal((await stat(configPath)).mode & 0o777, 0o640);
     assert.equal((await stat(metadataPath)).mode & 0o777, 0o600);
     assert.ok(await readFile(envPath, 'utf8') === credentials, 'Deployment must preserve the environment file.');
@@ -158,6 +168,7 @@ test('local CLI deploys Logger, publishes from a separate agent, and preserves i
     assert.equal(await rpc('eth_getTransactionCount', [deployer.address, 'latest']), '0x1');
     assert.equal(await readFile(configPath, 'utf8'), original);
     assert.deepEqual(await readdir(directory), files);
+    progress('Deployment record blocked a second broadcast before config adoption.');
 
     // Act as the operator adopting the verified address before reuse.
     await writeFile(configPath, `${JSON.stringify({ ...config, loggerContract: metadata.loggerContract }, null, 2)}\n`);
@@ -167,7 +178,9 @@ test('local CLI deploys Logger, publishes from a separate agent, and preserves i
     assert.equal(await rpc('eth_getTransactionCount', [deployer.address, 'latest']), '0x1');
     assert.deepEqual(await readdir(directory), files);
     assert.deepEqual(await Promise.all([configPath, metadataPath].map((path) => readFile(path, 'utf8'))), before);
+    progress('Logger address adopted in config; reuse submitted no transaction.');
 
+    progress('Starting isolated offline Kubo...');
     const ipfsEnv = { ...baseEnv, IPFS_PATH: join(directory, 'ipfs') };
     checked(await command('ipfs', ['init', '--profile=test'], { cwd: directory, env: ipfsEnv }), 0);
     const ipfsConfigPath = join(ipfsEnv.IPFS_PATH, 'config');
@@ -181,6 +194,7 @@ test('local CLI deploys Logger, publishes from a separate agent, and preserves i
     const ipfsUrl = `http://127.0.0.1:${ipfsPort}`;
     const ipfsRequest = (path) => fetch(`${ipfsUrl}/api/v0/${path}`, { method: 'POST', signal: AbortSignal.timeout(5000) });
     await until(async () => { const response = await ipfsRequest('version'); await response.text(); return response.ok; }, ipfs);
+    progress(`Kubo API ready at ${ipfsUrl}.`);
 
     const nodePort = await freePort();
     const nodeUrl = `http://127.0.0.1:${nodePort}`;
@@ -190,9 +204,12 @@ test('local CLI deploys Logger, publishes from a separate agent, and preserves i
     await writeFile(envPath, `OYA_NODE_PRIVATE_KEY=${nodeWallet.privateKey}\nOYA_RPC_AUTHORIZATION=\nOYA_IPFS_AUTHORIZATION=\nLOGGER_DEPLOYER_PK=\n`);
     await rpc('anvil_setBalance', [nodeWallet.address, '0x56bc75e2d63100000']);
     const settingsBefore = await Promise.all([configPath, envPath, metadataPath].map((path) => readFile(path, 'utf8')));
+    progress('Checking node configuration, Ethereum, Logger, gas balance, and IPFS...');
     checked(await cli('check'), 0, /OK IPFS API/);
+    progress('Readiness checks passed.');
 
     const start = async () => {
+        progress('Starting the node through the foreground runner...');
         const running = background(process.execPath, ['--', join(production, 'scripts/local-node.mjs'), 'run',
             '--config', 'config.local.json', '--env-file', 'node.env'], { ...env, INIT_CWD: directory });
         const health = await until(async () => {
@@ -204,9 +221,11 @@ test('local CLI deploys Logger, publishes from a separate agent, and preserves i
         assert.equal(health.loggerContract.toLowerCase(), metadata.loggerContract.toLowerCase());
         assert.equal(health.nodeAddress.toLowerCase(), nodeWallet.address.toLowerCase());
         checked(await cli('status'), 0, /OK ready/);
+        progress(`Node ready at ${nodeUrl}; signing address and Logger match the config.`);
         return running;
     };
     const shutdown = async (running, signal) => {
+        progress(`Stopping the node with ${signal}...`);
         assert.deepEqual(await stop(running, signal), { code: 0, signal: null });
         redacted(running.output());
         assert.match(running.output(), /Stopping node; waiting for active work to finish/);
@@ -214,6 +233,7 @@ test('local CLI deploys Logger, publishes from a separate agent, and preserves i
         checked(await cli('status'), 1, /Node is unreachable/);
         assert.equal(await rpc('eth_chainId'), '0x7a69');
         assert.ok((await (await ipfsRequest('version')).json()).Version.length > 0);
+        progress('Node stopped cleanly; status is unreachable; Anvil and Kubo remain available.');
     };
     const messagePath = join(directory, 'message.txt');
     const send = async (wallet, text) => {
@@ -224,6 +244,7 @@ test('local CLI deploys Logger, publishes from a separate agent, and preserves i
     };
     const logger = new Interface(['event Log(address indexed node, bytes32 indexed cidKeccak256Hash, string cid)']);
     const publish = async (text) => {
+        progress(`Submitting agent message: ${JSON.stringify(text)}`);
         const result = await send(agent, text);
         checked(result, 0);
         const body = JSON.parse(result.output);
@@ -234,9 +255,11 @@ test('local CLI deploys Logger, publishes from a separate agent, and preserves i
         assert.equal(publication.uri, `ipfs://${publication.cid}`);
         assert.equal(publication.nodeAddress.toLowerCase(), nodeWallet.address.toLowerCase());
         assert.equal(publication.loggerContract.toLowerCase(), metadata.loggerContract.toLowerCase());
+        progress(`Node returned HTTP 200 / logged; CID ${publication.cid}; transaction ${publication.transactionHash}.`);
         const content = await ipfsRequest(`cat?arg=${encodeURIComponent(publication.cid)}`);
         assert.equal(content.status, 200);
         assert.equal(await content.text(), JSON.stringify({ text, signer: agent.address, signature: await agent.signMessage(text) }));
+        progress('Retrieved IPFS envelope exactly matches the message, agent, and signature.');
         const receipt = await rpc('eth_getTransactionReceipt', [publication.transactionHash]);
         assert.equal(receipt.status, '0x1');
         assert.equal(receipt.from.toLowerCase(), nodeWallet.address.toLowerCase());
@@ -249,6 +272,7 @@ test('local CLI deploys Logger, publishes from a separate agent, and preserves i
         assert.equal(event.args.node.toLowerCase(), nodeWallet.address.toLowerCase());
         assert.equal(event.args.cid, publication.cid);
         assert.equal(event.args.cidKeccak256Hash, keccak256(toUtf8Bytes(publication.cid)));
+        progress(`Logger event verified in block ${publication.blockNumber}; node, CID, and CID hash match.`);
         return publication;
     };
 
@@ -256,16 +280,20 @@ test('local CLI deploys Logger, publishes from a separate agent, and preserves i
     assert.equal(await rpc('eth_getTransactionCount', [nodeWallet.address, 'pending']), '0x0');
     const firstText = 'A signed message from the separate local agent.\n';
     const firstPublication = await publish(firstText);
+    progress(`Submitting a message from disallowed signer ${disallowed.address}...`);
     const rejected = await send(disallowed, 'This signer is not on the allowlist.\n');
     checked(rejected, 1);
     assert.equal(JSON.parse(rejected.output).code, 'unauthorized_signer');
     assert.equal(await rpc('eth_getTransactionCount', [nodeWallet.address, 'pending']), '0x1');
+    progress('Unauthorized signer rejected; node nonce remains one.');
     await shutdown(firstRun, 'SIGINT');
 
+    progress('Restarting with the same node identity and Logger...');
     const secondRun = await start();
     checked(await cli('deploy-logger', '--broadcast'), 0, /Reusing configured Logger/);
     assert.equal(await rpc('eth_getTransactionCount', [deployer.address, 'latest']), '0x1');
     assert.equal(await rpc('eth_getTransactionCount', [nodeWallet.address, 'pending']), '0x1');
+    progress('Identity and Logger preserved; restart and reuse submitted no transactions.');
     const secondPublication = await publish('Another signed message after restarting the same node.\n');
     assert.notEqual(secondPublication.transactionHash, firstPublication.transactionHash);
     assert.equal(await rpc('eth_getTransactionCount', [nodeWallet.address, 'latest']), '0x2');
@@ -275,8 +303,11 @@ test('local CLI deploys Logger, publishes from a separate agent, and preserves i
     const settingsAfter = await Promise.all([configPath, envPath, metadataPath].map((path) => readFile(path, 'utf8')));
     assert.ok(settingsAfter.every((value, index) => value === settingsBefore[index]), 'Node operation must preserve settings files.');
     for (const wallet of [agent, disallowed]) assert.equal(await rpc('eth_getBalance', [wallet.address, 'latest']), '0x0');
+    progress('Original IPFS content remains available; settings are unchanged; agents used no gas.');
+    progress('Stopping fixture Kubo and Anvil...');
     await stop(ipfs);
     await stop(anvil);
+    progress('All fixture services stopped.');
 
     const evidence = { chainId: 31337, loggerContract: metadata.loggerContract, deploymentTransactionHash: metadata.transactionHash,
         nodeUrl, rpcUrl, ipfsUrl, nodeAddress: nodeWallet.address, agentAddress: agent.address,
