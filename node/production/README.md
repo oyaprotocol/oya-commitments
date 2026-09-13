@@ -8,7 +8,7 @@ The runtime installs the hardened `@oyaprotocol/ethereum` and `@oyaprotocol/mess
 
 ## Install and validate
 
-Use Node 22 or newer, npm, Foundry, and Kubo/IPFS for the local smoke. From the repository root:
+Use Node 22 or newer, npm, Foundry, and Kubo/IPFS for the local integration tests. CI uses Node 24. From the repository root:
 
 ```sh
 git submodule update --init lib/forge-std
@@ -16,8 +16,13 @@ npm --prefix node/production ci
 npm --prefix node/production test
 forge build --root contracts --sizes
 forge test --root contracts --offline -vv
+npm --prefix node/production run test:local
 npm --prefix node/production run smoke:local
 ```
+
+`test:local` exercises the operating commands with a disposable Anvil chain and an isolated offline Kubo repository. It simulates and deploys Logger, checks the deployment record, adopts the address in its config as an operator would, then runs `check`, launches the foreground node, and queries `status`. A separate process runs the existing message sender with its own agent key. The test retrieves the exact signed JSON from IPFS and independently checks the mined Logger event. A disallowed agent is rejected without a node transaction.
+
+The test stops the node with SIGINT, restarts with the same identity and Logger, publishes a second message, and stops with SIGTERM. It verifies unchanged settings, no transaction merely from restarting, unreachable status after shutdown, and continued Ethereum/IPFS service availability until fixture cleanup. All accounts are generated; only the deployer and node receive test ETH. The fixture stops its services and removes temporary settings and private keys. It retains a separate public `evidence.json` containing addresses, CIDs, transaction hashes, and checks, and prints that file's location. Offline Kubo keeps test content local; the fixture does not use the operator's existing fork or IPFS repository.
 
 The smoke starts isolated Anvil and offline Kubo processes on loopback ports, deploys Logger through `contracts/script/DeployLogger.s.sol`, and exercises real signed HTTP requests. It retrieves each published envelope and checks the mined Logger event, rejects invalid signatures, and rejects startup on a wrong chain or missing contract. With automining disabled, it checks busy rejection while exactly one transaction is pending. After mining, the rejected request succeeds; repeating an earlier completed message creates a separate Logger event with the same CID. The smoke also starts the actual node CLI and verifies its health and signing address. It stops its services when finished and prints a temporary directory containing `evidence.json` and service logs.
 
@@ -67,13 +72,7 @@ A successful broadcast is checked against its receipt, deployer, contract addres
 
 Each invocation of Forge has a separate private `.oya-logger-*` directory beside the config, printed for inspection and ignored by Git. After an uncertain broadcast, inspect those artifacts and reconcile the transaction before another attempt; the wrapper does not relaunch Forge or use `--resume`. If recording fails after verification, the verified address remains in the output for manual adoption. Existing metadata with no code at the configured address blocks deployment until the operator reconciles the record and chain, including adopting a newly deployed address in the config. Run one deployment command at a time per configuration.
 
-The automated deployment test owns and stops a separate disposable Anvil chain, using direct RPC access and a generated deployment account:
-
-```sh
-npm --prefix node/production run test:local
-```
-
-It checks simulation without a transaction, deployment and metadata with unchanged config, deployment-key precedence, blocked redeployment before manual adoption, and reuse after adoption. It does not use the operator's existing fork or IPFS service.
+The [local integration test](#install-and-validate) checks deployment-key precedence, blocked redeployment before manual adoption, and reuse after adoption as part of the complete publication flow.
 
 ### Check and run the node
 
@@ -148,10 +147,10 @@ Gas and fee values are ceilings; requests above them stop before signing. Transp
 
 The signature must be EIP-191 over exactly `text`; the signer must be in `allowedSigners`. The node caps bytes while reading the HTTP stream, and the kernel validates JSON, message size, schema, signature, and authorization before publication. The signed text should contain any context that its readers need; this first runtime does not interpret commitment-specific fields.
 
-Put ASCII text in a file, load the agent's key as `OYA_AGENT_PRIVATE_KEY`, and run:
+Put ASCII text in a file and store `OYA_AGENT_PRIVATE_KEY` in a separate private agent environment file outside version control. The sender needs its own key; keep the node and deployment keys in their respective environments. From the repository root, with the node already running:
 
 ```sh
-node --env-file=node/production/.env node/production/scripts/send-message.mjs http://127.0.0.1:8787 /absolute/path/to/message.txt
+node --env-file=/absolute/path/to/agent.env -- node/production/scripts/send-message.mjs http://127.0.0.1:8787 /absolute/path/to/message.txt
 ```
 
 The script signs the complete file, including any final newline. A successful response looks like:

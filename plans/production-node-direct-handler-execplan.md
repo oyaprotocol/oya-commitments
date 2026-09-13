@@ -2,6 +2,8 @@
 
 This ExecPlan follows `PLANS.md`. **Status: both milestones implemented and validated; milestone 2 is ready for user review.** Work was executed one milestone at a time, with user agreement before proceeding. Further integrations and public deployment require a separate scope.
 
+The subsequent [local operations plan](local-log-node-operations-execplan.md) covers deployment/reuse tooling and a complete separate-process sender-to-node validation through `npm --prefix node/production run test:local`. This plan's smoke remains the direct-handler regression test.
+
 ## Purpose / Big Picture
 
 The production node should authenticate an HTTP message, call the existing kernel's `publishAndLogSignedMessage` operation directly from the HTTP adapter, and return its final success or failure. Process only one complete operation at a time, covering IPFS publication, transaction preparation, signing, submission, and receipt verification. Additional authenticated requests receive `503 node_busy`; there is no waiting queue.
