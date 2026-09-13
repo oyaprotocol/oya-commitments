@@ -207,12 +207,46 @@ test('run uses its loaded settings when files change during readiness', { timeou
     assert.deepEqual(await running.exited, { code: 0, signal: null });
 });
 
-test('signal handlers survive disconnected work and are removed after full shutdown', { timeout: 15_000 }, async (t) => {
+test('throwing startup logger still returns a usable runtime that closes cleanly', { timeout: 15_000 }, async (t) => {
+    const f = await fixture(t);
+    // A broken startup can lose the runtime handle; isolate that failure in a bounded child.
+    const source = `
+        import assert from 'node:assert/strict';
+        import { startNode } from ${JSON.stringify(new URL('../src/main.mjs', import.meta.url).href)};
+        import { loadLocalSettings } from ${JSON.stringify(new URL('../scripts/local-config.mjs', import.meta.url).href)};
+        const { config, signer } = await loadLocalSettings(${JSON.stringify(f.configPath)}, ${JSON.stringify(f.envPath)}, { env: {} });
+        const listeners = () => ['SIGINT', 'SIGTERM'].map((signal) => process.listenerCount(signal));
+        const before = listeners();
+        let attempts = 0;
+        const runtime = await startNode(config, signer, { handleSignals: true, log() {
+            attempts++;
+            throw new Error('logger-secret-marker');
+        } });
+        try {
+            const response = await fetch(${JSON.stringify(`${f.url}/healthz`)});
+            assert.equal(response.status, 200);
+            assert.equal((await response.json()).nodeAddress, signer.address);
+            assert.equal(attempts, 1);
+        } finally { await runtime.close(); }
+        assert.equal(runtime.server.listening, false);
+        assert.deepEqual(listeners(), before);
+    `;
+    const { stdout, stderr } = await execute(process.execPath, ['--input-type=module', '--eval', source],
+        { cwd: f.cwd, timeout: 5000 });
+    assert.equal(stdout, '');
+    assert.equal(stderr, '');
+});
+
+test('throwing shutdown logger cannot interrupt disconnected work or leak signal handlers', { timeout: 15_000 }, async (t) => {
     const f = await fixture(t);
     const { config, signer } = await loadLocalSettings(f.configPath, f.envPath, { env: {} });
     const listeners = () => ['SIGINT', 'SIGTERM'].map((signal) => process.listenerCount(signal));
     const before = listeners();
-    const options = { handleSignals: true, log: () => {} };
+    const events = [];
+    const options = { handleSignals: true, log: (record) => {
+        events.push(record.event);
+        if (record.event === 'stopping') throw new Error('logger-secret-marker');
+    } };
     const runtime = await startNode(config, signer, options);
     t.after(async () => { f.release(); await runtime.close(); });
     const active = before.map((count) => count + 1);
@@ -229,10 +263,12 @@ test('signal handlers survive disconnected work and are removed after full shutd
     controller.abort();
     await assert.rejects(pending, { name: 'AbortError' });
     const closed = once(runtime.server, 'close');
-    const draining = runtime.close();
+    assert.doesNotThrow(() => process.emit('SIGTERM'));
+    assert.doesNotThrow(() => process.emit('SIGINT'));
     await closed;
     assert.deepEqual(listeners(), active, 'closing the listener must not remove handlers while work is active');
     f.release();
-    await draining;
+    await runtime.close();
     assert.deepEqual(listeners(), before);
+    assert.deepEqual(events, ['listening', 'stopping', 'message_result']);
 });

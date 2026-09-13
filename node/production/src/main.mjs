@@ -25,13 +25,18 @@ export async function startNode(config, signer, {
         runtime.server.listen(config.port, config.host, resolveListening);
     });
     if (handleSignals) {
+        const logLifecycle = (record) => {
+            try { log(record); } catch {
+                // A failed output sink must not abort startup or prevent shutdown.
+            }
+        };
         const signals = ['SIGINT', 'SIGTERM'];
         const close = runtime.close;
         let stopping = false;
         const stop = () => {
             if (stopping) return;
             stopping = true;
-            log({ event: 'stopping', message: 'Stopping node; waiting for active work to finish.' });
+            logLifecycle({ event: 'stopping', message: 'Stopping node; waiting for active work to finish.' });
             runtime.close().catch(() => { process.exitCode = 1; });
         };
         // Keep handlers until accepted work drains, even if its client already disconnected.
@@ -39,7 +44,7 @@ export async function startNode(config, signer, {
             for (const signal of signals) process.off(signal, stop);
         });
         for (const signal of signals) process.on(signal, stop);
-        log({ event: 'listening', host: config.host, port: config.port, chainId: config.chainId,
+        logLifecycle({ event: 'listening', host: config.host, port: config.port, chainId: config.chainId,
             loggerContract: config.loggerContract, nodeAddress: signer.address });
     }
     return runtime;
