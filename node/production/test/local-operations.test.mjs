@@ -23,13 +23,11 @@ test('setup creates private templates relative to the caller and preserves edits
     const output = [];
     const options = { cwd, log: (line) => output.push(line), execute: async (command, args, settings) => {
         commands.push([command, args]);
-        assert.equal(settings.cwd, fileURLToPath(new URL('../../../', import.meta.url)).replace(/\/$/, ''));
+        assert.equal(settings.cwd, production);
     } };
     const args = ['setup', '--config', 'config.json', '--env-file', 'node.env'];
     assert.equal(await main(args, options), 0);
-    assert.deepEqual(commands, [
-        ['npm', ['--prefix', 'node/production', 'ci']],
-    ]);
+    assert.deepEqual(commands, [['npm', ['ci']]]);
     for (const [name, template] of [['config.json', 'config.example.json'], ['node.env', '.env.example']]) {
         const path = join(cwd, name);
         assert.equal(await readFile(path, 'utf8'), await readFile(join(production, template), 'utf8'));
@@ -58,11 +56,23 @@ test('setup stops on installation failure without exposing child output or creat
     });
     assert.equal(result, 1);
     assert.equal(calls, 1);
-    assert.match(output.at(-1), /npm --prefix node\/production ci failed/);
+    assert.match(output.at(-1), /npm ci failed/);
     assert.equal(output.some((line) => line.includes('secret-marker')), false);
     for (const name of ['config.json', 'node.env']) {
         await assert.rejects(stat(join(cwd, name)), { code: 'ENOENT' });
     }
+});
+
+test('setup reports template failures without exposing paths or preparing later files', async (t) => {
+    const cwd = await directory(t);
+    const output = [];
+    const result = await main(['setup', '--config', 'missing-secret-marker/config.json', '--env-file', 'node.env'], {
+        cwd, log: (line) => output.push(line), execute: async () => {},
+    });
+    assert.equal(result, 1);
+    assert.match(output.at(-1), /Could not prepare config.example.json/);
+    assert.equal(output.some((line) => line.includes('secret-marker')), false);
+    await assert.rejects(stat(join(cwd, 'node.env')), { code: 'ENOENT' });
 });
 
 test('CLI help works from another directory and invalid arguments fail without echoing values', async (t) => {
