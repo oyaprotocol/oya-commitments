@@ -1,11 +1,21 @@
 import { execFile } from 'node:child_process';
-import { lstat, readFile, writeFile } from 'node:fs/promises';
+import { lstat, readFile, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs, promisify } from 'node:util';
 
 const production = fileURLToPath(new URL('../', import.meta.url));
 const usage = 'Usage: npm --prefix node/production run local -- setup [--config <path>] [--env-file <path>]';
+
+async function sameFile(left, right) {
+    try {
+        const [leftFile, rightFile] = await Promise.all([stat(left, { bigint: true }), stat(right, { bigint: true })]);
+        return leftFile.dev === rightFile.dev && leftFile.ino === rightFile.ino;
+    } catch (error) {
+        if (error.code === 'ENOENT') return false;
+        throw error;
+    }
+}
 
 async function prepareTemplate(template, destination) {
     const contents = await readFile(join(production, template));
@@ -49,8 +59,14 @@ export async function main(args, {
     const selectPath = (value, fallback) => value === undefined ? join(production, fallback) : resolve(cwd, value);
     const configPath = selectPath(values.config, 'config.local.json');
     const envPath = selectPath(values['env-file'], '.env');
-    if (configPath === envPath) return fail(invalidArguments);
+    const destinationConflict = 'Config and environment paths must refer to different files.';
+    if (configPath === envPath) return fail(destinationConflict);
     if (Number(process.versions.node.split('.')[0]) < 22) return fail('Setup requires Node.js 22 or newer.');
+    try {
+        if (await sameFile(configPath, envPath)) return fail(destinationConflict);
+    } catch {
+        return fail('Could not check config and environment paths. Check directories and file permissions.');
+    }
 
     log('Running npm ci');
     try {
@@ -64,6 +80,8 @@ export async function main(args, {
     ]) {
         try {
             const result = await prepareTemplate(template, destination);
+            // Previously missing paths may now resolve to the same newly created file.
+            if (await sameFile(configPath, envPath)) return fail(destinationConflict);
             log(`${result} ${destination}`);
         } catch {
             return fail(`Could not prepare ${template}. Check destination directories and file permissions.`);

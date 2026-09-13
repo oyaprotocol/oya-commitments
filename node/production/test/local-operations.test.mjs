@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { chmod, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,6 +42,54 @@ test('setup creates private templates relative to the caller and preserves edits
         assert.equal((await stat(path)).mode & 0o777, 0o400);
     }
     assert.equal(output.some((line) => line.includes('operator-edited')), false);
+});
+
+test('setup rejects existing hard-linked destinations before installing or changing files', async (t) => {
+    const cwd = await directory(t);
+    const configPath = join(cwd, 'config.json');
+    const envPath = join(cwd, 'node.env');
+    await writeFile(configPath, 'operator-secret-marker', { mode: 0o600 });
+    await link(configPath, envPath);
+    const output = [];
+    let installs = 0;
+    assert.equal(await main(['setup', '--config', 'config.json', '--env-file', 'node.env'], {
+        cwd, log: (line) => output.push(line), execute: async () => { installs++; },
+    }), 1);
+    assert.equal(installs, 0);
+    assert.match(output.at(-1), /must refer to different files/);
+    assert.equal(output.some((line) => line.includes('operator-secret-marker')), false);
+    for (const path of [configPath, envPath]) {
+        assert.equal(await readFile(path, 'utf8'), 'operator-secret-marker');
+        assert.equal((await stat(path)).mode & 0o777, 0o600);
+    }
+});
+
+test('setup handles case aliases according to the destination filesystem', async (t) => {
+    const cwd = await directory(t);
+    const probe = join(cwd, 'probe');
+    await writeFile(probe, '');
+    const foldsCase = await readFile(join(cwd, 'PROBE')).then(() => true, (error) => {
+        if (error.code === 'ENOENT') return false;
+        throw error;
+    });
+    await rm(probe);
+    const output = [];
+    let installs = 0;
+    const options = { cwd, log: (line) => output.push(line), execute: async () => { installs++; } };
+    const args = ['setup', '--config', 'settings', '--env-file', 'SETTINGS'];
+    assert.equal(await main(args, options), foldsCase ? 1 : 0);
+    assert.equal(installs, 1);
+    assert.equal(await readFile(join(cwd, 'settings'), 'utf8'),
+        await readFile(join(production, 'config.example.json'), 'utf8'));
+    assert.equal(await readFile(join(cwd, 'SETTINGS'), 'utf8'),
+        await readFile(join(production, foldsCase ? 'config.example.json' : '.env.example'), 'utf8'));
+    if (foldsCase) {
+        assert.match(output.at(-1), /must refer to different files/);
+        assert.equal(output.some((line) => line.includes('Setup complete')), false);
+    }
+    // Existing aliases must be rejected before another installation on repetition.
+    assert.equal(await main(args, options), foldsCase ? 1 : 0);
+    assert.equal(installs, foldsCase ? 1 : 2);
 });
 
 test('setup stops on installation failure without exposing child output or creating files', async (t) => {
