@@ -9,7 +9,7 @@
 - `packages/ipfs` -> [@oyaprotocol/ipfs](https://www.npmjs.com/package/@oyaprotocol/ipfs)
 - `packages/ethereum` -> [@oyaprotocol/ethereum](https://www.npmjs.com/package/@oyaprotocol/ethereum)
 
-All four packages are published on npm at `0.1.1`.
+Ethereum and messages are published on npm at `0.1.2`; utils and IPFS remain at `0.1.1`. Ethereum `0.1.2` exposes `parseTransactionQuantity`. Messages `0.1.2` updates only its version and Ethereum dependency pin, keeping one Ethereum package instance when consumed together.
 
 All four packages are licensed under MIT, copyright 2026 John Shutt. Each package includes its own `LICENSE` file. Their repository metadata points to [oyaprotocol/oya-commitments](https://github.com/oyaprotocol/oya-commitments) and the corresponding package directory.
 
@@ -19,7 +19,7 @@ All four packages are licensed under MIT, copyright 2026 John Shutt. Each packag
 - External consumers can install released versions from npm or use locally packed archives.
 - Public examples should import from package roots only, such as `@oyaprotocol/messages`.
 
-For the signed-message workflow, install `npm install --save-exact @oyaprotocol/messages@0.1.1`. It brings in the other three kernels and the two Noble dependencies; consumers do not need to build kernel source.
+For the signed-message workflow, install `npm install --save-exact @oyaprotocol/messages@0.1.2`. It brings in the other three kernels and the two Noble dependencies; consumers do not need to build kernel source.
 
 ## Source and Build
 

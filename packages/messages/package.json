@@ -1,6 +1,6 @@
 {
   "name": "@oyaprotocol/messages",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Oya signed message validation, ingress, IPFS publication, and CID logging.",
   "license": "MIT",
   "repository": {
@@ -31,7 +31,7 @@
   "dependencies": {
     "@noble/curves": "2.2.0",
     "@noble/hashes": "2.2.0",
-    "@oyaprotocol/ethereum": "0.1.1",
+    "@oyaprotocol/ethereum": "0.1.2",
     "@oyaprotocol/ipfs": "0.1.1",
     "@oyaprotocol/utils": "0.1.1"
   }

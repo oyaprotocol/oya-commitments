@@ -161,13 +161,16 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { assertCanonicalCid } from '@oyaprotocol/utils';
 import { createIpfsConfig } from '@oyaprotocol/ipfs';
-import { encodeLoggerCall, hashLoggerCid } from '@oyaprotocol/ethereum';
+import { encodeLoggerCall, hashLoggerCid, parseTransactionQuantity } from '@oyaprotocol/ethereum';
 import { publishSignedMessage, verifySignedMessage, SignedMessageVerificationError } from '@oyaprotocol/messages';
 for (const name of ${JSON.stringify(manifests.map(({ name }) => name))}) {
     assert.equal(realpathSync(fileURLToPath(import.meta.resolve(name))),
         realpathSync(new URL('./node_modules/' + name + '/dist/index.js', import.meta.url)));
 }
 const { publication, event } = JSON.parse(readFileSync(new URL('./fixtures.json', import.meta.url), 'utf8'));
+assert.equal(parseTransactionQuantity('0x7a69', 'chainId'), 31337n);
+assert.throws(() => parseTransactionQuantity('0x01', 'balance'));
+assert.throws(() => parseTransactionQuantity('0x1' + '0'.repeat(64), 'balance'));
 const message = JSON.parse(publication.text);
 assert.deepEqual(verifySignedMessage(message), message);
 assert.throws(() => verifySignedMessage({ ...message, text: message.text + '!' }), SignedMessageVerificationError);
@@ -189,12 +192,15 @@ assert.equal(hashLoggerCid(result.cid), event.cidKeccak256Hash);
         writeFileSync(join(consumer, 'consumer.ts'), `
 import { assertCanonicalCid, type HttpConfig } from '@oyaprotocol/utils';
 import { createIpfsConfig, type PublishToIpfsResult } from '@oyaprotocol/ipfs';
-import { encodeLoggerCall } from '@oyaprotocol/ethereum';
+import { encodeLoggerCall, parseTransactionQuantity } from '@oyaprotocol/ethereum';
 import { verifySignedMessage, publishSignedMessage, type SignedMessageInput, type PublishSignedMessageOptions } from '@oyaprotocol/messages';
 const config: HttpConfig = createIpfsConfig({ url: 'https://ipfs.example', headers: {}, timeoutMs: 1000, maxRetries: 0, retryDelayMs: 0 });
 declare const cid: string;
 assertCanonicalCid(cid, 'cid');
 const calldata: string = encodeLoggerCall(cid);
+const chainId: bigint = parseTransactionQuantity('0x7a69', 'chainId');
+// @ts-expect-error Quantities must not be narrowed to imprecise numbers.
+const imprecise: number = parseTransactionQuantity('0x7a69', 'chainId');
 declare const message: SignedMessageInput;
 const verified: Readonly<SignedMessageInput> = verifySignedMessage(message);
 declare const options: PublishSignedMessageOptions;

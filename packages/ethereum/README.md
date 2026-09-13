@@ -10,6 +10,7 @@ Ethereum JSON-RPC utilities for Oya kernel code. This package is a hardened kern
 
 - `createHttpConfig(options)`: validate explicit HTTP transport settings, re-exported from `@oyaprotocol/utils`.
 - `requestEthereumJsonRpc(options)`: send one JSON-RPC POST request with explicit config and injected `fetch`, returning the raw `result`, attempt count, id, and parsed response payload.
+- `parseTransactionQuantity(value, name)`: parse an Ethereum hexadecimal quantity into a `bigint`, rejecting noncanonical syntax and values larger than 256 bits. Available since `0.1.2`.
 - `createTransactionPreparer(options)`: configure a reusable EIP-1559 preparer that fetches transaction fields and invokes a host signer, without broadcasting.
 - `ethSendRawTransaction(options)`: submit a signed raw transaction and return the transaction hash with attempt metadata. Callers may pass `transactionHash` when they already know the hash, allowing the wrapper to verify duplicate-style retry errors with `eth_getTransactionByHash`.
 - `ethGetTransactionReceipt(options)`: look up a transaction receipt, returning `{ receipt, attemptCount, response }`. The receipt is `null` when unavailable, including pending or unknown transactions.
@@ -29,6 +30,8 @@ Ethereum JSON-RPC utilities for Oya kernel code. This package is a hardened kern
 `createHttpConfig(...)` accepts the shared `CreateHttpConfigOptions` shape from `@oyaprotocol/utils`. The `url` value is normalized by trimming trailing slashes before JSON-RPC requests are sent.
 
 `requestEthereumJsonRpc(...)` owns the JSON-RPC envelope and request headers. It sends `content-type: application/json`, rejects caller-provided `content-type` config headers, enforces a request timeout, retries transient HTTP/network failures only for read-only Ethereum methods, and treats JSON-RPC error payloads as non-retryable semantic errors.
+
+`parseTransactionQuantity(value, name)` validates raw RPC quantities such as chain IDs and balances. It accepts `"0x0"` or `"0x"` followed by up to 64 hexadecimal digits with no leading zero; hexadecimal digits may use either case. Decimal strings, numbers, whitespace, negatives, empty hex, leading zeros, and oversized values throw. `name` is a caller-supplied field label for errors; input values are not included in those errors. The parser makes no requests and applies no application policy: callers still compare the parsed chain ID or require a positive balance.
 
 `ethSendRawTransaction(...)` does not sign transactions and does not compute transaction hashes. It expects callers to provide a signed raw transaction. If `transactionHash` is supplied and a retry of `eth_sendRawTransaction` returns duplicate-style JSON-RPC errors such as `already known` or `nonce too low`, the wrapper checks `eth_getTransactionByHash(transactionHash)` before returning a recovered result. Without `transactionHash`, those cases are surfaced as `EthereumRawTransactionRecoveryError` because this wrapper requires the host's transaction hash to verify acceptance.
 

@@ -1,14 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import { parseEnv } from 'node:util';
-import { requestEthereumJsonRpc } from '@oyaprotocol/ethereum';
+import { parseTransactionQuantity, requestEthereumJsonRpc } from '@oyaprotocol/ethereum';
 import { createTimeoutSignal, invokeWithAbort } from '@oyaprotocol/utils';
 import { loadConfig } from '../src/config.mjs';
 import { createLocalSigner } from '../src/signer.mjs';
-
-function quantity(value) {
-    return typeof value === 'string' && /^0x(?:0|[1-9a-fA-F][0-9a-fA-F]{0,63})$/.test(value)
-        ? BigInt(value) : null;
-}
 
 export async function checkLocalNode(configPath, envPath, {
     env = process.env, fetch = globalThis.fetch, log = console.log, timeoutMs = 10_000,
@@ -42,14 +37,14 @@ export async function checkLocalNode(configPath, envPath, {
     })).result;
     const checks = [
         ['Ethereum chain', 'Check RPC availability, authorization, and chainId.', async (signal) =>
-            quantity(await rpc('eth_chainId', [], signal)) === BigInt(config.chainId)],
+            parseTransactionQuantity(await rpc('eth_chainId', [], signal), 'eth_chainId result') === BigInt(config.chainId)],
         ['Logger bytecode', 'Check loggerContract and deploy Logger on the selected chain.', async (signal) => {
             const code = await rpc('eth_getCode', [config.loggerContract, 'latest'], signal);
             return typeof code === 'string' && /^0x(?:[0-9a-fA-F]{2})+$/.test(code);
         }],
         ['Node gas balance', 'Check RPC availability and fund the node address with native currency.', async (signal) => {
-            const balance = quantity(await rpc('eth_getBalance', [nodeAddress, 'latest'], signal));
-            return balance !== null && balance > 0n;
+            const balance = parseTransactionQuantity(await rpc('eth_getBalance', [nodeAddress, 'latest'], signal), 'eth_getBalance result');
+            return balance > 0n;
         }],
         ['IPFS API', 'Check the Kubo API endpoint and its authorization.', async (signal) => {
             const response = await fetch(`${config.ipfs.url}/api/v0/version`, {

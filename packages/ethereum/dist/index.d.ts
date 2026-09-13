@@ -9,5 +9,5 @@ export type { EthGetTransactionReceiptOptions, EthGetTransactionReceiptResult, E
 export type { EthereumReceiptLog, EthereumTransactionReceipt } from './receipt-utils.js';
 export { encodeLoggerCall, decodeLoggerEvent, hashLoggerCid, logCid, LogCidError } from './logger.js';
 export type { LoggerEventInput, LoggerEvent, LogCidOptions, LogCidResult, } from './logger.js';
-export { EthereumJsonRpcError, requestEthereumJsonRpc, } from './request-utils.js';
+export { EthereumJsonRpcError, parseTransactionQuantity, requestEthereumJsonRpc, } from './request-utils.js';
 export type { RequestEthereumJsonRpcOptions, RequestEthereumJsonRpcResult, } from './request-utils.js';

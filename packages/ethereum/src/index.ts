@@ -43,6 +43,7 @@ export type {
 } from './logger.js';
 export {
     EthereumJsonRpcError,
+    parseTransactionQuantity,
     requestEthereumJsonRpc,
 } from './request-utils.js';
 export type {

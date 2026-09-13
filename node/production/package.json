@@ -11,9 +11,9 @@
     "smoke:local": "node scripts/smoke-local.mjs"
   },
   "dependencies": {
-    "@oyaprotocol/ethereum": "0.1.1",
+    "@oyaprotocol/ethereum": "0.1.2",
     "@oyaprotocol/ipfs": "0.1.1",
-    "@oyaprotocol/messages": "0.1.1",
+    "@oyaprotocol/messages": "0.1.2",
     "@oyaprotocol/utils": "0.1.1",
     "ethers": "6.17.0"
   }

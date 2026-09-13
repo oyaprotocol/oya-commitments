@@ -30,6 +30,7 @@ Verification, Safe/Governor proposals, agent strategy implementation, and new ke
 - [x] 2026-09-13: Milestone 1b implementation: selected environment loading, loopback validation, and bounded read-only Ethereum/IPFS checks, with focused CLI and transport tests.
 - [x] 2026-09-13: Milestone 1b validation and documentation: all 39 host tests passed under Node 24.21.0, including actual npm check success/failure, selected-file credential precedence, redaction, prerequisite failures, and bounded stalled response bodies. `git diff --check` passed.
 - [x] 2026-09-13: Replaced machine-specific validation paths with generic placeholders, preserving commands, tool versions, test conditions, and results.
+- [x] 2026-09-13: Published and adopted Ethereum/messages `0.1.2` under the separate [quantity-parser release plan](ethereum-quantity-parser-release-execplan.md). Local checks now use the public kernel parser. Registry validation, a fresh locked host installation, and all 40 host tests passed; external dependency entries are unchanged.
 - [ ] User reviews milestone 1b before lifecycle commands.
 - [ ] Milestone 1c: Foreground running, status, and graceful shutdown validation.
 - [ ] Milestone 2: Explicit Logger deployment and reuse.
@@ -38,7 +39,7 @@ Verification, Safe/Governor proposals, agent strategy implementation, and new ke
 ## Surprises & Discoveries
 
 - `node/production/src/main.mjs` already supports a supplied config file, chain and Logger bytecode checks, and SIGINT/SIGTERM draining. These are reusable runtime capabilities; a second server or shutdown implementation is unnecessary.
-- The original host used local `file:../../packages/...` dependencies and built kernels during setup. It now installs the four npm kernels at exact version `0.1.1` from its own lockfile.
+- The original host used local `file:../../packages/...` dependencies and built kernels during setup. It now installs exact npm releases from its own lockfile: Ethereum/messages `0.1.2` and utils/IPFS `0.1.1`.
 - With published dependencies, setup only needs its package directory. Running `npm ci` there preserves the installation behavior without calculating the repository root. The real npm entry was validated from a temporary caller directory with relative config/environment paths.
 - The former string comparison allowed both case aliases and existing hard links to return setup success for one underlying file. Reproduction used temporary files and a stub installer. Device and inode IDs identify existing files; previously missing aliases can be detected after the first template creates the file.
 - The published Ethereum kernel exposes `requestEthereumJsonRpc` and the utils kernel exposes cancellation/deadline helpers. The check command reuses these with the existing host config parser and signer. Kubo's read-only version probe uses `POST /api/v0/version`; the fixture confirms that normalized API paths and authorization headers reach it.
@@ -67,6 +68,7 @@ Verification, Safe/Governor proposals, agent strategy implementation, and new ke
 - Decision: Compare destination device/inode IDs with bigint stats before installation and after template preparation. Rationale: catches hard links and filesystem aliases without assumptions about operating-system case sensitivity. A newly created template may remain after an alias failure; preserve it and let the operator correct the paths. Date/Author: 2026-09-13 / Codex, implementing the user-approved edge-case fix.
 - Decision: Load `scripts/local-check.mjs` dynamically only for `check`. Rationale: `setup` and help must work before npm dependencies are installed. The check module reuses installed kernels and ethers without changing runtime modules or adding dependencies. Date/Author: 2026-09-13 / Codex.
 - Decision: Require the selected environment file to be readable, allow an empty file, and stop at the first failing probe with a 10-second deadline per probe. Rationale: a missing selected file must not silently select an inherited identity; separate deadlines keep readiness bounded while identifying the failing prerequisite. Deadlines include response bodies and RPC retries. Date/Author: 2026-09-13 / Codex.
+- Decision: Adopt the public bounded quantity parser from Ethereum `0.1.2` and update messages to its matching `0.1.2` dependency pin. Rationale: removes the host's duplicate parser and preserves the single Ethereum instance required by error-class checks. Date/Author: 2026-09-13 / user-authorized release, implemented by Codex.
 
 ## Outcomes & Retrospective
 
@@ -85,6 +87,8 @@ Validation records use generic placeholders for temporary directories so contrib
 The destination-alias fix adds a small `sameFile` helper and two regression tests. Existing aliases fail before installation or file changes; newly discovered aliases fail before setup can report success. The case test probes the destination filesystem and permits distinct case-sensitive names. Repetition verifies that a detected alias fails before another install. `npm --prefix node/production test` passed 26 tests with no skips under Node 24.21.0, and `git diff --check` passed. Tests used temporary files and stubbed installation; no dependencies, operator files, or kernel/runtime interfaces changed. The user subsequently authorized milestone 1b.
 
 Milestone 1b is implemented and validated for review. `local check` loads the selected files, validates loopback binding, derives the public node address, and checks chain ID, Logger code presence, positive node balance, and Kubo API reachability. It reports sanitized results without changing files, publishing content, or sending transactions. All 39 host tests passed under Node 24.21.0 using generated credentials and controlled endpoints. No operator configuration or credentials were used, and the independently running mainnet fork was not changed. Successful fixture checks do not establish readiness of that fork: an actual Logger deployment, funded node identity, and IPFS endpoint still need validation in the subsequent stages. Milestone 1c is next after review.
+
+The subsequent parser release replaces the local `quantity` helper with `parseTransactionQuantity` from the installed Ethereum kernel. Ethereum/messages `0.1.2` are published, hash-verified, and installed through the host lockfile; utils/IPFS remain at `0.1.1`. All 40 host tests pass, including oversized RPC balance rejection and the existing failure-classification paths. Config/signer hardening and milestone 1c remain separate work.
 
 ## Context and Orientation
 

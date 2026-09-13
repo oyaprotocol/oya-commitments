@@ -4,7 +4,7 @@ This standalone runtime accepts an agent's signed text, publishes the signed JSO
 
 After signature and allowlist checks, the HTTP handler calls the kernel's `publishAndLogSignedMessage` directly. One complete operation runs at a time, from IPFS publication through the verified receipt. Additional authenticated requests receive `503 node_busy`; there is no waiting queue.
 
-The runtime installs the four hardened `@oyaprotocol` kernels from npm at version `0.1.1` and uses ethers in `src/signer.mjs` for local transaction signing. The kernels handle publication, transaction preparation, broadcasting, and receipt verification. Kernel signing support remains future work. Reimbursement verification, Safe proposals, and DeFi actions are later integrations.
+The runtime installs the hardened `@oyaprotocol/ethereum` and `@oyaprotocol/messages` kernels from npm at `0.1.2`, with `@oyaprotocol/ipfs` and `@oyaprotocol/utils` at `0.1.1`, and uses ethers in `src/signer.mjs` for local transaction signing. Ethereum and messages are updated together to keep one Ethereum package instance for error classification. The kernels handle publication, transaction preparation, broadcasting, and receipt verification. Kernel signing support remains future work. Reimbursement verification, Safe proposals, and DeFi actions are later integrations.
 
 ## Install and validate
 

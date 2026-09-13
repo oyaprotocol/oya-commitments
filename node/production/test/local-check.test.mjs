@@ -150,6 +150,7 @@ test('check reports the failed prerequisite without exposing provider data', asy
         ['missing Logger', { eth_getCode: '0x' }, 'Logger bytecode', 2],
         ['unfunded node', { eth_getBalance: '0x0' }, 'Node gas balance', 3],
         ['invalid balance', { eth_getBalance: 'provider-secret-marker' }, 'Node gas balance', 3],
+        ['oversized balance', { eth_getBalance: `0x1${'0'.repeat(64)}` }, 'Node gas balance', 3],
         ['RPC error', { rpcError: true }, 'Ethereum chain', 1],
         ['IPFS denied', { ipfsStatus: 401, ipfsBody: { Message: 'provider-secret-marker' } }, 'IPFS API', 4],
         ['invalid IPFS response', { ipfsBody: { Message: 'provider-secret-marker' } }, 'IPFS API', 4],
