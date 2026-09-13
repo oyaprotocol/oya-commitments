@@ -61,11 +61,11 @@ To deploy, use `--broadcast`. Forge includes simulation in this command, so a se
 npm --prefix node/production run local -- deploy-logger --broadcast
 ```
 
-Both commands accept `--config <path>` and `--env-file <path>`, with the same file-first environment precedence as the other local commands. The selected chain and RPC endpoint are used by both the kernel checks and Forge. Deployment through RPC endpoints requiring Authorization headers is deferred; `deploy-logger` rejects a nonempty `OYA_RPC_AUTHORIZATION`. The config must be a writable regular file with no symlink or additional hard links. `--broadcast` is rejected for all other actions.
+Both commands accept `--config <path>` and `--env-file <path>`, with the same file-first environment precedence as the other local commands. The selected chain and RPC endpoint are used by both the kernel checks and Forge. Deployment through RPC endpoints requiring Authorization headers is deferred; `deploy-logger` rejects a nonempty `OYA_RPC_AUTHORIZATION`. The config must be readable, and its directory must be writable for deployment records and artifacts. `--broadcast` is rejected for all other actions.
 
-A successful broadcast is checked against its receipt, deployer, contract address, chain, and deployed code before `loggerContract` is updated atomically. Other config values, owner/group IDs, and permission bits are preserved; ACLs and extended attributes are not copied. If ownership or permissions cannot be applied, the original config remains untouched. Public deployment metadata goes into the ignored `node/production/deployment.local.json`; a custom config such as `settings.json` uses the sibling `settings.json.deployment.local.json`. Repeating the command reuses the configured address without another transaction.
+A successful broadcast is checked against its receipt, deployer, contract address, chain, and deployed code before public deployment metadata is saved. The record goes into the ignored `node/production/deployment.local.json`; a custom config such as `settings.json` uses the sibling `settings.json.deployment.local.json`. The command leaves the config untouched and prints the verified Logger address. Set `loggerContract` to that address in the selected config, then run `local check` after funding the node and starting IPFS. After this manual update, repeating the deployment command reuses the configured address without another transaction.
 
-Each invocation of Forge has a separate private `.oya-logger-*` directory beside the config, printed for inspection and ignored by Git. Simulation and failed or unverified broadcasts leave the config unchanged. After an uncertain broadcast, inspect those artifacts and reconcile the transaction before another attempt; the wrapper does not relaunch Forge or use `--resume`. If recording fails after verification, it prints the verified address for manual adoption. Existing metadata with no code at the configured address blocks deployment until the operator reconciles the record and chain. Run one deployment command at a time per configuration.
+Each invocation of Forge has a separate private `.oya-logger-*` directory beside the config, printed for inspection and ignored by Git. After an uncertain broadcast, inspect those artifacts and reconcile the transaction before another attempt; the wrapper does not relaunch Forge or use `--resume`. If recording fails after verification, the verified address remains in the output for manual adoption. Existing metadata with no code at the configured address blocks deployment until the operator reconciles the record and chain, including adopting a newly deployed address in the config. Run one deployment command at a time per configuration.
 
 The automated deployment test owns and stops a separate disposable Anvil chain, using direct RPC access and a generated deployment account:
 
@@ -73,7 +73,7 @@ The automated deployment test owns and stops a separate disposable Anvil chain, 
 npm --prefix node/production run test:local
 ```
 
-It checks simulation without a transaction, deployment and metadata, deployment-key precedence, and reuse without redeployment. It does not use the operator's existing fork or IPFS service.
+It checks simulation without a transaction, deployment and metadata with unchanged config, deployment-key precedence, blocked redeployment before manual adoption, and reuse after adoption. It does not use the operator's existing fork or IPFS service.
 
 ### Check and run the node
 

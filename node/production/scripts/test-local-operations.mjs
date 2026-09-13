@@ -23,7 +23,7 @@ async function freePort() {
     return port;
 }
 
-test('local CLI simulates, deploys, records, and reuses Logger on Anvil', { timeout: 180_000 }, async (t) => {
+test('local CLI simulates, deploys, records, and reuses Logger after manual config adoption on Anvil', { timeout: 180_000 }, async (t) => {
     const directory = await mkdtemp(join(tmpdir(), 'oya-local-operations-'));
     t.after(() => rm(directory, { recursive: true, force: true }));
     const port = await freePort();
@@ -101,15 +101,16 @@ test('local CLI simulates, deploys, records, and reuses Logger on Anvil', { time
     assert.equal(await readFile(configPath, 'utf8'), original);
     await assert.rejects(readFile(metadataPath), { code: 'ENOENT' });
 
-    checked(await cli('--broadcast'), 0, /Deployment recorded/);
+    const deployed = await cli('--broadcast');
+    checked(deployed, 0, /Deployment recorded/);
     const metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
-    const updated = JSON.parse(await readFile(configPath, 'utf8'));
     const receipt = await rpc('eth_getTransactionReceipt', [metadata.transactionHash]);
-    assert.deepEqual(updated, { ...config, loggerContract: receipt.contractAddress });
+    assert.equal(await readFile(configPath, 'utf8'), original);
+    assert.ok(deployed.output.includes(`Set loggerContract to ${metadata.loggerContract}`));
     assert.deepEqual(metadata, { chainId: 31337, loggerContract: receipt.contractAddress,
         transactionHash: receipt.transactionHash, blockNumber: BigInt(receipt.blockNumber).toString(), deployer: deployer.address });
     assert.equal(receipt.status, '0x1');
-    assert.notEqual(await rpc('eth_getCode', [updated.loggerContract, 'latest']), '0x');
+    assert.notEqual(await rpc('eth_getCode', [metadata.loggerContract, 'latest']), '0x');
     assert.equal((await stat(configPath)).mode & 0o777, 0o640);
     assert.equal((await stat(metadataPath)).mode & 0o777, 0o600);
     assert.equal(await readFile(envPath, 'utf8'), credentials);
@@ -117,6 +118,13 @@ test('local CLI simulates, deploys, records, and reuses Logger on Anvil', { time
     for (const name of files.filter((name) => name.startsWith('.oya-logger-'))) {
         assert.equal((await stat(join(directory, name))).mode & 0o777, 0o700);
     }
+    checked(await cli('--broadcast'), 1, /Prior deployment metadata exists/);
+    assert.equal(await rpc('eth_getTransactionCount', [deployer.address, 'latest']), '0x1');
+    assert.equal(await readFile(configPath, 'utf8'), original);
+    assert.deepEqual(await readdir(directory), files);
+
+    // Act as the operator adopting the verified address before reuse.
+    await writeFile(configPath, `${JSON.stringify({ ...config, loggerContract: metadata.loggerContract }, null, 2)}\n`);
     const before = await Promise.all([configPath, metadataPath].map((path) => readFile(path, 'utf8')));
     await writeFile(envPath, 'LOGGER_DEPLOYER_PK=\nOYA_RPC_AUTHORIZATION=\n');
     checked(await cli('--broadcast'), 0, /Reusing configured Logger/);

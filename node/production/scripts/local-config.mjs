@@ -16,17 +16,15 @@ export async function loadLocalConfig(configPath, envPath, { env = process.env, 
         return fail('Environment file. Check that the selected file exists and is readable.');
     }
     let config;
-    let configText;
     try {
-        configText = await readFile(configPath, 'utf8');
-        config = parseConfig(JSON.parse(configText), { env: selectedEnv });
+        config = parseConfig(JSON.parse(await readFile(configPath, 'utf8')), { env: selectedEnv });
     } catch {
         return fail('Configuration. Check the JSON, chainId, loggerContract, allowedSigners, rpcUrl, and ipfsUrl.');
     }
     if (!['127.0.0.1', '::1'].includes(config.host)) {
         return fail('Local binding. Set host to 127.0.0.1 or ::1.');
     }
-    return { config, configText, env: selectedEnv };
+    return { config, env: selectedEnv };
 }
 
 export async function loadLocalSettings(configPath, envPath, options = {}) {

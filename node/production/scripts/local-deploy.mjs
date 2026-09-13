@@ -1,6 +1,5 @@
 import { execFile } from 'node:child_process';
-import { constants } from 'node:fs';
-import { access, chmod, chown, lstat, mkdtemp, readFile, rename, writeFile } from 'node:fs/promises';
+import { access, lstat, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -35,7 +34,7 @@ async function readDeployment(artifactPath, chainId, deployer) {
     return { address: transaction.contractAddress, transactionHash: transaction.hash };
 }
 
-export async function deployLogger(configPath, { config, configText, env }, {
+export async function deployLogger(configPath, { config, env }, {
     broadcast = false, execute = promisify(execFile), fetch = globalThis.fetch, log = console.log,
 } = {}) {
     let stage = 'Check Ethereum RPC availability and chainId.';
@@ -69,11 +68,7 @@ export async function deployLogger(configPath, { config, configText, env }, {
         }
         stage = 'Set a valid LOGGER_DEPLOYER_PK in the selected environment file or inherited environment.';
         deployer = createLocalSigner(env.LOGGER_DEPLOYER_PK).address;
-        stage = 'Check config permissions and prior deployment metadata before deploying.';
-        const original = await lstat(configPath);
-        // Atomic replacement must not silently sever a symlink or another hard link.
-        if (!original.isFile() || original.nlink !== 1) throw new Error('Config must be a regular, singly linked file.');
-        await access(configPath, constants.W_OK);
+        stage = 'Check prior deployment metadata and config directory permissions before deploying.';
         const metadataPath = deploymentPath(configPath);
         try {
             await lstat(metadataPath);
@@ -121,19 +116,10 @@ export async function deployLogger(configPath, { config, configText, env }, {
             || !hasCode(await rpc('eth_getCode', [deployment.address, 'latest']))) throw new Error('Deployment did not verify.');
         log(`OK Verified Logger ${deployment.address} on chain ${config.chainId}.`);
         stage = 'Deployment verified, but recording failed. Adopt the verified address manually; do not deploy again.';
-        const current = await lstat(configPath);
-        if (current.dev !== original.dev || current.ino !== original.ino || current.nlink !== 1
-            || await readFile(configPath, 'utf8') !== configText) throw new Error('Config changed during deployment.');
         const metadata = { chainId: config.chainId, loggerContract: deployment.address,
             transactionHash: deployment.transactionHash, blockNumber: receipt.blockNumber.toString(), deployer };
         await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
-        const updated = { ...JSON.parse(configText), loggerContract: deployment.address };
-        const replacement = join(directory, 'config.json');
-        await writeFile(replacement, `${JSON.stringify(updated, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
-        await chown(replacement, current.uid, current.gid);
-        await chmod(replacement, current.mode & 0o777);
-        await rename(replacement, configPath);
-        log('OK Deployment recorded and loggerContract updated. Run local check after funding the node and starting IPFS.');
+        log(`OK Deployment recorded. Set loggerContract to ${deployment.address} in ${configPath}, then run local check.`);
         return 0;
     } catch {
         log(`FAIL ${stage}`);

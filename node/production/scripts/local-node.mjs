@@ -57,7 +57,7 @@ export async function main(args, {
             + 'Launch run directly with Node.js; supervisors must send SIGINT/SIGTERM to that process.\n'
             + 'Defaults: node/production/config.local.json and node/production/.env.\n'
             + 'Relative overrides use the directory where you invoked the command.\n'
-            + 'Existing files are preserved by setup; verified deployments update loggerContract.\n'
+            + 'Existing files are preserved by setup; deploy-logger leaves config unchanged. Set loggerContract manually.\n'
             + 'Exit status: 0 on success, 1 on failure; run preserves the child exit code.');
         return 0;
     }
