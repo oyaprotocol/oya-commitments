@@ -1,7 +1,17 @@
 {
   "name": "@oyaprotocol/utils",
-  "version": "0.0.0",
+  "version": "0.1.1",
   "description": "Oya utilities package.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oyaprotocol/oya-commitments.git",
+    "directory": "packages/utils"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -12,7 +22,10 @@
     }
   },
   "files": [
-    "dist",
-    "README.md"
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "dist/**/*.js.map",
+    "README.md",
+    "LICENSE"
   ]
 }

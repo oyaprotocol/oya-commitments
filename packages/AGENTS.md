@@ -12,6 +12,7 @@ This file applies to `packages/` and `packages/*`.
 
 - Treat the existing repo implementation as reference material only for this area. Do not import production-kernel code from `agent/`, `agent-library/`, `node/`, or `frontend/`.
 - Keep each package importable through its package root and `exports` surface. Do not rely on deep-import paths as a public interface.
+- Keep kernels independent of the Node.js runtime: do not add Node-only APIs or a Node.js engine requirement. Node.js 24 is the CI baseline for building and testing.
 - Keep package shells intentionally small until the user approves concrete functionality for a package.
 - Do not turn `packages/` into a grab bag for app wiring, CLI code, environment loading, or repo-specific startup logic.
 - Reference root `AGENTS.md`, `CONTRIBUTING.md`, and `PLANS.md` for repository-wide expectations.
