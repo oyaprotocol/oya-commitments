@@ -3,5 +3,5 @@ export { EthereumRawTransactionRecoveryError, ethSendRawTransaction, } from './t
 export { createTransactionPreparer } from './transaction-preparer.js';
 export { EthereumTransactionReceiptTimeoutError, ethGetTransactionReceipt, ethWaitForTransactionReceipt, } from './receipts.js';
 export { encodeLoggerCall, decodeLoggerEvent, hashLoggerCid, logCid, LogCidError } from './logger.js';
-export { EthereumJsonRpcError, requestEthereumJsonRpc, } from './request-utils.js';
+export { EthereumJsonRpcError, parseTransactionQuantity, requestEthereumJsonRpc, } from './request-utils.js';
 //# sourceMappingURL=index.js.map

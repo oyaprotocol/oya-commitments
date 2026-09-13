@@ -4,7 +4,7 @@ This standalone runtime accepts an agent's signed text, publishes the signed JSO
 
 After signature and allowlist checks, the HTTP handler calls the kernel's `publishAndLogSignedMessage` directly. One complete operation runs at a time, from IPFS publication through the verified receipt. Additional authenticated requests receive `503 node_busy`; there is no waiting queue.
 
-The runtime installs the four hardened `@oyaprotocol` kernels from npm at version `0.1.1` and uses ethers in `src/signer.mjs` for local transaction signing. The kernels handle publication, transaction preparation, broadcasting, and receipt verification. Kernel signing support remains future work. Reimbursement verification, Safe proposals, and DeFi actions are later integrations.
+The runtime installs the hardened `@oyaprotocol/ethereum` and `@oyaprotocol/messages` kernels from npm at `0.1.2`, with `@oyaprotocol/ipfs` and `@oyaprotocol/utils` at `0.1.1`, and uses ethers in `src/signer.mjs` for local transaction signing. Ethereum and messages are updated together to keep one Ethereum package instance for error classification. The kernels handle publication, transaction preparation, broadcasting, and receipt verification. Kernel signing support remains future work. Reimbursement verification, Safe proposals, and DeFi actions are later integrations.
 
 ## Install and validate
 
@@ -45,12 +45,24 @@ Edit the ignored `config.local.json` (or copy `config.example.json` there when c
 
 The node account must have gas funds and be dedicated to one runtime. The agent signing key is distinct; it does not need gas to sign a message. Store `OYA_NODE_PRIVATE_KEY` in the ignored `node/production/.env`, or inject it through your process supervisor. Optional `OYA_RPC_AUTHORIZATION` and `OYA_IPFS_AUTHORIZATION` contain complete HTTP Authorization header values. Keep RPC URLs containing credentials in private local config too.
 
-From the repository root:
+Check the configuration and services from the repository root:
+
+```sh
+npm --prefix node/production run local -- check
+```
+
+Check accepts the same `--config` and `--env-file` overrides as setup. The selected environment file must be readable; it may be empty when credentials are injected. Its values override inherited environment values, including explicitly empty values; omitted entries use the inherited environment. This command requires `host` to be `127.0.0.1` or `::1` and uses the existing config validator and node signer.
+
+The command checks the Ethereum chain ID, nonempty code at the Logger address, a positive native-currency balance for the node, and the Kubo `/api/v0/version` endpoint, in that order. Each probe has a 10-second deadline, including response reading and any RPC retries. It prints public addresses and an `OK` for each passing probe, exits 0 when all pass, or stops with a sanitized `FAIL` and exit 1 at the first failure. It submits no transactions, uploads no content, and changes no files. Code presence does not verify Logger's implementation, a positive balance does not guarantee sufficient gas for a particular transaction, and the IPFS probe does not prove publication permissions.
+
+To start the runtime directly:
 
 ```sh
 node --env-file=node/production/.env node/production/src/main.mjs node/production/config.local.json
 curl http://127.0.0.1:8787/healthz
 ```
+
+The direct Node.js `--env-file` command gives inherited variables precedence; clear conflicting inherited Oya values when using it after `local check`. The planned `local run` command will use the same file precedence as `check`.
 
 Alternatively, with environment variables already loaded:
 

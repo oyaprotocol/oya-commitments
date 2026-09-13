@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs, promisify } from 'node:util';
 
 const production = fileURLToPath(new URL('../', import.meta.url));
-const usage = 'Usage: npm --prefix node/production run local -- setup [--config <path>] [--env-file <path>]';
+const usage = 'Usage: npm --prefix node/production run local -- <setup|check> [--config <path>] [--env-file <path>]';
 
 async function sameFile(left, right) {
     try {
@@ -46,13 +46,14 @@ export async function main(args, {
     }
     const { values, positionals } = parsed;
     if (values.help) {
-        log(`${usage}\nInstall locked dependencies and create missing private config files.\n`
+        log(`${usage}\nsetup: Install locked dependencies and create missing private config files.\n`
+            + 'check: Load settings and check Ethereum, Logger, gas balance, and IPFS without writes.\n'
             + 'Defaults: node/production/config.local.json and node/production/.env.\n'
             + 'Relative overrides use the directory where you invoked the command.\n'
             + 'Existing files are preserved. Exit status: 0 on success, 1 on failure.');
         return 0;
     }
-    if (positionals.length !== 1 || positionals[0] !== 'setup'
+    if (positionals.length !== 1 || !['setup', 'check'].includes(positionals[0])
         || [values.config, values['env-file']].some((value) => value !== undefined && !value.trim())) {
         return fail(invalidArguments);
     }
@@ -61,11 +62,20 @@ export async function main(args, {
     const envPath = selectPath(values['env-file'], '.env');
     const destinationConflict = 'Config and environment paths must refer to different files.';
     if (configPath === envPath) return fail(destinationConflict);
-    if (Number(process.versions.node.split('.')[0]) < 22) return fail('Setup requires Node.js 22 or newer.');
+    if (Number(process.versions.node.split('.')[0]) < 22) return fail('Local commands require Node.js 22 or newer.');
     try {
         if (await sameFile(configPath, envPath)) return fail(destinationConflict);
     } catch {
         return fail('Could not check config and environment paths. Check directories and file permissions.');
+    }
+
+    if (positionals[0] === 'check') {
+        try {
+            const { checkLocalNode } = await import('./local-check.mjs');
+            return await checkLocalNode(configPath, envPath, { log });
+        } catch {
+            return fail('Check could not run. Run local setup and verify the selected settings.');
+        }
     }
 
     log('Running npm ci');
