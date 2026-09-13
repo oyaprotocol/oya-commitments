@@ -8,6 +8,7 @@
     "local": "node -- scripts/local-node.mjs",
     "start": "node src/main.mjs",
     "test": "node --test test/*.test.mjs",
+    "test:local": "node scripts/test-local-operations.mjs",
     "smoke:local": "node scripts/smoke-local.mjs"
   },
   "dependencies": {
