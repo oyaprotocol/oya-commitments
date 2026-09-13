@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
-import { EventEmitter, once } from 'node:events';
+import { once } from 'node:events';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { Wallet } from 'ethers';
 import { loadLocalSettings } from '../scripts/local-config.mjs';
-import { runLocalNode } from '../scripts/local-run.mjs';
+import { startNode } from '../src/main.mjs';
 
 const production = fileURLToPath(new URL('../', import.meta.url));
 const script = join(production, 'scripts/local-node.mjs');
@@ -61,6 +61,7 @@ async function fixture(t) {
                 response.writeHead(401).end('provider-secret-marker');
                 return;
             }
+            await state.onCheck?.();
             response.end(JSON.stringify({ Version: 'fixture' }));
         } else if (request.url.startsWith('/ipfs/api/v0/add')) {
             entered.resolve();
@@ -88,11 +89,14 @@ async function fixture(t) {
     };
 }
 
-function launch(t, f) {
-    const child = spawn(process.execPath, ['--', script, 'run', ...f.args], {
+function launch(t, f, direct = false) {
+    const args = direct ? [join(production, 'src/main.mjs'), f.configPath] : [script, 'run', ...f.args];
+    const child = spawn(process.execPath, ['--', ...args], {
         cwd: f.cwd, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, INIT_CWD: f.cwd, OYA_NODE_PRIVATE_KEY: Wallet.createRandom().privateKey,
-            OYA_RPC_AUTHORIZATION: 'wrong-secret-marker', OYA_IPFS_AUTHORIZATION: 'wrong-secret-marker' },
+        env: { ...process.env, INIT_CWD: f.cwd,
+            OYA_NODE_PRIVATE_KEY: direct ? f.wallet.privateKey : Wallet.createRandom().privateKey,
+            OYA_RPC_AUTHORIZATION: direct ? 'Bearer rpc-secret-marker' : 'wrong-secret-marker',
+            OYA_IPFS_AUTHORIZATION: direct ? 'Bearer ipfs-secret-marker' : 'wrong-secret-marker' },
     });
     let output = '';
     let closed = false;
@@ -140,11 +144,11 @@ test('run and npm status use selected settings, then stop without changing files
     assert.equal(running.output().includes(f.agent.privateKey), false);
 });
 
-test('SIGINT and SIGTERM wait for an admitted request to finish', { timeout: 20_000 }, async (t) => {
-    for (const signal of ['SIGINT', 'SIGTERM']) {
-        await t.test(signal, async (t) => {
+test('both launch paths drain admitted requests on SIGINT and SIGTERM', { timeout: 30_000 }, async (t) => {
+    for (const direct of [false, true]) for (const signal of ['SIGINT', 'SIGTERM']) {
+        await t.test(`${direct ? 'direct' : 'local'} ${signal}`, async (t) => {
             const f = await fixture(t);
-            const running = launch(t, f);
+            const running = launch(t, f, direct);
             await running.ready();
             const text = 'Local lifecycle test';
             const pending = fetch(`${f.url}/v1/messages`, { method: 'POST', headers: { 'content-type': 'application/json' },
@@ -157,7 +161,7 @@ test('SIGINT and SIGTERM wait for an admitted request to finish', { timeout: 20_
             running.child.kill(signal);
             await until(() => running.output().includes('Stopping node;'));
             await delay(100);
-            assert.equal(running.closed(), false, 'wrapper must wait for the child to drain');
+            assert.equal(running.closed(), false, 'node must wait for the admitted request to drain');
             f.release();
             const response = await pending;
             await response.text();
@@ -188,34 +192,83 @@ test('readiness and occupied-port failures leave no extra node running', { timeo
     assert.equal(occupied.listening, true);
 });
 
-test('runner passes only node credentials and preserves child exit outcomes', async (t) => {
+test('run uses its loaded settings when files change during readiness', { timeout: 15_000 }, async (t) => {
     const f = await fixture(t);
-    const settings = await loadLocalSettings(f.configPath, f.envPath, { env: { OYA_AGENT_PRIVATE_KEY: 'inherited-secret-marker' } });
-    assert.equal(settings.nodeEnv.OYA_NODE_PRIVATE_KEY, f.wallet.privateKey);
-    assert.equal(settings.nodeEnv.OYA_RPC_AUTHORIZATION, 'Bearer rpc-secret-marker');
-    assert.equal(settings.nodeEnv.OYA_IPFS_AUTHORIZATION, 'Bearer ipfs-secret-marker');
-    assert.equal(settings.nodeEnv.OYA_AGENT_PRIVATE_KEY, undefined);
-    assert.equal(settings.nodeEnv.LOGGER_DEPLOYER_PK, undefined);
-    for (const [code, signal, expected] of [[17, null, 17], [null, 'SIGTERM', 143], [-2, null, 1]]) {
-        const before = ['SIGINT', 'SIGTERM'].map((name) => process.listenerCount(name));
-        const result = await runLocalNode(f.configPath, settings, { log: () => {}, spawn: (command, args, options) => {
-            assert.equal(command, process.execPath);
-            assert.deepEqual(args, ['--', join(production, 'src/main.mjs'), f.configPath]);
-            assert.equal(options.env, settings.nodeEnv);
-            assert.equal(options.stdio, 'inherit');
-            const child = new EventEmitter();
-            queueMicrotask(() => {
-                if (code === -2) child.emit('error', new Error('spawn-secret-marker'));
-                child.emit('close', code, signal);
-            });
-            return child;
+    f.state.onCheck = async () => {
+        await writeFile(f.configPath, JSON.stringify({ ...f.config, chainId: 1 }));
+        await writeFile(f.envPath, `OYA_NODE_PRIVATE_KEY=${Wallet.createRandom().privateKey}\n`);
+    };
+    const running = launch(t, f);
+    await running.ready();
+    const health = await (await fetch(`${f.url}/healthz`)).json();
+    assert.equal(health.chainId, f.config.chainId);
+    assert.equal(health.nodeAddress, f.wallet.address);
+    running.child.kill('SIGTERM');
+    assert.deepEqual(await running.exited, { code: 0, signal: null });
+});
+
+test('throwing startup logger still returns a usable runtime that closes cleanly', { timeout: 15_000 }, async (t) => {
+    const f = await fixture(t);
+    // A broken startup can lose the runtime handle; isolate that failure in a bounded child.
+    const source = `
+        import assert from 'node:assert/strict';
+        import { startNode } from ${JSON.stringify(new URL('../src/main.mjs', import.meta.url).href)};
+        import { loadLocalSettings } from ${JSON.stringify(new URL('../scripts/local-config.mjs', import.meta.url).href)};
+        const { config, signer } = await loadLocalSettings(${JSON.stringify(f.configPath)}, ${JSON.stringify(f.envPath)}, { env: {} });
+        const listeners = () => ['SIGINT', 'SIGTERM'].map((signal) => process.listenerCount(signal));
+        const before = listeners();
+        let attempts = 0;
+        const runtime = await startNode(config, signer, { handleSignals: true, log() {
+            attempts++;
+            throw new Error('logger-secret-marker');
         } });
-        assert.equal(result, expected);
-        assert.deepEqual(['SIGINT', 'SIGTERM'].map((name) => process.listenerCount(name)), before);
-    }
-    const output = [];
-    assert.equal(await runLocalNode(f.configPath, settings, { log: (line) => output.push(line), spawn: () => {
-        throw new Error('spawn-secret-marker');
-    } }), 1);
-    assert.equal(output.join('\n').includes('secret-marker'), false);
+        try {
+            const response = await fetch(${JSON.stringify(`${f.url}/healthz`)});
+            assert.equal(response.status, 200);
+            assert.equal((await response.json()).nodeAddress, signer.address);
+            assert.equal(attempts, 1);
+        } finally { await runtime.close(); }
+        assert.equal(runtime.server.listening, false);
+        assert.deepEqual(listeners(), before);
+    `;
+    const { stdout, stderr } = await execute(process.execPath, ['--input-type=module', '--eval', source],
+        { cwd: f.cwd, timeout: 5000 });
+    assert.equal(stdout, '');
+    assert.equal(stderr, '');
+});
+
+test('throwing shutdown logger cannot interrupt disconnected work or leak signal handlers', { timeout: 15_000 }, async (t) => {
+    const f = await fixture(t);
+    const { config, signer } = await loadLocalSettings(f.configPath, f.envPath, { env: {} });
+    const listeners = () => ['SIGINT', 'SIGTERM'].map((signal) => process.listenerCount(signal));
+    const before = listeners();
+    const events = [];
+    const options = { handleSignals: true, log: (record) => {
+        events.push(record.event);
+        if (record.event === 'stopping') throw new Error('logger-secret-marker');
+    } };
+    const runtime = await startNode(config, signer, options);
+    t.after(async () => { f.release(); await runtime.close(); });
+    const active = before.map((count) => count + 1);
+    assert.deepEqual(listeners(), active);
+    await assert.rejects(startNode(config, signer, options), { code: 'EADDRINUSE' });
+    assert.deepEqual(listeners(), active, 'failed startup must not install signal handlers');
+
+    const controller = new AbortController();
+    const text = 'Disconnected request during shutdown';
+    const pending = fetch(`${f.url}/v1/messages`, { method: 'POST', signal: controller.signal,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text, signer: f.agent.address, signature: await f.agent.signMessage(text) }) });
+    await f.entered;
+    controller.abort();
+    await assert.rejects(pending, { name: 'AbortError' });
+    const closed = once(runtime.server, 'close');
+    assert.doesNotThrow(() => process.emit('SIGTERM'));
+    assert.doesNotThrow(() => process.emit('SIGINT'));
+    await closed;
+    assert.deepEqual(listeners(), active, 'closing the listener must not remove handlers while work is active');
+    f.release();
+    await runtime.close();
+    assert.deepEqual(listeners(), before);
+    assert.deepEqual(events, ['listening', 'stopping', 'message_result']);
 });

@@ -31,16 +31,12 @@ export async function loadLocalSettings(configPath, envPath, options = {}) {
     const settings = await loadLocalConfig(configPath, envPath, options);
     if (!settings) return null;
     const { config, env: selectedEnv } = settings;
-    let nodeAddress;
+    let signer;
     try {
-        nodeAddress = createLocalSigner(selectedEnv.OYA_NODE_PRIVATE_KEY).address;
+        signer = createLocalSigner(selectedEnv.OYA_NODE_PRIVATE_KEY);
     } catch {
         (options.log ?? console.log)('FAIL Node signing key. Set a valid OYA_NODE_PRIVATE_KEY in the selected file or environment.');
         return null;
     }
-    // The runtime needs only its own Oya credentials, never agent or deployment keys.
-    const nodeKeys = ['OYA_NODE_PRIVATE_KEY', 'OYA_RPC_AUTHORIZATION', 'OYA_IPFS_AUTHORIZATION'];
-    const nodeEnv = Object.fromEntries(Object.entries(selectedEnv).filter(([key]) =>
-        nodeKeys.includes(key) || (!key.startsWith('OYA_') && !key.startsWith('LOGGER_'))));
-    return { config, nodeAddress, nodeEnv };
+    return { config, signer, nodeAddress: signer.address };
 }

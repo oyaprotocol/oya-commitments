@@ -5,7 +5,9 @@ import { loadConfig } from './config.mjs';
 import { createLocalSigner } from './signer.mjs';
 import { createNodeServer } from './server.mjs';
 
-export async function startNode(config, signer, { fetch = globalThis.fetch, log } = {}) {
+export async function startNode(config, signer, {
+    fetch = globalThis.fetch, log = (record) => console.log(JSON.stringify(record)), handleSignals = false,
+} = {}) {
     const rpc = async (method, params = []) => (await requestEthereumJsonRpc({
         config: config.rpc, fetch, method, params,
     })).result;
@@ -22,26 +24,38 @@ export async function startNode(config, signer, { fetch = globalThis.fetch, log 
         runtime.server.once('error', reject);
         runtime.server.listen(config.port, config.host, resolveListening);
     });
+    if (handleSignals) {
+        const logLifecycle = (record) => {
+            try { log(record); } catch {
+                // A failed output sink must not abort startup or prevent shutdown.
+            }
+        };
+        const signals = ['SIGINT', 'SIGTERM'];
+        const close = runtime.close;
+        let stopping = false;
+        const stop = () => {
+            if (stopping) return;
+            stopping = true;
+            logLifecycle({ event: 'stopping', message: 'Stopping node; waiting for active work to finish.' });
+            runtime.close().catch(() => { process.exitCode = 1; });
+        };
+        // Keep handlers until accepted work drains, even if its client already disconnected.
+        runtime.close = () => close().finally(() => {
+            for (const signal of signals) process.off(signal, stop);
+        });
+        for (const signal of signals) process.on(signal, stop);
+        logLifecycle({ event: 'listening', host: config.host, port: config.port, chainId: config.chainId,
+            loggerContract: config.loggerContract, nodeAddress: signer.address });
+    }
     return runtime;
 }
 
 async function main() {
     const args = process.argv.slice(2);
-    if (args.length !== 1) throw new Error('Usage: npm start -- /absolute/path/to/config.json');
+    if (args.length !== 1) throw new Error('Usage: node node/production/src/main.mjs /absolute/path/to/config.json');
     const config = await loadConfig(args[0]);
     const signer = createLocalSigner(process.env.OYA_NODE_PRIVATE_KEY);
-    const runtime = await startNode(config, signer);
-    console.log(JSON.stringify({
-        event: 'listening', host: config.host, port: config.port, chainId: config.chainId,
-        loggerContract: config.loggerContract, nodeAddress: signer.address,
-    }));
-    let stopping = false;
-    for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
-        if (stopping) return;
-        stopping = true;
-        // Drain accepted work even when its client has already disconnected.
-        runtime.close().catch(() => { process.exitCode = 1; });
-    });
+    await startNode(config, signer, { handleSignals: true });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

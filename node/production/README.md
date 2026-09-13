@@ -100,11 +100,11 @@ Start the node in the foreground from the repository root:
 node -- node/production/scripts/local-node.mjs run
 ```
 
-Use this direct Node.js command when configuring a process supervisor, with the repository root as its working directory. Send SIGINT/SIGTERM to the wrapper's Node.js PID. Launching through npm introduces a shell whose signal forwarding can vary. The `--` separator keeps options such as `--env-file` with the script.
+Use this direct Node.js command when configuring a process supervisor, with the repository root as its working directory. Send SIGINT/SIGTERM to that Node.js PID, which owns the HTTP server. Launching through npm introduces a shell whose signal forwarding can vary. The `--` separator keeps options such as `--env-file` with the script.
 
-`run` performs the readiness checks itself, prints the local URL, and launches the existing node CLI with the same Node.js executable. The child inherits terminal output and the selected node key and provider authorization values; agent/deployer keys and other Oya/Logger environment settings are excluded. It uses the selected configuration file, so keep that file stable while launching. No dependencies are installed and no services are deployed by `run`.
+`run` loads the selected configuration and signer once, performs readiness checks, prints the local URL, and calls `startNode()` in the same process. Startup uses those loaded settings even if the files change during readiness; later edits take effect on the next explicit run. The runtime receives its configuration and signer directly, without copying the selected environment into `process.env`. No dependencies are installed and no services are deployed by `run`.
 
-Ctrl-C in the owning terminal, or SIGINT/SIGTERM sent to the wrapper, forwards a shutdown signal to the child and waits for active work to drain. There is no forced shutdown timer or automatic restart. A clean stop exits 0; otherwise the wrapper preserves the child's exit code, or uses `128 + signal number` for signal termination. Supplied Ethereum/IPFS services keep running. Start another explicit `run` to restart the node after reconciling any uncertain transaction outcome.
+Ctrl-C in the owning terminal, or SIGINT/SIGTERM sent to the node, stops admission and waits for active work to drain. There is no forced shutdown timer or automatic restart. A clean stop exits 0; startup or shutdown failure exits 1. Supplied Ethereum/IPFS services keep running. Start another explicit `run` to restart the node after reconciling any uncertain transaction outcome.
 
 In another terminal, using the same path overrides if any:
 
@@ -127,6 +127,8 @@ Alternatively, with environment variables already loaded:
 ```sh
 node -- node/production/src/main.mjs /absolute/path/to/config.json
 ```
+
+Both CLI paths use `startNode(config, signer, { handleSignals: true })` from `src/main.mjs`, which starts the HTTP server and enables shared lifecycle logs and SIGINT/SIGTERM handling. Programmatic callers omit `handleSignals` and use the returned runtime's `close()` method themselves. Signal listeners remain installed until accepted work has drained and are then removed.
 
 Startup checks the RPC chain and deployed Logger bytecode before serving traffic. Configuration rejects unsupported fields. There is no state directory, publication journal, process lock, or startup replay.
 
