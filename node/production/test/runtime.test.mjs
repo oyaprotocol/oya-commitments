@@ -3,6 +3,7 @@ import { request as httpRequest } from 'node:http';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Transaction, Wallet } from 'ethers';
+import { hasBytecode } from '../src/bytecode.mjs';
 import { parseConfig } from '../src/config.mjs';
 import { createLocalSigner } from '../src/signer.mjs';
 import { fixture, signedMessage } from './runtime-fixture.mjs';
@@ -44,13 +45,23 @@ test('signer preserves EIP-1559 fields and does not disclose invalid secret valu
     await assert.rejects(signer.signTransaction(input, aborted));
 });
 
-test('startup still rejects the wrong chain and absent Logger bytecode', async (t) => {
+test('bytecode distinguishes absence from valid bytes and rejects malformed RPC data', () => {
+    assert.equal(hasBytecode('0x'), false);
+    for (const code of ['0x00', '0x6000', '0xaAbB']) assert.equal(hasBytecode(code), true);
+    for (const code of [null, undefined, 0, {}, '', '0x0', '0x600', '0xgg', '0x00\n', 'provider-secret-marker']) {
+        assert.throws(() => hasBytecode(code), { message: 'Invalid bytecode.' });
+    }
+});
+
+test('startup still rejects the wrong chain and absent or malformed Logger bytecode', async (t) => {
     const setup = await fixture(t);
     setup.state.chainId = '0x1';
     await assert.rejects(setup.start(), /chain ID/);
     setup.state.chainId = '0x7a69';
-    setup.state.code = '0x';
-    await assert.rejects(setup.start(), /bytecode/);
+    for (const code of ['0x', '0x600']) {
+        setup.state.code = code;
+        await assert.rejects(setup.start(), /bytecode/);
+    }
     assert.equal(setup.state.uploads, 0);
     assert.equal(setup.state.signs, 0);
 });

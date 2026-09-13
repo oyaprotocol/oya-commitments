@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { ethWaitForTransactionReceipt, parseTransactionQuantity, requestEthereumJsonRpc } from '@oyaprotocol/ethereum';
 import { createTimeoutSignal, invokeWithAbort } from '@oyaprotocol/utils';
+import { hasBytecode } from '../src/bytecode.mjs';
 import { createLocalSigner } from '../src/signer.mjs';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
@@ -16,11 +17,6 @@ export function deploymentPath(configPath) {
     const name = basename(configPath);
     return join(dirname(configPath), name === 'config.local.json' ? 'deployment.local.json'
         : `${name}.deployment.local.json`);
-}
-
-function hasCode(code) {
-    if (typeof code !== 'string' || !/^0x(?:[0-9a-fA-F]{2})*$/.test(code)) throw new Error('Invalid bytecode.');
-    return code !== '0x';
 }
 
 async function readDeployment(artifactPath, chainId, deployer) {
@@ -62,7 +58,7 @@ export async function deployLogger(configPath, { config, env }, {
         }
         await checkChain();
         stage = 'Check the configured Logger address and RPC bytecode response.';
-        if (hasCode(await rpc('eth_getCode', [config.loggerContract, 'latest']))) {
+        if (hasBytecode(await rpc('eth_getCode', [config.loggerContract, 'latest']))) {
             log(`OK Reusing configured Logger ${config.loggerContract} on chain ${config.chainId}; no deployment submitted.`);
             return 0;
         }
@@ -113,7 +109,7 @@ export async function deployLogger(configPath, { config, env }, {
         await checkChain();
         if (receipt.status !== 'success' || receipt.to !== null || !equal(receipt.from, deployer)
             || !equal(receipt.contractAddress, deployment.address)
-            || !hasCode(await rpc('eth_getCode', [deployment.address, 'latest']))) throw new Error('Deployment did not verify.');
+            || !hasBytecode(await rpc('eth_getCode', [deployment.address, 'latest']))) throw new Error('Deployment did not verify.');
         log(`OK Verified Logger ${deployment.address} on chain ${config.chainId}.`);
         stage = 'Deployment verified, but recording failed. Adopt the verified address manually; do not deploy again.';
         const metadata = { chainId: config.chainId, loggerContract: deployment.address,

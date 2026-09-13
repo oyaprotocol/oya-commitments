@@ -129,11 +129,12 @@ test('reuse requires no deployment or node key, invokes no Forge, and changes no
 });
 
 test('preflight failures stop before Forge or configuration changes', async (t) => {
-    for (const reason of ['chain', 'key', 'code', 'record', 'authorization']) await t.test(reason, async (t) => {
+    for (const reason of ['chain', 'key', 'code', 'odd-code', 'record', 'authorization']) await t.test(reason, async (t) => {
         const f = await fixture(t);
         if (reason === 'chain') f.state.chain = '0x1';
         if (reason === 'key') f.settings.env.LOGGER_DEPLOYER_PK = '';
         if (reason === 'code') f.state.configuredCode = 'provider-secret-marker';
+        if (reason === 'odd-code') f.state.configuredCode = '0x600';
         if (reason === 'record') await writeFile(deploymentPath(f.configPath), 'existing-record');
         if (reason === 'authorization') {
             f.settings.config = { ...f.settings.config,

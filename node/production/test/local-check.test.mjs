@@ -151,6 +151,7 @@ test('check reports the failed prerequisite without exposing provider data', asy
     const cases = [
         ['chain mismatch', { eth_chainId: '0x1' }, 'Ethereum chain', 1],
         ['missing Logger', { eth_getCode: '0x' }, 'Logger bytecode', 2],
+        ['malformed Logger bytecode', { eth_getCode: '0x600' }, 'Logger bytecode', 2],
         ['unfunded node', { eth_getBalance: '0x0' }, 'Node gas balance', 3],
         ['invalid balance', { eth_getBalance: 'provider-secret-marker' }, 'Node gas balance', 3],
         ['oversized balance', { eth_getBalance: `0x1${'0'.repeat(64)}` }, 'Node gas balance', 3],

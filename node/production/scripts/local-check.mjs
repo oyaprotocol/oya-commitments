@@ -1,5 +1,6 @@
 import { parseTransactionQuantity, requestEthereumJsonRpc } from '@oyaprotocol/ethereum';
 import { createTimeoutSignal, invokeWithAbort } from '@oyaprotocol/utils';
+import { hasBytecode } from '../src/bytecode.mjs';
 
 export async function checkLocalNode({ config, nodeAddress }, {
     fetch = globalThis.fetch, log = console.log, timeoutMs = 10_000,
@@ -13,10 +14,8 @@ export async function checkLocalNode({ config, nodeAddress }, {
     const checks = [
         ['Ethereum chain', 'Check RPC availability, authorization, and chainId.', async (signal) =>
             parseTransactionQuantity(await rpc('eth_chainId', [], signal), 'eth_chainId result') === BigInt(config.chainId)],
-        ['Logger bytecode', 'Check loggerContract and deploy Logger on the selected chain.', async (signal) => {
-            const code = await rpc('eth_getCode', [config.loggerContract, 'latest'], signal);
-            return typeof code === 'string' && /^0x(?:[0-9a-fA-F]{2})+$/.test(code);
-        }],
+        ['Logger bytecode', 'Check loggerContract and deploy Logger on the selected chain.', async (signal) =>
+            hasBytecode(await rpc('eth_getCode', [config.loggerContract, 'latest'], signal))],
         ['Node gas balance', 'Check RPC availability and fund the node address with native currency.', async (signal) => {
             const balance = parseTransactionQuantity(await rpc('eth_getBalance', [nodeAddress, 'latest'], signal), 'eth_getBalance result');
             return balance > 0n;
