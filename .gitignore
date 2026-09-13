@@ -33,5 +33,8 @@ agent/.state/
 
 # Production node local configuration, keys, state, and deployment broadcasts
 node/production/config.local.json
+deployment.local.json
+*.deployment.local.json
+.oya-logger-*/
 node/production/.state/
 contracts/broadcast/

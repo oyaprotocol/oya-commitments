@@ -1,6 +1,6 @@
 # Make a local log-only node easy to deploy and run
 
-This ExecPlan follows `PLANS.md`. **Status: accepted on 2026-09-12; milestone 1 is implemented and validated, with stage 1c awaiting review.** The user will personally review every line of code. Report each stage's diff and validation before proceeding to the next stage. This explicit user instruction takes precedence over the repository's default of continuing through milestones.
+This ExecPlan follows `PLANS.md`. **Status: milestone 2 implemented and validated; awaiting user review before milestone 3.** The user will personally review every line of code. Report each stage's diff and validation before proceeding to the next stage. This explicit user instruction takes precedence over the repository's default of continuing through milestones.
 
 ## Purpose / Big Picture
 
@@ -11,6 +11,8 @@ An operator should be able to prepare a checkout, configure an Ethereum connecti
 The accepted first version runs in the foreground: logs appear in the terminal, Ctrl-C stops admission and drains active work, and another terminal can query status or run an agent. This plan does not create a supervisor, PID registry, automatic restart loop, cloud deployment, container setup, or boot-time service. Treat the local instance as maintained operating tooling with stable configuration and explicit failures. Use Node.js built-ins and the existing necessary dependencies; avoid disposable launch scripts in the operator workflow.
 
 Verification, Safe/Governor proposals, agent strategy implementation, and new kernel signing support are outside this plan. The current single-operation HTTP behavior and ethers signing adapter remain unchanged. Operational configuration and deployment receipts are retained; message progress is not journaled.
+
+Milestones 2 and 3 validate deployment against direct, unauthenticated local Anvil RPC. Authenticated RPC deployment testing, proxy fixtures, and Foundry header-compatibility work are deferred. Existing node RPC/IPFS authorization handling remains unchanged.
 
 ## Progress
 
@@ -35,12 +37,23 @@ Verification, Safe/Governor proposals, agent strategy implementation, and new ke
 - [x] 2026-09-13: Implemented shared local settings loading, foreground child launch with signal forwarding, and bounded health/identity status checks.
 - [x] 2026-09-13: Milestone 1c validation and documentation: all 62 host tests passed under Node 24.21.0, including actual CLI startup, npm status, signal forwarding with a held request, occupied ports, sanitized failures, and exit outcomes. `git diff --check` passed.
 - [x] 2026-09-13: Updated launch examples and CLI help to use Node.js directly so a supervisor signals the wrapper PID. npm remains the setup/check/status convenience command. Direct help, all six existing CLI/setup tests under Node 24.21.0, and `git diff --check` passed.
-- [ ] User reviews milestone 1c before Logger deployment tooling.
-- [ ] Milestone 2: Explicit Logger deployment and reuse.
+- [x] 2026-09-13: User authorized Logger deployment and reuse tooling after milestone 1c and deferred Node.js portability work.
+- [x] 2026-09-13: Implemented deploy-logger with simulation by default, explicit broadcast, configured-code reuse, isolated Forge artifacts, verified deployment metadata, and atomic config replacement. Added generated-account unit tests and a disposable Anvil integration fixture.
+- [x] 2026-09-13: Contract build and 26 deployment/setup tests passed under Node 24.21.0. The integration fixture requires loopback access outside the sandbox; its permission request was interrupted while the user asked about the existing mainnet fork. No additional chain was started by that failed sandboxed attempt.
+- [x] 2026-09-13: Full host suite passed all 82 tests under Node 24.21.0, including existing readiness, runtime, and shutdown tests.
+- [x] 2026-09-13: The integration fixture subsequently ran outside the sandbox but stopped during Forge simulation with HTTP 401; the proxy observed a missing Authorization header. Each test-owned chain was cleaned up, and the existing mainnet fork was untouched.
+- [x] 2026-09-13: User removed authenticated RPC testing from the plan. Revised the deployment scope and acceptance criteria to use Anvil directly; no further Foundry header investigation is required.
+- [x] 2026-09-13: Simplified the deployment fixture to direct Anvil RPC and removed the authenticated proxy and temporary diagnostic hooks. Deployment rejects custom Authorization headers before RPC or Forge activity; existing runtime authorization behavior is unchanged.
+- [x] 2026-09-13: All 83 host tests and the real Anvil deployment/reuse fixture passed under Node 24.21.0 with Foundry 1.5.1 on macOS. Simulation left the deployer nonce at zero, broadcast advanced it to one, and reuse left it at one. The contract build and `git diff --check` passed.
+- [x] 2026-09-13: Milestone 2: Explicit Logger deployment and reuse implemented and validated.
+- [ ] User reviews milestone 2 before local agent publication integration.
 - [ ] Milestone 3: Local agent-to-node integration evidence and operator instructions.
 
 ## Surprises & Discoveries
 
+- Deployment needs shared file/config loading without constructing a node signer. `loadLocalConfig` now supplies that shared portion; existing run/check/status still use `loadLocalSettings` and require the node key. Reuse exits before validating the deployment key or invoking Forge.
+- Artifact and config writes introduce recovery concerns beyond startup checks. Every Forge invocation uses a fresh private sibling directory. Existing metadata blocks a new deployment when the configured address has no code; linked configs are rejected before deployment, and edits during deployment prevent automatic config replacement.
+- Direct Anvil validation confirms that the isolated Foundry artifact identifies the new Logger and that a separate kernel receipt/code check can verify it before config replacement. The test retained mode `0640` on its config and created metadata with mode `0600`; reuse required no deployment key and changed neither file.
 - `node/production/src/main.mjs` already supports a supplied config file, chain and Logger bytecode checks, and SIGINT/SIGTERM draining. These are reusable runtime capabilities; a second server or shutdown implementation is unnecessary.
 - The original host used local `file:../../packages/...` dependencies and built kernels during setup. It now installs exact npm releases from its own lockfile: Ethereum/messages `0.1.2` and utils/IPFS `0.1.1`.
 - With published dependencies, setup only needs its package directory. Running `npm ci` there preserves the installation behavior without calculating the repository root. The real npm entry was validated from a temporary caller directory with relative config/environment paths.
@@ -56,11 +69,13 @@ Verification, Safe/Governor proposals, agent strategy implementation, and new ke
 - The existing runtime deliberately has no publication journal, deduplication, or automatic restart recovery. A health result of `transaction_outcome_unknown` must not trigger a management-script restart that clears that flag.
 - A local agent already has a usable wire protocol and example client in `node/production/scripts/send-message.mjs`. Receiving messages does not require an agent-specific package or reimbursement logic.
 - Foundry's script path is relative to the invoking working directory even when using `--root contracts`. Invoke `contracts/script/DeployLogger.s.sol:DeployLogger` from the repository root, as the working smoke does.
-- A read-only configuration probe with non-secret loopback values confirmed `FOUNDRY_ETH_RPC_URL` and a JSON array in `FOUNDRY_ETH_RPC_HEADERS` populate Foundry's `eth_rpc_url` and `eth_rpc_headers`. The same probe did not populate `eth_rpc_url` through `ETH_RPC_URL`. Validate actual script behavior in the local integration test rather than assuming Cast and Forge use identical environment names.
+- Foundry 1.5.1 accepted the RPC URL/header configuration, but its actual script invocation omitted Authorization on a request and received HTTP 401 from the test proxy. Configuration parsing alone did not establish authenticated deployment support. This compatibility work is now deferred; validate the local deployment path against Anvil directly.
 - Node 23.10.0 consumed `--env-file` even after the script filename, causing setup to exit with code 9 before creating the selected file. `node -- scripts/local-node.mjs` prevents that interpretation. The npm command uses this separator, and a process test passes a nonexistent environment file through the actual npm entry to guard against regression.
 
 ## Decision Log
 
+- Decision: Validate deployment and reuse directly on disposable Anvil, with no authenticated RPC proxy or header-compatibility investigation. Rationale: the user removed authenticated RPC testing from this local milestone. Preserve generated deployment accounts, nonce assertions, and test-owned process cleanup; leave the existing mainnet fork for operator use. Date/Author: 2026-09-13 / user instruction, recorded by Codex; supersedes the earlier proxy-based validation decision.
+- Decision: Store per-invocation Forge artifacts in a private `.oya-logger-*` sibling directory, and metadata in `deployment.local.json` for `config.local.json` or `<full-config-filename>.deployment.local.json` otherwise. Rationale: avoid stale artifact selection and collisions between differently named configurations. Record verified public data before atomically updating config; never retry an ambiguous broadcast. Date/Author: 2026-09-13 / Codex.
 - Decision: Keep node location separate from Ethereum/IPFS location. Rationale: a local node must still interact with the selected Ethereum network and supplied services. Date/Author: 2026-09-11 / user requirement, recorded by Codex.
 - Decision: Use a foreground local command with terminal logs, status, and Ctrl-C shutdown. Rationale: reuses the existing lifecycle and avoids introducing a background service manager for the first local release. Date/Author: proposed 2026-09-11 / Codex; accepted 2026-09-12 / user.
 - Decision: Keep Logger deployment an explicit action; running or restarting the node only uses an existing address. Rationale: service lifecycle operations should not unexpectedly deploy contracts or spend deployment gas. Date/Author: 2026-09-11 / Codex.
@@ -81,6 +96,8 @@ Verification, Safe/Governor proposals, agent strategy implementation, and new ke
 - Decision: Forward only `OYA_NODE_PRIVATE_KEY`, `OYA_RPC_AUTHORIZATION`, and `OYA_IPFS_AUTHORIZATION` among Oya/Logger environment variables. Rationale: the node child does not need agent or deployment credentials; preserve other ordinary process environment settings. Date/Author: 2026-09-13 / Codex.
 
 ## Outcomes & Retrospective
+
+Milestone 2 is implemented and validated for review. The command optionally previews deployment, broadcasts only with `--broadcast`, verifies the new Logger before recording it, and reuses an existing configured address with code. All 83 host tests, the direct Anvil integration fixture, the contract build, and whitespace checks passed. The fixture verifies a single deployment, selected-file key precedence, preserved config values and permissions, public metadata, and reuse without another transaction. Its Anvil process and temporary files were cleaned up; the operator's existing mainnet fork and private configuration were untouched. No dependencies or Solidity/kernel/runtime source changed. Deployment with custom RPC Authorization headers remains deferred and is rejected explicitly. Milestone 3 awaits the user's review of this stage.
 
 Milestone 1a adds the maintained `local setup` command using Node built-ins, three focused tests, a package command, and brief operating instructions. Setup installs/builds from the existing lockfiles and creates private templates without overwriting existing regular files or their permissions. The actual command completed successfully with temporary config/environment destinations, followed by all 23 host tests passing. Existing operator node configuration files were not read or changed. No dependencies, lockfiles, runtime message handling, or contracts changed; no Ethereum or IPFS services were started and no blockchain transaction was submitted. Full milestone 1 still requires configuration loading, readiness checks, and lifecycle commands.
 
@@ -114,9 +131,9 @@ The standalone runtime is `node/production/`. `src/config.mjs` validates configu
 
 ### Operator interface
 
-The `setup`, `check`, `run`, and `status` actions are implemented with published dependencies. `deploy-logger` remains planned for the next review milestone.
+The `setup`, `check`, `run`, `status`, and `deploy-logger` actions are implemented with published dependencies. Deployment and reuse have passed direct Anvil integration validation.
 
-Use `node -- node/production/scripts/local-node.mjs run` from the repository root to launch the node. A supervisor must execute this command directly and signal the wrapper's Node.js PID. Use the package command `npm --prefix node/production run local -- <action>` for setup/check/status and the planned explicit deployment action. Both entry paths use `node/production/scripts/local-node.mjs`. Support `--config <path>` and `--env-file <path>` for commands that consume settings. Their defaults are `node/production/config.local.json` and `node/production/.env`, resolved from the package location. Resolve supplied relative paths against the caller's original working directory (`INIT_CWD` under npm, otherwise `process.cwd()`), and show absolute paths in examples with overrides. Running from another directory must not break repository-relative build or deployment commands.
+Use `node -- node/production/scripts/local-node.mjs run` from the repository root to launch the node. A supervisor must execute this command directly and signal the wrapper's Node.js PID. Use the package command `npm --prefix node/production run local -- <action>` for setup/check/status and explicit deployment. Both entry paths use `node/production/scripts/local-node.mjs`. Support `--config <path>` and `--env-file <path>` for commands that consume settings. Their defaults are `node/production/config.local.json` and `node/production/.env`, resolved from the package location. Resolve supplied relative paths against the caller's original working directory (`INIT_CWD` under npm, otherwise `process.cwd()`), and show absolute paths in examples with overrides. Running from another directory must not break repository-relative build or deployment commands.
 
 | Action | Behavior |
 | --- | --- |
@@ -138,7 +155,7 @@ Milestone 1c moves the existing loading into `scripts/local-config.mjs` using `u
 
 Create new private config/environment files with mode `0600`; never overwrite or loosen existing permissions. RPC URLs can contain credentials, so output only public chain/address information and local paths, not complete config objects, URLs for providers, private keys, headers, raw child-process exceptions, or unsanitized provider failures. Installation, startup, and deployment failure messages should name the failed step and give a safe next action.
 
-Use one new ignored `node/production/deployment.local.json` for successful Logger deployment metadata: chain ID, contract address, deployment transaction hash, block number, and deployer address. For a custom config path, use a sibling filename derived from that config's basename so separate configurations do not overwrite each other's metadata. This record contains no signing material or message progress. Do not add `stateDir`, transaction replay, process locks, or runtime persistence.
+Use one new ignored `node/production/deployment.local.json` for successful Logger deployment metadata: chain ID, contract address, deployment transaction hash, block number, and deployer address. A `config.local.json` in another directory uses the same sibling metadata name; other config names use `<full-config-filename>.deployment.local.json`. This record contains no signing material or message progress. Retain each invocation's private `.oya-logger-*` sibling directory for Forge artifacts and failure inspection. Do not add `stateDir`, transaction replay, process locks, or runtime persistence.
 
 ### Prerequisites and service boundaries
 
@@ -176,9 +193,9 @@ This milestone is independently usable with an already deployed Logger and suppl
 
 Add the `deploy-logger` action as orchestration of `contracts/script/DeployLogger.s.sol`. No Solidity changes are expected. First initialize the existing `lib/forge-std` submodule if needed and build the contracts. Validate the selected chain and deployment key before invoking Forge. This action can operate before the running node is funded or has usable Logger bytecode; do not call the full node-readiness check as its prerequisite.
 
-If the configured Logger already has code, report that the existing address is in use and do not deploy another contract. Otherwise, `deploy-logger` without `--broadcast` runs the Foundry simulation only. With `--broadcast`, repeat simulation as part of the normal Foundry script execution and broadcast explicitly. Use the configured chain ID for `LOGGER_CHAIN_ID`, the separately supplied `LOGGER_DEPLOYER_PK`, and the configured RPC endpoint and authorization. An external network is allowed by configuration, but implementation validation broadcasts only on isolated Anvil; approval of this plan is not permission to use unspecified live credentials or funds.
+If the configured Logger already has code, report that the existing address is in use and do not deploy another contract. Otherwise, `deploy-logger` without `--broadcast` runs the Foundry simulation only. With `--broadcast`, repeat simulation as part of the normal Foundry script execution and broadcast explicitly. Use the configured chain ID for `LOGGER_CHAIN_ID`, the separately supplied `LOGGER_DEPLOYER_PK`, and the configured RPC endpoint. An external network is allowed by configuration, but implementation validation broadcasts only on isolated Anvil; approval of this plan is not permission to use unspecified live credentials or funds.
 
-Invoke Forge from the repository root with argument arrays, not shell-interpolated commands. Supply `FOUNDRY_ETH_RPC_URL` and `FOUNDRY_ETH_RPC_HEADERS` through its child environment so credential-bearing RPC URLs and headers do not appear in process arguments. Validate the installed Foundry behavior in the local tests, including authorized RPC access. Do not log the child environment. Contract deployment remains implemented by the existing Solidity script; host code only orchestrates it and reads the result.
+Invoke Forge from the repository root with argument arrays, not shell-interpolated commands. Supply `FOUNDRY_ETH_RPC_URL` through its child environment so RPC URLs do not appear in process arguments. Validate the installed Foundry behavior against direct local Anvil RPC. Deployment requiring custom RPC Authorization headers is deferred; report that unsupported setting before invoking Forge rather than silently dropping it. Do not add a proxy or header workaround, and do not log the child environment. Existing node/check RPC authorization support remains unchanged. Contract deployment remains implemented by the existing Solidity script; host code only orchestrates it and reads the result.
 
 After a broadcast, verify the successful receipt, expected chain, and deployed code using the existing Ethereum kernel primitives. Read the current invocation's Foundry artifact, not an unrelated stale `run-latest.json`; isolate broadcast output or check invocation freshness and identity before selecting its transaction. Only then write public deployment metadata and update `loggerContract` in the selected config. Preserve all other settings and file permissions, and replace config atomically. Simulation, failure, or uncertain receipt observation must leave the configured address unchanged.
 
@@ -186,11 +203,11 @@ Do not automatically retry, redeploy, or invoke `forge --resume` after an ambigu
 
 Add a blank, documented `LOGGER_DEPLOYER_PK` entry to `.env.example`; existing local environment files remain untouched. Extend CLI tests for simulation without broadcast, chain mismatch before effects, preservation of configuration on failure, verified address recording, and reuse without redeployment.
 
-Introduce `node/production/scripts/test-local-operations.mjs` and a `test:local` package command in this milestone. Initially this fixture owns a fresh Anvil process, temporary config/environment files, and a generated funded deployment account. Exercise the actual CLI to simulate, broadcast, verify the recorded address, and repeat deployment as a reuse operation with no additional transaction. Always stop the owned process. Run the host tests, contract build, and `test:local` before reviewing this milestone; milestone 3 will extend this same fixture to publication and node lifecycle checks.
+Introduce `node/production/scripts/test-local-operations.mjs` and a `test:local` package command in this milestone. Initially this fixture owns a fresh Anvil process, temporary config/environment files, and a generated funded deployment account. Point the configured RPC URL directly at Anvil; no authenticated proxy or RPC authorization credentials are needed. Exercise the actual CLI to simulate, broadcast, verify the recorded address, and repeat deployment as a reuse operation with no additional transaction. Always stop the owned process. Run the host tests, contract build, and `test:local` before reviewing this milestone; milestone 3 will extend this same fixture to publication and node lifecycle checks.
 
 ### Milestone 3: Prove operation with a separate local sender
 
-Extend `node/production/scripts/test-local-operations.mjs` to run isolated offline Kubo alongside its disposable Anvil, using the existing smoke's approach. Generate separate deployer, node, and agent identities, and fund only the test deployer and node through that owned Anvil. Create private config/environment files in a temporary directory; do not touch the operator's default files or services.
+Extend `node/production/scripts/test-local-operations.mjs` to run isolated offline Kubo alongside its disposable Anvil, using the existing smoke's approach and retaining direct Anvil RPC access. Generate separate deployer, node, and agent identities, and fund only the test deployer and node through that owned Anvil. Create private config/environment files in a temporary directory; do not touch the operator's default files or services.
 
 Exercise the actual local CLI to simulate and deploy Logger, run `check`, launch `run`, and query `status`. From a separate child process, use the existing `scripts/send-message.mjs` with an agent-only environment to submit a signed file. Assert the `200` / `logged` response, retrieve the exact signed envelope from Kubo, and independently inspect the expected Logger event on Anvil. A disallowed signer must be rejected before any Logger transaction. No new agent implementation is needed to prove the same interface is usable by a local agent.
 
@@ -202,7 +219,7 @@ Run the host tests, contract build, new local integration test, existing smoke, 
 
 ## Concrete Steps
 
-Use the repository root unless otherwise specified. Setup, check, run, and status are available. Deployment commands and `test:local` below remain planned for milestones 2 and 3; the examples describe the complete intended workflow.
+Use the repository root unless otherwise specified. Setup, check, run, status, deploy-logger, and the deployment-only `test:local` fixture are implemented and validated. Publication and lifecycle integration in this fixture remain milestone 3 work. The examples describe the complete intended workflow.
 
 The intended operator workflow is:
 
@@ -213,7 +230,7 @@ Edit the created `config.local.json` and `.env` with the intended chain, RPC/IPF
     npm --prefix node/production run local -- deploy-logger
     npm --prefix node/production run local -- deploy-logger --broadcast
 
-The first deployment command simulates; the second broadcasts only when a usable Logger is not already configured. Then:
+The first deployment command is an optional preview; the second includes Forge's simulation and broadcasts only when code is absent at the configured Logger address. Then:
 
     npm --prefix node/production run local -- check
     node -- node/production/scripts/local-node.mjs run
@@ -244,7 +261,7 @@ Milestone 1 validation:
     npm --prefix node/production test
     git diff --check
 
-Milestone 2 validation (the local fixture at this stage exercises deployment and reuse on isolated Anvil):
+Milestone 2 validation (the local fixture exercises deployment and reuse directly on isolated Anvil, without RPC authentication):
 
     npm --prefix node/production test
     forge build --root contracts --sizes
@@ -265,7 +282,7 @@ No kernel or contract source changes are planned. If implementation actually req
 
 Acceptance is an operator-visible flow from a prepared checkout to a foreground node receiving a separately signed local request and producing an actual Logger event. The RPC endpoint and expected chain come from configuration, independent of the loopback node address. The local integration fixture must exercise the public CLI rather than calling only internal helpers.
 
-Setup must leave existing operator files untouched, use existing lockfiles, and avoid installing the legacy agent runner. Readiness checks and status must submit no transactions and publish no data. Correctly authenticated RPC/IPFS endpoints must work; wrong chain, missing bytecode, zero node balance, unreachable services, and missing secrets must yield useful sanitized failures. An already running listener or mismatched health identity must not be mistaken for a successful launch.
+Setup must leave existing operator files untouched, use existing lockfiles, and avoid installing the legacy agent runner. Readiness checks and status must submit no transactions and publish no data. Preserve existing node RPC/IPFS authorization behavior and its host tests; authenticated RPC deployment testing is not an acceptance requirement. Wrong chain, missing bytecode, zero node balance, unreachable services, and missing secrets must yield useful sanitized failures. An already running listener or mismatched health identity must not be mistaken for a successful launch.
 
 A deployment simulation must not alter the chain or configured Logger address. A successful broadcast must be verified before configuration changes. Reuse and ordinary node restarts must preserve the Logger address and signing identity without creating transactions. Failure or lost deployment receipts must not trigger automatic redeployment.
 
@@ -311,9 +328,18 @@ All 39 tests passed with no failures or skips. The check fixture invokes the act
 
 Milestone 1c used the same `npm --prefix node/production test` and `git diff --check` commands under Node 24.21.0 on macOS. All 62 tests passed with zero failures or skips. The actual CLI starts the existing node with selected file credentials over conflicting inherited values; npm status reports ready without contacting upstream services. Held signed requests report busy and survive SIGINT/SIGTERM until the fixture returns its final rejection and the child exits cleanly. The tests verify unavailable health after shutdown, unchanged settings files, supplied services left running, wrong-chain refusal before launch, occupied-port startup failure, child exit-code propagation, launch-error redaction, and signal-listener cleanup. Controlled health responses cover ready/busy, draining, uncertain outcomes, malformed data, each identity mismatch, IPv6 URL formatting, and bounded stalled connections/bodies. Every test-owned process/listener is cleaned up; no real-chain transaction or IPFS publication was performed.
 
+Milestone 2 validation used Node 24.21.0 and Foundry 1.5.1 on macOS, from the repository root:
+
+    forge build --root contracts --sizes
+    npm --prefix node/production test
+    npm --prefix node/production run test:local
+    git diff --check
+
+The build passed, all 83 host tests passed, and the direct Anvil integration test passed. The actual npm CLI rejected a wrong chain, simulated with nonce zero and unchanged config, deployed one Logger, independently checked its successful receipt and code, and recorded matching public metadata. Config mode `0640`, metadata mode `0600`, and artifact-directory mode `0700` were verified. Reuse with an empty deployment key left the nonce at one and preserved config/metadata bytes without another artifact directory. The fixture stopped its owned Anvil and removed its temporary files. A final scan of the ten pending files found no credential literals, personal details, or machine-specific paths. No operator credentials or existing chain were used. The wrapper invokes Forge once; Forge's own RPC retries remain internal to that invocation.
+
 ## Interfaces and Dependencies
 
-Operating helpers are `node/production/scripts/local-node.mjs`, `scripts/local-config.mjs`, `scripts/local-check.mjs`, `scripts/local-run.mjs`, and `scripts/local-status.mjs`, with corresponding local tests. Subsequent milestones add `scripts/test-local-operations.mjs`, package command entries, `.env.example`'s empty deployment-key setting, relevant README updates, and an ignore rule for local deployment metadata. Reuse `src/config.mjs`, `src/main.mjs`, `src/signer.mjs`, and `scripts/send-message.mjs`. Existing contracts remain in `contracts/`, and deployment is performed by `contracts/script/DeployLogger.s.sol`.
+Operating helpers are `node/production/scripts/local-node.mjs`, `scripts/local-config.mjs`, `scripts/local-check.mjs`, `scripts/local-run.mjs`, `scripts/local-status.mjs`, and `scripts/local-deploy.mjs`, with corresponding local tests. Milestone 2 adds `scripts/test-local-operations.mjs`, the `test:local` package command, `.env.example`'s empty deployment-key setting, relevant README updates, and ignore rules for local deployment metadata and artifacts. Milestone 3 extends that fixture. Reuse `src/config.mjs`, `src/main.mjs`, `src/signer.mjs`, and `scripts/send-message.mjs`. Existing contracts remain in `contracts/`, and deployment is performed by `contracts/script/DeployLogger.s.sol`.
 
 The release handoff additionally changes `node/production/package.json` and its lockfile to pin published kernels, with focused updates to setup, host tests/docs, and affected CI assumptions. This is the planned exception to retaining the existing lockfile; subsequent operating commands must use it without rewriting it.
 

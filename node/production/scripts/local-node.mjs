@@ -7,7 +7,7 @@ import { parseArgs, promisify } from 'node:util';
 const production = fileURLToPath(new URL('../', import.meta.url));
 const usage = 'Usage (from repository root):\n'
     + '  node -- node/production/scripts/local-node.mjs run [--config <path>] [--env-file <path>]\n'
-    + '  npm --prefix node/production run local -- <setup|check|status> [--config <path>] [--env-file <path>]';
+    + '  npm --prefix node/production run local -- <setup|check|status|deploy-logger> [--config <path>] [--env-file <path>] [--broadcast]';
 
 async function sameFile(left, right) {
     try {
@@ -41,7 +41,7 @@ export async function main(args, {
     let parsed;
     try {
         parsed = parseArgs({ args, allowPositionals: true, options: {
-            config: { type: 'string' }, 'env-file': { type: 'string' }, help: { type: 'boolean' },
+            config: { type: 'string' }, 'env-file': { type: 'string' }, help: { type: 'boolean' }, broadcast: { type: 'boolean' },
         } });
     } catch {
         return fail(invalidArguments);
@@ -52,13 +52,17 @@ export async function main(args, {
             + 'check: Load settings and check Ethereum, Logger, gas balance, and IPFS without writes.\n'
             + 'run: Check settings and services, then run the node in the foreground; Ctrl-C drains active work.\n'
             + 'status: Query local node health and identity without checking upstream services or restarting.\n'
+            + 'deploy-logger: Reuse configured code or simulate deployment; only --broadcast submits and records a new Logger.\n'
+            + '--broadcast is accepted only with deploy-logger.\n'
             + 'Launch run directly with Node.js; supervisors must send SIGINT/SIGTERM to that process.\n'
             + 'Defaults: node/production/config.local.json and node/production/.env.\n'
             + 'Relative overrides use the directory where you invoked the command.\n'
-            + 'Existing files are preserved. Exit status: 0 on success, 1 on failure; run preserves the child exit code.');
+            + 'Existing files are preserved by setup; verified deployments update loggerContract.\n'
+            + 'Exit status: 0 on success, 1 on failure; run preserves the child exit code.');
         return 0;
     }
-    if (positionals.length !== 1 || !['setup', 'check', 'run', 'status'].includes(positionals[0])
+    if (positionals.length !== 1 || !['setup', 'check', 'run', 'status', 'deploy-logger'].includes(positionals[0])
+        || (values.broadcast !== undefined && positionals[0] !== 'deploy-logger')
         || [values.config, values['env-file']].some((value) => value !== undefined && !value.trim())) {
         return fail(invalidArguments);
     }
@@ -76,6 +80,13 @@ export async function main(args, {
 
     if (positionals[0] !== 'setup') {
         try {
+            if (positionals[0] === 'deploy-logger') {
+                const { loadLocalConfig } = await import('./local-config.mjs');
+                const settings = await loadLocalConfig(configPath, envPath, { log });
+                if (!settings) return 1;
+                const { deployLogger } = await import('./local-deploy.mjs');
+                return await deployLogger(configPath, settings, { broadcast: values.broadcast, execute, log });
+            }
             const { loadLocalSettings } = await import('./local-config.mjs');
             const settings = await loadLocalSettings(configPath, envPath, { log });
             if (!settings) return 1;
