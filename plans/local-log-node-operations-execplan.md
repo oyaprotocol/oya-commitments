@@ -1,6 +1,6 @@
 # Make a local log-only node easy to deploy and run
 
-This ExecPlan follows `PLANS.md`. **Status: milestone 2 deployer simplification implemented and validated; awaiting user review before milestone 3.** The user will personally review every line of code. Report each stage's diff and validation before proceeding to the next stage. This explicit user instruction takes precedence over the repository's default of continuing through milestones.
+This ExecPlan follows `PLANS.md`. **Status: all milestones implemented and validated.** The user authorized completing the whole message-publication flow in one stage, including validation and documentation, superseding the earlier request to pause between smaller parts of milestone 3.
 
 ## Purpose / Big Picture
 
@@ -50,11 +50,15 @@ Milestones 2 and 3 validate deployment against direct, unauthenticated local Anv
 - [x] 2026-09-13: Ownership fix validation: all 23 deployment tests passed under Node 24.21.0 with no skips, including the real group-preservation regression and injected ownership failure. `git diff --check` passed. Tests used temporary files and simulated RPC/Forge responses; no chain or operator settings were changed.
 - [x] 2026-09-13: User approved removing automatic config updates after review identified a remaining edit/rename race. Removed config replacement, ownership/mode copying, writable/link checks, and the unused raw config snapshot. Deployment saves verified metadata and prints the address for manual adoption. Updated help, README, and tests; 26 focused deployment/setup tests passed.
 - [x] 2026-09-13: Simplification validation: all 82 host tests and the direct Anvil integration test passed under Node 24.21.0 with no skips. The fixture confirmed unchanged config, blocked redeployment before adoption, and reuse afterward with nonce one. `git diff --check` passed; the fixture cleaned up its own Anvil and temporary files.
-- [ ] User reviews milestone 2 before local agent publication integration.
-- [ ] Milestone 3: Local agent-to-node integration evidence and operator instructions.
+- [x] 2026-09-13: User accepted moving on from milestone 2 and authorized the complete milestone 3 flow in one stage. Node 24.21.0, Foundry 1.5.1, and Kubo 0.40.1 are installed. The existing runtime and sender already provide the required interfaces.
+- [x] 2026-09-13: Milestone 3 implementation: extended the maintained fixture with isolated offline Kubo, separate node/agent identities, actual CLI readiness/run/status, separate sender processes, exact IPFS envelope and Logger event verification, unauthorized-signer rejection, and SIGINT/restart/SIGTERM checks. Updated operator instructions and added public evidence output.
+- [x] 2026-09-13: Milestone 3 validation: the full local integration test passed on its first run under Node 24.21.0, Kubo 0.40.1, and Foundry 1.5.1 on macOS. All 82 host tests, the existing real Anvil/Kubo smoke, the contract build, and whitespace checks passed. Test services were stopped; the maintained fixture removed its private working files and retained only a separate public evidence file.
+- [x] 2026-09-13: Final review restricted the sender environment to its single signing-key variable and made settings assertions avoid printing credential contents on failure. The complete flow passed again in 13.1 seconds. The added-line scan found no private-key/token literals, credential-bearing URLs, or machine-specific paths; `git diff --check` passed.
 
 ## Surprises & Discoveries
 
+- The existing sender and foreground runner already support the full flow without runtime changes. Running the sender as a separate process verifies its real exit/response behavior; independently retrieving the exact signed JSON and decoding Logger events verifies both publication effects. Kubo works with its gateway disabled and swarm addresses empty in offline mode, so the fixture needs only its loopback API port.
+- The node can restart with the same configured signer and Logger and continue from the existing chain nonce. The new fixture observed node nonce zero before publication, one after the first message and unauthorized rejection, still one after restart, and two after the second message. Anvil and Kubo stayed available across each node shutdown, and IPFS still served the first message afterward.
 - Atomic config replacement required ownership preservation and still allowed an operator edit between the final check and rename to be overwritten. Removing config writes eliminates both concerns; the deployer now records the verified address for manual adoption. Ownership-copying tests and filesystem mocks are no longer needed.
 - Deployment needs shared file/config loading without constructing a node signer. `loadLocalConfig` now supplies that shared portion; existing run/check/status still use `loadLocalSettings` and require the node key. Reuse exits before validating the deployment key or invoking Forge.
 - Artifact writes introduce recovery concerns beyond startup checks. Every Forge invocation uses a fresh private sibling directory. Existing metadata blocks a new deployment when the configured address has no code, including while manual adoption is pending. Deployment can use a read-only config and leaves operator edits untouched.
@@ -79,6 +83,8 @@ Milestones 2 and 3 validate deployment against direct, unauthenticated local Anv
 
 ## Decision Log
 
+- Decision: Retain only public evidence in a separate temporary directory after the maintained fixture succeeds; remove its working config, credentials, Kubo repository, and deployment artifacts after stopping owned processes. Rationale: retain reviewable addresses/CIDs/hashes without keeping generated private keys or test services alive. The existing smoke retains its original artifact behavior. Date/Author: 2026-09-13 / Codex.
+- Decision: Complete milestone 3 in one stage by extending the maintained `test-local-operations.mjs` fixture, reusing the existing sender as a separate process and the direct Node.js runner entrypoint. Rationale: the user requested the whole flow at once; no new agent implementation, runtime behavior, or dependency is needed. Keep isolated offline Kubo, disposable Anvil, and generated identities. Date/Author: 2026-09-13 / user instruction, implemented by Codex.
 - Decision: Leave config files untouched during deployment. Save verified public metadata and print the Logger address for the operator to set in `loggerContract`. Rationale: remove ownership preservation and concurrent-edit coordination from the deployer's responsibilities; retain verification, isolated artifacts, and the guard against accidental redeployment. This supersedes the earlier config replacement and ownership-copying decisions. Date/Author: 2026-09-13 / user-approved simplification, implemented by Codex.
 - Decision: Validate deployment and reuse directly on disposable Anvil, with no authenticated RPC proxy or header-compatibility investigation. Rationale: the user removed authenticated RPC testing from this local milestone. Preserve generated deployment accounts, nonce assertions, and test-owned process cleanup; leave the existing mainnet fork for operator use. Date/Author: 2026-09-13 / user instruction, recorded by Codex; supersedes the earlier proxy-based validation decision.
 - Decision: Store per-invocation Forge artifacts in a private `.oya-logger-*` sibling directory, and metadata in `deployment.local.json` for `config.local.json` or `<full-config-filename>.deployment.local.json` otherwise. Rationale: avoid stale artifact selection and collisions between differently named configurations. Record verified public data; never retry an ambiguous broadcast. Date/Author: 2026-09-13 / Codex; config adoption is now manual under the subsequent user decision.
@@ -103,7 +109,9 @@ Milestones 2 and 3 validate deployment against direct, unauthenticated local Anv
 
 ## Outcomes & Retrospective
 
-The deployer simplification removes automatic config editing and its filesystem coordination. The command saves verified metadata and prints the exact address and config path for manual adoption. Tests check an untouched read-only config, preserved operator edits, and recovery from metadata recording failure. All 82 host tests and the real Anvil fixture passed with no skips; the fixture confirmed blocked redeployment before manual adoption and reuse afterward. Whitespace checks passed. No dependencies or operator settings changed; milestone 3 remains pending user review.
+Milestone 3 completes the local operations roadmap. `npm --prefix node/production run test:local` now exercises deployment/reuse, manual Logger adoption, readiness, direct foreground launch, a separately signed message, exact IPFS retrieval, and independently decoded Logger events. It rejects a disallowed sender without a transaction, stops with SIGINT, restarts the same identity without spending a nonce, publishes again, and stops with SIGTERM. It verifies unavailable status after shutdown, unchanged settings, and supplied-service survival until cleanup. The test passed in about 14 seconds; all 82 host tests, the existing smoke, the contract build, and whitespace checks also passed. No production runtime, sender, dependency, or contract changes were needed. The tests leave no maintained-fixture services running; operating a persistent instance still uses the documented operator-owned configuration and services. Safe/Governor verification, reimbursements, and DeFi actions remain later integrations outside this completed plan.
+
+The deployer simplification removes automatic config editing and its filesystem coordination. The command saves verified metadata and prints the exact address and config path for manual adoption. Tests check an untouched read-only config, preserved operator edits, and recovery from metadata recording failure. All 82 host tests and the real Anvil fixture passed with no skips; the fixture confirmed blocked redeployment before manual adoption and reuse afterward. Whitespace checks passed. No dependencies or operator settings changed; the user subsequently authorized milestone 3.
 
 Initial milestone 2 validation passed all 83 host tests, the direct Anvil integration fixture, the contract build, and whitespace checks. The fixture verified a single deployment, selected-file key precedence, preserved config values and permissions, public metadata, and reuse without another transaction. Its Anvil process and temporary files were cleaned up; the operator's existing mainnet fork and private configuration were untouched. No dependencies or Solidity/kernel/runtime source changed. Deployment with custom RPC Authorization headers remains deferred and is rejected explicitly. The subsequent simplification replaces automatic config editing with manual adoption.
 
@@ -139,7 +147,7 @@ The standalone runtime is `node/production/`. `src/config.mjs` validates configu
 
 ### Operator interface
 
-The `setup`, `check`, `run`, `status`, and `deploy-logger` actions are implemented with published dependencies. Deployment and reuse have passed direct Anvil integration validation.
+The `setup`, `check`, `run`, `status`, and `deploy-logger` actions are implemented with published dependencies. Deployment, reuse, separate-agent publication, and node restart have passed integration validation against direct Anvil and offline Kubo.
 
 Use `node -- node/production/scripts/local-node.mjs run` from the repository root to launch the node. A supervisor must execute this command directly and signal the wrapper's Node.js PID. Use the package command `npm --prefix node/production run local -- <action>` for setup/check/status and explicit deployment. Both entry paths use `node/production/scripts/local-node.mjs`. Support `--config <path>` and `--env-file <path>` for commands that consume settings. Their defaults are `node/production/config.local.json` and `node/production/.env`, resolved from the package location. Resolve supplied relative paths against the caller's original working directory (`INIT_CWD` under npm, otherwise `process.cwd()`), and show absolute paths in examples with overrides. Running from another directory must not break repository-relative build or deployment commands.
 
@@ -227,7 +235,7 @@ Run the host tests, contract build, new local integration test, existing smoke, 
 
 ## Concrete Steps
 
-Use the repository root unless otherwise specified. Setup, check, run, status, deploy-logger, and the deployment-only `test:local` fixture are implemented and validated. Publication and lifecycle integration in this fixture remain milestone 3 work. The examples describe the complete intended workflow.
+Use the repository root unless otherwise specified. Setup, check, run, status, deploy-logger, and the complete publication/lifecycle `test:local` fixture are implemented and validated. The examples describe the complete operator workflow.
 
 The intended operator workflow is:
 
@@ -246,7 +254,7 @@ The first deployment command is an optional preview; the second includes Forge's
 In another terminal:
 
     npm --prefix node/production run local -- status
-    node --env-file=/absolute/path/to/agent.env node/production/scripts/send-message.mjs http://127.0.0.1:8787 /absolute/path/to/message.txt
+    node --env-file=/absolute/path/to/agent.env -- node/production/scripts/send-message.mjs http://127.0.0.1:8787 /absolute/path/to/message.txt
 
 The agent environment contains `OYA_AGENT_PRIVATE_KEY`, and its corresponding address is allowlisted in the node config. The file contains the exact nonempty ASCII text to sign. A successful response contains the CID and verified Logger transaction hash. The node process never needs the agent key. Ctrl-C in the node's terminal drains and stops it.
 
@@ -354,6 +362,18 @@ Deployer simplification validation used Node 24.21.0 on macOS, from the reposito
     git diff --check
 
 All 82 host tests and the single direct Anvil integration test passed without skips. The unit tests prove a read-only config retains its bytes, inode, UID/GID, and mode; operator edits survive a successful deployment; and a competing metadata record is preserved with a verified-address recovery message. The integration fixture confirms config is unchanged after simulation and broadcast, metadata matches the successful receipt and deployed code, another broadcast is blocked before manual adoption, and reuse after the fixture adopts the address leaves the deployer nonce at one. Test-owned processes and temporary files were cleaned up. No operator configuration, existing fork, IPFS service, dependencies, or contracts were changed.
+
+Milestone 3 validation ran from the repository root with Node 24.21.0, Foundry 1.5.1, and Kubo 0.40.1 on macOS:
+
+    npm --prefix node/production run test:local
+    npm --prefix node/production test
+    forge build --root contracts --sizes
+    npm --prefix node/production run smoke:local
+    git diff --check
+
+The complete local flow passed initially in 13.6 seconds and again in 13.1 seconds after the final environment/output review. All 82 host tests passed with no skips, the contract build passed, and the existing smoke passed its four-publication, busy-admission, duplicate-message, and CLI checks. The local flow recorded one deployment transaction and two node publication transactions; both agent accounts remained unfunded. The node shut down cleanly through the direct wrapper PID for SIGINT and SIGTERM. Status reported unreachable afterward while Anvil and Kubo still responded; the fixture then stopped both services and removed its private working files.
+
+The maintained test prints a separate `/path/to/oya-local-evidence-<suffix>/evidence.json` containing only public test addresses, loopback URLs, CIDs, transaction hashes, and the completed checks. The actual generated path belongs in the test output, not this plan. Offline test content disappears when the fixture's Kubo repository is removed; evidence records what was verified during the run. The operator's existing fork, private configuration, and IPFS repository were not used. Changes are limited to the integration fixture and documentation; no npm, kernel, runtime, sender, or contract changes were required.
 
 ## Interfaces and Dependencies
 
