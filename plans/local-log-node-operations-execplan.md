@@ -34,6 +34,7 @@ Verification, Safe/Governor proposals, agent strategy implementation, and new ke
 - [x] 2026-09-13: User authorized milestone 1c on the existing roadmap and explicitly deferred config/signer hardening.
 - [x] 2026-09-13: Implemented shared local settings loading, foreground child launch with signal forwarding, and bounded health/identity status checks.
 - [x] 2026-09-13: Milestone 1c validation and documentation: all 62 host tests passed under Node 24.21.0, including actual CLI startup, npm status, signal forwarding with a held request, occupied ports, sanitized failures, and exit outcomes. `git diff --check` passed.
+- [x] 2026-09-13: Updated launch examples and CLI help to use Node.js directly so a supervisor signals the wrapper PID. npm remains the setup/check/status convenience command. Direct help, all six existing CLI/setup tests under Node 24.21.0, and `git diff --check` passed.
 - [ ] User reviews milestone 1c before Logger deployment tooling.
 - [ ] Milestone 2: Explicit Logger deployment and reuse.
 - [ ] Milestone 3: Local agent-to-node integration evidence and operator instructions.
@@ -48,6 +49,7 @@ Verification, Safe/Governor proposals, agent strategy implementation, and new ke
 - Node's `util.parseEnv` parses a file without updating the process environment. Merging its result over inherited values implements the selected-file precedence, including empty entries. Direct `node --env-file` startup gives inherited values precedence; the local commands use their shared file-first loader. The README explains this distinction.
 - Milestone 1c shares settings loading in `scripts/local-config.mjs`; `run` forwards the selected environment directly to the existing CLI, preserving file precedence. `status` loads the same settings but only queries local health, allowing upstream service failures to be investigated independently.
 - Lifecycle tests hold a real signed HTTP request in an IPFS fixture, signal the wrapper, and release the request before expecting process exit. The first fixture used an invalid CID and triggered the runtime's existing `500` classification; an explicit fixture `403` now exercises a definite upload rejection (`502`) without changing runtime behavior.
+- Lifecycle tests launch the wrapper directly, while the original README launched it through npm. npm runs scripts through a shell, so signaling only the npm PID depends on npm/shell behavior. A minimal process-tree probe with npm 11.19.0 on macOS forwarded SIGTERM successfully; that result does not establish portable behavior. The documented launch now matches the direct entry used in lifecycle tests.
 - npm initially retained the former local links after the manifest changed because the local packages already reported `0.1.1`. Removing only the old local-package/link entries before regenerating the lockfile resolved this. The final lock contains registry URLs and integrity hashes for all four kernels; every existing external package entry is unchanged. Noble `2.2.0`, formerly supplied by the kernel workspace, is now recorded under the consuming kernels in the host lockfile.
 - The host tests share one static Logger ABI JSON fixture with `packages/ethereum/test/fixtures/`; they do not require kernel source or build output. A temporary copy containing only tracked host files and that fixture passed setup and all 23 tests. The first sandboxed test run could not bind localhost (`listen EPERM`); the same suite passed with permission to open its temporary HTTP listeners.
 - `scripts/smoke-local.mjs --keep-running` starts a complete disposable Anvil/Kubo/node demonstration. It generates accounts, deploys a fresh Logger, and uses temporary artifacts. It is a test fixture rather than the operating configuration for a durable node identity.
@@ -74,6 +76,7 @@ Verification, Safe/Governor proposals, agent strategy implementation, and new ke
 - Decision: Require the selected environment file to be readable, allow an empty file, and stop at the first failing probe with a 10-second deadline per probe. Rationale: a missing selected file must not silently select an inherited identity; separate deadlines keep readiness bounded while identifying the failing prerequisite. Deadlines include response bodies and RPC retries. Date/Author: 2026-09-13 / Codex.
 - Decision: Adopt the public bounded quantity parser from Ethereum `0.1.2` and update messages to its matching `0.1.2` dependency pin. Rationale: removes the host's duplicate parser and preserves the single Ethereum instance required by error-class checks. Date/Author: 2026-09-13 / user-authorized release, implemented by Codex.
 - Decision: Keep `run` as a foreground child process using `process.execPath` and inherited terminal output, with SIGINT/SIGTERM forwarding and no forced termination timer. Rationale: reuse the runtime's existing draining behavior and preserve the child's exit outcome. Date/Author: 2026-09-13 / Codex, implementing milestone 1c.
+- Decision: Document `node -- node/production/scripts/local-node.mjs run` for foreground operation and supervision. Rationale: the supervised PID belongs to the wrapper with the tested signal handlers, avoiding dependence on npm/shell forwarding. Retain npm for setup/check/status and the `--` separator for script options. Date/Author: 2026-09-13 / user-approved review update, implemented by Codex.
 - Decision: Give `status` a five-second deadline including body reading, reject redirects, and accept only recognized health states with consistent HTTP status and matching identity. Rationale: a different local service must not be reported as the configured node. Date/Author: 2026-09-13 / Codex.
 - Decision: Forward only `OYA_NODE_PRIVATE_KEY`, `OYA_RPC_AUTHORIZATION`, and `OYA_IPFS_AUTHORIZATION` among Oya/Logger environment variables. Rationale: the node child does not need agent or deployment credentials; preserve other ordinary process environment settings. Date/Author: 2026-09-13 / Codex.
 
@@ -99,6 +102,8 @@ The subsequent parser release replaces the local `quantity` helper with `parseTr
 
 Milestone 1c completes the first operating milestone with `local run` and `local status`. Shared settings loading preserves the selected-file precedence and strips unrelated Oya/Logger credentials from the node child. Run performs read-only readiness checks, starts the existing CLI, forwards shutdown signals once, and waits for the child to finish. Status checks local health and identity with a five-second deadline and reports uncertain outcomes without recovery actions. All 62 host tests pass under Node 24.21.0 on macOS. Validation used generated keys and controlled local endpoints; the operator's configuration, background fork, dependencies, and runtime source were unchanged. Full Anvil/Kubo deployment and publication evidence remain milestones 2 and 3. The user explicitly deferred config/signer hardening.
 
+The launch-guidance review aligns README examples, CLI help, and this plan with direct Node.js supervision. Runtime behavior and dependencies are unchanged; existing lifecycle tests already exercise this entry path. From the repository root, `node --test node/production/test/local-operations.test.mjs` passed all six tests under Node 24.21.0. `node -- node/production/scripts/local-node.mjs run --help --env-file missing-for-help.env` printed the new guidance without reading configuration, and `git diff --check` passed.
+
 ## Context and Orientation
 
 The standalone runtime is `node/production/`. `src/config.mjs` validates configuration and constructs authorized RPC/IPFS transports. `src/signer.mjs` loads `OYA_NODE_PRIVATE_KEY` and signs transactions with ethers. `src/main.mjs` starts the server after checking the chain and Logger. `src/server.mjs` owns `/healthz`, `/v1/messages`, authentication, the single-operation guard, deadlines, and final responses. Preserve these responsibilities.
@@ -111,7 +116,7 @@ The standalone runtime is `node/production/`. `src/config.mjs` validates configu
 
 The `setup`, `check`, `run`, and `status` actions are implemented with published dependencies. `deploy-logger` remains planned for the next review milestone.
 
-Add one package command, `npm --prefix node/production run local -- <action>`, backed by `node/production/scripts/local-node.mjs`. Support `--config <path>` and `--env-file <path>` for commands that consume settings. Their defaults are `node/production/config.local.json` and `node/production/.env`, resolved from the package location. Resolve supplied relative paths against the caller's original working directory (`INIT_CWD` under npm, otherwise `process.cwd()`), and show absolute paths in examples with overrides. Running from another directory must not break repository-relative build or deployment commands.
+Use `node -- node/production/scripts/local-node.mjs run` from the repository root to launch the node. A supervisor must execute this command directly and signal the wrapper's Node.js PID. Use the package command `npm --prefix node/production run local -- <action>` for setup/check/status and the planned explicit deployment action. Both entry paths use `node/production/scripts/local-node.mjs`. Support `--config <path>` and `--env-file <path>` for commands that consume settings. Their defaults are `node/production/config.local.json` and `node/production/.env`, resolved from the package location. Resolve supplied relative paths against the caller's original working directory (`INIT_CWD` under npm, otherwise `process.cwd()`), and show absolute paths in examples with overrides. Running from another directory must not break repository-relative build or deployment commands.
 
 | Action | Behavior |
 | --- | --- |
@@ -157,7 +162,7 @@ Fresh locked installation, real setup with temporary config/environment destinat
 
 Implement this milestone in three separate review stages: 1a provides setup, private template creation, path options, and help; 1b loads configuration/environment and implements `check`; 1c implements `run` and `status` with lifecycle tests. Each stage updates this plan and stops for the user's code review. Do not advertise commands as available before their implementation. During 1a, installation is exercised with temporary config destinations; blockchain and IPFS services are not needed.
 
-The implemented `scripts/local-node.mjs` dispatches setup, check, run, status, and help through the `local` package command. `scripts/local-config.mjs` owns shared settings loading and loopback URL formatting; `scripts/local-check.mjs` owns readiness probes; `scripts/local-run.mjs` owns the foreground child lifecycle; `scripts/local-status.mjs` owns the health query. All new tooling stays outside `packages/`, with no HTTP runtime changes.
+The implemented `scripts/local-node.mjs` dispatches setup, check, run, status, and help. Launch `run` directly with Node.js; the other actions use the `local` package command. `scripts/local-config.mjs` owns shared settings loading and loopback URL formatting; `scripts/local-check.mjs` owns readiness probes; `scripts/local-run.mjs` owns the foreground child lifecycle; `scripts/local-status.mjs` owns the health query. All new tooling stays outside `packages/`, with no HTTP runtime changes.
 
 `setup` copies templates only when missing and clearly identifies fields the operator must fill. The template Logger address is not a deployment; bytecode readiness checks must still reject it unless it actually identifies code on the selected chain. `run` delegates to `src/main.mjs` through `process.execPath`, forwards SIGINT/SIGTERM, waits for the child to finish draining, and preserves its exit outcome. Do not use Node watch mode, an automatic restart policy, or a short force-kill timeout. Startup failure or an occupied port must not leave another process running.
 
@@ -211,7 +216,7 @@ Edit the created `config.local.json` and `.env` with the intended chain, RPC/IPF
 The first deployment command simulates; the second broadcasts only when a usable Logger is not already configured. Then:
 
     npm --prefix node/production run local -- check
-    npm --prefix node/production run local -- run
+    node -- node/production/scripts/local-node.mjs run
 
 In another terminal:
 
@@ -222,7 +227,7 @@ The agent environment contains `OYA_AGENT_PRIVATE_KEY`, and its corresponding ad
 
 An alternate config uses explicit paths, for example:
 
-    npm --prefix node/production run local -- run --config /absolute/path/to/node.json --env-file /absolute/path/to/node.env
+    node -- node/production/scripts/local-node.mjs run --config /absolute/path/to/node.json --env-file /absolute/path/to/node.env
 
 Underlying build/deployment commands used by the wrapper are:
 
@@ -264,7 +269,7 @@ Setup must leave existing operator files untouched, use existing lockfiles, and 
 
 A deployment simulation must not alter the chain or configured Logger address. A successful broadcast must be verified before configuration changes. Reuse and ordinary node restarts must preserve the Logger address and signing identity without creating transactions. Failure or lost deployment receipts must not trigger automatic redeployment.
 
-The local agent client must succeed when authorized and fail when unauthorized. Verify actual IPFS content and Logger event fields. SIGINT/SIGTERM must preserve draining and leave no child node process behind. Status must accurately surface the existing uncertain-transaction state without restarting the node. Do not re-test every kernel invariant in the new CLI tests; retain the existing host suite and smoke for those behaviors.
+The local agent client must succeed when authorized and fail when unauthorized. Verify actual IPFS content and Logger event fields. Launch the wrapper directly with Node.js as documented, and send SIGINT/SIGTERM to that PID; it must preserve draining and leave no child node process behind. Status must accurately surface the existing uncertain-transaction state without restarting the node. Do not re-test every kernel invariant in the new CLI tests; retain the existing host suite and smoke for those behaviors.
 
 ## Idempotence and Recovery
 

@@ -55,15 +55,17 @@ npm --prefix node/production run local -- check
 
 The command checks the Ethereum chain ID, nonempty code at the Logger address, a positive native-currency balance for the node, and the Kubo `/api/v0/version` endpoint, in that order. Each probe has a 10-second deadline, including response reading and any RPC retries. It prints public addresses and an `OK` for each passing probe, exits 0 when all pass, or stops with a sanitized `FAIL` and exit 1 at the first failure. It submits no transactions, uploads no content, and changes no files. Code presence does not verify Logger's implementation, a positive balance does not guarantee sufficient gas for a particular transaction, and the IPFS probe does not prove publication permissions.
 
-Start the node in the foreground:
+Start the node in the foreground from the repository root:
 
 ```sh
-npm --prefix node/production run local -- run
+node -- node/production/scripts/local-node.mjs run
 ```
+
+Use this direct Node.js command when configuring a process supervisor, with the repository root as its working directory. Send SIGINT/SIGTERM to the wrapper's Node.js PID. Launching through npm introduces a shell whose signal forwarding can vary. The `--` separator keeps options such as `--env-file` with the script.
 
 `run` performs the readiness checks itself, prints the local URL, and launches the existing node CLI with the same Node.js executable. The child inherits terminal output and the selected node key and provider authorization values; agent/deployer keys and other Oya/Logger environment settings are excluded. It uses the selected configuration file, so keep that file stable while launching. No dependencies are installed and no services are deployed by `run`.
 
-Ctrl-C or SIGTERM forwards a shutdown signal to the child and waits for active work to drain. There is no forced shutdown timer or automatic restart. A clean stop exits 0; otherwise the wrapper preserves the child's exit code, or uses `128 + signal number` for signal termination. Supplied Ethereum/IPFS services keep running. Start another explicit `run` to restart the node after reconciling any uncertain transaction outcome.
+Ctrl-C in the owning terminal, or SIGINT/SIGTERM sent to the wrapper, forwards a shutdown signal to the child and waits for active work to drain. There is no forced shutdown timer or automatic restart. A clean stop exits 0; otherwise the wrapper preserves the child's exit code, or uses `128 + signal number` for signal termination. Supplied Ethereum/IPFS services keep running. Start another explicit `run` to restart the node after reconciling any uncertain transaction outcome.
 
 In another terminal, using the same path overrides if any:
 
@@ -84,7 +86,7 @@ The direct Node.js `--env-file` command gives inherited variables precedence; cl
 Alternatively, with environment variables already loaded:
 
 ```sh
-npm --prefix node/production start -- /absolute/path/to/config.json
+node -- node/production/src/main.mjs /absolute/path/to/config.json
 ```
 
 Startup checks the RPC chain and deployed Logger bytecode before serving traffic. Configuration rejects unsupported fields. There is no state directory, publication journal, process lock, or startup replay.

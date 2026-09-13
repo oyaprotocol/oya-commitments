@@ -5,7 +5,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs, promisify } from 'node:util';
 
 const production = fileURLToPath(new URL('../', import.meta.url));
-const usage = 'Usage: npm --prefix node/production run local -- <setup|check|run|status> [--config <path>] [--env-file <path>]';
+const usage = 'Usage (from repository root):\n'
+    + '  node -- node/production/scripts/local-node.mjs run [--config <path>] [--env-file <path>]\n'
+    + '  npm --prefix node/production run local -- <setup|check|status> [--config <path>] [--env-file <path>]';
 
 async function sameFile(left, right) {
     try {
@@ -50,6 +52,7 @@ export async function main(args, {
             + 'check: Load settings and check Ethereum, Logger, gas balance, and IPFS without writes.\n'
             + 'run: Check settings and services, then run the node in the foreground; Ctrl-C drains active work.\n'
             + 'status: Query local node health and identity without checking upstream services or restarting.\n'
+            + 'Launch run directly with Node.js; supervisors must send SIGINT/SIGTERM to that process.\n'
             + 'Defaults: node/production/config.local.json and node/production/.env.\n'
             + 'Relative overrides use the directory where you invoked the command.\n'
             + 'Existing files are preserved. Exit status: 0 on success, 1 on failure; run preserves the child exit code.');
