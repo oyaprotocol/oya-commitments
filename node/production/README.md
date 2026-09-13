@@ -51,18 +51,35 @@ Check the configuration and services from the repository root:
 npm --prefix node/production run local -- check
 ```
 
-Check accepts the same `--config` and `--env-file` overrides as setup. The selected environment file must be readable; it may be empty when credentials are injected. Its values override inherited environment values, including explicitly empty values; omitted entries use the inherited environment. This command requires `host` to be `127.0.0.1` or `::1` and uses the existing config validator and node signer.
+`check`, `run`, and `status` accept the same `--config` and `--env-file` overrides as setup and share one settings loader. The selected environment file must be readable; it may be empty when credentials are injected. Its values override inherited environment values, including explicitly empty values; omitted entries use the inherited environment. These local commands require `host` to be `127.0.0.1` or `::1` and use the existing config validator and node signer.
 
 The command checks the Ethereum chain ID, nonempty code at the Logger address, a positive native-currency balance for the node, and the Kubo `/api/v0/version` endpoint, in that order. Each probe has a 10-second deadline, including response reading and any RPC retries. It prints public addresses and an `OK` for each passing probe, exits 0 when all pass, or stops with a sanitized `FAIL` and exit 1 at the first failure. It submits no transactions, uploads no content, and changes no files. Code presence does not verify Logger's implementation, a positive balance does not guarantee sufficient gas for a particular transaction, and the IPFS probe does not prove publication permissions.
 
-To start the runtime directly:
+Start the node in the foreground:
+
+```sh
+npm --prefix node/production run local -- run
+```
+
+`run` performs the readiness checks itself, prints the local URL, and launches the existing node CLI with the same Node.js executable. The child inherits terminal output and the selected node key and provider authorization values; agent/deployer keys and other Oya/Logger environment settings are excluded. It uses the selected configuration file, so keep that file stable while launching. No dependencies are installed and no services are deployed by `run`.
+
+Ctrl-C or SIGTERM forwards a shutdown signal to the child and waits for active work to drain. There is no forced shutdown timer or automatic restart. A clean stop exits 0; otherwise the wrapper preserves the child's exit code, or uses `128 + signal number` for signal termination. Supplied Ethereum/IPFS services keep running. Start another explicit `run` to restart the node after reconciling any uncertain transaction outcome.
+
+In another terminal, using the same path overrides if any:
+
+```sh
+npm --prefix node/production run local -- status
+```
+
+`status` queries only the local `/healthz` endpoint, with a five-second deadline covering connection and response reading. It verifies the chain ID, Logger address, and node address against the selected settings. `ready` and `busy` exit 0. `shutting_down`, `transaction_outcome_unknown`, an identity mismatch, an unreachable node, or malformed health data exit 1 with sanitized output. Status never starts or restarts a process and does not probe Ethereum or IPFS. An unknown transaction outcome requires inspection before restarting or retrying.
+
+For direct runtime startup, the existing entrypoint remains available:
 
 ```sh
 node --env-file=node/production/.env node/production/src/main.mjs node/production/config.local.json
-curl http://127.0.0.1:8787/healthz
 ```
 
-The direct Node.js `--env-file` command gives inherited variables precedence; clear conflicting inherited Oya values when using it after `local check`. The planned `local run` command will use the same file precedence as `check`.
+The direct Node.js `--env-file` command gives inherited variables precedence; clear conflicting inherited Oya values when using it after the local commands.
 
 Alternatively, with environment variables already loaded:
 
@@ -72,7 +89,7 @@ npm --prefix node/production start -- /absolute/path/to/config.json
 
 Startup checks the RPC chain and deployed Logger bytecode before serving traffic. Configuration rejects unsupported fields. There is no state directory, publication journal, process lock, or startup replay.
 
-`host` defaults to `127.0.0.1`, and `port` to `8787`. To host it remotely, choose the binding explicitly and provide HTTPS through your hosting environment. Other optional settings are:
+`host` defaults to `127.0.0.1`, and `port` to `8787`. To host it remotely, use the direct runtime entrypoint, choose the binding explicitly, and provide HTTPS through your hosting environment. Other optional settings are:
 
 | Setting | Default | Purpose |
 | --- | --- | --- |

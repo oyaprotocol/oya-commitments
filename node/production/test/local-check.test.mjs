@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { Wallet } from 'ethers';
 import { checkLocalNode } from '../scripts/local-check.mjs';
+import { loadLocalSettings } from '../scripts/local-config.mjs';
 
 const production = fileURLToPath(new URL('../', import.meta.url));
 const execute = promisify(execFile);
@@ -61,9 +62,11 @@ async function fixture(t) {
         + 'OYA_IPFS_AUTHORIZATION="Bearer ipfs-secret-marker"\n', { mode: 0o600 });
     const output = [];
     return { cwd, wallet, calls, state, config, configPath, envPath, output,
-        check: (options = {}) => checkLocalNode(configPath, envPath, {
-            env: {}, log: (line) => output.push(line), timeoutMs: 1000, ...options,
-        }),
+        check: async (options = {}) => {
+            const log = (line) => output.push(line);
+            const settings = await loadLocalSettings(configPath, envPath, { env: options.env ?? {}, log });
+            return settings ? checkLocalNode(settings, { log, timeoutMs: 1000, ...options }) : 1;
+        },
     };
 }
 
@@ -130,9 +133,9 @@ test('check inherits omitted values but explicit empty file values override them
 
 test('unreadable settings, invalid JSON, and non-loopback binding fail before requests', async (t) => {
     const f = await fixture(t);
-    assert.equal(await checkLocalNode(f.configPath, join(f.cwd, 'missing-secret-marker.env'), {
+    assert.equal(await loadLocalSettings(f.configPath, join(f.cwd, 'missing-secret-marker.env'), {
         env: {}, log: (line) => f.output.push(line),
-    }), 1);
+    }), null);
     assert.match(f.output.at(-1), /FAIL Environment file/);
     await writeFile(f.configPath, 'invalid-secret-marker');
     assert.equal(await f.check(), 1);
