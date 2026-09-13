@@ -16,6 +16,7 @@ Milestones 2 and 3 validate deployment against direct, unauthenticated local Anv
 
 ## Progress
 
+- [x] 2026-09-13 06:44Z: Consolidated bytecode checks in `src/bytecode.mjs` for startup, readiness, deployment reuse, and post-deployment verification. All 89 host tests passed under Node 24.21.0 with no skips; whitespace checks passed.
 - [x] 2026-09-13 06:34Z: Fixed lifecycle logger exceptions in shared startup. Both regressions failed before the fix; all 86 host tests passed afterward under Node 24.21.0, with no skips. Whitespace checks passed.
 - [x] 2026-09-13 06:18Z: User authorized standardizing `startNode()` across launch paths. Inspected configuration loading, child launch, signal handling, and lifecycle tests.
 - [x] 2026-09-13: Replaced the foreground child runner with a call to `startNode()` using the already loaded configuration and signer; both CLIs opt into shared signal handling. All 85 host tests passed under Node 24.21.0, including file edits during readiness and handler cleanup after disconnected work drains.
@@ -63,6 +64,7 @@ Milestones 2 and 3 validate deployment against direct, unauthenticated local Anv
 
 ## Surprises & Discoveries
 
+- Startup previously accepted odd-length hex such as `0x600`, while readiness and deployment rejected it. The shared helper now applies the existing deployment rule everywhere: valid byte pairs, `0x` for absence, and an exception for malformed RPC data.
 - The new lifecycle log calls could throw after listening began or before shutdown called `runtime.close()`. Unlike publication logging, they were unguarded. A throwing startup logger and a throwing shutdown logger each reproduced the failure; lifecycle output now uses a small guarded helper.
 - Before this follow-up, the local command constructed a signer for readiness, then discarded it and started a child that reread configuration and recreated the signer. Both stages now use the same objects in one process. The existing `startNode()` is also used by tests and the smoke, so process-wide signal handlers are explicitly enabled by CLI callers. A disconnected client's operation can outlive the HTTP listener; handler cleanup waits for the complete `runtime.close()` promise, as verified by the new lifecycle test.
 - Captured child-process output and the final evidence diagnostic made the test difficult to follow manually. Optional `console.log` progress messages now appear while the test runs; raw child output stays captured for the existing redaction checks.
@@ -92,6 +94,7 @@ Milestones 2 and 3 validate deployment against direct, unauthenticated local Anv
 
 ## Decision Log
 
+- Decision: Extract `hasBytecode(code)` into `node/production/src/bytecode.mjs` and reuse it at all four bytecode call sites. Rationale: malformed responses must never be interpreted as permission to deploy. Keep caller-specific handling, chain checks, RPC calls, and deadlines unchanged. Date/Author: 2026-09-13 / Codex, implementing the user-approved bytecode consolidation.
 - Decision: Isolate synchronous lifecycle logging exceptions with `try/catch`, matching publication logging. Rationale: output failures must not strand a listener or interrupt accepted work during shutdown. Keep the existing lifecycle and dependencies unchanged. Date/Author: 2026-09-13 / Codex, implementing the user-approved review fix.
 - Decision: Reuse `startNode(config, signer, options)` for both CLIs, with optional signal handling, and remove `scripts/local-run.mjs`. Return the signer from local settings instead of a child environment. Rationale: removes repeated initialization and signal relay while preserving selected-file precedence, readiness checks, and graceful shutdown. Setup, deployment, HTTP behavior, and dependencies remain unchanged. This supersedes the earlier child-launch and environment-forwarding decisions below. Date/Author: 2026-09-13 / Codex, implementing the user's startup simplification.
 - Decision: Make progress output opt-in through `npm --prefix node/production run test:local -- --verbose`. Print explicit stage messages and selected public addresses, message text, CIDs, and transaction hashes. Rationale: allow manual observation without forwarding raw process output or changing default test behavior. Date/Author: 2026-09-13 / user-requested option, implemented by Codex.
@@ -120,6 +123,8 @@ Milestones 2 and 3 validate deployment against direct, unauthenticated local Anv
 - Decision: Forward only `OYA_NODE_PRIVATE_KEY`, `OYA_RPC_AUTHORIZATION`, and `OYA_IPFS_AUTHORIZATION` among Oya/Logger environment variables. Rationale: the node child does not need agent or deployment credentials; preserve other ordinary process environment settings. Date/Author: 2026-09-13 / Codex.
 
 ## Outcomes & Retrospective
+
+Bytecode consolidation is complete. `npm --prefix node/production test` passed all 89 tests under Node 24.21.0, covering valid/empty/malformed bytecode, startup and readiness rejection, and deployment refusal before Forge on malformed code. Existing simulation, reuse, and post-deployment checks passed. No dependencies, kernels, operator settings, or onchain contracts changed; validation used controlled transports and generated keys without broadcasting transactions.
 
 The lifecycle logging review fix guards the listening and stopping records. Regression coverage proves that a throwing logger still allows usable startup, shutdown draining after client disconnection, repeated signals, and signal-listener cleanup. Both regressions failed against the prior code; `npm --prefix node/production test` then passed all 86 tests under Node 24.21.0, and `git diff --check` passed. Validation used generated keys and controlled loopback services, without operator settings, blockchain transactions, or new dependencies.
 

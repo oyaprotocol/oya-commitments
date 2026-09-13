@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createTransactionPreparer, requestEthereumJsonRpc } from '@oyaprotocol/ethereum';
+import { hasBytecode } from './bytecode.mjs';
 import { loadConfig } from './config.mjs';
 import { createLocalSigner } from './signer.mjs';
 import { createNodeServer } from './server.mjs';
@@ -12,8 +13,7 @@ export async function startNode(config, signer, {
         config: config.rpc, fetch, method, params,
     })).result;
     if (BigInt(await rpc('eth_chainId')) !== BigInt(config.chainId)) throw new Error('RPC chain ID does not match configuration.');
-    const code = await rpc('eth_getCode', [config.loggerContract, 'latest']);
-    if (typeof code !== 'string' || !/^0x[0-9a-fA-F]+$/.test(code) || code === '0x0') {
+    if (!hasBytecode(await rpc('eth_getCode', [config.loggerContract, 'latest']))) {
         throw new Error('No contract bytecode exists at loggerContract.');
     }
     const transactionPreparer = createTransactionPreparer({
