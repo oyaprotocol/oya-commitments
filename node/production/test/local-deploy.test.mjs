@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { chmod, link, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import fs, { chmod, chown, link, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -88,18 +89,54 @@ test('simulation uses only selected deployment settings and leaves config and me
 
 test('verified broadcast records public metadata and atomically preserves other config values and permissions', async (t) => {
     const f = await fixture(t);
-    const originalInode = (await stat(f.configPath)).ino;
+    const original = await stat(f.configPath);
     assert.equal(await f.run({ broadcast: true }), 0);
     assert.ok(f.commands[0].args.includes('--broadcast'));
     assert.deepEqual(JSON.parse(await readFile(f.configPath, 'utf8')), { ...f.input, loggerContract: f.address });
-    assert.notEqual((await stat(f.configPath)).ino, originalInode);
-    assert.equal((await stat(f.configPath)).mode & 0o777, 0o640);
+    const updated = await stat(f.configPath);
+    assert.notEqual(updated.ino, original.ino);
+    assert.equal(updated.uid, original.uid);
+    assert.equal(updated.gid, original.gid);
+    assert.equal(updated.mode & 0o777, 0o640);
     assert.equal((await stat(deploymentPath(f.configPath))).mode & 0o777, 0o600);
     assert.deepEqual(JSON.parse(await readFile(deploymentPath(f.configPath), 'utf8')), {
         chainId: 31337, loggerContract: f.address, transactionHash: f.hash, blockNumber: '1', deployer: f.deployer.address,
     });
     assert.equal(deploymentPath(join(f.directory, 'config.local.json')), join(f.directory, 'deployment.local.json'));
     assert.notEqual(deploymentPath(join(f.directory, 'settings.json')), deploymentPath(join(f.directory, 'settings.txt')));
+});
+
+test('atomic replacement preserves a config group different from its directory', async (t) => {
+    const f = await fixture(t);
+    const original = await stat(f.configPath);
+    const directoryGroup = (await stat(f.directory)).gid;
+    const configGroup = process.getgroups?.().find((gid) => gid !== directoryGroup && gid !== process.getgid());
+    if (configGroup === undefined) return t.skip('Requires an additional group the current user can assign.');
+    await chown(f.configPath, original.uid, configGroup);
+    assert.equal(await f.run({ broadcast: true }), 0);
+    const updated = await stat(f.configPath);
+    assert.equal(updated.uid, original.uid);
+    assert.equal(updated.gid, configGroup);
+    assert.equal(updated.mode & 0o777, 0o640);
+});
+
+test('ownership failure leaves the original config intact and reports the verified deployment for recovery', async (t) => {
+    const f = await fixture(t);
+    const original = await stat(f.configPath);
+    const changeOwnership = t.mock.method(fs, 'chown', async () => {
+        throw Object.assign(new Error('ownership-secret-marker'), { code: 'EPERM' });
+    });
+    // Update the named fs import used by the deployment module.
+    syncBuiltinESMExports();
+    t.after(() => { changeOwnership.mock.restore(); syncBuiltinESMExports(); });
+    assert.equal(await f.run({ broadcast: true }), 1);
+    assert.equal(await readFile(f.configPath, 'utf8'), f.original);
+    const unchanged = await stat(f.configPath);
+    for (const key of ['ino', 'uid', 'gid', 'mode']) assert.equal(unchanged[key], original[key]);
+    assert.equal(f.commands.length, 1);
+    assert.equal(JSON.parse(await readFile(deploymentPath(f.configPath), 'utf8')).loggerContract, f.address);
+    assert.ok(f.output.some((line) => line.includes(`Verified Logger ${f.address}`)));
+    assert.match(f.output.join('\n'), /Adopt the verified address manually/);
 });
 
 test('reuse requires no deployment or node key, invokes no Forge, and changes no files', async (t) => {

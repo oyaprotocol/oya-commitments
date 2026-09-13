@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
-import { access, chmod, lstat, mkdtemp, readFile, rename, writeFile } from 'node:fs/promises';
+import { access, chmod, chown, lstat, mkdtemp, readFile, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -130,6 +130,7 @@ export async function deployLogger(configPath, { config, configText, env }, {
         const updated = { ...JSON.parse(configText), loggerContract: deployment.address };
         const replacement = join(directory, 'config.json');
         await writeFile(replacement, `${JSON.stringify(updated, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
+        await chown(replacement, current.uid, current.gid);
         await chmod(replacement, current.mode & 0o777);
         await rename(replacement, configPath);
         log('OK Deployment recorded and loggerContract updated. Run local check after funding the node and starting IPFS.');
