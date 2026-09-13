@@ -58,7 +58,7 @@ export async function main(args, {
             + 'Defaults: node/production/config.local.json and node/production/.env.\n'
             + 'Relative overrides use the directory where you invoked the command.\n'
             + 'Existing files are preserved by setup; deploy-logger leaves config unchanged. Set loggerContract manually.\n'
-            + 'Exit status: 0 on success, 1 on failure; run preserves the child exit code.');
+            + 'Exit status: 0 on success or a clean shutdown, 1 on failure.');
         return 0;
     }
     if (positionals.length !== 1 || !['setup', 'check', 'run', 'status', 'deploy-logger'].includes(positionals[0])
@@ -87,7 +87,7 @@ export async function main(args, {
                 const { deployLogger } = await import('./local-deploy.mjs');
                 return await deployLogger(configPath, settings, { broadcast: values.broadcast, execute, log });
             }
-            const { loadLocalSettings } = await import('./local-config.mjs');
+            const { loadLocalSettings, localUrl } = await import('./local-config.mjs');
             const settings = await loadLocalSettings(configPath, envPath, { log });
             if (!settings) return 1;
             if (positionals[0] === 'status') {
@@ -97,8 +97,16 @@ export async function main(args, {
             const { checkLocalNode } = await import('./local-check.mjs');
             const checked = await checkLocalNode(settings, { log });
             if (checked !== 0 || positionals[0] === 'check') return checked;
-            const { runLocalNode } = await import('./local-run.mjs');
-            return await runLocalNode(configPath, settings, { log });
+            const { startNode } = await import('../src/main.mjs');
+            log(`Starting node at ${localUrl(settings.config)}. Press Ctrl-C to drain and stop.`);
+            try {
+                await startNode(settings.config, settings.signer, {
+                    handleSignals: true, log: (record) => log(JSON.stringify(record)),
+                });
+                return 0;
+            } catch {
+                return fail('Node startup failed. Check config, signer, RPC/Logger availability, and the listening port.');
+            }
         } catch {
             return fail('Local command failed. Run local setup and verify the selected settings.');
         }
