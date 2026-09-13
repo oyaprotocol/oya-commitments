@@ -5,7 +5,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs, promisify } from 'node:util';
 
 const production = fileURLToPath(new URL('../', import.meta.url));
-const usage = 'Usage: npm --prefix node/production run local -- <setup|check> [--config <path>] [--env-file <path>]';
+const usage = 'Usage (from repository root):\n'
+    + '  node -- node/production/scripts/local-node.mjs run [--config <path>] [--env-file <path>]\n'
+    + '  npm --prefix node/production run local -- <setup|check|status> [--config <path>] [--env-file <path>]';
 
 async function sameFile(left, right) {
     try {
@@ -48,12 +50,15 @@ export async function main(args, {
     if (values.help) {
         log(`${usage}\nsetup: Install locked dependencies and create missing private config files.\n`
             + 'check: Load settings and check Ethereum, Logger, gas balance, and IPFS without writes.\n'
+            + 'run: Check settings and services, then run the node in the foreground; Ctrl-C drains active work.\n'
+            + 'status: Query local node health and identity without checking upstream services or restarting.\n'
+            + 'Launch run directly with Node.js; supervisors must send SIGINT/SIGTERM to that process.\n'
             + 'Defaults: node/production/config.local.json and node/production/.env.\n'
             + 'Relative overrides use the directory where you invoked the command.\n'
-            + 'Existing files are preserved. Exit status: 0 on success, 1 on failure.');
+            + 'Existing files are preserved. Exit status: 0 on success, 1 on failure; run preserves the child exit code.');
         return 0;
     }
-    if (positionals.length !== 1 || !['setup', 'check'].includes(positionals[0])
+    if (positionals.length !== 1 || !['setup', 'check', 'run', 'status'].includes(positionals[0])
         || [values.config, values['env-file']].some((value) => value !== undefined && !value.trim())) {
         return fail(invalidArguments);
     }
@@ -69,12 +74,22 @@ export async function main(args, {
         return fail('Could not check config and environment paths. Check directories and file permissions.');
     }
 
-    if (positionals[0] === 'check') {
+    if (positionals[0] !== 'setup') {
         try {
+            const { loadLocalSettings } = await import('./local-config.mjs');
+            const settings = await loadLocalSettings(configPath, envPath, { log });
+            if (!settings) return 1;
+            if (positionals[0] === 'status') {
+                const { statusLocalNode } = await import('./local-status.mjs');
+                return await statusLocalNode(settings, { log });
+            }
             const { checkLocalNode } = await import('./local-check.mjs');
-            return await checkLocalNode(configPath, envPath, { log });
+            const checked = await checkLocalNode(settings, { log });
+            if (checked !== 0 || positionals[0] === 'check') return checked;
+            const { runLocalNode } = await import('./local-run.mjs');
+            return await runLocalNode(configPath, settings, { log });
         } catch {
-            return fail('Check could not run. Run local setup and verify the selected settings.');
+            return fail('Local command failed. Run local setup and verify the selected settings.');
         }
     }
 
