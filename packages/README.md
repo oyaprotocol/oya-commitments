@@ -9,7 +9,7 @@
 - `packages/ipfs` -> [@oyaprotocol/ipfs](https://www.npmjs.com/package/@oyaprotocol/ipfs)
 - `packages/ethereum` -> [@oyaprotocol/ethereum](https://www.npmjs.com/package/@oyaprotocol/ethereum)
 
-Ethereum and messages are published on npm at `0.1.2`; utils and IPFS remain at `0.1.1`. Ethereum `0.1.2` exposes `parseTransactionQuantity`. Messages `0.1.2` updates only its version and Ethereum dependency pin, keeping one Ethereum package instance when consumed together.
+This checkout prepares Ethereum and messages `0.2.0` for the Ledger naming change, plus IPFS `0.1.2` for updated documentation; utils remains at `0.1.1`. The renamed kernel APIs use `ledgerContract`, the `ledger` publication option, and `encodeLedgerCall` / `decodeLedgerEvent` / `hashLedgerCid`. Logging operations and the onchain `log` function and `Log` event are unchanged. See the [Ledger migration plan](../plans/ledger-contract-rename-execplan.md) for release status.
 
 All four packages are licensed under MIT, copyright 2026 John Shutt. Each package includes its own `LICENSE` file. Their repository metadata points to [oyaprotocol/oya-commitments](https://github.com/oyaprotocol/oya-commitments) and the corresponding package directory.
 
@@ -19,7 +19,7 @@ All four packages are licensed under MIT, copyright 2026 John Shutt. Each packag
 - External consumers can install released versions from npm or use locally packed archives.
 - Public examples should import from package roots only, such as `@oyaprotocol/messages`.
 
-For the signed-message workflow, install `npm install --save-exact @oyaprotocol/messages@0.1.2`. It brings in the other three kernels and the two Noble dependencies; consumers do not need to build kernel source.
+Once the prepared releases are published, install the signed-message workflow with `npm install --save-exact @oyaprotocol/messages@0.2.0`. It brings in the other three kernels and the two Noble dependencies; consumers do not need to build kernel source. Until publication, validate the prepared archives with the release test below.
 
 ## Source and Build
 
@@ -40,7 +40,7 @@ npm --prefix packages run build
 npm --prefix packages run test:release
 ```
 
-The release test packs all four kernels and installs their archives together in a new temporary project outside the checkout. It uses Node.js built-ins and the existing TypeScript compiler. Installation disables lifecycle scripts and requires npm registry access for the pinned Noble dependencies. Signature, IPFS publication, and Logger checks use existing fixtures and an injected transport; they need no keys, blockchain, or IPFS service.
+The release test packs all four kernels and installs their archives together in a new temporary project outside the checkout. It uses Node.js built-ins and the existing TypeScript compiler. Installation disables lifecycle scripts and requires npm registry access for the pinned Noble dependencies. Signature, IPFS publication, and Ledger checks use existing fixtures and an injected transport; they need no keys, blockchain, or IPFS service.
 
 The test checks archive file lists, SHA-512 hashes, metadata, licenses, source maps, dependency versions, package-root imports, and TypeScript declarations. Only compiled JavaScript, declarations, source maps, package metadata, READMEs, and licenses ship; TypeScript's incremental build caches are excluded.
 

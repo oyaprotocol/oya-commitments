@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import { Wallet } from 'ethers';
-import { cid, fixture, gate, loggerContract, signedMessage } from './runtime-fixture.mjs';
+import { cid, fixture, gate, ledgerContract, signedMessage } from './runtime-fixture.mjs';
 
 test('HTTP holds one operation through upload and receipt, then repeats independently', async (t) => {
     const setup = await fixture(t);
@@ -38,7 +38,7 @@ test('HTTP holds one operation through upload and receipt, then repeats independ
     assert.equal(body.status, 'logged');
     assert.deepEqual(body.publication, {
         status: 'logged', cid, uri: `ipfs://${cid}`, transactionHash: setup.state.transactions[0].hash,
-        blockNumber: '1', nodeAddress: setup.wallet.address, loggerContract,
+        blockNumber: '1', nodeAddress: setup.wallet.address, ledgerContract,
     });
     assert.equal(Object.hasOwn(body.publication, 'messageId'), false);
     const duplicate = await setup.post();

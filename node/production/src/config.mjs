@@ -23,14 +23,14 @@ function endpoint(value, name) {
 
 export function parseConfig(input, { env = process.env } = {}) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Config must be an object.');
-    const fields = new Set(['host', 'port', 'chainId', 'loggerContract', 'allowedSigners', 'rpcUrl', 'ipfsUrl',
+    const fields = new Set(['host', 'port', 'chainId', 'ledgerContract', 'allowedSigners', 'rpcUrl', 'ipfsUrl',
         'maxBodyBytes', 'maxTextBytes', 'bodyTimeoutMs', 'receiptTimeoutMs', 'pollIntervalMs',
         'operationTimeoutMs', 'gasLimit', 'maxFeePerGasWei']);
     for (const key of Object.keys(input)) {
         if (!fields.has(key)) throw new Error('Config contains an unsupported field.');
     }
-    if (!/^0x[0-9a-fA-F]{40}$/.test(input.loggerContract ?? '') || /^0x0{40}$/i.test(input.loggerContract)) {
-        throw new Error('loggerContract must be a nonzero Ethereum address.');
+    if (!/^0x[0-9a-fA-F]{40}$/.test(input.ledgerContract ?? '') || /^0x0{40}$/i.test(input.ledgerContract)) {
+        throw new Error('ledgerContract must be a nonzero Ethereum address.');
     }
     const authorize = createSignedMessageAuthorizer(input.allowedSigners);
     if (input.allowedSigners.length === 0) throw new Error('allowedSigners must not be empty.');
@@ -47,7 +47,7 @@ export function parseConfig(input, { env = process.env } = {}) {
     return Object.freeze({
         host: input.host ?? '127.0.0.1', port: integer(input.port, 'port', 8787, 65535),
         chainId: integer(input.chainId, 'chainId', undefined, Number.MAX_SAFE_INTEGER),
-        loggerContract: input.loggerContract, authorize,
+        ledgerContract: input.ledgerContract, authorize,
         maxBodyBytes: integer(input.maxBodyBytes, 'maxBodyBytes', 16_384, 1_048_576),
         maxTextBytes: integer(input.maxTextBytes, 'maxTextBytes', 8192, 1_048_576),
         bodyTimeoutMs: integer(input.bodyTimeoutMs, 'bodyTimeoutMs', 10_000),

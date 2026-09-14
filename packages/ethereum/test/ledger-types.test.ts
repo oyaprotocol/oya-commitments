@@ -1,16 +1,16 @@
-import { encodeLoggerCall, decodeLoggerEvent, hashLoggerCid } from '@oyaprotocol/ethereum';
+import { encodeLedgerCall, decodeLedgerEvent, hashLedgerCid } from '@oyaprotocol/ethereum';
 import type {
     EthereumReceiptLog,
-    LoggerEvent,
-    LoggerEventInput,
+    LedgerEvent,
+    LedgerEventInput,
 } from '@oyaprotocol/ethereum';
 
-const calldata: string = encodeLoggerCall('bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e');
-declare const loggerContract: string;
-const cidKeccak256Hash: string = hashLoggerCid('bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e');
+const calldata: string = encodeLedgerCall('bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e');
+declare const ledgerContract: string;
+const cidKeccak256Hash: string = hashLedgerCid('bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e');
 declare const receiptLog: EthereumReceiptLog;
-const input: LoggerEventInput = receiptLog;
-const event: LoggerEvent | null = decodeLoggerEvent(input, loggerContract);
+const input: LedgerEventInput = receiptLog;
+const event: LedgerEvent | null = decodeLedgerEvent(input, ledgerContract);
 if (event !== null) {
     const node: string = event.node;
     const cidKeccak256Hash: string = event.cidKeccak256Hash;
@@ -24,9 +24,9 @@ if (event !== null) {
 }
 
 // @ts-expect-error Call encoding requires a string.
-encodeLoggerCall(1);
-// @ts-expect-error Decoding requires an explicit expected Logger address.
-decodeLoggerEvent(receiptLog);
+encodeLedgerCall(1);
+// @ts-expect-error Decoding requires an explicit expected Ledger address.
+decodeLedgerEvent(receiptLog);
 // @ts-expect-error Event filtering can return null.
-const matchingEvent: LoggerEvent = decodeLoggerEvent(receiptLog, loggerContract);
+const matchingEvent: LedgerEvent = decodeLedgerEvent(receiptLog, ledgerContract);
 void [calldata, cidKeccak256Hash, matchingEvent];

@@ -5,24 +5,24 @@ import test from 'node:test';
 
 import {
     logCid, LogCidError, EthereumTransactionReceiptTimeoutError,
-    ethWaitForTransactionReceipt, decodeLoggerEvent,
+    ethWaitForTransactionReceipt, decodeLedgerEvent,
 } from '@oyaprotocol/ethereum';
 import {
-    fixtures, sample, loggerContract, node, transactionHash, rawTransaction,
+    fixtures, sample, ledgerContract, node, transactionHash, rawTransaction,
     createLog, createReceipt, response, createOptions,
-} from './fixtures/logger-transaction.js';
+} from './fixtures/ledger-transaction.js';
 
-test('logCid prepares once, submits, waits, and verifies the expected Logger event', async () => {
+test('logCid prepares once, submits, waits, and verifies the expected Ledger event', async () => {
     const stages = [];
     let polls = 0;
     const result = await logCid(sample.cid, createOptions({
-        loggerContract: `0x${loggerContract.slice(2).toUpperCase()}`,
+        ledgerContract: `0x${ledgerContract.slice(2).toUpperCase()}`,
         nodeAddress: `0x${node.slice(2).toUpperCase()}`,
         transactionPreparer: (request) => {
             stages.push('prepare');
             assert.equal(Object.isFrozen(request), true);
             assert.deepEqual(request, {
-                to: `0x${loggerContract.slice(2).toUpperCase()}`, data: sample.calldata, value: 0n,
+                to: `0x${ledgerContract.slice(2).toUpperCase()}`, data: sample.calldata, value: 0n,
             });
             return { rawTransaction, transactionHash };
         },
@@ -36,7 +36,7 @@ test('logCid prepares once, submits, waits, and verifies the expected Logger eve
             assert.deepEqual(params, [transactionHash]);
             if (++polls === 1) return response(null);
             // A wallet can route the call; the event node is not inferred from receipt.from/to.
-            return response(createReceipt({ from: loggerContract, to: node, logs: [
+            return response(createReceipt({ from: ledgerContract, to: node, logs: [
                 createLog({ address: node, topics: [], data: '0x' }), createLog(),
             ] }));
         },
@@ -70,7 +70,7 @@ test('logCid forwards custom string and numeric IDs through submission and every
 test('logCid validates configuration before preparing or broadcasting a transaction', async () => {
     let calls = 0;
     for (const overrides of [
-        { loggerContract: 'invalid' }, { nodeAddress: 'invalid' },
+        { ledgerContract: 'invalid' }, { nodeAddress: 'invalid' },
         { timeoutMs: 0 }, { timeoutMs: 2_147_483_648 }, { pollIntervalMs: 0 },
         { pollIntervalMs: 2_147_483_648 }, { config: {} }, { fetch: undefined },
         { transactionPreparer: undefined },
@@ -158,7 +158,7 @@ test('logCid retains transaction identity on ambiguous or invalid submission res
     }
 });
 
-test('logCid rejects unsuccessful receipts and absent, removed, or incorrect Logger events', async () => {
+test('logCid rejects unsuccessful receipts and absent, removed, or incorrect Ledger events', async () => {
     const other = fixtures.cases[0];
     const receipts = [
         createReceipt({ status: '0x0' }),
@@ -217,7 +217,7 @@ test('logCid receipt timeout retains the hash so observation can resume without 
         },
     });
     assert.equal(observed.receipt.status, 'success');
-    assert.equal(decodeLoggerEvent(observed.receipt.logs[0], loggerContract).cid, failure.cid);
+    assert.equal(decodeLedgerEvent(observed.receipt.logs[0], ledgerContract).cid, failure.cid);
 });
 
 test('logCid aborts preparation without later broadcasting when the signer ignores cancellation', async () => {

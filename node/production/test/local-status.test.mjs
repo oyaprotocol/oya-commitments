@@ -4,11 +4,11 @@ import { statusLocalNode } from '../scripts/local-status.mjs';
 
 const settings = {
     config: { host: '127.0.0.1', port: 8787, chainId: 31337,
-        loggerContract: '0x1111111111111111111111111111111111111111' },
+        ledgerContract: '0x1111111111111111111111111111111111111111' },
     nodeAddress: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd',
 };
 const ready = { status: 'ready', busy: false, chainId: settings.config.chainId,
-    loggerContract: settings.config.loggerContract, nodeAddress: settings.nodeAddress };
+    ledgerContract: settings.config.ledgerContract, nodeAddress: settings.nodeAddress };
 
 test('status validates health state, HTTP status, and all identity fields', async (t) => {
     const cases = [
@@ -18,8 +18,8 @@ test('status validates health state, HTTP status, and all identity fields', asyn
         ['uncertain', 503, { ...ready, status: 'transaction_outcome_unknown' }, 1, 'FAIL transaction_outcome_unknown'],
         ['draining', 503, { ...ready, status: 'shutting_down', busy: true }, 1, 'FAIL shutting_down'],
         ['wrong chain', 200, { ...ready, chainId: 1 }, 1, 'FAIL Node identity mismatch'],
-        ['wrong Logger', 200, { ...ready, loggerContract: settings.nodeAddress }, 1, 'FAIL Node identity mismatch'],
-        ['wrong node', 200, { ...ready, nodeAddress: settings.config.loggerContract }, 1, 'FAIL Node identity mismatch'],
+        ['wrong Ledger', 200, { ...ready, ledgerContract: settings.nodeAddress }, 1, 'FAIL Node identity mismatch'],
+        ['wrong node', 200, { ...ready, nodeAddress: settings.config.ledgerContract }, 1, 'FAIL Node identity mismatch'],
         ['wrong HTTP status', 503, ready, 1, 'FAIL Malformed'],
         ['inconsistent busy flag', 200, { ...ready, busy: true }, 1, 'FAIL Malformed'],
         ['missing identity', 200, { status: 'ready', busy: false }, 1, 'FAIL Malformed'],

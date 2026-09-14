@@ -1,17 +1,17 @@
 import type { EthereumReceiptLog, EthereumTransactionReceipt } from './receipt-utils.js';
 import type { EthWaitForTransactionReceiptOptions } from './receipts.js';
 import type { TransactionPreparer, TransactionStage } from './transactions.js';
-type LoggerEventInput = Pick<EthereumReceiptLog, 'address' | 'topics' | 'data' | 'removed'>;
-interface LoggerEvent {
+type LedgerEventInput = Pick<EthereumReceiptLog, 'address' | 'topics' | 'data' | 'removed'>;
+interface LedgerEvent {
     readonly node: string;
     readonly cidKeccak256Hash: string;
     readonly cid: string;
     readonly removed?: boolean;
 }
 interface LogCidOptions extends Omit<EthWaitForTransactionReceiptOptions, 'transactionHash'> {
-    /** 20-byte address of the deployed Logger contract. */
-    loggerContract: string;
-    /** Address Logger should record as its immediate caller; can be a contract wallet. */
+    /** 20-byte address of the deployed Ledger contract. */
+    ledgerContract: string;
+    /** Address Ledger should record as its immediate caller; can be a contract wallet. */
     nodeAddress: string;
     transactionPreparer: TransactionPreparer;
 }
@@ -19,7 +19,7 @@ interface LogCidResult {
     readonly cid: string;
     readonly transactionHash: string;
     readonly receipt: EthereumTransactionReceipt;
-    readonly event: LoggerEvent;
+    readonly event: LedgerEvent;
 }
 declare class LogCidError extends Error {
     readonly cid: string;
@@ -29,11 +29,11 @@ declare class LogCidError extends Error {
     readonly receipt: EthereumTransactionReceipt | null;
     constructor(cid: string, stage: TransactionStage, transactionHash: string | null, receipt: EthereumTransactionReceipt | null, cause: unknown);
 }
-declare function encodeLoggerCall(cid: string): string;
-/** Compute the topic used to find Logger events for a canonical CID. */
-declare function hashLoggerCid(cid: string): string;
-/** Returns null for unrelated logs; malformed matching Logger events throw. */
-declare function decodeLoggerEvent(log: LoggerEventInput, loggerContract: string): LoggerEvent | null;
-declare function logCid(cid: string, { config, fetch, loggerContract, nodeAddress, transactionPreparer, timeoutMs, pollIntervalMs, id, signal, }: LogCidOptions): Promise<LogCidResult>;
-export { encodeLoggerCall, decodeLoggerEvent, hashLoggerCid, logCid, LogCidError };
-export type { LoggerEventInput, LoggerEvent, LogCidOptions, LogCidResult, };
+declare function encodeLedgerCall(cid: string): string;
+/** Compute the topic used to find Ledger events for a canonical CID. */
+declare function hashLedgerCid(cid: string): string;
+/** Returns null for unrelated logs; malformed matching Ledger events throw. */
+declare function decodeLedgerEvent(log: LedgerEventInput, ledgerContract: string): LedgerEvent | null;
+declare function logCid(cid: string, { config, fetch, ledgerContract, nodeAddress, transactionPreparer, timeoutMs, pollIntervalMs, id, signal, }: LogCidOptions): Promise<LogCidResult>;
+export { encodeLedgerCall, decodeLedgerEvent, hashLedgerCid, logCid, LogCidError };
+export type { LedgerEventInput, LedgerEvent, LogCidOptions, LogCidResult, };

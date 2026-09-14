@@ -7,7 +7,7 @@ import { parseArgs, promisify } from 'node:util';
 const production = fileURLToPath(new URL('../', import.meta.url));
 const usage = 'Usage (from repository root):\n'
     + '  node -- node/production/scripts/local-node.mjs run [--config <path>] [--env-file <path>]\n'
-    + '  npm --prefix node/production run local -- <setup|check|status|deploy-logger> [--config <path>] [--env-file <path>] [--broadcast]';
+    + '  npm --prefix node/production run local -- <setup|check|status|deploy-ledger> [--config <path>] [--env-file <path>] [--broadcast]';
 
 async function sameFile(left, right) {
     try {
@@ -49,20 +49,20 @@ export async function main(args, {
     const { values, positionals } = parsed;
     if (values.help) {
         log(`${usage}\nsetup: Install locked dependencies and create missing private config files.\n`
-            + 'check: Load settings and check Ethereum, Logger, gas balance, and IPFS without writes.\n'
+            + 'check: Load settings and check Ethereum, Ledger, gas balance, and IPFS without writes.\n'
             + 'run: Check settings and services, then run the node in the foreground; Ctrl-C drains active work.\n'
             + 'status: Query local node health and identity without checking upstream services or restarting.\n'
-            + 'deploy-logger: Reuse configured code or simulate deployment; only --broadcast submits and records a new Logger.\n'
-            + '--broadcast is accepted only with deploy-logger.\n'
+            + 'deploy-ledger: Reuse configured code or simulate deployment; only --broadcast submits and records a new Ledger.\n'
+            + '--broadcast is accepted only with deploy-ledger.\n'
             + 'Launch run directly with Node.js; supervisors must send SIGINT/SIGTERM to that process.\n'
             + 'Defaults: node/production/config.local.json and node/production/.env.\n'
             + 'Relative overrides use the directory where you invoked the command.\n'
-            + 'Existing files are preserved by setup; deploy-logger leaves config unchanged. Set loggerContract manually.\n'
+            + 'Existing files are preserved by setup; deploy-ledger leaves config unchanged. Set ledgerContract manually.\n'
             + 'Exit status: 0 on success or a clean shutdown, 1 on failure.');
         return 0;
     }
-    if (positionals.length !== 1 || !['setup', 'check', 'run', 'status', 'deploy-logger'].includes(positionals[0])
-        || (values.broadcast !== undefined && positionals[0] !== 'deploy-logger')
+    if (positionals.length !== 1 || !['setup', 'check', 'run', 'status', 'deploy-ledger'].includes(positionals[0])
+        || (values.broadcast !== undefined && positionals[0] !== 'deploy-ledger')
         || [values.config, values['env-file']].some((value) => value !== undefined && !value.trim())) {
         return fail(invalidArguments);
     }
@@ -80,12 +80,12 @@ export async function main(args, {
 
     if (positionals[0] !== 'setup') {
         try {
-            if (positionals[0] === 'deploy-logger') {
+            if (positionals[0] === 'deploy-ledger') {
                 const { loadLocalConfig } = await import('./local-config.mjs');
                 const settings = await loadLocalConfig(configPath, envPath, { log });
                 if (!settings) return 1;
-                const { deployLogger } = await import('./local-deploy.mjs');
-                return await deployLogger(configPath, settings, { broadcast: values.broadcast, execute, log });
+                const { deployLedger } = await import('./local-deploy.mjs');
+                return await deployLedger(configPath, settings, { broadcast: values.broadcast, execute, log });
             }
             const { loadLocalSettings, localUrl } = await import('./local-config.mjs');
             const settings = await loadLocalSettings(configPath, envPath, { log });
@@ -105,7 +105,7 @@ export async function main(args, {
                 });
                 return 0;
             } catch {
-                return fail('Node startup failed. Check config, signer, RPC/Logger availability, and the listening port.');
+                return fail('Node startup failed. Check config, signer, RPC/Ledger availability, and the listening port.');
             }
         } catch {
             return fail('Local command failed. Run local setup and verify the selected settings.');
@@ -131,7 +131,7 @@ export async function main(args, {
             return fail(`Could not prepare ${template}. Check destination directories and file permissions.`);
         }
     }
-    log('Setup complete. Configure chainId, loggerContract, allowedSigners, rpcUrl, ipfsUrl, and OYA_NODE_PRIVATE_KEY before starting the node.');
+    log('Setup complete. Configure chainId, ledgerContract, allowedSigners, rpcUrl, ipfsUrl, and OYA_NODE_PRIVATE_KEY before starting the node.');
     return 0;
 }
 

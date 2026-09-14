@@ -24,16 +24,16 @@ export async function statusLocalNode({ config, nodeAddress }, {
     if ((!running && !unavailable) || response.status !== (running ? 200 : 503)
         || typeof health.busy !== 'boolean' || (running && health.busy !== (health.status === 'busy'))
         || !Number.isSafeInteger(health.chainId) || health.chainId < 1
-        || !/^0x[0-9a-fA-F]{40}$/.test(health.loggerContract ?? '')
+        || !/^0x[0-9a-fA-F]{40}$/.test(health.ledgerContract ?? '')
         || !/^0x[0-9a-fA-F]{40}$/.test(health.nodeAddress ?? '')
-        || typeof health.loggerContract !== 'string' || typeof health.nodeAddress !== 'string') {
+        || typeof health.ledgerContract !== 'string' || typeof health.nodeAddress !== 'string') {
         return fail('Malformed node health response. Check the service at the configured local port.');
     }
-    if (health.chainId !== config.chainId || health.loggerContract.toLowerCase() !== config.loggerContract.toLowerCase()
+    if (health.chainId !== config.chainId || health.ledgerContract.toLowerCase() !== config.ledgerContract.toLowerCase()
         || health.nodeAddress.toLowerCase() !== nodeAddress.toLowerCase()) {
-        return fail('Node identity mismatch. Check the configured chain, Logger, node key, and local port.');
+        return fail('Node identity mismatch. Check the configured chain, Ledger, node key, and local port.');
     }
-    log(`${running ? 'OK' : 'FAIL'} ${health.status} at ${localUrl(config)}; node ${nodeAddress}; chain ${config.chainId}; Logger ${config.loggerContract}.`);
+    log(`${running ? 'OK' : 'FAIL'} ${health.status} at ${localUrl(config)}; node ${nodeAddress}; chain ${config.chainId}; Ledger ${config.ledgerContract}.`);
     if (health.status === 'transaction_outcome_unknown') {
         log('Inspect the prior transaction before restarting or retrying.');
     }

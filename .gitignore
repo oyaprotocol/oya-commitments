@@ -36,5 +36,6 @@ node/production/config.local.json
 deployment.local.json
 *.deployment.local.json
 .oya-logger-*/
+.oya-ledger-*/
 node/production/.state/
 contracts/broadcast/

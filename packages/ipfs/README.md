@@ -30,7 +30,7 @@ All read helpers require `maxBytes`. This keeps unexpectedly large content from 
 
 ## Canonical CIDs and File Imports
 
-All CID inputs and successful publication responses must be **CIDv1 in lowercase, unpadded Base32 with a 32-byte SHA-256 digest**. The shared `assertCanonicalCid` helper from `@oyaprotocol/utils` validates the binary structure as well as the spelling. The package rejects noncanonical values instead of converting them: CIDv0, uppercase, other bases, surrounding whitespace, `ipfs://` URIs, and paths such as `<cid>/message.json` are not accepted. Pass the bare `cid` result into reads and Logger helpers.
+All CID inputs and successful publication responses must be **CIDv1 in lowercase, unpadded Base32 with a 32-byte SHA-256 digest**. The shared `assertCanonicalCid` helper from `@oyaprotocol/utils` validates the binary structure as well as the spelling. The package rejects noncanonical values instead of converting them: CIDv0, uppercase, other bases, surrounding whitespace, `ipfs://` URIs, and paths such as `<cid>/message.json` are not accepted. Pass the bare `cid` result into reads and Ledger helpers.
 
 Every upload explicitly sends the file settings from [the `unixfs-v1-2025` profile](https://specs.ipfs.tech/ipips/ipip-0499/), plus canonical text output and pinning:
 
@@ -57,4 +57,4 @@ Providers must support and honor these [RPC options](https://docs.ipfs.tech/refe
 
 ## Indexing
 
-Pinning keeps content retained by an IPFS node, but it does not create a discovery index or publication order. Hosts can compose publication with the Logger helpers in `@oyaprotocol/ethereum` to record the canonical CID onchain. `hashLoggerCid(cid)` computes the indexed lookup topic from the same validated spelling; verifiers and interfaces can scan events by block and log position.
+Pinning keeps content retained by an IPFS node, but it does not create a discovery index or publication order. Hosts can compose publication with the Ledger helpers in `@oyaprotocol/ethereum` to record the canonical CID onchain. `hashLedgerCid(cid)` computes the indexed lookup topic from the same validated spelling; verifiers and interfaces can scan events by block and log position.

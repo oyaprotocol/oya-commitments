@@ -75,14 +75,14 @@ async function fixture(t) {
     await new Promise((resolve) => reservation.close(resolve));
     const base = `http://127.0.0.1:${upstream.address().port}`;
     const config = { host: '127.0.0.1', port, chainId: 31337,
-        loggerContract: '0x1111111111111111111111111111111111111111', allowedSigners: [agent.address],
+        ledgerContract: '0x1111111111111111111111111111111111111111', allowedSigners: [agent.address],
         rpcUrl: `${base}/rpc`, ipfsUrl: `${base}/ipfs`, operationTimeoutMs: 10_000 };
     const configPath = join(cwd, 'config.json');
     const envPath = join(cwd, 'node.env');
     await writeFile(configPath, JSON.stringify(config), { mode: 0o600 });
     await writeFile(envPath, `OYA_NODE_PRIVATE_KEY=${wallet.privateKey}\n`
         + 'OYA_RPC_AUTHORIZATION="Bearer rpc-secret-marker"\nOYA_IPFS_AUTHORIZATION="Bearer ipfs-secret-marker"\n'
-        + `OYA_AGENT_PRIVATE_KEY=${agent.privateKey}\nLOGGER_DEPLOYER_PK=deployer-secret-marker\n`, { mode: 0o600 });
+        + `OYA_AGENT_PRIVATE_KEY=${agent.privateKey}\nLEDGER_DEPLOYER_PK=deployer-secret-marker\n`, { mode: 0o600 });
     return { cwd, wallet, agent, config, configPath, envPath, upstream, calls, state,
         entered: entered.promise, release: released.resolve, url: `http://127.0.0.1:${port}`,
         args: ['--config', 'config.json', '--env-file', 'node.env'],

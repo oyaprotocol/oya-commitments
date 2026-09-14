@@ -89,7 +89,7 @@ export function createNodeServer({ config, transactionPreparer, nodeAddress, fet
             if (request.url === '/healthz' && request.method === 'GET') {
                 return respond(response, stopping || outcomeUnknown ? 503 : 200, {
                     status: stopping ? 'shutting_down' : outcomeUnknown ? 'transaction_outcome_unknown' : active ? 'busy' : 'ready',
-                    chainId: config.chainId, loggerContract: config.loggerContract, nodeAddress, busy: active !== null,
+                    chainId: config.chainId, ledgerContract: config.ledgerContract, nodeAddress, busy: active !== null,
                 }, { connection: 'close' });
             }
             if (request.url !== '/v1/messages') {
@@ -113,8 +113,8 @@ export function createNodeServer({ config, transactionPreparer, nodeAddress, fet
                     try {
                         completed = await publishAndLogSignedMessage(message, {
                             ipfs: { config: config.ipfs, fetch },
-                            logger: {
-                                config: config.rpc, fetch, loggerContract: config.loggerContract, nodeAddress,
+                            ledger: {
+                                config: config.rpc, fetch, ledgerContract: config.ledgerContract, nodeAddress,
                                 transactionPreparer, timeoutMs: config.receiptTimeoutMs, pollIntervalMs: config.pollIntervalMs,
                             },
                             signal: controller.signal,
@@ -128,7 +128,7 @@ export function createNodeServer({ config, transactionPreparer, nodeAddress, fet
                         status: 'logged', cid: completed.publication.cid, uri: completed.publication.uri,
                         transactionHash: completed.logging.transactionHash,
                         blockNumber: completed.logging.receipt.blockNumber.toString(),
-                        nodeAddress, loggerContract: config.loggerContract,
+                        nodeAddress, ledgerContract: config.ledgerContract,
                     };
                 },
             });

@@ -11,19 +11,19 @@ class PublishAndLogSignedMessageError extends Error {
     }
 }
 /** Use after allowlist authorization, typically as an ingress callback. */
-async function publishAndLogSignedMessage(message, { ipfs, logger, signal }) {
+async function publishAndLogSignedMessage(message, { ipfs, ledger, signal }) {
     const ipfsOptions = { ...ipfs };
-    const loggerOptions = { ...logger };
+    const ledgerOptions = { ...ledger };
     // Omit only narrows types; reused stage options may still contain signals.
     delete ipfsOptions.signal;
-    delete loggerOptions.signal;
+    delete ledgerOptions.signal;
     if (signal !== undefined) {
         ipfsOptions.signal = signal;
-        loggerOptions.signal = signal;
+        ledgerOptions.signal = signal;
     }
     const publication = await publishSignedMessage(message, ipfsOptions);
     try {
-        const logging = await logCid(publication.cid, loggerOptions);
+        const logging = await logCid(publication.cid, ledgerOptions);
         return { publication, logging };
     }
     catch (cause) {
