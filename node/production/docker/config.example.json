@@ -1,0 +1,12 @@
+{
+  "host": "0.0.0.0",
+  "port": 8787,
+  "chainId": 1,
+  "ledgerContract": "0x1111111111111111111111111111111111111111",
+  "allowedSigners": ["0x2222222222222222222222222222222222222222"],
+  "rpcUrl": "https://rpc.example.com",
+  "ipfsUrl": "http://ipfs:5001",
+  "operationTimeoutMs": 180000,
+  "gasLimit": 200000,
+  "maxFeePerGasWei": "30000000000"
+}

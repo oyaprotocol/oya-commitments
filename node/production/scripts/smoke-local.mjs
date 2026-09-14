@@ -61,6 +61,8 @@ async function cleanup() {
 }
 
 try {
+    const kuboVersion = (await run('ipfs', ['version', '--number'], { timeout: 5000 })).stdout.trim();
+    assert.equal(kuboVersion, '0.43.0', 'Local integration requires Kubo 0.43.0 on PATH.');
     const [rpcPort, ipfsPort, gatewayPort, nodePort] = await Promise.all([freePort(), freePort(), freePort(), freePort()]);
     const rpcUrl = `http://127.0.0.1:${rpcPort}`;
     const ipfsUrl = `http://127.0.0.1:${ipfsPort}`;
@@ -87,6 +89,8 @@ try {
     await writeFile(ipfsConfigPath, JSON.stringify(ipfsConfig), { mode: 0o600 });
     const ipfs = background('ipfs', ['daemon', '--offline'], ipfsEnv);
     await until(async () => (await fetch(`${ipfsUrl}/api/v0/version`, { method: 'POST' })).ok, ipfs);
+    const versionResponse = await fetch(`${ipfsUrl}/api/v0/version`, { method: 'POST', signal: AbortSignal.timeout(5000) });
+    assert.equal((await versionResponse.json()).Version, kuboVersion);
 
     const deployer = Wallet.createRandom();
     const nodeWallet = Wallet.createRandom();
@@ -208,7 +212,7 @@ try {
 
     const evidence = {
         chainId: 31337, ledgerContract: config.ledgerContract, deploymentTransactionHash: deployment.hash,
-        nodeUrl, rpcUrl, ipfsUrl, nodeAddress: signer.address, agentAddress: agent.address,
+        nodeUrl, rpcUrl, ipfsUrl, kuboVersion, nodeAddress: signer.address, agentAddress: agent.address,
         publication, pendingPublication, nextPublication, duplicatePublication,
         busyCheck: { pendingTransactionHash, pendingTransactionCount: 1, rejectedRequests: 2 },
         checks: ['signed HTTP ingestion', 'IPFS retrieval', 'Ledger event', 'invalid signature rejection',

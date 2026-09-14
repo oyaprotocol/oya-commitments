@@ -1,0 +1,73 @@
+services:
+  node:
+    build: .
+    image: oya-node:local
+    user: ${OYA_CONTAINER_USER:-1000:1000}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - type: bind
+        source: ${OYA_CONFIG_FILE:?Set OYA_CONFIG_FILE to an absolute file path}
+        target: /config/node.json
+        read_only: true
+        bind:
+          create_host_path: false
+    env_file:
+      - path: ${OYA_ENV_FILE:?Set OYA_ENV_FILE to an absolute file path}
+        format: raw
+    ports:
+      - "127.0.0.1:${OYA_HTTP_PORT:-8787}:8787"
+    depends_on:
+      ipfs:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - --input-type=module
+        - -e
+        - >-
+          try {
+            const response = await fetch('http://127.0.0.1:8787/healthz', { signal: AbortSignal.timeout(3000) });
+            await response.arrayBuffer();
+            process.exit(response.status === 200 ? 0 : 1);
+          } catch { process.exit(1); }
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    stop_signal: SIGTERM
+    stop_grace_period: ${OYA_STOP_GRACE_PERIOD:-4m}
+    restart: "no"
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  ipfs:
+    image: ipfs/kubo:v0.43.0@sha256:63f5502f7a01b82a675e45bae81b2f5dfa90248ec4a86cd0a58c218347e1f2d2
+    environment:
+      IPFS_PROFILE: server
+    volumes:
+      - ipfs-data:/data/ipfs
+    ports:
+      - "4001:4001/tcp"
+      - "4001:4001/udp"
+    healthcheck:
+      test: [CMD, ipfs, "--api=/ip4/127.0.0.1/tcp/5001", id]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    stop_grace_period: 1m
+    restart: unless-stopped
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  ipfs-data:
