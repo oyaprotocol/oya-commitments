@@ -1,6 +1,6 @@
 # Package a deployable Docker runtime for the log-only node
 
-This ExecPlan is a living document maintained according to `PLANS.md`. It is a proposal for review; implementation has not begun. Work should proceed in the small milestones below, with a review handoff after each milestone to respect the user's requested pace.
+This ExecPlan is a living document maintained according to `PLANS.md`. The user authorized milestone 1 on 2026-09-14, with a small diff for manual line-by-line review. Work proceeds in the milestones below, with a review handoff after each milestone.
 
 ## Purpose / Big Picture
 
@@ -15,7 +15,9 @@ This delivers a deployable, manually supervised log-only instance. It does not a
 - [x] 2026-09-13 07:01Z: Reviewed plan requirements, the direct runtime entrypoint, configuration, existing deployment/publication tests, and current CI.
 - [x] 2026-09-13: Checked Docker availability and official container lifecycle, networking, and storage documentation; drafted this plan without changing implementation files.
 - [x] 2026-09-14: Clarified build and restore validation; exact commands and image digests remain implementation details, as requested by the user.
-- [ ] Milestone 1: Build and inspect the minimal runtime image.
+- [x] 2026-09-14: Rechecked status against the working tree at `1696f89`. Docker implementation files, `test:docker`, and container CI are still absent; the dependency pins match this plan. Docker remains unreachable. This status review did not rerun host tests or execute container validation.
+- [x] 2026-09-14: User authorized milestone 1. Added the minimal Dockerfile and explicit build-input allowlist; started Docker Desktop and resolved the official Node 24.21.0 bookworm slim multi-platform digest.
+- [x] 2026-09-14: Milestone 1 validation passed on Linux arm64: image build, all five dependency imports and licenses, UID/GID 1000:1000, direct Node PID 1, exact application files, no npm cache, and sanitized missing-config exit 1. A disposable build-context fixture retained exactly eight allowed files and excluded all 14 dummy artifacts. All 89 host tests passed under Node 24.21.0 with no skips; whitespace checks passed. Ready for human review.
 - [ ] Milestone 2: Add persistent Compose services and operator instructions.
 - [ ] Milestone 3: Validate message publication and container lifecycle, then add CI coverage.
 
@@ -26,19 +28,24 @@ This delivers a deployable, manually supervised log-only instance. It does not a
 - The default operation deadline is 180 seconds. Docker's default stop grace is 10 seconds, so container shutdown needs an explicit longer allowance. The default proposed here is four minutes. See the [Compose service reference](https://docs.docker.com/reference/compose-file/services/#stop_grace_period).
 - The existing environment example also contains agent and deployer credentials. The container needs a smaller, dedicated environment file containing only node credentials and optional transport authorization values.
 - Docker client 27.4.0 and Compose 2.31.0 are installed in the inspected environment. `docker version` reported that it could not connect to the daemon. No image build or container test has been performed, and no daemon was started while drafting.
+- The 2026-09-14 status review confirmed the same Docker connection failure and found Buildx 0.19.2 and Foundry 1.5.1 available. The default shell resolves Node 23.10.0; select Node 24 explicitly for the planned host validation.
+- During milestone 1, starting Docker Desktop made its Linux arm64 daemon available. Docker socket access and host npm registry access required execution outside the sandbox. The resulting image built successfully, and the host suite passed after installing the locked dependencies under Node 24.21.0.
 
 ## Decision Log
 
-- Decision: Package the existing direct CLI without a new launcher, process supervisor, or runtime refactor. Rationale: `startNode()` already owns startup and shutdown, and additional wrappers would recreate the earlier signal-forwarding problem. Date/Author: 2026-09-13 / Codex, proposed for review.
+- Decision: Package the existing direct CLI without a new launcher, process supervisor, or runtime refactor. Rationale: `startNode()` already owns startup and shutdown, and additional wrappers would recreate the earlier signal-forwarding problem. Date/Author: 2026-09-13 / Codex; implemented in the user-authorized milestone 1 on 2026-09-14.
 - Decision: Use a Node 24 Debian slim image, locked npm dependencies, a non-root process, and Linux containers. Rationale: This matches the CI baseline and avoids adding another runtime or application dependency. Build for Linux amd64 and arm64; record which architectures were actually executed. Date/Author: 2026-09-13 / Codex.
 - Decision: Use a read-only config mount and a dedicated Compose `env_file` for the existing environment-variable interface. Rationale: This requires no signer changes or secret-loader wrapper. The file stays outside the build context; Docker administrators can still inspect the process environment. This is not encrypted secret storage. Date/Author: 2026-09-13 / Codex.
 - Decision: Keep Oya at `restart: "no"`, with one running instance per signing account. Kubo may use `unless-stopped`. Rationale: Content storage can restart independently, while resuming node signing requires an operator to reconcile any uncertain transaction. Date/Author: 2026-09-13 / Codex.
 - Decision: Keep Ledger deployment explicit and use external Ethereum RPC for normal operation. Add Anvil only to the disposable test configuration. Rationale: Starting or replacing the node must not deploy contracts, generate a new identity, fund accounts, or reset a chain. Date/Author: 2026-09-13 / Codex.
 - Decision: Build and test images without publishing them. Rationale: A registry, image namespace, and release policy have not been chosen. A locally built image is sufficient to validate deployment. Date/Author: 2026-09-13 / Codex.
+- Decision: Keep milestone 1 to a 13-line Dockerfile and 12-line `.dockerignore`, plus this progress record. Explicitly allow the five current runtime modules, keep installed code root-owned, and remove npm's cache in the installation layer. Rationale: This keeps the human review small, excludes unlisted files even under `src/`, and gives the runtime user read access without ownership of the application. A new runtime module must be added to the allowlist. Date/Author: 2026-09-14 / Codex.
 
 ## Outcomes & Retrospective
 
-Planning is complete; all implementation milestones remain pending. The expected change is primarily packaging and operations configuration. The existing HTTP API, kernel dependencies, single-operation behavior, and transaction semantics should remain unchanged. Update this section after each milestone with files changed, validation evidence, and any remaining limits.
+Milestone 1 is implemented and validated, ready for manual line-by-line review. `node/production/Dockerfile` packages the existing CLI with locked dependencies, and `.dockerignore` restricts the build inputs. The image runs as a non-root user and fails cleanly without configuration. A fresh host test run passed all 89 tests. Runtime source, manifests, and lockfile are unchanged.
+
+Milestones 2 and 3 remain pending. Only Linux arm64 image execution was validated here; amd64 builds and the full container publication/lifecycle flow remain for milestone 3. No Compose services, registry publication, or live deployment were added. The earlier Ledger migration's local integration and smoke results were not rerun for this packaging-only milestone.
 
 ## Context and Orientation
 
@@ -218,7 +225,15 @@ Planned implementation files are `node/production/Dockerfile`, `node/production/
 
 Record public image digests, tested platform/tool versions, relevant exit statuses, CIDs, transaction hashes, and pass/fail evidence as milestones finish. Keep real environment files, endpoint credentials, account keys, private artifact paths, and full container inspection output out of the plan and committed documentation. Use repository-relative paths or placeholders for examples.
 
-Current evidence is limited to source review, official documentation, and client availability checks. Docker reported an unavailable daemon; the initial working tree was clean. No Docker acceptance result is claimed yet.
+Milestone 1 evidence (2026-09-14):
+
+- Base: [official Node image](https://hub.docker.com/_/node), `node:24.21.0-bookworm-slim@sha256:2fe369e969550cde8e867afc3fe370b260140cab4a23d467074295b42163d553`. `docker buildx imagetools inspect node:24.21.0-bookworm-slim` confirmed Linux amd64 and arm64 manifests in this index.
+- Build: `docker build --tag oya-node:local node/production` passed using Docker Desktop 4.37.2 / Engine 27.4.0 on Linux arm64. The application build context was 25.25 kB; npm installed 16 locked packages without authentication or lifecycle scripts.
+- Local image ID: `sha256:ca17ea6b3e7b1f22e63b9b36adff351862edeb79ca20bbd4cdbc0be60d2b3550`. Image inspection confirmed `/app`, user `node`, entrypoint `["node","src/main.mjs"]`, and command `["/config/node.json"]`.
+- Isolated `docker run --rm --network none --entrypoint node oya-node:local --input-type=module -e '<assertions>'` checks imported all five direct dependencies at their pinned versions and the application entrypoint, verified dependency license files, Node v24.21.0, UID/GID 1000:1000, PID 1, and the exact `/app` and `/app/src` file lists. A separate root inspection verified npm caches and operator settings were absent.
+- `docker run --rm --network none oya-node:local` exited 1 with only `Node startup failed. Check config, signer, and RPC/Ledger availability.` No settings or keys were supplied.
+- Build-context verification used a temporary copy of the eight allowed inputs plus `.dockerignore`, with 14 dummy artifacts at the root and under `src/`, `node_modules/`, `test/`, `scripts/`, `.state/`, and `docker/`. An external two-line Dockerfile (`FROM scratch`, `COPY . /`) exported the filtered context using `docker build --file <fixture>/context-inspect.Dockerfile --output type=local,dest=<fixture>/export <fixture>/context`. Exactly the eight intended files remained, with unchanged bytes. No repository test harness was added.
+- With Node 24.21.0 selected on `PATH`, `npm --prefix node/production ci --ignore-scripts --no-audit --no-fund` and `npm --prefix node/production test` passed: 89 tests, zero failures/skips. `git diff --check` passed. Disposable validation containers removed themselves; no chain or IPFS services were started.
 
 ## Interfaces and Dependencies
 

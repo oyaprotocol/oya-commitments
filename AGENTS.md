@@ -73,6 +73,13 @@
 - PRs should summarize intent, list main changes, note testing performed (`forge test`, `forge snapshot`, scripts run), and flag any config or env var impacts.
 - Include relevant issue links and, if user-visible, attach logs or gas deltas for reviewers.
 
+## Before Human Review
+
+- Before declaring work ready for review, inspect the complete proposed change, including commits in a proposed PR and staged, unstaged, and new files intended for review.
+- Check source, tests, configuration, documentation, plans, generated artifacts, and proposed PR text or attachments for secrets, credentials, private endpoints, and sensitive data.
+- Do not include developer-specific absolute paths, temporary directory names, private directory layouts, or dependencies on local-only files. Use repository-relative paths, configurable inputs, or clearly marked placeholders. Documented container paths are permitted.
+- Resolve findings before handing off for review. If the check is incomplete or findings remain unresolved, state the limitation without reproducing sensitive values and do not claim the work is ready. Successful checks do not require a written record in files, PRs, or handoff messages.
+
 ## Security & Configuration Tips
 - Never commit private keys; load them via `.env`/CI secrets. `DEPLOYER_PK` should only be set locally or in secure pipelines.
 - Double-check network-specific addresses (`SAFE_*`, `OG_MASTER_COPY`) before broadcasting; prefer dry-runs against Anvil or testnets.
