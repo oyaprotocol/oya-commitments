@@ -42,7 +42,7 @@ Planning is complete; all implementation milestones remain pending. The expected
 
 ## Context and Orientation
 
-The standalone application is `node/production/`. Its `package.json` and `package-lock.json` target `@oyaprotocol/ethereum` and `@oyaprotocol/messages` at 0.2.0, `@oyaprotocol/ipfs` at 0.1.2, `@oyaprotocol/utils` at 0.1.1, and ethers at 6.17.0. Complete the [Ledger naming migration](ledger-contract-rename-execplan.md), including kernel publication and registry validation, before resuming Docker implementation. The image then installs kernels from npm without compiling their source. `src/config.mjs` parses the JSON configuration and optional RPC/IPFS Authorization headers. `src/signer.mjs` reads the node key through its caller and uses ethers for transaction signing.
+The standalone application is `node/production/`. Its `package.json` and `package-lock.json` target `@oyaprotocol/ethereum` and `@oyaprotocol/messages` at 0.2.0, `@oyaprotocol/ipfs` at 0.1.2, `@oyaprotocol/utils` at 0.1.1, and ethers at 6.17.0. The [Ledger naming migration](ledger-contract-rename-execplan.md) includes completed kernel publication and registry validation. The image installs kernels from npm without compiling their source. `src/config.mjs` parses the JSON configuration and optional RPC/IPFS Authorization headers. `src/signer.mjs` reads the node key through its caller and uses ethers for transaction signing.
 
 The direct command is `node node/production/src/main.mjs /absolute/path/to/config.json`. Startup checks the chain ID and code presence at `ledgerContract`. It does not establish that the node can afford a transaction, that the code is the intended Ledger implementation, or that IPFS publication is available.
 
