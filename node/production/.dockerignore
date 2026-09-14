@@ -1,0 +1,12 @@
+# Include only the runtime's build inputs.
+**
+!Dockerfile
+!package.json
+!package-lock.json
+!src/
+src/**
+!src/bytecode.mjs
+!src/config.mjs
+!src/main.mjs
+!src/server.mjs
+!src/signer.mjs
