@@ -3,13 +3,13 @@ import { setImmediate as nextTurn } from 'node:timers/promises';
 import test from 'node:test';
 
 import { createHttpConfig, createTransactionPreparer, EthereumJsonRpcError, logCid } from '@oyaprotocol/ethereum';
-import { sample, loggerContract, node, createReceipt, response } from './fixtures/logger-transaction.js';
+import { sample, ledgerContract, node, createReceipt, response } from './fixtures/ledger-transaction.js';
 
 // Opaque test bytes, not a real signature. Hash independently checked with cast keccak 0x02abcd.
 const rawTransaction = '0x02abcd';
 const transactionHash = '0xe3607eedbe2ea88ad1994e3ef901f3c7ed167a59ebb5ffe5e40321e468f49eb1';
 const signed = { rawTransaction, transactionHash };
-const request = { to: loggerContract, data: '0x1234', value: 7n };
+const request = { to: ledgerContract, data: '0x1234', value: 7n };
 
 function fixture(overrides = {}) {
     const calls = [];
@@ -381,12 +381,12 @@ test('signed results must have type-2 bytes and a matching hash', async () => {
     assert.equal(result.rawTransaction, '0x02ABCD');
 });
 
-test('the default preparer composes with Logger submission and event verification', async () => {
+test('the default preparer composes with Ledger submission and event verification', async () => {
     const { options, signatures, calls } = fixture();
     const prepare = createTransactionPreparer(options);
     const loggingCalls = [];
     const result = await logCid(sample.cid, {
-        config: options.config, loggerContract, nodeAddress: node, transactionPreparer: prepare,
+        config: options.config, ledgerContract, nodeAddress: node, transactionPreparer: prepare,
         timeoutMs: 1_000, pollIntervalMs: 1,
         fetch: async (_url, init) => {
             assert.equal(signatures.length, 1);
@@ -402,7 +402,7 @@ test('the default preparer composes with Logger submission and event verificatio
     });
     assert.equal(signatures[0].transaction.data, sample.calldata);
     assert.equal(signatures[0].transaction.value, 0n);
-    assert.equal(signatures[0].transaction.to, loggerContract);
+    assert.equal(signatures[0].transaction.to, ledgerContract);
     assert.equal(result.transactionHash, transactionHash);
     assert.equal(result.event.node, node);
     assert.equal(calls.length, 5);

@@ -2,6 +2,8 @@
 
 This ExecPlan is a living document maintained according to `PLANS.md`.
 
+**Historical implementation record.** The runtime has since been simplified: the HTTP handler calls `publishAndLogSignedMessage` directly, processes one operation at a time, and returns `200` / `logged` after verification. Publication journals, deduplication, state locks, and restart replay described below were removed. Use [the direct-handler ExecPlan](production-node-direct-handler-execplan.md) for the current design and validation, and [the production node guide](../node/production/README.md) for operation. Endpoints and artifacts below describe earlier local sessions; they are not current service-discovery information.
+
 ## Purpose / Big Picture
 
 An operator can start an Oya HTTP node, submit an allowlisted agent's Ethereum-signed text message, retrieve the published JSON from IPFS, and observe its CID in a mined Logger event attributed to the node's account. This establishes a running node built on the hardened kernel packages and a deployed Logger. Commitments continue to use Safe and Optimistic Governor; reimbursement verification and DeFi integrations are subsequent work.
@@ -19,6 +21,7 @@ An operator can start an Oya HTTP node, submit an allowlisted agent's Ethereum-s
 - [x] 2026-09-07: Reworded documentation and sample messages around kernel-node behavior for reuse in the upstream repository.
 - [x] 2026-09-07: Moved the standalone runtime to `node/production/` and updated documentation, CI, CLI startup paths, and ignore rules.
 - [x] 2026-09-07: All seven runtime tests and the full local smoke, including CLI startup, passed from `node/production/`. Verified ignore rules and removed all old directory references.
+- [x] 2026-09-07: Superseded the journal-based runtime and smoke under `production-node-direct-handler-execplan.md`; retained this plan as implementation history.
 - [ ] If public deployment is desired, obtain the selected chain, host, funded signer, RPC, and IPFS access; the deployment-scope question remains unanswered.
 
 ## Surprises & Discoveries
@@ -41,6 +44,8 @@ An operator can start an Oya HTTP node, submit an allowlisted agent's Ethereum-s
 - Decision: Name the standalone runtime directory `node/production/`. Rationale: the directory identifies the intended production node, while `packages/` contains its hardened kernel dependencies and older daemons remain experimental. Existing operational limitations remain documented. Date/Author: 2026-09-07 / Codex.
 
 ## Outcomes & Retrospective
+
+The outcomes in this section describe the initial implementation. Current behavior and evidence are maintained in [the direct-handler ExecPlan](production-node-direct-handler-execplan.md).
 
 The local milestone is implemented and running. Seven host tests and eight Logger contract tests pass, as do contract formatting and `git diff --check`. A real smoke deployed Logger, published/retrieved signed JSON through Kubo, checked Logger events, deduplicated requests, recovered both prepared and mined transactions, and rejected concurrent new work. The final smoke leaves Anvil, offline Kubo, and the actual node CLI running; its health check returned success after CLI startup. CI now installs the standalone runtime and runs its host tests after checking package build freshness. No public network deployment has been attempted because its chain, credentials, and hosting are not selected.
 

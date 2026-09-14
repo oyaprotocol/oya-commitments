@@ -150,13 +150,13 @@ A synchronous throw or rejected Promise from `onAcceptedMessage` rejects `handle
 
 The public TypeScript API uses one `HandleSignedMessageOptions<TResult>` interface whose `onAcceptedMessage` property is optional, and one accepted-result interface with an optional `handleSignedMessageResult` property. After narrowing `status === 202`, the host may read the property directly as `Awaited<TResult> | undefined`, with `TResult` inferred from the handler. Check `'handleSignedMessageResult' in result` when distinguishing an omitted handler from one that returned `undefined`. With `exactOptionalPropertyTypes` enabled, this presence check also narrows the property's type to `Awaited<TResult>`.
 
-The accepted-message function is a host integration point. The package provides the IPFS publisher and the sequential publication/Logger handler below; the host selects and configures a handler.
+The accepted-message function is a host integration point. The package provides the IPFS publisher and the sequential publication/Ledger handler below; the host selects and configures a handler.
 
 ## IPFS Publication Handler
 
 `publishSignedMessage(message, options)` verifies the message's schema and EIP-191 signature, snapshots its three fields, and publishes and pins the resulting JSON through `@oyaprotocol/ipfs`. It is implemented in `src/handlers/publish.ts` and exported through the package root. Direct callers receive the same verification as callback users; allowlist authorization remains the responsibility of ingress or the host.
 
-Publication inherits the [fixed IPFS import settings and strict CID format](../ipfs/README.md#canonical-cids-and-file-imports): CIDv1, lowercase unpadded Base32, and SHA-256. The returned `cid` can be passed directly to IPFS reads, `encodeLoggerCall`, and `hashLoggerCid` from `@oyaprotocol/ethereum`. The same serialized envelope bytes produce the same CID through a conforming provider; changing the text, signer spelling, or signature changes the serialized artifact.
+Publication inherits the [fixed IPFS import settings and strict CID format](https://github.com/oyaprotocol/oya-commitments/blob/main/packages/ipfs/README.md#canonical-cids-and-file-imports): CIDv1, lowercase unpadded Base32, and SHA-256. The returned `cid` can be passed directly to IPFS reads, `encodeLedgerCall`, and `hashLedgerCid` from `@oyaprotocol/ethereum`. The same serialized envelope bytes produce the same CID through a conforming provider; changing the text, signer spelling, or signature changes the serialized artifact.
 
 `PublishSignedMessageOptions` requires `config` and `fetch` from `PublishToIpfsOptions` and accepts its optional `signal`. The host provides an explicit IPFS URL, headers, timeout, retry count, and retry delay through `createIpfsConfig(...)`. Cancellation and retry behavior are delegated to the IPFS primitive.
 
@@ -225,10 +225,10 @@ const result = await handleSignedMessage(request, {
     maxTextBytes: 1024,
     onAcceptedMessage: (message) => publishAndLogSignedMessage(message, {
         ipfs: { config: ipfsConfig, fetch: ipfsFetch },
-        logger: {
+        ledger: {
             config: rpcConfig,
             fetch: rpcFetch,
-            loggerContract,
+            ledgerContract,
             nodeAddress,
             transactionPreparer,
             timeoutMs: 60_000,
@@ -246,9 +246,9 @@ if (result.status === 202 && result.handleSignedMessageResult !== undefined) {
 }
 ```
 
-The host supplies the IPFS/RPC configs and transports, Logger address, expected node address, and transaction preparation/signing callback. See [`logCid`](../ethereum/README.md#logging-a-cid) for the signing contract: the callback returns signed bytes and their transaction hash without broadcasting. The node signs the Logger transaction; this is separate from the allowlisted sender's signature over the message text.
+The host supplies the IPFS/RPC configs and transports, Ledger address, expected node address, and transaction preparation/signing callback. See [`logCid`](https://github.com/oyaprotocol/oya-commitments/blob/main/packages/ethereum/README.md#logging-a-cid) for the signing contract: the callback returns signed bytes and their transaction hash without broadcasting. The node signs the Ledger transaction; this is separate from the allowlisted sender's signature over the message text.
 
-`PublishAndLogSignedMessageOptions` contains separate `ipfs` and `logger` options plus one optional `signal` shared by both stages. Only the top-level `signal` controls caller cancellation; nested signals in reused stage options are ignored, even when the top-level signal is omitted. The original options are not modified. The result is `{ publication: PublishToIpfsResult, logging: LogCidResult }`. Ingress waits for the whole callback, including receipt verification, before returning 202; the external response body still contains only the existing acceptance fields. A direct call verifies the message signature through the publisher, but the caller is responsible for allowlist authorization. Use the ingress configuration above for requests from senders.
+`PublishAndLogSignedMessageOptions` contains separate `ipfs` and `ledger` options plus one optional `signal` shared by both stages. Only the top-level `signal` controls caller cancellation; nested signals in reused stage options are ignored, even when the top-level signal is omitted. The original options are not modified. The result is `{ publication: PublishToIpfsResult, logging: LogCidResult }`. Ingress waits for the whole callback, including receipt verification, before returning 202; the external response body still contains only the existing acceptance fields. A direct call verifies the message signature through the publisher, but the caller is responsible for allowlist authorization. Use the ingress configuration above for requests from senders.
 
 IPFS or message-validation failures propagate unchanged and prevent logging. If publication succeeds but logging does not complete, `PublishAndLogSignedMessageError` exposes `publication`, the known `transactionHash` (or `null`), and the original `cause`. A `LogCidError` cause supplies the logging stage and any parsed receipt. Such failures reject ingress rather than producing an accepted response. Publication may already have succeeded, and a submitted transaction may still be pending or mined. Resume receipt observation by the known hash instead of retrying the entire handler blindly. The handler adds no deduplication, rollback, durable progress storage, or full-flow retries; repeated accepted requests invoke both operations again.
 
@@ -258,4 +258,4 @@ An Internet-facing server must cap request bytes while reading the request strea
 
 ## Publication Ordering
 
-A v1 EIP-191 signature authenticates the signer and exact `text`; it does not assign a publication time or order. Repeated valid submissions remain acceptable at this ingress boundary. The publication/Logger callback establishes the public record by logging the published IPFS CID onchain. Canonical block and log positions identify when and in what order messages were recorded; hosts choose their confirmation policy.
+A v1 EIP-191 signature authenticates the signer and exact `text`; it does not assign a publication time or order. Repeated valid submissions remain acceptable at this ingress boundary. The publication/Ledger callback establishes the public record by logging the published IPFS CID onchain. Canonical block and log positions identify when and in what order messages were recorded; hosts choose their confirmation policy.

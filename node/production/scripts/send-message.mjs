@@ -12,7 +12,7 @@ try {
         body: JSON.stringify({ text, signer: wallet.address, signature: await wallet.signMessage(text) }),
     });
     console.log(JSON.stringify(await response.json(), null, 2));
-    if (response.status !== 202) process.exitCode = 1;
+    if (response.status !== 200) process.exitCode = 1;
 } catch {
     console.error('Could not submit message. Supply OYA_AGENT_PRIVATE_KEY, a node URL, and a nonempty ASCII text file.');
     process.exitCode = 1;

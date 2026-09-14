@@ -56,7 +56,7 @@ The copied `default` module now starts as a minimal standard scaffold using the 
 - Agent module layout and new-commitment workflow: `agent-library/README.md`
 - Runner config, message APIs, publication nodes, and harness usage: `agent/README.md`
 - Standalone node daemons and startup commands: `node/README.md`
-- Oya production node, Logger deployment, and local end-to-end smoke: `node/production/README.md`
+- Oya production node, Ledger deployment, and local end-to-end smoke: `node/production/README.md`
 - Deployment and configuration: `docs/deployment.md`
 - Signer options and `with-signer` helper: `docs/signers.md`
 - Offchain agent usage: `docs/agent.md`
@@ -66,7 +66,7 @@ The copied `default` module now starts as a minimal standard scaffold using the 
 
 ## Repo Layout
 
-- `contracts/` Hardened onchain contracts, including Logger; separate Foundry project (see `contracts/README.md`)
+- `contracts/` Hardened onchain contracts, including Ledger; separate Foundry project (see `contracts/README.md`)
 - `packages/` Hardened offchain libraries consumed by nodes
 - `src/` Existing Solidity contracts
 - `script/` Foundry deployment and ops scripts

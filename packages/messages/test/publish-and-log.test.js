@@ -10,9 +10,9 @@ import {
 import { createIpfsConfig, HttpStatusError } from '@oyaprotocol/ipfs';
 import { LogCidError, EthereumTransactionReceiptTimeoutError } from '@oyaprotocol/ethereum';
 import {
-    sample, loggerContract, node, transactionHash, rawTransaction,
-    createReceipt, response, createOptions as createLoggerOptions,
-} from '../../ethereum/test/fixtures/logger-transaction.js';
+    sample, ledgerContract, node, transactionHash, rawTransaction,
+    createReceipt, response, createOptions as createLedgerOptions,
+} from '../../ethereum/test/fixtures/ledger-transaction.js';
 
 const fixtures = JSON.parse(readFileSync(new URL('../../test/fixtures/cids.json', import.meta.url), 'utf8'));
 const envelope = fixtures.cases.find(({ name }) => name === 'message');
@@ -30,7 +30,7 @@ function createOptions(overrides = {}) {
             }),
             fetch: async () => ipfsResponse(),
         },
-        logger: createLoggerOptions(), ...overrides,
+        ledger: createLedgerOptions(), ...overrides,
     };
 }
 
@@ -48,7 +48,7 @@ function createIngress(options, overrides = {}) {
     };
 }
 
-test('the allowlisted message callback awaits publication, signing, submission, and the expected Logger receipt in order', async () => {
+test('the allowlisted message callback awaits publication, signing, submission, and the expected Ledger receipt in order', async () => {
     const uploadStarted = Promise.withResolvers();
     const uploaded = Promise.withResolvers();
     const signingStarted = Promise.withResolvers();
@@ -57,7 +57,7 @@ test('the allowlisted message callback awaits publication, signing, submission, 
     const mined = Promise.withResolvers();
     const stages = [];
     const options = createOptions();
-    options.logger.id = 'message-flow';
+    options.ledger.id = 'message-flow';
     options.ipfs.fetch = async (url, request) => {
         stages.push('publish');
         assert.deepEqual(Object.fromEntries(new URL(url).searchParams), fixtures.options);
@@ -69,13 +69,13 @@ test('the allowlisted message callback awaits publication, signing, submission, 
         await uploaded.promise;
         return ipfsResponse();
     };
-    options.logger.transactionPreparer = (request) => {
+    options.ledger.transactionPreparer = (request) => {
         stages.push('prepare');
-        assert.deepEqual(request, { to: loggerContract, data: sample.calldata, value: 0n });
+        assert.deepEqual(request, { to: ledgerContract, data: sample.calldata, value: 0n });
         signingStarted.resolve();
         return signed.promise;
     };
-    options.logger.fetch = async (_url, request) => {
+    options.ledger.fetch = async (_url, request) => {
         const { method, params, id } = JSON.parse(request.body);
         assert.equal(id, 'message-flow');
         stages.push(method);
@@ -125,8 +125,8 @@ test('the allowlisted message callback awaits publication, signing, submission, 
 test('rejected ingress requests never publish, prepare, or log a message', async () => {
     let calls = 0;
     const options = createOptions();
-    options.ipfs.fetch = options.logger.fetch = async () => { calls++; throw new Error('Unexpected fetch'); };
-    options.logger.transactionPreparer = () => { calls++; throw new Error('Unexpected signing'); };
+    options.ipfs.fetch = options.ledger.fetch = async () => { calls++; throw new Error('Unexpected fetch'); };
+    options.ledger.transactionPreparer = () => { calls++; throw new Error('Unexpected signing'); };
     const cases = [
         [createRequest(), { authorize: createSignedMessageAuthorizer([]) }, 403],
         [createRequest({ ...message, text: `${message.text}!` }), {}, 401],
@@ -143,12 +143,12 @@ test('rejected ingress requests never publish, prepare, or log a message', async
     assert.equal(calls, 0);
 });
 
-test('invalid direct messages and failed IPFS publication prevent all Logger actions', async () => {
-    let loggerCalls = 0;
+test('invalid direct messages and failed IPFS publication prevent all Ledger actions', async () => {
+    let ledgerCalls = 0;
     let uploads = 0;
     const options = createOptions();
-    options.logger.transactionPreparer = () => { loggerCalls++; };
-    options.logger.fetch = async () => { loggerCalls++; };
+    options.ledger.transactionPreparer = () => { ledgerCalls++; };
+    options.ledger.fetch = async () => { ledgerCalls++; };
     options.ipfs.fetch = async () => {
         uploads++;
         return { ok: false, status: 400, statusText: 'Bad Request', text: async () => '' };
@@ -158,7 +158,7 @@ test('invalid direct messages and failed IPFS publication prevent all Logger act
     await assert.rejects(handleSignedMessage(createRequest(), createIngress(options)), HttpStatusError);
     options.ipfs.fetch = async () => ({ ...ipfsResponse(), text: async () => '{"Hash":"bafy-invalid"}' });
     await assert.rejects(handleSignedMessage(createRequest(), createIngress(options)), /canonical CIDv1/);
-    assert.equal(loggerCalls, 0);
+    assert.equal(ledgerCalls, 0);
 });
 
 test('message logging failures preserve the publication and known transaction hash without repeating either operation', async () => {
@@ -169,13 +169,13 @@ test('message logging failures preserve the publication and known transaction ha
         let submissions = 0;
         const cause = new Error(`${stage} failed`);
         options.ipfs.fetch = async () => { uploads++; return ipfsResponse(); };
-        options.logger.transactionPreparer = () => {
+        options.ledger.transactionPreparer = () => {
             preparations++;
             if (stage === 'prepare') throw cause;
             return { rawTransaction, transactionHash };
         };
-        options.logger.timeoutMs = 10;
-        options.logger.fetch = async (_url, request) => {
+        options.ledger.timeoutMs = 10;
+        options.ledger.fetch = async (_url, request) => {
             const { method } = JSON.parse(request.body);
             if (method === 'eth_sendRawTransaction') {
                 submissions++;
@@ -203,17 +203,17 @@ test('message logging failures preserve the publication and known transaction ha
     }
 });
 
-for (const stage of ['ipfs', 'logger']) {
+for (const stage of ['ipfs', 'ledger']) {
     test(`an aborted nested ${stage} signal is ignored when the top-level signal is absent`, async () => {
         const options = createOptions();
         const nestedSignal = AbortSignal.abort('Stale stage cancellation');
         options[stage].signal = nestedSignal;
-        options.logger.transactionPreparer = (request) => {
+        options.ledger.transactionPreparer = (request) => {
             assert.equal('signal' in request, false);
             return { rawTransaction, transactionHash };
         };
         Object.freeze(options.ipfs);
-        Object.freeze(options.logger);
+        Object.freeze(options.ledger);
 
         const result = await handleSignedMessage(createRequest(), createIngress(options));
 
@@ -229,20 +229,20 @@ test('the message callback forwards one cancellation signal through publication 
     const controller = new AbortController();
     options.signal = controller.signal;
     options.ipfs.signal = AbortSignal.abort('Stale IPFS cancellation');
-    options.logger.signal = AbortSignal.abort('Stale Logger cancellation');
+    options.ledger.signal = AbortSignal.abort('Stale Ledger cancellation');
     const signingStarted = Promise.withResolvers();
     const signed = Promise.withResolvers();
     let ipfsSignal;
     let submissions = 0;
     options.ipfs.fetch = async (_url, request) => { ipfsSignal = request.signal; return ipfsResponse(); };
-    options.logger.transactionPreparer = (request) => {
+    options.ledger.transactionPreparer = (request) => {
         assert.equal(request.signal, controller.signal);
         signingStarted.resolve();
         return signed.promise;
     };
-    options.logger.fetch = async () => { submissions++; };
+    options.ledger.fetch = async () => { submissions++; };
     Object.freeze(options.ipfs);
-    Object.freeze(options.logger);
+    Object.freeze(options.ledger);
     const promise = handleSignedMessage(createRequest(), createIngress(options));
     await signingStarted.promise;
     controller.abort(new Error('Host cancelled'));
@@ -258,7 +258,7 @@ test('a pre-aborted message callback does not publish or prepare a transaction',
     const options = createOptions({ signal: AbortSignal.abort('Cancelled') });
     let calls = 0;
     options.ipfs.fetch = async () => { calls++; };
-    options.logger.transactionPreparer = () => { calls++; };
+    options.ledger.transactionPreparer = () => { calls++; };
     await assert.rejects(handleSignedMessage(createRequest(), createIngress(options)), /aborted/);
     assert.equal(calls, 0);
 });

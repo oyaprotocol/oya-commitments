@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
 import { createSignedMessageAuthorizer } from '@oyaprotocol/messages';
 import { createHttpConfig } from '@oyaprotocol/ethereum';
 import { createIpfsConfig } from '@oyaprotocol/ipfs';
@@ -22,23 +21,22 @@ function endpoint(value, name) {
     }
 }
 
-export function parseConfig(input, { baseDir = process.cwd(), env = process.env } = {}) {
+export function parseConfig(input, { env = process.env } = {}) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Config must be an object.');
-    const fields = new Set(['host', 'port', 'chainId', 'loggerContract', 'allowedSigners', 'rpcUrl', 'ipfsUrl',
-        'stateDir', 'maxBodyBytes', 'maxTextBytes', 'bodyTimeoutMs', 'receiptTimeoutMs', 'pollIntervalMs',
-        'gasLimit', 'maxFeePerGasWei']);
+    const fields = new Set(['host', 'port', 'chainId', 'ledgerContract', 'allowedSigners', 'rpcUrl', 'ipfsUrl',
+        'maxBodyBytes', 'maxTextBytes', 'bodyTimeoutMs', 'receiptTimeoutMs', 'pollIntervalMs',
+        'operationTimeoutMs', 'gasLimit', 'maxFeePerGasWei']);
     for (const key of Object.keys(input)) {
         if (!fields.has(key)) throw new Error('Config contains an unsupported field.');
     }
-    if (!/^0x[0-9a-fA-F]{40}$/.test(input.loggerContract ?? '') || /^0x0{40}$/i.test(input.loggerContract)) {
-        throw new Error('loggerContract must be a nonzero Ethereum address.');
+    if (!/^0x[0-9a-fA-F]{40}$/.test(input.ledgerContract ?? '') || /^0x0{40}$/i.test(input.ledgerContract)) {
+        throw new Error('ledgerContract must be a nonzero Ethereum address.');
     }
     const authorize = createSignedMessageAuthorizer(input.allowedSigners);
     if (input.allowedSigners.length === 0) throw new Error('allowedSigners must not be empty.');
     if (input.host !== undefined && (typeof input.host !== 'string' || !input.host.trim())) {
         throw new Error('host must be a nonempty string.');
     }
-    if (typeof input.stateDir !== 'string' || !input.stateDir.trim()) throw new Error('stateDir is required.');
     if (input.maxFeePerGasWei !== undefined && !/^[1-9][0-9]{0,77}$/.test(input.maxFeePerGasWei)) {
         throw new Error('maxFeePerGasWei must be a positive decimal string.');
     }
@@ -49,12 +47,12 @@ export function parseConfig(input, { baseDir = process.cwd(), env = process.env 
     return Object.freeze({
         host: input.host ?? '127.0.0.1', port: integer(input.port, 'port', 8787, 65535),
         chainId: integer(input.chainId, 'chainId', undefined, Number.MAX_SAFE_INTEGER),
-        loggerContract: input.loggerContract, authorize,
-        stateDir: resolve(baseDir, input.stateDir),
+        ledgerContract: input.ledgerContract, authorize,
         maxBodyBytes: integer(input.maxBodyBytes, 'maxBodyBytes', 16_384, 1_048_576),
         maxTextBytes: integer(input.maxTextBytes, 'maxTextBytes', 8192, 1_048_576),
         bodyTimeoutMs: integer(input.bodyTimeoutMs, 'bodyTimeoutMs', 10_000),
         receiptTimeoutMs: integer(input.receiptTimeoutMs, 'receiptTimeoutMs', 60_000),
+        operationTimeoutMs: integer(input.operationTimeoutMs, 'operationTimeoutMs', 180_000),
         pollIntervalMs: integer(input.pollIntervalMs, 'pollIntervalMs', 1000),
         limits: {
             gasLimit: BigInt(integer(input.gasLimit, 'gasLimit', 200_000)),
@@ -66,5 +64,5 @@ export function parseConfig(input, { baseDir = process.cwd(), env = process.env 
 }
 
 export async function loadConfig(path, env = process.env) {
-    return parseConfig(JSON.parse(await readFile(path, 'utf8')), { baseDir: dirname(resolve(path)), env });
+    return parseConfig(JSON.parse(await readFile(path, 'utf8')), { env });
 }

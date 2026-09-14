@@ -7,7 +7,7 @@ export type { CreateTransactionPreparerOptions } from './transaction-preparer.js
 export { EthereumTransactionReceiptTimeoutError, ethGetTransactionReceipt, ethWaitForTransactionReceipt, } from './receipts.js';
 export type { EthGetTransactionReceiptOptions, EthGetTransactionReceiptResult, EthWaitForTransactionReceiptOptions, EthWaitForTransactionReceiptResult, } from './receipts.js';
 export type { EthereumReceiptLog, EthereumTransactionReceipt } from './receipt-utils.js';
-export { encodeLoggerCall, decodeLoggerEvent, hashLoggerCid, logCid, LogCidError } from './logger.js';
-export type { LoggerEventInput, LoggerEvent, LogCidOptions, LogCidResult, } from './logger.js';
-export { EthereumJsonRpcError, requestEthereumJsonRpc, } from './request-utils.js';
+export { encodeLedgerCall, decodeLedgerEvent, hashLedgerCid, logCid, LogCidError } from './ledger.js';
+export type { LedgerEventInput, LedgerEvent, LogCidOptions, LogCidResult, } from './ledger.js';
+export { EthereumJsonRpcError, parseTransactionQuantity, requestEthereumJsonRpc, } from './request-utils.js';
 export type { RequestEthereumJsonRpcOptions, RequestEthereumJsonRpcResult, } from './request-utils.js';

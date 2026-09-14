@@ -4,7 +4,7 @@ import type { SignedMessageInput } from '../schema.js';
 import type { PublishSignedMessageOptions } from './publish.js';
 interface PublishAndLogSignedMessageOptions {
     ipfs: Omit<PublishSignedMessageOptions, 'signal'>;
-    logger: Omit<LogCidOptions, 'signal'>;
+    ledger: Omit<LogCidOptions, 'signal'>;
     signal?: AbortSignal;
 }
 interface PublishAndLogSignedMessageResult {
@@ -17,6 +17,6 @@ declare class PublishAndLogSignedMessageError extends Error {
     constructor(publication: PublishToIpfsResult, cause: unknown);
 }
 /** Use after allowlist authorization, typically as an ingress callback. */
-declare function publishAndLogSignedMessage(message: Readonly<SignedMessageInput>, { ipfs, logger, signal }: PublishAndLogSignedMessageOptions): Promise<PublishAndLogSignedMessageResult>;
+declare function publishAndLogSignedMessage(message: Readonly<SignedMessageInput>, { ipfs, ledger, signal }: PublishAndLogSignedMessageOptions): Promise<PublishAndLogSignedMessageResult>;
 export { publishAndLogSignedMessage, PublishAndLogSignedMessageError };
 export type { PublishAndLogSignedMessageOptions, PublishAndLogSignedMessageResult };

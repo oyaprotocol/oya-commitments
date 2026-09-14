@@ -1,164 +1,200 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { request as httpRequest } from 'node:http';
+import { once } from 'node:events';
+import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
-import { Interface, Wallet, keccak256, toUtf8Bytes } from 'ethers';
-import { parseConfig } from '../src/config.mjs';
-import { createLocalSigner } from '../src/signer.mjs';
-import { messageId, openStore } from '../src/store.mjs';
-import { createPublisher } from '../src/publication.mjs';
+import { Wallet } from 'ethers';
+import { cid, fixture, gate, ledgerContract, signedMessage } from './runtime-fixture.mjs';
 
-const fixtures = JSON.parse(await readFile(new URL('../../../packages/ethereum/test/fixtures/logger-abi.json', import.meta.url), 'utf8'));
-const cid = fixtures.cases.find((entry) => entry.name === 'message').cid;
-const loggerContract = '0x1111111111111111111111111111111111111111';
-
-async function fixture(t) {
-    const directory = await mkdtemp(join(tmpdir(), 'oya-publisher-test-'));
-    const wallet = Wallet.createRandom();
-    const agent = Wallet.createRandom();
-    const localSigner = createLocalSigner(wallet.privateKey);
-    const config = parseConfig({
-        chainId: 31337, loggerContract, allowedSigners: [agent.address],
-        rpcUrl: 'http://rpc.example', ipfsUrl: 'http://ipfs.example', stateDir: directory,
-        receiptTimeoutMs: 50, pollIntervalMs: 1,
-    });
-    const identity = { chainId: 31337, loggerContract, nodeAddress: wallet.address };
-    let store = await openStore(directory, identity);
-    t.after(async () => { await store?.close(); });
-    const message = { text: 'publish test', signer: agent.address, signature: await agent.signMessage('publish test') };
-    const state = { signs: 0, uploads: 0, sends: 0, submitted: null, failSend: false, failReceipt: false, missingEvent: false };
-    let releaseUpload;
-    let enteredUpload;
-    let holdUpload = null;
-    const signer = {
-        address: wallet.address,
-        async signTransaction(transaction, signal) {
-            state.signs++;
-            const durable = JSON.parse(await readFile(join(directory, `${messageId(message)}.json`), 'utf8'));
-            assert.equal(durable.cid, cid, 'CID must be durable before signing');
-            return localSigner.signTransaction(transaction, signal);
-        },
-    };
-    const eventAbi = new Interface(['event Log(address indexed node, bytes32 indexed cidKeccak256Hash, string cid)']);
-    const transport = async (url, request) => {
-        if (url.startsWith(config.ipfs.url)) {
-            state.uploads++;
-            enteredUpload?.();
-            if (holdUpload) await holdUpload;
-            return new Response(JSON.stringify({ Hash: cid }));
-        }
-        const { id, method, params } = JSON.parse(request.body);
-        let result;
-        switch (method) {
-            case 'eth_chainId': result = '0x7a69'; break;
-            case 'eth_getTransactionCount': result = '0x0'; break;
-            case 'eth_getBlockByNumber': result = { baseFeePerGas: '0x1', gasLimit: '0x1c9c380' }; break;
-            case 'eth_maxPriorityFeePerGas': result = '0x1'; break;
-            case 'eth_estimateGas': result = '0x8000'; break;
-            case 'eth_sendRawTransaction': {
-                state.sends++;
-                const durable = JSON.parse(await readFile(join(directory, `${messageId(message)}.json`), 'utf8'));
-                assert.equal(durable.signed.rawTransaction, params[0], 'signed bytes must be durable before broadcasting');
-                assert.equal(durable.signed.transactionHash, keccak256(params[0]));
-                if (state.failSend) throw new Error('provider-secret-marker');
-                state.submitted = params[0];
-                result = keccak256(params[0]);
-                break;
-            }
-            case 'eth_getTransactionReceipt': {
-                if (state.failReceipt) throw new Error('provider-secret-marker');
-                if (!state.submitted) { result = null; break; }
-                const transactionHash = keccak256(state.submitted);
-                const blockHash = `0x${'ab'.repeat(32)}`;
-                const event = eventAbi.encodeEventLog(eventAbi.getEvent('Log'), [wallet.address, keccak256(toUtf8Bytes(cid)), cid]);
-                result = {
-                    transactionHash, blockHash, blockNumber: '0x1', transactionIndex: '0x0',
-                    from: wallet.address, to: loggerContract, contractAddress: null,
-                    cumulativeGasUsed: '0x8000', gasUsed: '0x8000', logsBloom: `0x${'00'.repeat(256)}`, status: '0x1',
-                    logs: state.missingEvent ? [] : [{
-                        ...event, address: loggerContract, transactionHash, blockHash, blockNumber: '0x1',
-                        transactionIndex: '0x0', logIndex: '0x0', removed: false,
-                    }],
-                };
-                break;
-            }
-            default: throw new Error(`Unexpected RPC method ${method}`);
-        }
-        return new Response(JSON.stringify({ jsonrpc: '2.0', id, result }));
-    };
-    const publisher = () => createPublisher({ config, signer, store, fetch: transport });
-    return {
-        publisher, state, message, store: () => store,
-        async reopen() { await store.close(); store = null; store = await openStore(directory, identity); },
-        holdUpload() {
-            holdUpload = new Promise((resolve) => { releaseUpload = resolve; });
-            return new Promise((resolve) => { enteredUpload = resolve; });
-        },
-        releaseUpload() { releaseUpload(); },
-        async anotherMessage() {
-            const text = 'another signed message';
-            return { text, signer: agent.address, signature: await agent.signMessage(text) };
-        },
-    };
-}
-
-test('persists before side effects, serializes work, and deduplicates completed messages', async (t) => {
+test('HTTP holds one operation through upload and receipt, then repeats independently', async (t) => {
     const setup = await fixture(t);
-    const publisher = setup.publisher();
-    const entered = setup.holdUpload();
-    const pending = publisher.publish(setup.message);
-    await entered;
-    const idle = publisher.waitForIdle();
+    await setup.start();
+    const upload = gate();
+    const receipt = gate();
+    t.after(() => { upload.release(); receipt.release(); });
+    setup.state.onUpload = upload.wait;
+    setup.state.onReceipt = receipt.wait;
+    const pending = setup.post();
+    await upload.entered;
+    const busy = await setup.post();
+    assert.equal(busy.status, 503);
+    assert.equal(busy.headers.get('retry-after'), '5');
+    assert.deepEqual(await busy.json(), { code: 'node_busy', started: false });
+    assert.equal((await setup.post(await signedMessage(Wallet.createRandom()))).status, 403);
+    assert.equal((await setup.post({ ...setup.message, text: 'tampered' })).status, 401);
+    assert.equal(setup.state.uploads, 1);
+    assert.equal(setup.state.signs, 0);
+    upload.release();
+    await receipt.entered;
+    assert.equal((await (await setup.health()).json()).status, 'busy');
+    assert.equal((await setup.post()).status, 503);
+    assert.equal(setup.state.uploads, 1);
+    assert.equal(setup.state.signs, 1);
+    assert.equal(setup.state.sends, 1);
+    receipt.release();
+    const response = await pending;
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.status, 'logged');
+    assert.deepEqual(body.publication, {
+        status: 'logged', cid, uri: `ipfs://${cid}`, transactionHash: setup.state.transactions[0].hash,
+        blockNumber: '1', nodeAddress: setup.wallet.address, ledgerContract,
+    });
+    assert.equal(Object.hasOwn(body.publication, 'messageId'), false);
+    const duplicate = await setup.post();
+    assert.equal(duplicate.status, 200);
+    assert.notEqual((await duplicate.json()).publication.transactionHash, body.publication.transactionHash);
+    assert.deepEqual(setup.state.transactions.map((tx) => tx.nonce), [0, 1]);
+    assert.equal(setup.state.uploads, 2);
+    assert.equal(setup.state.mined, 2);
+    assert.equal((await (await setup.health()).json()).status, 'ready');
+});
+
+test('definite failures return sanitized results and release admission', async (t) => {
+    for (const failure of ['ipfs', 'preparation', 'reverted', 'missing_event']) await t.test(failure, async (t) => {
+        const setup = await fixture(t);
+        await setup.start();
+        if (failure === 'ipfs') setup.state.ipfsFailure = true;
+        else if (failure === 'preparation') setup.state.preparationFailure = true;
+        else setup.state.receiptMode = failure;
+        const response = await setup.post();
+        assert.equal(response.status, 502);
+        const body = await response.json();
+        assert.equal(body.code, 'publication_failed');
+        assert.equal(body.started, true);
+        assert.ok(!JSON.stringify([body, setup.logs]).includes('provider-secret-marker'));
+        if (failure === 'ipfs') assert.equal(body.publication, undefined);
+        else assert.equal(body.publication.cid, cid);
+        if (failure === 'ipfs' || failure === 'preparation') {
+            assert.equal(body.loggingOutcome, 'not_submitted');
+            assert.equal(setup.state.signs, 0);
+            assert.equal(setup.state.sends, 0);
+        } else {
+            assert.equal(body.loggingOutcome, 'failed');
+            assert.equal(body.publication.blockNumber, '1');
+            assert.equal(body.publication.transactionHash, setup.state.transactions[0].hash);
+        }
+        setup.state.ipfsFailure = false;
+        setup.state.preparationFailure = false;
+        setup.state.receiptMode = 'mined';
+        assert.equal((await setup.health()).status, 200);
+        assert.equal((await setup.post()).status, 200);
+    });
+});
+
+test('uncertain submission, receipt timeout, and malformed receipt block further work', async (t) => {
+    for (const failure of ['submission', 'pending', 'malformed']) await t.test(failure, async (t) => {
+        const setup = await fixture(t, { receiptTimeoutMs: 80 });
+        await setup.start();
+        if (failure === 'submission') setup.state.sendFailure = true;
+        else setup.state.receiptMode = failure;
+        const response = await setup.post();
+        assert.equal(response.status, failure === 'pending' ? 504 : 502);
+        const body = await response.json();
+        assert.equal(body.loggingOutcome, 'unknown');
+        assert.equal(body.publication.cid, cid);
+        assert.equal(body.publication.transactionHash, setup.state.transactions[0].hash);
+        assert.ok(!JSON.stringify([body, setup.logs]).includes('provider-secret-marker'));
+        const previousCalls = [...setup.state.calls];
+        const health = await setup.health();
+        assert.equal(health.status, 503);
+        assert.equal((await health.json()).status, 'transaction_outcome_unknown');
+        const rejected = await setup.post();
+        assert.equal(rejected.status, 503);
+        assert.equal(rejected.headers.get('retry-after'), null);
+        assert.deepEqual(await rejected.json(), { code: 'transaction_outcome_unknown', started: false });
+        assert.equal((await setup.post(await signedMessage(Wallet.createRandom()))).status, 403);
+        assert.equal(setup.state.uploads, 1);
+        assert.equal(setup.state.signs, 1);
+        assert.equal(setup.state.sends, 1);
+        assert.deepEqual(setup.state.calls, previousCalls, 'no host recovery or extra receipt query');
+    });
+});
+
+test('unexpected unclassified faults return 500 and leave the node unavailable', async (t) => {
+    const setup = await fixture(t);
+    await setup.start();
+    setup.state.onUpload = () => { throw new TypeError('private-fault-marker'); };
+    const response = await setup.post();
+    assert.equal(response.status, 500);
+    assert.deepEqual(await response.json(), { code: 'internal_error', started: true, loggingOutcome: 'unknown' });
+    assert.ok(!JSON.stringify(setup.logs).includes('private-fault-marker'));
+    assert.equal((await setup.post()).status, 503);
+    assert.equal((await setup.health()).status, 503);
+});
+
+test('overall deadline aborts held I/O and handles pre- and post-submission outcomes', async (t) => {
+    for (const stage of ['Upload', 'Receipt']) await t.test(stage, async (t) => {
+        const setup = await fixture(t, { operationTimeoutMs: 80 });
+        await setup.start();
+        const held = gate();
+        t.after(held.release);
+        setup.state[`on${stage}`] = held.wait;
+        const response = await setup.post();
+        assert.equal(response.status, 504);
+        const body = await response.json();
+        assert.equal(body.code, 'operation_timeout');
+        assert.equal(body.loggingOutcome, stage === 'Upload' ? 'not_submitted' : 'unknown');
+        held.release();
+        if (stage === 'Upload') {
+            assert.equal(setup.state.sends, 0);
+            assert.equal((await setup.post()).status, 200);
+            assert.equal(setup.state.sends, 1, 'late upload completion must not submit a transaction');
+        } else assert.equal((await setup.post()).status, 503);
+    });
+});
+
+test('a disconnected accepted request stays busy and shutdown drains its final result', async (t) => {
+    const setup = await fixture(t);
+    await setup.start();
+    const held = gate();
+    t.after(held.release);
+    setup.state.onReceipt = held.wait;
+    const request = httpRequest(`${setup.url}/v1/messages`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+    });
+    request.on('error', () => {});
+    request.end(JSON.stringify(setup.message));
+    await held.entered;
+    const disconnected = once(request, 'close').catch(() => {});
+    request.destroy();
+    await disconnected;
+    assert.equal((await setup.post()).status, 503);
+    assert.equal(setup.state.uploads, 1);
     let drained = false;
-    idle.then(() => { drained = true; });
-    await assert.rejects(publisher.publish(await setup.anotherMessage()), { code: 'node_busy' });
+    const closing = setup.runtime.close().then(() => { drained = true; });
+    await delay(20);
     assert.equal(drained, false);
-    setup.releaseUpload();
-    const result = await pending;
-    await idle;
-    assert.equal(drained, true);
-    assert.equal(result.status, 'logged');
-    assert.equal(result.cid, cid);
-    assert.deepEqual(await publisher.publish(setup.message), result);
-    assert.equal(setup.state.uploads, 1);
-    assert.equal(setup.state.signs, 1);
-    assert.equal(setup.state.sends, 1);
+    held.release();
+    await closing;
+    assert.equal(setup.state.mined, 1);
+    assert.equal(setup.logs.length, 1);
+    assert.equal(setup.logs[0].httpStatus, 200);
+    assert.equal(setup.logs[0].publication.status, 'logged');
 });
 
-test('uncertain submission blocks new work and resumes the same signed transaction after restart', async (t) => {
+test('shutdown rejects a request that finishes authentication after draining begins', async (t) => {
     const setup = await fixture(t);
-    setup.state.failSend = true;
-    setup.state.failReceipt = true;
-    let publisher = setup.publisher();
-    await assert.rejects(publisher.publish(setup.message), (error) => {
-        assert.equal(error.code, 'publication_incomplete');
-        assert.ok(error.record.signed.transactionHash);
-        assert.equal(error.message.includes('provider-secret-marker'), false);
-        return true;
+    await setup.start();
+    const body = JSON.stringify(setup.message);
+    const requestReceived = once(setup.runtime.server, 'request');
+    const response = new Promise((resolve, reject) => {
+        const request = httpRequest(`${setup.url}/v1/messages`, { method: 'POST',
+            headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) },
+        }, (response) => {
+            let data = '';
+            response.on('data', (chunk) => { data += chunk; });
+            response.on('end', () => resolve({ status: response.statusCode, body: JSON.parse(data) }));
+        });
+        request.on('error', reject);
+        request.write(body.slice(0, 1));
+        setup.finishRequest = () => request.end(body.slice(1));
     });
-    await assert.rejects(publisher.publish(await setup.anotherMessage()), { code: 'recovery_required' });
-    const signed = setup.store().records.get(messageId(setup.message)).signed;
-    await setup.reopen();
-    setup.state.failSend = false;
-    setup.state.failReceipt = false;
-    publisher = setup.publisher();
-    const recovered = await publisher.recover();
-    assert.equal(recovered.transactionHash, signed.transactionHash);
-    assert.equal(setup.state.submitted, signed.rawTransaction);
-    assert.equal(setup.state.signs, 1);
-    assert.equal(setup.state.uploads, 1);
-    assert.equal(publisher.status().pendingMessageId, null);
-});
-
-test('rejects a receipt without the expected event and later reconciles it without another broadcast', async (t) => {
-    const setup = await fixture(t);
-    setup.state.missingEvent = true;
-    const publisher = setup.publisher();
-    await assert.rejects(publisher.publish(setup.message), { code: 'publication_incomplete' });
-    assert.equal(setup.store().records.get(messageId(setup.message)).result, undefined);
-    setup.state.missingEvent = false;
-    assert.equal((await publisher.recover()).status, 'logged');
-    assert.equal(setup.state.sends, 1);
-    assert.equal(setup.state.signs, 1);
+    await requestReceived;
+    const closing = setup.runtime.close();
+    setup.finishRequest();
+    assert.deepEqual(await response, { status: 503, body: { code: 'shutting_down', started: false } });
+    await closing;
+    assert.equal(setup.state.uploads, 0);
+    assert.equal(setup.state.signs, 0);
 });

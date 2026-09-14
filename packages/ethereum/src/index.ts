@@ -36,13 +36,14 @@ export type {
     EthWaitForTransactionReceiptResult,
 } from './receipts.js';
 export type { EthereumReceiptLog, EthereumTransactionReceipt } from './receipt-utils.js';
-export { encodeLoggerCall, decodeLoggerEvent, hashLoggerCid, logCid, LogCidError } from './logger.js';
+export { encodeLedgerCall, decodeLedgerEvent, hashLedgerCid, logCid, LogCidError } from './ledger.js';
 export type {
-    LoggerEventInput, LoggerEvent,
+    LedgerEventInput, LedgerEvent,
     LogCidOptions, LogCidResult,
-} from './logger.js';
+} from './ledger.js';
 export {
     EthereumJsonRpcError,
+    parseTransactionQuantity,
     requestEthereumJsonRpc,
 } from './request-utils.js';
 export type {

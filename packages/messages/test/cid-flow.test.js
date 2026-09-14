@@ -4,14 +4,14 @@ import test from 'node:test';
 
 import { publishSignedMessage } from '@oyaprotocol/messages';
 import { createIpfsConfig, readIpfsBytes, readIpfsPublicGatewayBytes } from '@oyaprotocol/ipfs';
-import { encodeLoggerCall, decodeLoggerEvent, hashLoggerCid } from '@oyaprotocol/ethereum';
+import { encodeLedgerCall, decodeLedgerEvent, hashLedgerCid } from '@oyaprotocol/ethereum';
 
 const imports = JSON.parse(readFileSync(new URL('../../test/fixtures/cids.json', import.meta.url), 'utf8'));
-const logger = JSON.parse(readFileSync(new URL('../../ethereum/test/fixtures/logger-abi.json', import.meta.url), 'utf8'));
+const ledger = JSON.parse(readFileSync(new URL('../../ethereum/test/fixtures/ledger-abi.json', import.meta.url), 'utf8'));
 const publication = imports.cases.find(({ name }) => name === 'message');
-const event = logger.cases.find(({ name }) => name === 'message');
+const event = ledger.cases.find(({ name }) => name === 'message');
 
-test('a signed message uses the same canonical CID for publication, Logger lookup, and retrieval', async () => {
+test('a signed message uses the same canonical CID for publication, Ledger lookup, and retrieval', async () => {
     const config = createIpfsConfig({
         url: 'https://ipfs.example', headers: {}, timeoutMs: 1_000, maxRetries: 0, retryDelayMs: 0,
     });
@@ -24,12 +24,12 @@ test('a signed message uses the same canonical CID for publication, Logger looku
         },
     });
     assert.equal(result.cid, event.cid);
-    assert.equal(encodeLoggerCall(result.cid), event.calldata);
-    assert.equal(hashLoggerCid(result.cid), event.cidKeccak256Hash);
-    const decoded = decodeLoggerEvent({
-        address: logger.loggerContract,
-        topics: [...logger.topics, event.cidKeccak256Hash], data: event.data,
-    }, logger.loggerContract);
+    assert.equal(encodeLedgerCall(result.cid), event.calldata);
+    assert.equal(hashLedgerCid(result.cid), event.cidKeccak256Hash);
+    const decoded = decodeLedgerEvent({
+        address: ledger.ledgerContract,
+        topics: [...ledger.topics, event.cidKeccak256Hash], data: event.data,
+    }, ledger.ledgerContract);
     assert.equal(decoded.cid, result.cid);
 
     for (const read of [readIpfsBytes, readIpfsPublicGatewayBytes]) {

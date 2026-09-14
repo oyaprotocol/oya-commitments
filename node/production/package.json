@@ -5,15 +5,17 @@
   "type": "module",
   "engines": { "node": ">=22" },
   "scripts": {
+    "local": "node -- scripts/local-node.mjs",
     "start": "node src/main.mjs",
     "test": "node --test test/*.test.mjs",
+    "test:local": "node scripts/test-local-operations.mjs",
     "smoke:local": "node scripts/smoke-local.mjs"
   },
   "dependencies": {
-    "@oyaprotocol/ethereum": "file:../../packages/ethereum",
-    "@oyaprotocol/ipfs": "file:../../packages/ipfs",
-    "@oyaprotocol/messages": "file:../../packages/messages",
-    "@oyaprotocol/utils": "file:../../packages/utils",
+    "@oyaprotocol/ethereum": "0.2.0",
+    "@oyaprotocol/ipfs": "0.1.2",
+    "@oyaprotocol/messages": "0.2.0",
+    "@oyaprotocol/utils": "0.1.1",
     "ethers": "6.17.0"
   }
 }
