@@ -14,6 +14,7 @@ This delivers a deployable, manually supervised log-only instance. It does not a
 
 - [x] 2026-09-13 07:01Z: Reviewed plan requirements, the direct runtime entrypoint, configuration, existing deployment/publication tests, and current CI.
 - [x] 2026-09-13: Checked Docker availability and official container lifecycle, networking, and storage documentation; drafted this plan without changing implementation files.
+- [x] 2026-09-14: Clarified build and restore validation; exact commands and image digests remain implementation details, as requested by the user.
 - [ ] Milestone 1: Build and inspect the minimal runtime image.
 - [ ] Milestone 2: Add persistent Compose services and operator instructions.
 - [ ] Milestone 3: Validate message publication and container lifecycle, then add CI coverage.
@@ -184,7 +185,9 @@ npm --prefix node/production test
 git diff --check
 ```
 
-The new test owns all its fixtures and must fail clearly if required tools are missing. It should not ask the operator to supply production credentials or reuse a background Anvil instance. Put the exact tested Buildx commands and backup/restore commands into the README during implementation, after resolving the pinned image digests and exercising the workflow.
+The new test owns all its fixtures and must fail clearly if required tools are missing. It should not ask the operator to supply production credentials or reuse a background Anvil instance.
+
+Build validation must cover Linux amd64 and arm64 without publishing images, recording separately which platforms ran the integration flow. Restore validation must stop the node and Kubo, back up the complete repository, restore into a fresh fixture-owned volume, and verify the peer identity, pins, and message bytes. Resolve image digests and document the exact tested commands in the README during the corresponding implementation milestone; record results here. These checks remain pending until executed.
 
 ## Validation and Acceptance
 
