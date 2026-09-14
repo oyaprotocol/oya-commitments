@@ -34,7 +34,7 @@ Solidity changes: `forge fmt`, `forge test`.
 For the separate `contracts/` project, use `forge fmt --root contracts`, `forge build --root contracts`, and `forge test --root contracts --offline` from the repository root.
 Agent changes: relevant module tests/simulations.
 4. Before requesting human review, follow [Before Human Review](AGENTS.md#before-human-review).
-Inspect the complete proposed change, including PR commits, staged and unstaged changes, new files, and proposed PR text or attachments. Check code, tests, configuration, docs, plans, and generated artifacts for sensitive data and references to developer-specific paths or local-only files. Use repository-relative paths, configurable inputs, or placeholders; documented container paths are permitted. Resolve findings and report the check's scope and result without exposing sensitive values. An incomplete check must be reported and does not establish readiness for review.
+Inspect the complete proposed change, including PR commits, staged and unstaged changes, new files, and proposed PR text or attachments. Check code, tests, configuration, docs, plans, and generated artifacts for sensitive data and references to developer-specific paths or local-only files. Use repository-relative paths, configurable inputs, or placeholders; documented container paths are permitted. Resolve findings before review. Report incomplete checks or unresolved findings without exposing sensitive values, and do not claim readiness while they remain. Successful checks do not require a written record in files, PRs, or handoff messages.
 5. In PRs, document:
 What changed and why.
 Tests run.

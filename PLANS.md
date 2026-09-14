@@ -117,7 +117,7 @@ For end-to-end flows, include the setup assumptions, the commands to exercise th
 
 If a validation step cannot be run in the current environment, the plan must say what is missing and how a future contributor should run it.
 
-Before every human-review handoff, perform the sensitive-information and local-file-reference check required by [Before Human Review](AGENTS.md#before-human-review), including the ExecPlan itself. Record the scope, method, result, and any unresolved limitations in `Progress` or `Outcomes & Retrospective` without reproducing sensitive values or developer-specific paths. Do not mark the work ready for review while findings or required checks remain unresolved.
+Before every human-review handoff, perform the sensitive-information and local-file-reference check required by [Before Human Review](AGENTS.md#before-human-review), including the ExecPlan itself. Successful checks do not require a written record in the plan, PR, or handoff message. Do not mark the work ready for review while findings or required checks remain unresolved.
 
 ## Progress Tracking Rules
 
