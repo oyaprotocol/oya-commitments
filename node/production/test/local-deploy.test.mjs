@@ -38,6 +38,7 @@ async function fixture(t) {
         contractAddress: address, transaction: { from: deployer.address, to: null } }] };
     const state = { chain: '0x7a69', configuredCode: '0x', deployedCode: '0x6000', receipt, artifact, forgeError: false };
     const commands = [];
+    const forgeCommands = [];
     const calls = [];
     const fetch = async (_url, options) => {
         const { method, params, id } = JSON.parse(options.body);
@@ -51,7 +52,13 @@ async function fixture(t) {
     };
     const execute = async (command, args, options) => {
         commands.push({ command, args, options });
+        // Fresh checkouts initialize Foundry's submodule before invoking Forge.
+        if (command === 'git') {
+            assert.deepEqual(args, ['submodule', 'update', '--init', 'lib/forge-std']);
+            return;
+        }
         assert.equal(command, 'forge');
+        forgeCommands.push({ command, args, options });
         if (args.includes('--broadcast')) {
             const destination = join(options.env.FOUNDRY_BROADCAST, 'DeployLedger.s.sol', '31337');
             await mkdir(destination, { recursive: true });
@@ -63,14 +70,14 @@ async function fixture(t) {
         assert.equal(output.join('\n').includes('secret-marker'), false);
         assert.equal(output.join('\n').includes(deployer.privateKey), false);
     });
-    return { directory, configPath, envPath, original, input, address, hash, deployer, settings, state, output, calls, commands, execute,
+    return { directory, configPath, envPath, original, input, address, hash, deployer, settings, state, output, calls, commands, forgeCommands, execute,
         run: (options = {}) => deployLedger(configPath, settings, { execute, fetch, log, ...options }) };
 }
 
 test('simulation uses only selected deployment settings and leaves config and metadata untouched', async (t) => {
     const f = await fixture(t);
     assert.equal(await f.run(), 0);
-    const [{ args, options }] = f.commands;
+    const [{ args, options }] = f.forgeCommands;
     assert.equal(args.includes('--broadcast'), false);
     assert.equal(args.includes('--resume'), false);
     assert.equal(args.join(' ').includes('secret-marker'), false);
@@ -92,7 +99,7 @@ test('verified broadcast records public metadata, leaves a read-only config unto
     await chmod(f.configPath, 0o440);
     const original = await stat(f.configPath);
     assert.equal(await f.run({ broadcast: true }), 0);
-    assert.ok(f.commands[0].args.includes('--broadcast'));
+    assert.ok(f.forgeCommands[0].args.includes('--broadcast'));
     assert.equal(await readFile(f.configPath, 'utf8'), f.original);
     const unchanged = await stat(f.configPath);
     for (const key of ['ino', 'uid', 'gid', 'mode']) assert.equal(unchanged[key], original[key]);
@@ -107,12 +114,12 @@ test('verified broadcast records public metadata, leaves a read-only config unto
 
 test('recording failure preserves existing files and reports the verified deployment for recovery', async (t) => {
     const f = await fixture(t);
-    assert.equal(await f.run({ broadcast: true, execute: async (...args) => {
-        await f.execute(...args);
-        await writeFile(deploymentPath(f.configPath), 'existing-record');
+    assert.equal(await f.run({ broadcast: true, execute: async (command, ...args) => {
+        await f.execute(command, ...args);
+        if (command === 'forge') await writeFile(deploymentPath(f.configPath), 'existing-record');
     } }), 1);
     assert.equal(await readFile(f.configPath, 'utf8'), f.original);
-    assert.equal(f.commands.length, 1);
+    assert.equal(f.forgeCommands.length, 1);
     assert.equal(await readFile(deploymentPath(f.configPath), 'utf8'), 'existing-record');
     assert.ok(f.output.some((line) => line.includes(`Verified Ledger ${f.address}`)));
     assert.match(f.output.join('\n'), /Adopt the verified address manually/);
@@ -159,7 +166,7 @@ test('failed or unverified broadcasts retain artifacts, leave config unchanged, 
         if (reason === 'missing-code') f.state.deployedCode = '0x';
         if (reason === 'missing-receipt') f.state.receipt = null;
         assert.equal(await f.run({ broadcast: true }), 1);
-        assert.equal(f.commands.length, 1);
+        assert.equal(f.forgeCommands.length, 1);
         assert.equal(await readFile(f.configPath, 'utf8'), f.original);
         await assert.rejects(readFile(deploymentPath(f.configPath)), { code: 'ENOENT' });
         assert.ok((await readdir(f.directory)).some((name) => name.startsWith('.oya-ledger-')));
@@ -170,9 +177,9 @@ test('failed or unverified broadcasts retain artifacts, leave config unchanged, 
 test('operator edits during deployment are preserved while the verified deployment is recorded', async (t) => {
     const f = await fixture(t);
     const edited = JSON.stringify({ ...f.input, port: 9090 });
-    assert.equal(await f.run({ broadcast: true, execute: async (...args) => {
-        await f.execute(...args);
-        await writeFile(f.configPath, edited);
+    assert.equal(await f.run({ broadcast: true, execute: async (command, ...args) => {
+        await f.execute(command, ...args);
+        if (command === 'forge') await writeFile(f.configPath, edited);
     } }), 0);
     assert.equal(await readFile(f.configPath, 'utf8'), edited);
     assert.equal(JSON.parse(await readFile(deploymentPath(f.configPath), 'utf8')).ledgerContract, f.address);
