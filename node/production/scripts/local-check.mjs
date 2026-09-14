@@ -6,7 +6,7 @@ export async function checkLocalNode({ config, nodeAddress }, {
     fetch = globalThis.fetch, log = console.log, timeoutMs = 10_000,
 } = {}) {
     const fail = (message) => { log(`FAIL ${message}`); return 1; };
-    log(`Node ${nodeAddress}; chain ${config.chainId}; Logger ${config.loggerContract}.`);
+    log(`Node ${nodeAddress}; chain ${config.chainId}; Ledger ${config.ledgerContract}.`);
 
     const rpc = async (method, params, signal) => (await requestEthereumJsonRpc({
         config: config.rpc, fetch, method, params, signal,
@@ -14,8 +14,8 @@ export async function checkLocalNode({ config, nodeAddress }, {
     const checks = [
         ['Ethereum chain', 'Check RPC availability, authorization, and chainId.', async (signal) =>
             parseTransactionQuantity(await rpc('eth_chainId', [], signal), 'eth_chainId result') === BigInt(config.chainId)],
-        ['Logger bytecode', 'Check loggerContract and deploy Logger on the selected chain.', async (signal) =>
-            hasBytecode(await rpc('eth_getCode', [config.loggerContract, 'latest'], signal))],
+        ['Ledger bytecode', 'Check ledgerContract and deploy Ledger on the selected chain.', async (signal) =>
+            hasBytecode(await rpc('eth_getCode', [config.ledgerContract, 'latest'], signal))],
         ['Node gas balance', 'Check RPC availability and fund the node address with native currency.', async (signal) => {
             const balance = parseTransactionQuantity(await rpc('eth_getBalance', [nodeAddress, 'latest'], signal), 'eth_getBalance result');
             return balance > 0n;

@@ -3,7 +3,7 @@ pragma solidity ^0.8.23;
 
 /// @notice Records claims linking callers to IPFS CIDs.
 /// @dev A log does not verify CID syntax, content validity, or availability.
-contract Logger {
+contract Ledger {
     event Log(address indexed node, bytes32 indexed cidKeccak256Hash, string cid);
 
     /// @notice Record a CID claim attributed to the immediate caller.

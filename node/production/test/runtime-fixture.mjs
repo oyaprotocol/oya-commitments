@@ -4,9 +4,9 @@ import { parseConfig } from '../src/config.mjs';
 import { createLocalSigner } from '../src/signer.mjs';
 import { startNode } from '../src/main.mjs';
 
-const fixtures = JSON.parse(await readFile(new URL('../../../packages/ethereum/test/fixtures/logger-abi.json', import.meta.url), 'utf8'));
+const fixtures = JSON.parse(await readFile(new URL('../../../packages/ethereum/test/fixtures/ledger-abi.json', import.meta.url), 'utf8'));
 export const cid = fixtures.cases.find((entry) => entry.name === 'message').cid;
-export const loggerContract = '0x1111111111111111111111111111111111111111';
+export const ledgerContract = '0x1111111111111111111111111111111111111111';
 export const signedMessage = async (wallet, text = 'Oya kernel signed message') => ({
     text, signer: wallet.address, signature: await wallet.signMessage(text),
 });
@@ -25,7 +25,7 @@ export async function fixture(t, overrides = {}) {
     const agent = Wallet.createRandom();
     const localSigner = createLocalSigner(wallet.privateKey);
     const parsed = parseConfig({
-        chainId: 31337, loggerContract, allowedSigners: [agent.address],
+        chainId: 31337, ledgerContract, allowedSigners: [agent.address],
         rpcUrl: 'http://rpc.example', ipfsUrl: 'http://ipfs.example',
         receiptTimeoutMs: 1000, operationTimeoutMs: 3000, pollIntervalMs: 5, ...overrides,
     }, { env: {} });
@@ -75,11 +75,11 @@ export async function fixture(t, overrides = {}) {
                 const event = eventAbi.encodeEventLog(eventAbi.getEvent('Log'), [wallet.address, keccak256(toUtf8Bytes(cid)), cid]);
                 result = {
                     transactionHash, blockHash, blockNumber, transactionIndex: '0x0',
-                    from: wallet.address, to: loggerContract, contractAddress: null,
+                    from: wallet.address, to: ledgerContract, contractAddress: null,
                     cumulativeGasUsed: '0x8000', gasUsed: '0x8000', logsBloom: `0x${'00'.repeat(256)}`,
                     status: state.receiptMode === 'reverted' ? '0x0' : '0x1',
                     logs: state.receiptMode !== 'mined' ? [] : [{
-                        ...event, address: loggerContract, transactionHash, blockHash, blockNumber,
+                        ...event, address: ledgerContract, transactionHash, blockHash, blockNumber,
                         transactionIndex: '0x0', logIndex: '0x0', removed: false,
                     }],
                 };

@@ -8,7 +8,7 @@ import type { PublishSignedMessageOptions } from './publish.js';
 
 interface PublishAndLogSignedMessageOptions {
     ipfs: Omit<PublishSignedMessageOptions, 'signal'>;
-    logger: Omit<LogCidOptions, 'signal'>;
+    ledger: Omit<LogCidOptions, 'signal'>;
     signal?: AbortSignal;
 }
 
@@ -32,20 +32,20 @@ class PublishAndLogSignedMessageError extends Error {
 /** Use after allowlist authorization, typically as an ingress callback. */
 async function publishAndLogSignedMessage(
     message: Readonly<SignedMessageInput>,
-    { ipfs, logger, signal }: PublishAndLogSignedMessageOptions
+    { ipfs, ledger, signal }: PublishAndLogSignedMessageOptions
 ): Promise<PublishAndLogSignedMessageResult> {
     const ipfsOptions: PublishSignedMessageOptions = { ...ipfs };
-    const loggerOptions: LogCidOptions = { ...logger };
+    const ledgerOptions: LogCidOptions = { ...ledger };
     // Omit only narrows types; reused stage options may still contain signals.
     delete ipfsOptions.signal;
-    delete loggerOptions.signal;
+    delete ledgerOptions.signal;
     if (signal !== undefined) {
         ipfsOptions.signal = signal;
-        loggerOptions.signal = signal;
+        ledgerOptions.signal = signal;
     }
     const publication = await publishSignedMessage(message, ipfsOptions);
     try {
-        const logging = await logCid(publication.cid, loggerOptions);
+        const logging = await logCid(publication.cid, ledgerOptions);
         return { publication, logging };
     } catch (cause) {
         throw new PublishAndLogSignedMessageError(publication, cause);

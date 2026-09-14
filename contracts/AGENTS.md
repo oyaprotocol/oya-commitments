@@ -2,7 +2,7 @@
 
 ## Scope and Purpose
 
-These instructions apply to `contracts/` and its subdirectories. This is the home for hardened onchain Oya contracts, including Logger. Root `AGENTS.md`, `CONTRIBUTING.md`, and `PLANS.md` also apply.
+These instructions apply to `contracts/` and its subdirectories. This is the home for hardened onchain Oya contracts, including Ledger. Root `AGENTS.md`, `CONTRIBUTING.md`, and `PLANS.md` also apply.
 
 ## Organization
 

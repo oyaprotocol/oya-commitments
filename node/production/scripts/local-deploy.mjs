@@ -23,14 +23,14 @@ async function readDeployment(artifactPath, chainId, deployer) {
     const artifact = JSON.parse(await readFile(artifactPath, 'utf8'));
     if (artifact.chain !== chainId || artifact.transactions?.length !== 1) throw new Error('Invalid deployment artifact.');
     const transaction = artifact.transactions[0];
-    if (transaction.contractName !== 'Logger' || transaction.transactionType !== 'CREATE'
+    if (transaction.contractName !== 'Ledger' || transaction.transactionType !== 'CREATE'
         || !addressPattern.test(transaction.contractAddress) || /^0x0{40}$/i.test(transaction.contractAddress)
         || !hashPattern.test(transaction.hash) || !equal(transaction.transaction?.from, deployer)
         || transaction.transaction?.to != null) throw new Error('Invalid deployment transaction.');
     return { address: transaction.contractAddress, transactionHash: transaction.hash };
 }
 
-export async function deployLogger(configPath, { config, env }, {
+export async function deployLedger(configPath, { config, env }, {
     broadcast = false, execute = promisify(execFile), fetch = globalThis.fetch, log = console.log,
 } = {}) {
     let stage = 'Check Ethereum RPC availability and chainId.';
@@ -53,17 +53,17 @@ export async function deployLogger(configPath, { config, env }, {
     };
     try {
         if (config.rpc.headers.authorization) {
-            log('FAIL deploy-logger does not support RPC Authorization headers yet. Use an RPC endpoint without that requirement.');
+            log('FAIL deploy-ledger does not support RPC Authorization headers yet. Use an RPC endpoint without that requirement.');
             return 1;
         }
         await checkChain();
-        stage = 'Check the configured Logger address and RPC bytecode response.';
-        if (hasBytecode(await rpc('eth_getCode', [config.loggerContract, 'latest']))) {
-            log(`OK Reusing configured Logger ${config.loggerContract} on chain ${config.chainId}; no deployment submitted.`);
+        stage = 'Check the configured Ledger address and RPC bytecode response.';
+        if (hasBytecode(await rpc('eth_getCode', [config.ledgerContract, 'latest']))) {
+            log(`OK Reusing configured Ledger ${config.ledgerContract} on chain ${config.chainId}; no deployment submitted.`);
             return 0;
         }
-        stage = 'Set a valid LOGGER_DEPLOYER_PK in the selected environment file or inherited environment.';
-        deployer = createLocalSigner(env.LOGGER_DEPLOYER_PK).address;
+        stage = 'Set a valid LEDGER_DEPLOYER_PK in the selected environment file or inherited environment.';
+        deployer = createLocalSigner(env.LEDGER_DEPLOYER_PK).address;
         stage = 'Check prior deployment metadata and config directory permissions before deploying.';
         const metadataPath = deploymentPath(configPath);
         try {
@@ -71,12 +71,12 @@ export async function deployLogger(configPath, { config, env }, {
             log('FAIL Prior deployment metadata exists but the configured address has no code. Reconcile the record and chain before deploying again.');
             return 1;
         } catch (error) { if (error.code !== 'ENOENT') throw error; }
-        const directory = await mkdtemp(join(dirname(configPath), '.oya-logger-'));
-        artifactPath = join(directory, 'broadcast', 'DeployLogger.s.sol', String(config.chainId), 'run-latest.json');
+        const directory = await mkdtemp(join(dirname(configPath), '.oya-ledger-'));
+        artifactPath = join(directory, 'broadcast', 'DeployLedger.s.sol', String(config.chainId), 'run-latest.json');
         log(`Deployment artifacts: ${directory}`);
         // Retain ordinary process settings, but isolate Foundry and Oya configuration.
         const baseEnv = Object.fromEntries(Object.entries(env).filter(([key]) =>
-            !/^(OYA_|LOGGER_|FOUNDRY_|DAPP_|ETH_|ETHERSCAN_|VERIFIER_)/.test(key)));
+            !/^(OYA_|LEDGER_|LOGGER_|FOUNDRY_|DAPP_|ETH_|ETHERSCAN_|VERIFIER_)/.test(key)));
         stage = 'Install Foundry and initialize lib/forge-std before deploying.';
         try { await access(join(root, 'lib/forge-std/src/Script.sol')); } catch (error) {
             if (error.code !== 'ENOENT') throw error;
@@ -84,15 +84,15 @@ export async function deployLogger(configPath, { config, env }, {
                 cwd: root, env: baseEnv, timeout: 180_000,
             });
         }
-        const forgeEnv = { ...baseEnv, LOGGER_CHAIN_ID: String(config.chainId), LOGGER_DEPLOYER_PK: env.LOGGER_DEPLOYER_PK,
+        const forgeEnv = { ...baseEnv, LEDGER_CHAIN_ID: String(config.chainId), LEDGER_DEPLOYER_PK: env.LEDGER_DEPLOYER_PK,
             FOUNDRY_ETH_RPC_URL: config.rpc.url,
             FOUNDRY_BROADCAST: join(directory, 'broadcast'), FOUNDRY_CACHE_PATH: join(directory, 'cache'),
         };
         stage = 'Forge deployment failed. Check Foundry, compiler availability, deployer funds, and retained artifacts.';
-        log(`${broadcast ? 'Broadcasting' : 'Simulating'} Logger deployment from ${deployer} on chain ${config.chainId}.`);
+        log(`${broadcast ? 'Broadcasting' : 'Simulating'} Ledger deployment from ${deployer} on chain ${config.chainId}.`);
         submitted = broadcast;
         // Forge compiles the existing script and simulates before any explicit broadcast.
-        await execute('forge', ['script', '--root', 'contracts', 'contracts/script/DeployLogger.s.sol:DeployLogger',
+        await execute('forge', ['script', '--root', 'contracts', 'contracts/script/DeployLedger.s.sol:DeployLedger',
             '--non-interactive', '--no-storage-caching', '--timeout', '60', ...(broadcast ? ['--broadcast'] : [])], {
             cwd: root, env: forgeEnv, timeout: 180_000, maxBuffer: 1_048_576,
         });
@@ -110,12 +110,12 @@ export async function deployLogger(configPath, { config, env }, {
         if (receipt.status !== 'success' || receipt.to !== null || !equal(receipt.from, deployer)
             || !equal(receipt.contractAddress, deployment.address)
             || !hasBytecode(await rpc('eth_getCode', [deployment.address, 'latest']))) throw new Error('Deployment did not verify.');
-        log(`OK Verified Logger ${deployment.address} on chain ${config.chainId}.`);
+        log(`OK Verified Ledger ${deployment.address} on chain ${config.chainId}.`);
         stage = 'Deployment verified, but recording failed. Adopt the verified address manually; do not deploy again.';
-        const metadata = { chainId: config.chainId, loggerContract: deployment.address,
+        const metadata = { chainId: config.chainId, ledgerContract: deployment.address,
             transactionHash: deployment.transactionHash, blockNumber: receipt.blockNumber.toString(), deployer };
         await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
-        log(`OK Deployment recorded. Set loggerContract to ${deployment.address} in ${configPath}, then run local check.`);
+        log(`OK Deployment recorded. Set ledgerContract to ${deployment.address} in ${configPath}, then run local check.`);
         return 0;
     } catch {
         log(`FAIL ${stage}`);

@@ -150,10 +150,10 @@ test('released kernels work in an independent consumer', () => {
         inventory.dependencies = expectedVersions;
 
         const cids = readJson(join(packages, 'test/fixtures/cids.json'));
-        const logger = readJson(join(packages, 'ethereum/test/fixtures/logger-abi.json'));
+        const ledger = readJson(join(packages, 'ethereum/test/fixtures/ledger-abi.json'));
         writeJson(join(consumer, 'fixtures.json'), {
             publication: cids.cases.find(({ name }) => name === 'message'),
-            event: logger.cases.find(({ name }) => name === 'message'),
+            event: ledger.cases.find(({ name }) => name === 'message'),
         });
         writeFileSync(join(consumer, 'consumer.mjs'), `
 import assert from 'node:assert/strict';
@@ -161,7 +161,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { assertCanonicalCid } from '@oyaprotocol/utils';
 import { createIpfsConfig } from '@oyaprotocol/ipfs';
-import { encodeLoggerCall, hashLoggerCid, parseTransactionQuantity } from '@oyaprotocol/ethereum';
+import { encodeLedgerCall, hashLedgerCid, parseTransactionQuantity } from '@oyaprotocol/ethereum';
 import { publishSignedMessage, verifySignedMessage, SignedMessageVerificationError } from '@oyaprotocol/messages';
 for (const name of ${JSON.stringify(manifests.map(({ name }) => name))}) {
     assert.equal(realpathSync(fileURLToPath(import.meta.resolve(name))),
@@ -185,19 +185,19 @@ const result = await publishSignedMessage(message, {
 });
 assert.equal(result.cid, event.cid);
 assert.equal(result.pinned, true);
-assert.equal(encodeLoggerCall(result.cid), event.calldata);
-assert.equal(hashLoggerCid(result.cid), event.cidKeccak256Hash);
+assert.equal(encodeLedgerCall(result.cid), event.calldata);
+assert.equal(hashLedgerCid(result.cid), event.cidKeccak256Hash);
 `);
         run(process.execPath, ['consumer.mjs'], consumer);
         writeFileSync(join(consumer, 'consumer.ts'), `
 import { assertCanonicalCid, type HttpConfig } from '@oyaprotocol/utils';
 import { createIpfsConfig, type PublishToIpfsResult } from '@oyaprotocol/ipfs';
-import { encodeLoggerCall, parseTransactionQuantity } from '@oyaprotocol/ethereum';
+import { encodeLedgerCall, parseTransactionQuantity } from '@oyaprotocol/ethereum';
 import { verifySignedMessage, publishSignedMessage, type SignedMessageInput, type PublishSignedMessageOptions } from '@oyaprotocol/messages';
 const config: HttpConfig = createIpfsConfig({ url: 'https://ipfs.example', headers: {}, timeoutMs: 1000, maxRetries: 0, retryDelayMs: 0 });
 declare const cid: string;
 assertCanonicalCid(cid, 'cid');
-const calldata: string = encodeLoggerCall(cid);
+const calldata: string = encodeLedgerCall(cid);
 const chainId: bigint = parseTransactionQuantity('0x7a69', 'chainId');
 // @ts-expect-error Quantities must not be narrowed to imprecise numbers.
 const imprecise: number = parseTransactionQuantity('0x7a69', 'chainId');
@@ -205,8 +205,8 @@ declare const message: SignedMessageInput;
 const verified: Readonly<SignedMessageInput> = verifySignedMessage(message);
 declare const options: PublishSignedMessageOptions;
 const result: Promise<PublishToIpfsResult> = publishSignedMessage(verified, options);
-// @ts-expect-error The Logger encoder requires a CID string.
-encodeLoggerCall(123);
+// @ts-expect-error The Ledger encoder requires a CID string.
+encodeLedgerCall(123);
 // @ts-expect-error Publication requires an explicit transport.
 publishSignedMessage(verified, { config });
 `);

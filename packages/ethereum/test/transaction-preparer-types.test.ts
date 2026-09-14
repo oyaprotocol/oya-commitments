@@ -7,7 +7,7 @@ import type {
 declare const options: CreateTransactionPreparerOptions;
 declare const signed: SignedTransaction;
 declare const request: TransactionRequest;
-declare const loggerOptions: LogCidOptions;
+declare const ledgerOptions: LogCidOptions;
 
 const signer: TransactionSigner = {
     address: '0x1111111111111111111111111111111111111111',
@@ -31,7 +31,7 @@ const preparer: TransactionPreparer = createTransactionPreparer({
     limits: { gasLimit: 100_000n, feePerGas: 30_000_000_000n }, timeoutMs: 30_000, id: 'prepare',
 });
 const result: SignedTransaction = await preparer(request);
-const logging = logCid('cid', { ...loggerOptions, transactionPreparer: preparer });
+const logging = logCid('cid', { ...ledgerOptions, transactionPreparer: preparer });
 declare const transaction: UnsignedTransaction;
 const call: Omit<TransactionRequest, 'signal'> = transaction;
 // @ts-expect-error Public chain IDs use numbers, validated at runtime as positive safe integers.

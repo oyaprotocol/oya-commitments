@@ -13,8 +13,8 @@ export async function startNode(config, signer, {
         config: config.rpc, fetch, method, params,
     })).result;
     if (BigInt(await rpc('eth_chainId')) !== BigInt(config.chainId)) throw new Error('RPC chain ID does not match configuration.');
-    if (!hasBytecode(await rpc('eth_getCode', [config.loggerContract, 'latest']))) {
-        throw new Error('No contract bytecode exists at loggerContract.');
+    if (!hasBytecode(await rpc('eth_getCode', [config.ledgerContract, 'latest']))) {
+        throw new Error('No contract bytecode exists at ledgerContract.');
     }
     const transactionPreparer = createTransactionPreparer({
         config: config.rpc, fetch, chainId: config.chainId, signer, limits: config.limits,
@@ -45,7 +45,7 @@ export async function startNode(config, signer, {
         });
         for (const signal of signals) process.on(signal, stop);
         logLifecycle({ event: 'listening', host: config.host, port: config.port, chainId: config.chainId,
-            loggerContract: config.loggerContract, nodeAddress: signer.address });
+            ledgerContract: config.ledgerContract, nodeAddress: signer.address });
     }
     return runtime;
 }
@@ -61,7 +61,7 @@ async function main() {
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
     main().catch(() => {
         // RPC URLs, IPFS headers, and wallet errors may contain secrets.
-        console.error('Node startup failed. Check config, signer, and RPC/Logger availability.');
+        console.error('Node startup failed. Check config, signer, and RPC/Ledger availability.');
         process.exitCode = 1;
     });
 }

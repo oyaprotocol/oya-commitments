@@ -4,9 +4,9 @@ import { assertCanonicalCid, assertHexData, assertTimerMs, createHttpConfig, inv
 import { ethWaitForTransactionReceipt } from './receipts.js';
 import { normalizeJsonRpcId } from './request-utils.js';
 import { ethSendRawTransaction } from './transactions.js';
-// Verified against contracts/src/Logger.sol with forge inspect and cast keccak.
-const LOGGER_SELECTOR = '0x41304fac'; // log(string)
-const LOGGER_EVENT_TOPIC = '0xce2d845fcf02211a951a2153c1ddf64ec48ef6d54644ea188101f10018b871dc'; // Log(address,bytes32,string)
+// Verified against contracts/src/Ledger.sol with forge inspect and cast keccak.
+const LEDGER_SELECTOR = '0x41304fac'; // log(string)
+const LEDGER_EVENT_TOPIC = '0xce2d845fcf02211a951a2153c1ddf64ec48ef6d54644ea188101f10018b871dc'; // Log(address,bytes32,string)
 const STRING_OFFSET = '20'.padStart(64, '0');
 class LogCidError extends Error {
     cid;
@@ -23,22 +23,22 @@ class LogCidError extends Error {
         this.receipt = receipt;
     }
 }
-function encodeLoggerCall(cid) {
+function encodeLedgerCall(cid) {
     assertCanonicalCid(cid, 'cid');
     const bytes = new TextEncoder().encode(cid);
     const length = bytes.length.toString(16).padStart(64, '0');
     const content = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
     const paddedContent = content.padEnd(Math.ceil(bytes.length / 32) * 64, '0');
-    return `${LOGGER_SELECTOR}${STRING_OFFSET}${length}${paddedContent}`;
+    return `${LEDGER_SELECTOR}${STRING_OFFSET}${length}${paddedContent}`;
 }
-/** Compute the topic used to find Logger events for a canonical CID. */
-function hashLoggerCid(cid) {
+/** Compute the topic used to find Ledger events for a canonical CID. */
+function hashLedgerCid(cid) {
     assertCanonicalCid(cid, 'cid');
     return `0x${bytesToHex(keccak_256(new TextEncoder().encode(cid)))}`;
 }
-/** Returns null for unrelated logs; malformed matching Logger events throw. */
-function decodeLoggerEvent(log, loggerContract) {
-    const expectedAddress = parseBytes(loggerContract, 'loggerContract', 20);
+/** Returns null for unrelated logs; malformed matching Ledger events throw. */
+function decodeLedgerEvent(log, ledgerContract) {
+    const expectedAddress = parseBytes(ledgerContract, 'ledgerContract', 20);
     if (!isPlainObject(log)) {
         throw new TypeError('log must be a plain object.');
     }
@@ -53,15 +53,15 @@ function decodeLoggerEvent(log, loggerContract) {
         return null;
     }
     const signature = parseBytes(log.topics[0], 'log.topics[0]', 32);
-    if (signature.toLowerCase() !== LOGGER_EVENT_TOPIC) {
+    if (signature.toLowerCase() !== LEDGER_EVENT_TOPIC) {
         return null;
     }
     if (log.topics.length !== 3) {
-        throw new Error('Logger event must have exactly three topics.');
+        throw new Error('Ledger event must have exactly three topics.');
     }
     const nodeTopic = parseBytes(log.topics[1], 'log.topics[1]', 32);
     if (nodeTopic.slice(2, 26) !== '0'.repeat(24)) {
-        throw new Error('Logger event node address must have zero padding.');
+        throw new Error('Ledger event node address must have zero padding.');
     }
     const cidKeccak256Hash = parseBytes(log.topics[2], 'log.topics[2]', 32);
     if (log.removed !== undefined && typeof log.removed !== 'boolean') {
@@ -69,18 +69,18 @@ function decodeLoggerEvent(log, loggerContract) {
     }
     const data = parseBytes(log.data, 'log.data').slice(2);
     if (data.length < 128 || data.slice(0, 64) !== STRING_OFFSET) {
-        throw new Error('Logger event data must contain offset 32 and a string length word.');
+        throw new Error('Ledger event data must contain offset 32 and a string length word.');
     }
     const length = BigInt(`0x${data.slice(64, 128)}`);
     const paddedLength = ((length + 31n) / 32n) * 32n;
     if (BigInt(data.length / 2) !== 64n + paddedLength) {
-        throw new Error('Logger event data size must match its padded string length.');
+        throw new Error('Ledger event data size must match its padded string length.');
     }
     // The size check bounds the declared length to the actual input before allocation.
     const byteLength = Number(length);
     const contentEnd = 128 + byteLength * 2;
     if (!/^0*$/.test(data.slice(contentEnd))) {
-        throw new Error('Logger event string must have zero padding.');
+        throw new Error('Ledger event string must have zero padding.');
     }
     const bytes = new Uint8Array(byteLength);
     for (let index = 0; index < byteLength; index += 1) {
@@ -92,10 +92,10 @@ function decodeLoggerEvent(log, loggerContract) {
         cid = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
     }
     catch (error) {
-        throw new Error('Logger event cid must contain valid UTF-8.', { cause: error });
+        throw new Error('Ledger event cid must contain valid UTF-8.', { cause: error });
     }
-    if (hashLoggerCid(cid).toLowerCase() !== cidKeccak256Hash.toLowerCase()) {
-        throw new Error('Logger event cidKeccak256Hash must match its canonical CID.');
+    if (hashLedgerCid(cid).toLowerCase() !== cidKeccak256Hash.toLowerCase()) {
+        throw new Error('Ledger event cidKeccak256Hash must match its canonical CID.');
     }
     return {
         node: `0x${nodeTopic.slice(26)}`,
@@ -104,9 +104,9 @@ function decodeLoggerEvent(log, loggerContract) {
         ...(log.removed === undefined ? {} : { removed: log.removed }),
     };
 }
-async function logCid(cid, { config, fetch, loggerContract, nodeAddress, transactionPreparer, timeoutMs, pollIntervalMs, id, signal, }) {
-    const data = encodeLoggerCall(cid);
-    const to = parseBytes(loggerContract, 'loggerContract', 20);
+async function logCid(cid, { config, fetch, ledgerContract, nodeAddress, transactionPreparer, timeoutMs, pollIntervalMs, id, signal, }) {
+    const data = encodeLedgerCall(cid);
+    const to = parseBytes(ledgerContract, 'ledgerContract', 20);
     const node = parseBytes(nodeAddress, 'nodeAddress', 20);
     const rpcConfig = createHttpConfig(config);
     const deadlineMs = assertTimerMs(timeoutMs, 'timeoutMs');
@@ -141,14 +141,14 @@ async function logCid(cid, { config, fetch, loggerContract, nodeAddress, transac
         receipt = observed.receipt;
         stage = 'verify';
         if (receipt.status !== 'success') {
-            throw new Error(`Logger transaction execution status: ${receipt.status ?? 'unknown'}.`);
+            throw new Error(`Ledger transaction execution status: ${receipt.status ?? 'unknown'}.`);
         }
         const event = receipt.logs
-            .map((log) => decodeLoggerEvent(log, to))
+            .map((log) => decodeLedgerEvent(log, to))
             .find((entry) => entry !== null && entry.removed !== true &&
             entry.node.toLowerCase() === node.toLowerCase() && entry.cid === cid);
         if (!event) {
-            throw new Error('Receipt did not contain the expected Logger event.');
+            throw new Error('Receipt did not contain the expected Ledger event.');
         }
         return { cid, transactionHash, receipt, event };
     }
@@ -156,5 +156,5 @@ async function logCid(cid, { config, fetch, loggerContract, nodeAddress, transac
         throw new LogCidError(cid, stage, transactionHash, receipt, cause);
     }
 }
-export { encodeLoggerCall, decodeLoggerEvent, hashLoggerCid, logCid, LogCidError };
-//# sourceMappingURL=logger.js.map
+export { encodeLedgerCall, decodeLedgerEvent, hashLedgerCid, logCid, LogCidError };
+//# sourceMappingURL=ledger.js.map

@@ -93,32 +93,32 @@ try {
     const agent = Wallet.createRandom();
     for (const wallet of [deployer, nodeWallet]) await rawRpc('anvil_setBalance', [wallet.address, '0x56bc75e2d63100000']);
     await run('forge', [
-        'script', '--root', 'contracts', 'contracts/script/DeployLogger.s.sol:DeployLogger',
+        'script', '--root', 'contracts', 'contracts/script/DeployLedger.s.sol:DeployLedger',
         '--rpc-url', rpcUrl, '--broadcast', '--offline',
     ], {
         cwd: root, timeout: 60_000,
-        env: { ...process.env, LOGGER_CHAIN_ID: '31337', LOGGER_DEPLOYER_PK: deployer.privateKey },
+        env: { ...process.env, LEDGER_CHAIN_ID: '31337', LEDGER_DEPLOYER_PK: deployer.privateKey },
     });
-    const broadcast = JSON.parse(await readFile(join(root, 'contracts/broadcast/DeployLogger.s.sol/31337/run-latest.json'), 'utf8'));
-    const deployment = broadcast.transactions.find((transaction) => transaction.contractName === 'Logger');
+    const broadcast = JSON.parse(await readFile(join(root, 'contracts/broadcast/DeployLedger.s.sol/31337/run-latest.json'), 'utf8'));
+    const deployment = broadcast.transactions.find((transaction) => transaction.contractName === 'Ledger');
     assert.ok(deployment?.contractAddress);
     const input = {
-        host: '127.0.0.1', port: nodePort, chainId: 31337, loggerContract: deployment.contractAddress,
+        host: '127.0.0.1', port: nodePort, chainId: 31337, ledgerContract: deployment.contractAddress,
         allowedSigners: [agent.address], rpcUrl, ipfsUrl,
         receiptTimeoutMs: 30_000, operationTimeoutMs: 45_000, pollIntervalMs: 50,
     };
     const config = parseConfig(input, { env: {} });
     const signer = createLocalSigner(nodeWallet.privateKey);
     await assert.rejects(startNode({ ...config, chainId: 1 }, signer), /chain ID/);
-    await assert.rejects(startNode({ ...config, loggerContract: agent.address }, signer), /bytecode/);
+    await assert.rejects(startNode({ ...config, ledgerContract: agent.address }, signer), /bytecode/);
     runtime = await startNode(config, signer);
     assert.equal((await fetch(`${nodeUrl}/healthz`)).status, 200);
-    const text = 'First message through the Oya kernel node and deployed Logger.';
+    const text = 'First message through the Oya kernel node and deployed Ledger.';
     const message = { text, signer: agent.address, signature: await agent.signMessage(text) };
     const post = (body) => fetch(`${nodeUrl}/v1/messages`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
     });
-    const loggerAbi = new Interface(['event Log(address indexed node, bytes32 indexed cidKeccak256Hash, string cid)']);
+    const ledgerAbi = new Interface(['event Log(address indexed node, bytes32 indexed cidKeccak256Hash, string cid)']);
     const checkedPublication = async (response, expectedMessage) => {
         const body = await response.json();
         assert.equal(response.status, 200, JSON.stringify(body));
@@ -134,14 +134,14 @@ try {
         assert.equal(receipt.status, '0x1');
         assert.equal(publication.blockNumber, BigInt(receipt.blockNumber).toString());
         assert.equal(receipt.logs.length, 1);
-        assert.equal(receipt.logs[0].address.toLowerCase(), config.loggerContract.toLowerCase());
-        const event = loggerAbi.parseLog(receipt.logs[0]);
+        assert.equal(receipt.logs[0].address.toLowerCase(), config.ledgerContract.toLowerCase());
+        const event = ledgerAbi.parseLog(receipt.logs[0]);
         assert.equal(event.name, 'Log');
         assert.equal(event.args.node.toLowerCase(), signer.address.toLowerCase());
         assert.equal(event.args.cid, publication.cid);
         assert.equal(event.args.cidKeccak256Hash, keccak256(toUtf8Bytes(publication.cid)));
         assert.equal(publication.nodeAddress.toLowerCase(), signer.address.toLowerCase());
-        assert.equal(publication.loggerContract.toLowerCase(), config.loggerContract.toLowerCase());
+        assert.equal(publication.ledgerContract.toLowerCase(), config.ledgerContract.toLowerCase());
         return publication;
     };
     const initialNonce = await rawRpc('eth_getTransactionCount', [signer.address, 'pending']);
@@ -150,7 +150,7 @@ try {
     const publication = await checkedPublication(await post(message), message);
 
     // Wait for an actual pending transaction before testing busy admission.
-    const pendingText = 'Keep one Logger transaction active until its receipt is checked.';
+    const pendingText = 'Keep one Ledger transaction active until its receipt is checked.';
     const pendingMessage = { text: pendingText, signer: agent.address, signature: await agent.signMessage(pendingText) };
     const nextText = 'Process this message after the active operation completes.';
     const nextMessage = { text: nextText, signer: agent.address, signature: await agent.signMessage(nextText) };
@@ -207,13 +207,13 @@ try {
     assert.equal(health.nodeAddress.toLowerCase(), signer.address.toLowerCase());
 
     const evidence = {
-        chainId: 31337, loggerContract: config.loggerContract, deploymentTransactionHash: deployment.hash,
+        chainId: 31337, ledgerContract: config.ledgerContract, deploymentTransactionHash: deployment.hash,
         nodeUrl, rpcUrl, ipfsUrl, nodeAddress: signer.address, agentAddress: agent.address,
         publication, pendingPublication, nextPublication, duplicatePublication,
         busyCheck: { pendingTransactionHash, pendingTransactionCount: 1, rejectedRequests: 2 },
-        checks: ['signed HTTP ingestion', 'IPFS retrieval', 'Logger event', 'invalid signature rejection',
+        checks: ['signed HTTP ingestion', 'IPFS retrieval', 'Ledger event', 'invalid signature rejection',
             'busy rejection while a transaction is pending', 'no second pending transaction',
-            'successful resubmission after completion', 'independent duplicate Logger event',
+            'successful resubmission after completion', 'independent duplicate Ledger event',
             'chain and contract startup checks', 'CLI startup'],
     };
     await writeFile(join(directory, 'evidence.json'), `${JSON.stringify(evidence, null, 2)}\n`);

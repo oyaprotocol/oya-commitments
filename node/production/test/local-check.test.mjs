@@ -50,7 +50,7 @@ async function fixture(t) {
     await once(server, 'listening');
     const base = `http://127.0.0.1:${server.address().port}`;
     const config = {
-        chainId: 31337, loggerContract: '0x1111111111111111111111111111111111111111',
+        chainId: 31337, ledgerContract: '0x1111111111111111111111111111111111111111',
         allowedSigners: [Wallet.createRandom().address],
         rpcUrl: `${base}/rpc-secret-marker`, ipfsUrl: `${base}/ipfs-secret-marker/api/v0/`,
     };
@@ -95,7 +95,7 @@ test('npm check uses caller-relative files and their credentials, with only read
     assert.deepEqual(f.calls, [
         { method: 'eth_chainId', params: [], path: '/rpc-secret-marker', verb: 'POST',
             authorization: 'Bearer rpc-secret-marker' },
-        { method: 'eth_getCode', params: [f.config.loggerContract, 'latest'], path: '/rpc-secret-marker',
+        { method: 'eth_getCode', params: [f.config.ledgerContract, 'latest'], path: '/rpc-secret-marker',
             verb: 'POST', authorization: 'Bearer rpc-secret-marker' },
         { method: 'eth_getBalance', params: [f.wallet.address, 'latest'], path: '/rpc-secret-marker',
             verb: 'POST', authorization: 'Bearer rpc-secret-marker' },
@@ -150,8 +150,8 @@ test('unreadable settings, invalid JSON, and non-loopback binding fail before re
 test('check reports the failed prerequisite without exposing provider data', async (t) => {
     const cases = [
         ['chain mismatch', { eth_chainId: '0x1' }, 'Ethereum chain', 1],
-        ['missing Logger', { eth_getCode: '0x' }, 'Logger bytecode', 2],
-        ['malformed Logger bytecode', { eth_getCode: '0x600' }, 'Logger bytecode', 2],
+        ['missing Ledger', { eth_getCode: '0x' }, 'Ledger bytecode', 2],
+        ['malformed Ledger bytecode', { eth_getCode: '0x600' }, 'Ledger bytecode', 2],
         ['unfunded node', { eth_getBalance: '0x0' }, 'Node gas balance', 3],
         ['invalid balance', { eth_getBalance: 'provider-secret-marker' }, 'Node gas balance', 3],
         ['oversized balance', { eth_getBalance: `0x1${'0'.repeat(64)}` }, 'Node gas balance', 3],

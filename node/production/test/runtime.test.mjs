@@ -10,14 +10,14 @@ import { fixture, signedMessage } from './runtime-fixture.mjs';
 
 const agent = Wallet.createRandom();
 const configInput = {
-    chainId: 31337, loggerContract: '0x1111111111111111111111111111111111111111',
+    chainId: 31337, ledgerContract: '0x1111111111111111111111111111111111111111',
     allowedSigners: [agent.address], rpcUrl: 'http://127.0.0.1:8545', ipfsUrl: 'http://127.0.0.1:5001',
 };
 
 test('config fails closed on missing allowlist, chain, and invalid endpoints', () => {
     for (const change of [
         { allowedSigners: [] }, { allowedSigners: undefined }, { chainId: undefined }, { chainId: 1.5 },
-        { loggerContract: '0x' }, { rpcUrl: 'file:///tmp/rpc' }, { port: 65536 },
+        { ledgerContract: '0x' }, { rpcUrl: 'file:///tmp/rpc' }, { port: 65536 },
         { stateDir: './state' }, { operationTimeoutMs: 0 }, { operationTimeoutMs: 2_147_483_648 },
         { maxFeePerGasWei: '-1' }, { typo: true },
     ]) assert.throws(() => parseConfig({ ...configInput, ...change }));
@@ -31,7 +31,7 @@ test('signer preserves EIP-1559 fields and does not disclose invalid secret valu
     const wallet = Wallet.createRandom();
     const signer = createLocalSigner(wallet.privateKey);
     const input = {
-        to: configInput.loggerContract, data: '0x1234', value: 0n, type: 2, chainId: 31337,
+        to: configInput.ledgerContract, data: '0x1234', value: 0n, type: 2, chainId: 31337,
         nonce: 4, gasLimit: 45_000n, maxFeePerGas: 2_000_000_000n, maxPriorityFeePerGas: 1_000_000_000n,
     };
     const signed = await signer.signTransaction(input);
@@ -53,7 +53,7 @@ test('bytecode distinguishes absence from valid bytes and rejects malformed RPC 
     }
 });
 
-test('startup still rejects the wrong chain and absent or malformed Logger bytecode', async (t) => {
+test('startup still rejects the wrong chain and absent or malformed Ledger bytecode', async (t) => {
     const setup = await fixture(t);
     setup.state.chainId = '0x1';
     await assert.rejects(setup.start(), /chain ID/);

@@ -44,7 +44,7 @@ async function command(file, args, options) {
     }
 }
 
-test('local CLI deploys Logger, publishes from a separate agent, and preserves identity across restart', { timeout: 180_000 }, async (t) => {
+test('local CLI deploys Ledger, publishes from a separate agent, and preserves identity across restart', { timeout: 180_000 }, async (t) => {
     const directory = await mkdtemp(join(tmpdir(), 'oya-local-operations-'));
     const processes = [];
     t.after(async () => {
@@ -61,7 +61,7 @@ test('local CLI deploys Logger, publishes from a separate agent, and preserves i
         } finally { await rm(directory, { recursive: true, force: true }); }
     });
     const baseEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
-        !/^(OYA_|LOGGER_|FOUNDRY_|IPFS_)/.test(key)));
+        !/^(OYA_|LEDGER_|LOGGER_|FOUNDRY_|IPFS_)/.test(key)));
     const background = (file, args, env = baseEnv) => {
         const child = spawn(file, args, { cwd: directory, env, detached: process.platform !== 'win32',
             stdio: ['ignore', 'pipe', 'pipe'] });
@@ -108,18 +108,18 @@ test('local CLI deploys Logger, publishes from a separate agent, and preserves i
     const configPath = join(directory, 'config.local.json');
     const envPath = join(directory, 'node.env');
     const metadataPath = join(directory, 'deployment.local.json');
-    const config = { chainId: 31337, loggerContract: '0x1111111111111111111111111111111111111111',
+    const config = { chainId: 31337, ledgerContract: '0x1111111111111111111111111111111111111111',
         allowedSigners: [agent.address],
         rpcUrl, ipfsUrl: 'http://127.0.0.1:1',
         pollIntervalMs: 50, receiptTimeoutMs: 5000 };
     const original = `${JSON.stringify(config, null, 2)}\n`;
     await writeFile(configPath, original, { mode: 0o600 });
     await chmod(configPath, 0o640);
-    const credentials = `LOGGER_DEPLOYER_PK=${deployer.privateKey}\nOYA_RPC_AUTHORIZATION=\n`;
+    const credentials = `LEDGER_DEPLOYER_PK=${deployer.privateKey}\nOYA_RPC_AUTHORIZATION=\n`;
     await writeFile(envPath, credentials, { mode: 0o600 });
-    const env = { ...baseEnv, LOGGER_DEPLOYER_PK: inherited.privateKey,
+    const env = { ...baseEnv, LEDGER_DEPLOYER_PK: inherited.privateKey,
         OYA_NODE_PRIVATE_KEY: 'unused-node-secret-marker',
-        FOUNDRY_ETH_RPC_URL: 'http://127.0.0.1:1', LOGGER_CHAIN_ID: '1' };
+        FOUNDRY_ETH_RPC_URL: 'http://127.0.0.1:1', LEDGER_CHAIN_ID: '1' };
     const cli = (action, ...flags) => command('npm', ['--prefix', production, 'run', 'local', '--', action,
         '--config', 'config.local.json', '--env-file', 'node.env', ...flags], { cwd: directory, env, timeout: 120_000 });
     const redacted = (output) => {
@@ -133,52 +133,52 @@ test('local CLI deploys Logger, publishes from a separate agent, and preserves i
         if (pattern) assert.match(result.output, pattern);
     };
     await writeFile(configPath, JSON.stringify({ ...config, chainId: 1 }));
-    checked(await cli('deploy-logger', '--broadcast'), 1, /FAIL.*chainId/);
+    checked(await cli('deploy-ledger', '--broadcast'), 1, /FAIL.*chainId/);
     assert.equal(await rpc('eth_getTransactionCount', [deployer.address, 'latest']), '0x0');
     await writeFile(configPath, original);
     progress('Wrong-chain deployment rejected without a transaction.');
 
-    progress('Simulating Logger deployment...');
-    checked(await cli('deploy-logger'), 0, /Simulation passed/);
+    progress('Simulating Ledger deployment...');
+    checked(await cli('deploy-ledger'), 0, /Simulation passed/);
     assert.equal(await rpc('eth_getTransactionCount', [deployer.address, 'latest']), '0x0');
     assert.equal(await readFile(configPath, 'utf8'), original);
     await assert.rejects(readFile(metadataPath), { code: 'ENOENT' });
     progress('Simulation passed; no transaction or config changes.');
 
-    progress('Broadcasting Logger deployment...');
-    const deployed = await cli('deploy-logger', '--broadcast');
+    progress('Broadcasting Ledger deployment...');
+    const deployed = await cli('deploy-ledger', '--broadcast');
     checked(deployed, 0, /Deployment recorded/);
     const metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
     const receipt = await rpc('eth_getTransactionReceipt', [metadata.transactionHash]);
     assert.equal(await readFile(configPath, 'utf8'), original);
-    assert.ok(deployed.output.includes(`Set loggerContract to ${metadata.loggerContract}`));
-    assert.deepEqual(metadata, { chainId: 31337, loggerContract: receipt.contractAddress,
+    assert.ok(deployed.output.includes(`Set ledgerContract to ${metadata.ledgerContract}`));
+    assert.deepEqual(metadata, { chainId: 31337, ledgerContract: receipt.contractAddress,
         transactionHash: receipt.transactionHash, blockNumber: BigInt(receipt.blockNumber).toString(), deployer: deployer.address });
     assert.equal(receipt.status, '0x1');
-    assert.notEqual(await rpc('eth_getCode', [metadata.loggerContract, 'latest']), '0x');
-    progress(`Logger verified at ${metadata.loggerContract}; transaction ${metadata.transactionHash}.`);
+    assert.notEqual(await rpc('eth_getCode', [metadata.ledgerContract, 'latest']), '0x');
+    progress(`Ledger verified at ${metadata.ledgerContract}; transaction ${metadata.transactionHash}.`);
     assert.equal((await stat(configPath)).mode & 0o777, 0o640);
     assert.equal((await stat(metadataPath)).mode & 0o777, 0o600);
     assert.ok(await readFile(envPath, 'utf8') === credentials, 'Deployment must preserve the environment file.');
     const files = await readdir(directory);
-    for (const name of files.filter((name) => name.startsWith('.oya-logger-'))) {
+    for (const name of files.filter((name) => name.startsWith('.oya-ledger-'))) {
         assert.equal((await stat(join(directory, name))).mode & 0o777, 0o700);
     }
-    checked(await cli('deploy-logger', '--broadcast'), 1, /Prior deployment metadata exists/);
+    checked(await cli('deploy-ledger', '--broadcast'), 1, /Prior deployment metadata exists/);
     assert.equal(await rpc('eth_getTransactionCount', [deployer.address, 'latest']), '0x1');
     assert.equal(await readFile(configPath, 'utf8'), original);
     assert.deepEqual(await readdir(directory), files);
     progress('Deployment record blocked a second broadcast before config adoption.');
 
     // Act as the operator adopting the verified address before reuse.
-    await writeFile(configPath, `${JSON.stringify({ ...config, loggerContract: metadata.loggerContract }, null, 2)}\n`);
+    await writeFile(configPath, `${JSON.stringify({ ...config, ledgerContract: metadata.ledgerContract }, null, 2)}\n`);
     const before = await Promise.all([configPath, metadataPath].map((path) => readFile(path, 'utf8')));
-    await writeFile(envPath, 'LOGGER_DEPLOYER_PK=\nOYA_RPC_AUTHORIZATION=\n');
-    checked(await cli('deploy-logger', '--broadcast'), 0, /Reusing configured Logger/);
+    await writeFile(envPath, 'LEDGER_DEPLOYER_PK=\nOYA_RPC_AUTHORIZATION=\n');
+    checked(await cli('deploy-ledger', '--broadcast'), 0, /Reusing configured Ledger/);
     assert.equal(await rpc('eth_getTransactionCount', [deployer.address, 'latest']), '0x1');
     assert.deepEqual(await readdir(directory), files);
     assert.deepEqual(await Promise.all([configPath, metadataPath].map((path) => readFile(path, 'utf8'))), before);
-    progress('Logger address adopted in config; reuse submitted no transaction.');
+    progress('Ledger address adopted in config; reuse submitted no transaction.');
 
     progress('Starting isolated offline Kubo...');
     const ipfsEnv = { ...baseEnv, IPFS_PATH: join(directory, 'ipfs') };
@@ -198,13 +198,13 @@ test('local CLI deploys Logger, publishes from a separate agent, and preserves i
 
     const nodePort = await freePort();
     const nodeUrl = `http://127.0.0.1:${nodePort}`;
-    const selectedConfig = { ...config, loggerContract: metadata.loggerContract, ipfsUrl, host: '127.0.0.1', port: nodePort,
+    const selectedConfig = { ...config, ledgerContract: metadata.ledgerContract, ipfsUrl, host: '127.0.0.1', port: nodePort,
         receiptTimeoutMs: 30_000, operationTimeoutMs: 45_000 };
     await writeFile(configPath, `${JSON.stringify(selectedConfig, null, 2)}\n`);
-    await writeFile(envPath, `OYA_NODE_PRIVATE_KEY=${nodeWallet.privateKey}\nOYA_RPC_AUTHORIZATION=\nOYA_IPFS_AUTHORIZATION=\nLOGGER_DEPLOYER_PK=\n`);
+    await writeFile(envPath, `OYA_NODE_PRIVATE_KEY=${nodeWallet.privateKey}\nOYA_RPC_AUTHORIZATION=\nOYA_IPFS_AUTHORIZATION=\nLEDGER_DEPLOYER_PK=\n`);
     await rpc('anvil_setBalance', [nodeWallet.address, '0x56bc75e2d63100000']);
     const settingsBefore = await Promise.all([configPath, envPath, metadataPath].map((path) => readFile(path, 'utf8')));
-    progress('Checking node configuration, Ethereum, Logger, gas balance, and IPFS...');
+    progress('Checking node configuration, Ethereum, Ledger, gas balance, and IPFS...');
     checked(await cli('check'), 0, /OK IPFS API/);
     progress('Readiness checks passed.');
 
@@ -218,10 +218,10 @@ test('local CLI deploys Logger, publishes from a separate agent, and preserves i
         }, running);
         assert.equal(health.status, 'ready');
         assert.equal(health.chainId, 31337);
-        assert.equal(health.loggerContract.toLowerCase(), metadata.loggerContract.toLowerCase());
+        assert.equal(health.ledgerContract.toLowerCase(), metadata.ledgerContract.toLowerCase());
         assert.equal(health.nodeAddress.toLowerCase(), nodeWallet.address.toLowerCase());
         checked(await cli('status'), 0, /OK ready/);
-        progress(`Node ready at ${nodeUrl}; signing address and Logger match the config.`);
+        progress(`Node ready at ${nodeUrl}; signing address and Ledger match the config.`);
         return running;
     };
     const shutdown = async (running, signal) => {
@@ -242,7 +242,7 @@ test('local CLI deploys Logger, publishes from a separate agent, and preserves i
             cwd: directory, env: { OYA_AGENT_PRIVATE_KEY: wallet.privateKey },
         });
     };
-    const logger = new Interface(['event Log(address indexed node, bytes32 indexed cidKeccak256Hash, string cid)']);
+    const ledger = new Interface(['event Log(address indexed node, bytes32 indexed cidKeccak256Hash, string cid)']);
     const publish = async (text) => {
         progress(`Submitting agent message: ${JSON.stringify(text)}`);
         const result = await send(agent, text);
@@ -254,7 +254,7 @@ test('local CLI deploys Logger, publishes from a separate agent, and preserves i
         assert.equal(publication.status, 'logged');
         assert.equal(publication.uri, `ipfs://${publication.cid}`);
         assert.equal(publication.nodeAddress.toLowerCase(), nodeWallet.address.toLowerCase());
-        assert.equal(publication.loggerContract.toLowerCase(), metadata.loggerContract.toLowerCase());
+        assert.equal(publication.ledgerContract.toLowerCase(), metadata.ledgerContract.toLowerCase());
         progress(`Node returned HTTP 200 / logged; CID ${publication.cid}; transaction ${publication.transactionHash}.`);
         const content = await ipfsRequest(`cat?arg=${encodeURIComponent(publication.cid)}`);
         assert.equal(content.status, 200);
@@ -263,16 +263,16 @@ test('local CLI deploys Logger, publishes from a separate agent, and preserves i
         const receipt = await rpc('eth_getTransactionReceipt', [publication.transactionHash]);
         assert.equal(receipt.status, '0x1');
         assert.equal(receipt.from.toLowerCase(), nodeWallet.address.toLowerCase());
-        assert.equal(receipt.to.toLowerCase(), metadata.loggerContract.toLowerCase());
+        assert.equal(receipt.to.toLowerCase(), metadata.ledgerContract.toLowerCase());
         assert.equal(publication.blockNumber, BigInt(receipt.blockNumber).toString());
         assert.equal(receipt.logs.length, 1);
-        assert.equal(receipt.logs[0].address.toLowerCase(), metadata.loggerContract.toLowerCase());
-        const event = logger.parseLog(receipt.logs[0]);
+        assert.equal(receipt.logs[0].address.toLowerCase(), metadata.ledgerContract.toLowerCase());
+        const event = ledger.parseLog(receipt.logs[0]);
         assert.equal(event.name, 'Log');
         assert.equal(event.args.node.toLowerCase(), nodeWallet.address.toLowerCase());
         assert.equal(event.args.cid, publication.cid);
         assert.equal(event.args.cidKeccak256Hash, keccak256(toUtf8Bytes(publication.cid)));
-        progress(`Logger event verified in block ${publication.blockNumber}; node, CID, and CID hash match.`);
+        progress(`Ledger event verified in block ${publication.blockNumber}; node, CID, and CID hash match.`);
         return publication;
     };
 
@@ -288,12 +288,12 @@ test('local CLI deploys Logger, publishes from a separate agent, and preserves i
     progress('Unauthorized signer rejected; node nonce remains one.');
     await shutdown(firstRun, 'SIGINT');
 
-    progress('Restarting with the same node identity and Logger...');
+    progress('Restarting with the same node identity and Ledger...');
     const secondRun = await start();
-    checked(await cli('deploy-logger', '--broadcast'), 0, /Reusing configured Logger/);
+    checked(await cli('deploy-ledger', '--broadcast'), 0, /Reusing configured Ledger/);
     assert.equal(await rpc('eth_getTransactionCount', [deployer.address, 'latest']), '0x1');
     assert.equal(await rpc('eth_getTransactionCount', [nodeWallet.address, 'pending']), '0x1');
-    progress('Identity and Logger preserved; restart and reuse submitted no transactions.');
+    progress('Identity and Ledger preserved; restart and reuse submitted no transactions.');
     const secondPublication = await publish('Another signed message after restarting the same node.\n');
     assert.notEqual(secondPublication.transactionHash, firstPublication.transactionHash);
     assert.equal(await rpc('eth_getTransactionCount', [nodeWallet.address, 'latest']), '0x2');
@@ -309,11 +309,11 @@ test('local CLI deploys Logger, publishes from a separate agent, and preserves i
     await stop(anvil);
     progress('All fixture services stopped.');
 
-    const evidence = { chainId: 31337, loggerContract: metadata.loggerContract, deploymentTransactionHash: metadata.transactionHash,
+    const evidence = { chainId: 31337, ledgerContract: metadata.ledgerContract, deploymentTransactionHash: metadata.transactionHash,
         nodeUrl, rpcUrl, ipfsUrl, nodeAddress: nodeWallet.address, agentAddress: agent.address,
         firstPublication, secondPublication,
-        checks: ['manual Logger adoption and reuse', 'separate sender with only agent credentials', 'exact IPFS envelope',
-            'verified Logger event', 'disallowed signer rejected without a transaction', 'SIGINT and SIGTERM shutdown',
+        checks: ['manual Ledger adoption and reuse', 'separate sender with only agent credentials', 'exact IPFS envelope',
+            'verified Ledger event', 'disallowed signer rejected without a transaction', 'SIGINT and SIGTERM shutdown',
             'stable identity and nonce across restart', 'unchanged settings', 'supplied services survive node shutdown',
             'fixture services stopped'] };
     const evidenceDirectory = await mkdtemp(join(tmpdir(), 'oya-local-evidence-'));
