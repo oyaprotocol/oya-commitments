@@ -53,7 +53,7 @@ These settings are fixed in the package, with no caller override. Identical file
 
 Providers must support and honor these [RPC options](https://docs.ipfs.tech/reference/kubo/rpc/#api-v0-add). Returned CID validation checks the identifier's structure; it does not recompute the file DAG, verify downloaded content against the CID, or prove storage. `pinned: true` reports a successful add with pinning requested, not an independent pin audit. Invalid provider CIDs fail without transport retries.
 
-`packages/test/fixtures/cids.json` records independently generated CIDs for empty files, message JSON, and bytes below, at, and above the 1 MiB chunk boundary. They were generated with IPFS CLI 0.40.1 using an isolated temporary repository, offline mode, `--only-hash`, the settings above, and `--pin=false`. Tests use these committed fixtures and injected transports; they require no IPFS installation or live service and do not establish a provider's conformance.
+`packages/test/fixtures/cids.json` records independently generated CIDs for empty files, message JSON, and bytes below, at, and above the 1 MiB chunk boundary. They were generated with IPFS CLI 0.43.0 using an isolated temporary repository, offline mode, `--only-hash`, the settings above, and `--pin=false`. Tests use these committed fixtures and injected transports; they require no IPFS installation or live service and do not establish a provider's conformance.
 
 ## Indexing
 

@@ -1,5 +1,5 @@
 {
-  "generatedBy": "IPFS CLI 0.40.1, offline add --only-hash --quieter, with the options below and pin=false. No uploaded data or daemon. Literal UTF-8, hex bytes, or repeated-byte inputs.",
+  "generatedBy": "IPFS CLI 0.43.0, offline add --only-hash --quieter, with the options below and pin=false. No uploaded data or daemon. Literal UTF-8, hex bytes, or repeated-byte inputs.",
   "options": {
     "cid-version": "1",
     "cid-base": "base32",

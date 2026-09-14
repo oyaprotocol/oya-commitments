@@ -45,6 +45,8 @@ async function command(file, args, options) {
 }
 
 test('local CLI deploys Ledger, publishes from a separate agent, and preserves identity across restart', { timeout: 180_000 }, async (t) => {
+    const kuboVersion = (await execute('ipfs', ['version', '--number'], { timeout: 5000 })).stdout.trim();
+    assert.equal(kuboVersion, '0.43.0', 'Local integration requires Kubo 0.43.0 on PATH.');
     const directory = await mkdtemp(join(tmpdir(), 'oya-local-operations-'));
     const processes = [];
     t.after(async () => {
@@ -232,7 +234,7 @@ test('local CLI deploys Ledger, publishes from a separate agent, and preserves i
         await assert.rejects(fetch(`${nodeUrl}/healthz`, { signal: AbortSignal.timeout(1000) }));
         checked(await cli('status'), 1, /Node is unreachable/);
         assert.equal(await rpc('eth_chainId'), '0x7a69');
-        assert.ok((await (await ipfsRequest('version')).json()).Version.length > 0);
+        assert.equal((await (await ipfsRequest('version')).json()).Version, kuboVersion);
         progress('Node stopped cleanly; status is unreachable; Anvil and Kubo remain available.');
     };
     const messagePath = join(directory, 'message.txt');
@@ -310,7 +312,7 @@ test('local CLI deploys Ledger, publishes from a separate agent, and preserves i
     progress('All fixture services stopped.');
 
     const evidence = { chainId: 31337, ledgerContract: metadata.ledgerContract, deploymentTransactionHash: metadata.transactionHash,
-        nodeUrl, rpcUrl, ipfsUrl, nodeAddress: nodeWallet.address, agentAddress: agent.address,
+        nodeUrl, rpcUrl, ipfsUrl, kuboVersion, nodeAddress: nodeWallet.address, agentAddress: agent.address,
         firstPublication, secondPublication,
         checks: ['manual Ledger adoption and reuse', 'separate sender with only agent credentials', 'exact IPFS envelope',
             'verified Ledger event', 'disallowed signer rejected without a transaction', 'SIGINT and SIGTERM shutdown',

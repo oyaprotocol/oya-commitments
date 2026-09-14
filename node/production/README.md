@@ -8,9 +8,113 @@ The Ledger runtime installs the published `@oyaprotocol/ethereum` and `@oyaproto
 
 When upgrading an existing local instance, rename `loggerContract` to `ledgerContract` in its config and deployment record, and `LOGGER_DEPLOYER_PK` / `LOGGER_CHAIN_ID` to `LEDGER_DEPLOYER_PK` / `LEDGER_CHAIN_ID` where used. Use `deploy-ledger` for deployment/reuse. The existing contract address remains valid because the ABI is unchanged. Private settings and prior deployment artifacts are not rewritten automatically.
 
+## Run with Docker Compose
+
+[compose.yaml](compose.yaml) runs the node and Kubo with persistent IPFS storage. Use a Linux Docker host or Docker Desktop with Linux containers, and Compose 2.30 or newer. Run the commands below from the repository root. Ethereum comes from your selected RPC provider; deploy or verify Ledger and fund a dedicated node account before starting the node.
+
+### Prepare private settings
+
+For a new instance, replace the placeholder directory below with an absolute path outside the checkout. Keep the Compose project name stable: `oya` owns the `oya_ipfs-data` volume.
+
+```sh
+umask 077
+mkdir -m 700 /absolute/path/to/private-oya
+export OYA_CONFIG_FILE=/absolute/path/to/private-oya/node.json
+export OYA_ENV_FILE=/absolute/path/to/private-oya/node.env
+export OYA_CONTAINER_USER="$(id -u):$(id -g)"
+export COMPOSE_FILE=node/production/compose.yaml
+export COMPOSE_PROJECT_NAME=oya
+cp -n node/production/docker/config.example.json "$OYA_CONFIG_FILE"
+cp -n node/production/docker/runtime.env.example "$OYA_ENV_FILE"
+chmod 600 "$OYA_CONFIG_FILE" "$OYA_ENV_FILE"
+```
+
+Edit both files before continuing. The example chain, RPC URL, Ledger address, and allowed signer address are placeholders. Select your chain and RPC, verified Ledger address, and actual agent allowlist. Keep the internal `host` as `0.0.0.0`, `port` as `8787`, and `ipfsUrl` as `http://ipfs:5001`. Container loopback addresses refer to that container, so an RPC running elsewhere needs an address reachable from Docker.
+
+The environment file contains only the node signing key and optional complete RPC/IPFS Authorization headers. Use literal, unquoted `KEY=value` lines, with no inline comments; Compose's raw format preserves dollar signs and quotes. Leave authorization values empty when unused; the bundled Kubo API requires none. Keep agent and Ledger-deployer keys in separate files for their separate tools. Docker administrators can inspect container environment values; do not share expanded Compose configuration or full container inspection output.
+
+The default container user is `1000:1000`. On a POSIX host, the override above selects the current operator's UID/GID; run it as a non-root user. A mode-0600 config needs a matching owner, or deliberately configured group access. Compose reads the environment file on the host, while the container reads the mounted JSON. On Windows, set the same variables in your shell using absolute host paths and an explicit numeric `OYA_CONTAINER_USER`, such as `1000:1000`, and restrict access with host ACLs. Docker Desktop file sharing can differ from Linux ownership; verify the actual mount below before startup. Do not make private files world-readable to fix access.
+
+```sh
+docker compose config --quiet
+docker compose build node
+docker compose run --rm --no-deps --entrypoint node node -e 'require("node:fs").readFileSync("/config/node.json"); console.log("Config is readable")'
+```
+
+`config --quiet` checks the Compose model without printing credentials. The mount check confirms file access; application startup validates the JSON and signer. A missing config path fails instead of creating a directory. Re-export these variables in a new terminal before using the remaining commands.
+
+If Ledger still needs deployment, use the existing [deployment workflow](#deploy-or-reuse-ledger) with host Node.js/npm and Foundry. Prepare a separate host-facing config with `host: "127.0.0.1"`, a host-reachable RPC URL, and the same chain; put only the deployer key in its environment file. The local CLI rejects the container's `0.0.0.0` bind. Preview and then explicitly broadcast:
+
+```sh
+npm --prefix node/production run local -- deploy-ledger --config /absolute/path/to/private-oya/deploy.json --env-file /absolute/path/to/private-oya/deployer.env
+npm --prefix node/production run local -- deploy-ledger --broadcast --config /absolute/path/to/private-oya/deploy.json --env-file /absolute/path/to/private-oya/deployer.env
+```
+
+Broadcast spends funds on the selected chain. Adopt the verified address manually in both configs. Deployment with custom RPC Authorization headers is unsupported. Starting Compose never deploys Ledger, creates a node key, or funds accounts.
+
+### Operate and inspect
+
+```sh
+docker compose up -d
+docker compose ps
+docker compose logs --follow node
+```
+
+Stopping log-following leaves services running. Node HTTP is published at `http://127.0.0.1:8787`; `OYA_HTTP_PORT` changes only the host port. Kubo's TCP/UDP swarm port 4001 is published on the host, while API 5001 and gateway 8080 remain unpublished. The API is reachable by containers on the Compose network. For agents on other machines, provide TLS termination and access controls through your hosting platform's proxy. Check Kubo peer connectivity and retrieval from an independent peer before relying on public availability:
+
+```sh
+docker compose exec ipfs ipfs swarm peers
+```
+
+The node waits for Kubo's API health check before startup. Node health reports local lifecycle state: ready and busy are healthy; shutdown and unknown transaction outcomes are unhealthy. It does not continuously test Ethereum or IPFS. Both services rotate logs at 10 MB per file with three files retained. Kubo can restart automatically; the signing node has `restart: "no"` because restarting clears its in-memory unknown-outcome guard. Reconcile uncertain transactions before restarting or retrying, and run only one instance per node account.
+
+From a separate terminal with host Node.js and the installed `node/production` dependencies, use the [existing sender](#submit-a-message) with only the agent key loaded. Substitute your text file and returned CID:
+
+```sh
+node --env-file=/absolute/path/to/agent.env -- node/production/scripts/send-message.mjs http://127.0.0.1:8787 /absolute/path/to/message.txt
+docker compose exec ipfs ipfs pin ls --type=recursive
+docker compose exec ipfs ipfs cat /ipfs/REPLACE_WITH_RETURNED_CID
+```
+
+Stop admission and drain accepted work before replacing the node or updating its settings:
+
+```sh
+docker compose stop node
+docker compose up -d --no-deps --force-recreate node
+```
+
+For an image update, preserve the previous image ID for rollback and run `docker compose build node` between these commands. Recreation reloads changed configuration and environment values; `docker compose restart` does not apply changed service environment. The node has a four-minute stop grace for its default three-minute operation deadline. Increase `OYA_STOP_GRACE_PERIOD` with headroom if you increase `operationTimeoutMs`. A forced shutdown or missing client response requires transaction reconciliation before another start.
+
+`docker compose down` stops services in dependency order and retains the named IPFS volume. Keep the same project name when bringing them back. `down --volumes` deletes the repository. An image moved to another host does not carry its volume or private settings.
+
+### Back up and restore IPFS
+
+Back up the complete Kubo repository while both services are stopped. The archive contains Kubo's private identity as well as content and pins; protect it and keep an off-host copy. Back up node config/key files separately. Choose a new backup filename and retain the exact image versions with it. Record the peer identity before stopping:
+
+```sh
+docker compose exec -T ipfs ipfs id -f='<id>\n'
+docker compose stop node ipfs
+export OYA_BACKUP_FILE=/absolute/path/to/private-oya/ipfs-repo.tar
+umask 077
+docker compose run --rm --no-deps -T --entrypoint tar ipfs -C /data/ipfs -cpf - . > "$OYA_BACKUP_FILE"
+```
+
+Require a successful archive command before relying on the backup. Restore into a fresh volume by choosing a new, unused Compose project name (`oya-restore` below). These one-off containers use the pinned Kubo image and do not start a daemon or publish service ports:
+
+```sh
+docker compose -p oya-restore run --rm --no-deps -T --entrypoint tar ipfs -C /data/ipfs -xpf - < "$OYA_BACKUP_FILE"
+docker compose -p oya-restore run --rm --no-deps -T --entrypoint ipfs ipfs --offline id -f='<id>\n'
+docker compose -p oya-restore run --rm --no-deps -T --entrypoint ipfs ipfs --offline pin ls --type=recursive
+docker compose -p oya-restore run --rm --no-deps -T --entrypoint ipfs ipfs --offline cat /ipfs/REPLACE_WITH_RETURNED_CID
+```
+
+Compare the restored identity, pins, and message bytes with the original before adopting the backup. To resume the original stack, use `docker compose up -d`. To adopt the restored repository instead, keep the original services stopped, set `COMPOSE_PROJECT_NAME=oya-restore`, and start with the same node settings and key after reconciling pending work. Do not run both signing nodes. Upgrade Kubo separately from the node and take a cold backup first; an image downgrade alone does not undo repository-format changes.
+
+Milestone 2 was validated on Linux arm64 through Docker Desktop 4.37.2 / Engine 27.4.0 and Compose 2.31.0, using Node 24.21.0 and Kubo 0.43.0. Checks covered mounted settings, health probes, startup, persistence, and the cold backup/restore commands above. Validation used offline Kubo, an isolated RPC fixture limited to startup reads, and a dynamic loopback HTTP port. Signed publication through Ledger in Docker and container CI remain milestone 3; amd64 execution, a native Linux host, and Windows file sharing have not been tested here.
+
 ## Install and validate
 
-Use Node 22 or newer, npm, Foundry, and Kubo/IPFS for the local integration tests. CI uses Node 24. From the repository root:
+Use Node 22 or newer, npm, Foundry, and [Kubo 0.43.0](https://github.com/ipfs/kubo/releases/tag/v0.43.0) for the local integration tests. Both integration scripts require `ipfs` on `PATH` to report exactly `0.43.0`, matching Compose, and check the fixture daemon's version. Select that release on `PATH` before running them; a mismatch fails before any services start. CI uses Node 24. From the repository root:
 
 ```sh
 git submodule update --init lib/forge-std
@@ -18,6 +122,7 @@ npm --prefix node/production ci
 npm --prefix node/production test
 forge build --root contracts --sizes
 forge test --root contracts --offline -vv
+ipfs version --number # Must print 0.43.0.
 npm --prefix node/production run test:local
 npm --prefix node/production run smoke:local
 ```
