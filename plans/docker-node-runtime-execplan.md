@@ -10,6 +10,8 @@ Docker Compose, which describes related containers, networking, and storage in o
 
 This delivers a deployable, manually supervised log-only instance. It does not add durable transaction recovery, unattended node restarts, reimbursement verification, or a hosted service. A disposable Anvil chain will support container validation. Registry publication and a permanent deployment using real credentials are separate follow-up actions.
 
+After milestone 3 proves that internal end-to-end flow, follow-up milestones add external HTTP access over HTTPS for users and agents. They preserve the existing signed-message format, `allowedSigners`, and independent processing of repeated submissions. General request limits bound incoming traffic. Sender funding, payment workflows, and duplicate suppression are outside this follow-up scope. Milestones 1–3 retain their existing scope and order.
+
 ## Progress
 
 - [x] 2026-09-13 07:01Z: Reviewed plan requirements, the direct runtime entrypoint, configuration, existing deployment/publication tests, and current CI.
@@ -22,9 +24,15 @@ This delivers a deployable, manually supervised log-only instance. It does not a
 - [x] 2026-09-14: Milestone 2 complete: added the operator workflow and validated the Compose model, required files, raw environment values, read-only mounts, non-root file access, health-probe failures/timeouts, and startup on Linux arm64. Kubo identity, pins, and exact dummy content survived recreation and ordinary down/up. The documented cold backup restored into a fresh project volume with matching identity, content, UID/GID, and mode. All 89 host tests and whitespace checks passed. Ready for the requested human review.
 - [x] 2026-09-14: Updated the host integration baseline to Kubo 0.43.0 at the user's request. Both local integration flows passed under Node 24.21.0, and both reject Kubo 0.40.1 before starting services. Regenerated all nine CID fixtures with 0.43.0; their CIDs are unchanged. Package build, 21 targeted package tests, and all 89 production host tests passed.
 - [ ] Milestone 3: Validate message publication and container lifecycle, then add CI coverage.
+- [x] 2026-09-14: Added the user-requested external HTTP follow-up plan after milestone 3. This update changes planning only; repeated signed messages remain expected behavior under general request limits and `allowedSigners`.
+- [x] 2026-09-14: Clarified configurable proxy deadlines, aligned shutdown grace periods, and required coverage for an operation timeout above four minutes. Implementation and proxy-path tests remain pending in milestones 5–6.
+- [ ] Milestone 4, after milestone 3 passes: Add configurable general message-request limits.
+- [ ] Milestone 5, after milestone 4 passes: Add HTTPS proxy configuration and external-client operating instructions.
+- [ ] Milestone 6, after milestone 5: Validate the complete flow through HTTPS and document a check from another machine.
 
 ## Surprises & Discoveries
 
+- External ingestion can reuse `POST /v1/messages` and `scripts/send-message.mjs`; the present deployment publishes the API only on host loopback. Existing body/time/connection limits and one-operation admission bound individual work, but there is no general request-rate limit. Repeated signed envelopes already produce independent successful results, as checked by `scripts/smoke-local.mjs`; the user explicitly confirmed this behavior is intended.
 - The host integration scripts previously selected any `ipfs` on `PATH`, which still resolved to 0.40.1 after Compose moved to 0.43.0. The installed CLI is now 0.43.0. Regenerating the package fixtures with offline `add --only-hash --quieter`, the committed import options, and `pin=false` produced the same nine CIDs.
 - The runtime already has the required process entrypoint. `node/production/src/main.mjs` loads a config path, creates the signer, and calls `startNode(..., { handleSignals: true })`. Its SIGINT/SIGTERM handling drains accepted work. The local launcher intentionally requires a loopback bind address, so it should not launch the container process, which must listen on `0.0.0.0` inside its network namespace.
 - `src/server.mjs` keeps the unresolved-transaction stop condition only in memory. Restarting clears that condition. Persistence of config and IPFS content does not provide transaction recovery; an automatic restart policy would obscure this limitation.
@@ -37,6 +45,9 @@ This delivers a deployable, manually supervised log-only instance. It does not a
 
 ## Decision Log
 
+- Decision: Make the proxy response deadline configurable and require at least one minute of headroom above the configured `operationTimeoutMs`, with aligned shutdown grace periods. Rationale: Accepted work continues after a client disconnects, so longer operation settings must not cause avoidable proxy failures while the node is still completing valid work. Repeated submissions remain expected behavior. Date/Author: 2026-09-14 / user direction, recorded by Codex.
+- Decision: Schedule external HTTP work as milestones 4–6 after the existing internal Docker validation. Preserve signature verification, `allowedSigners`, and intentional repeated submissions; apply limits to incoming requests generally. Rationale: The user requested follow-ups rather than changing the current end-to-end milestone, and excluded sender-funding concerns and duplicate prevention. Keep each follow-up separately reviewable. Date/Author: 2026-09-14 / user direction, recorded by Codex.
+- Decision: Use a small application-level request counter and an optional Compose overlay with the official Caddy HTTPS proxy. Rationale: A process-wide counter needs no per-client database or proxy plugin, and the overlay preserves the internal Compose workflow while providing a reproducible external entrypoint. Date/Author: 2026-09-14 / Codex.
 - Decision: Require Kubo 0.43.0 in both host integration scripts and verify the fixture daemon version. Rationale: The user requested the same baseline as Compose; checking `ipfs` before starting services prevents silent use of another version from `PATH`. Keep this to small checks in the existing scripts. Date/Author: 2026-09-14 / Codex.
 - Decision: Package the existing direct CLI without a new launcher, process supervisor, or runtime refactor. Rationale: `startNode()` already owns startup and shutdown, and additional wrappers would recreate the earlier signal-forwarding problem. Date/Author: 2026-09-13 / Codex; implemented in the user-authorized milestone 1 on 2026-09-14.
 - Decision: Use a Node 24 Debian slim image, locked npm dependencies, a non-root process, and Linux containers. Rationale: This matches the CI baseline and avoids adding another runtime or application dependency. Build for Linux amd64 and arm64; record which architectures were actually executed. Date/Author: 2026-09-13 / Codex.
@@ -56,6 +67,8 @@ Milestone 2 adds a 73-line Compose file, 17 lines of example settings, and an op
 The host integration follow-up adds small version checks to `scripts/test-local-operations.mjs` and `scripts/smoke-local.mjs`, includes `kuboVersion` in their existing evidence, and documents the matching prerequisite. On macOS under Node 24.21.0, `npm --prefix node/production run test:local -- --verbose` and `npm --prefix node/production run smoke:local` passed against Kubo 0.43.0. Both scripts reject 0.40.1 before starting services. The CID fixture values remain unchanged after regeneration; only their version metadata and documentation changed. `npm --prefix packages run build`, `node --test packages/ipfs/test/cids.test.js packages/utils/test/cid.test.js packages/messages/test/cid-flow.test.js packages/ethereum/test/log-cid.test.js` (21 tests), and `npm --prefix node/production test` (89 tests) passed.
 
 Milestone 3 remains pending: signed publication through Ledger, pending-transaction shutdown and unknown-outcome handling in Docker, amd64 validation, and CI coverage. Only Linux arm64 container execution through Docker Desktop is established here; native Linux host and Windows permission behavior remain unverified. No image was published and no live deployment was performed.
+
+The external-access extension is planned only. Milestone 3 remains the next implementation milestone. Milestones 4–6 subsequently add general message limits, HTTPS routing, and validation from an external client's perspective. Their acceptance includes repeated identical signed requests succeeding independently when capacity is available, plus proxy response and shutdown coverage with longer-than-default operation timeouts. No runtime, Compose, or test implementation changed during this plan update.
 
 ## Context and Orientation
 
@@ -120,6 +133,34 @@ The harness must bound polling and subprocess lifetimes, clean up only its own c
 Extend `.github/workflows/test.yml` with a container-validation job using Node 24 and host Foundry. Keep existing host tests. Build and run the flow on Linux amd64; also build the Oya image for Linux arm64 with Buildx, Docker's multi-platform builder. Do not push images or provide registry credentials. Execute the flow on an arm64 Docker host when available, and distinguish a successful cross-build from an executed test in the evidence. Do not require native arm64 availability for the amd64 job.
 
 Acceptance is the complete observable flow below, including storage persistence and real Docker SIGTERM behavior. Finish the operator README with commands actually exercised, the tested version/platform matrix, a verified Kubo backup/restore procedure, and any unresolved platform limitation. Keep this plan current before the review handoff.
+
+### Milestone 4: General limits on received message requests
+
+Begin only after milestone 3 passes and its internal end-to-end evidence is recorded. Extend `node/production/src/config.mjs` and `node/production/src/server.mjs`, add focused cases in `node/production/test/http-limits.test.mjs`, and document the setting in `node/production/README.md`. Keep the limiter in the existing runtime files so the image's source allowlist and kernel packages stay unchanged.
+
+Add a positive integer `maxMessageRequestsPerMinute`, defaulting to 60. Use one process-wide counter in fixed 60-second windows, measured with a monotonic clock. Count every `POST /v1/messages` attempt before reading its body or verifying its signature, including malformed, disallowed, busy, and repeated requests. Once exhausted, return HTTP 429 with `{ "code": "rate_limited", "started": false }`, a `Retry-After` value for the remaining window, and a closed connection so an unread body cannot keep the connection occupied. Health checks and other routes do not consume this budget. The counter resets on process restart; document that fixed windows permit bursts across a boundary. Retain existing body-size, body-timeout, connection, and single-operation limits.
+
+Requests admitted by the counter must still pass the existing signature and `allowedSigners` checks. Do not interpret a repeated signature or CID as a reason to reject a request. Acceptance covers configuration validation, the exact threshold and reset boundary using a controlled clock, no publication on a limited request, continued health checks at the limit, and normal authorization failures below the limit. Repeated valid messages below the limit must still be processed independently. Run the production host tests and the existing internal Docker flow before this milestone's review handoff.
+
+### Milestone 5: External HTTPS access and operator instructions
+
+Add `node/production/docker/compose.http.yaml` and `node/production/docker/Caddyfile`, plus the corresponding README instructions. A reverse proxy receives public HTTPS requests and forwards their HTTP requests to the node. The overlay adds a `proxy` service using an official Caddy image whose version and multi-platform digest are verified and pinned during implementation. Bind-mount the repository's Caddyfile read-only, publish TCP ports 80 and 443, and retain Caddy's certificate state and configuration in project-scoped named volumes. Use the required `OYA_PUBLIC_HOSTNAME` input for the operator's hostname. The base Compose file keeps the node's host-loopback mapping and Kubo's unpublished API/gateway ports.
+
+Forward the exact `/v1/messages` path to `node:8787` on the Compose network, preserving the method, signed body, status, and `Retry-After` response. Keep other public paths closed; existing internal health checks remain available. Serve clients over HTTPS and redirect plain HTTP to HTTPS. Keep proxy retries disabled so repeated requests remain under client control. Bound proxy logs and avoid logging signed request bodies or credentials. See the [Caddy reverse-proxy reference](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy) and [automatic HTTPS guidance](https://caddyserver.com/docs/automatic-https).
+
+Make the proxy response deadline configurable through `OYA_PROXY_RESPONSE_TIMEOUT`, defaulting to `4m`. Require its resolved duration to be at least `operationTimeoutMs + 60_000` milliseconds; document this comparison and the necessary overrides whenever the operator changes `operationTimeoutMs`. Set the proxy's shutdown drain allowance at least as long as its response deadline, and give Docker's proxy stop grace additional time for the process to exit. Keep the node's `OYA_STOP_GRACE_PERIOD` above its configured operation deadline with headroom. Order shutdown so the proxy drains while the node and Kubo remain available.
+
+Document DNS, inbound firewall access for ports 80/443, certificate renewal/storage, starting and stopping the overlay, and selecting allowed signer addresses. Show external users and agents signing locally with the existing sender and submitting to `https://node.example.com/v1/messages`; their private keys stay with their clients. Explain HTTP 429 and the existing busy response, and explicitly document that deliberate identical submissions are accepted subject to the same limits. Initial clients use the existing HTTP sender; a separately hosted browser frontend would need an explicit origin policy and CORS preflight support in its own follow-up. Acceptance for this milestone is valid merged configuration, a correctly routed proxy, and reviewable operating instructions; complete proxy-path validation follows in milestone 6.
+
+### Milestone 6: Validate external-client message reception
+
+Extend the milestone 3 harness with an `--http` mode, exposed as `npm --prefix node/production run test:http`, and add `node/production/docker/compose.http.test.yaml`. Reuse the existing disposable Anvil/Kubo/node setup and cleanup. The test overlay changes listener settings to dynamic loopback ports and selects `localhost` for Caddy's local certificate issuer; exercise the production proxy routing and message limits. Trust the fixture's generated CA only in test clients, with no host trust-store edits or disabled TLS verification. All reusable harness logic and configuration belong in the repository; generated keys, certificates, and service data remain disposable fixtures.
+
+Send from a separate client process through HTTPS, verifying the returned result, exact IPFS envelope, and Ledger event as in milestone 3. Submit the identical signed envelope again after the first completes: require another successful result with the same CID and an independent Ledger event. Cover malformed and disallowed signatures, request-size limits, HTTP 429 and recovery, busy responses, pending-operation response/shutdown timing, and the absence of proxy-generated resubmissions. Inspect the merged model and running containers to verify the node's loopback-only host binding and Kubo's unpublished API/gateway ports. Add this mode to the existing container CI job and retain the original internal flow.
+
+Include a nondefault `operationTimeoutMs` above four minutes with matching proxy and shutdown overrides. Verify the resolved timeout relationships, then keep an accepted operation pending beyond the old four-minute proxy deadline and complete it before its configured operation and receipt deadlines. Require the final successful response to reach the client and the same deadline relationships to permit graceful shutdown without terminating accepted work.
+
+Finish the README with the tested proxy version, TLS/port setup, and a command for a sender on another machine. Record a real remote-host check separately from the local HTTPS fixture when an operator-selected host, hostname, and allowed signer are available; verify from that machine that the node port and Kubo API/gateway cannot be reached directly. Until then, report that live reachability as pending; do not deploy to an unspecified host or substitute a localhost test for that evidence. This check adds no sender-funding or payment step. Keep this final validation diff separate from the request limiter and proxy configuration for human review.
 
 ## Concrete Steps
 
@@ -206,6 +247,22 @@ The new test owns all its fixtures and must fail clearly if required tools are m
 
 Build validation must cover Linux amd64 and arm64 without publishing images, recording separately which platforms ran the integration flow. Restore validation must stop the node and Kubo, back up the complete repository, restore into a fresh fixture-owned volume, and verify the peer identity, pins, and message bytes. Resolve image digests and document the exact tested commands in the README during the corresponding implementation milestone; record results here. These checks remain pending until executed.
 
+After milestone 3 passes, validate milestone 4 with `npm --prefix node/production test` and `npm --prefix node/production run test:docker -- --verbose`. For milestone 5, retain the existing private config/environment inputs and substitute an operator-owned hostname for the placeholder below. The first command checks the merged model without printing credentials; starting public services is a later operator action after DNS and certificate prerequisites are satisfied:
+
+```sh
+export OYA_PUBLIC_HOSTNAME=node.example.com
+docker compose -p oya -f node/production/compose.yaml -f node/production/docker/compose.http.yaml config --quiet
+docker compose -p oya -f node/production/compose.yaml -f node/production/docker/compose.http.yaml up -d --build
+```
+
+For milestone 6, run `npm --prefix node/production run test:http -- --verbose` and `npm --prefix node/production test` from the repository root. The HTTPS fixture requires no public DNS or real credentials. Once a real hostname is configured, a separate machine with Node 24 and the repository's installed sender dependencies can run the following command, substituting its hostname and private client-file paths:
+
+```sh
+node --env-file=/absolute/path/to/agent.env node/production/scripts/send-message.mjs https://node.example.com /absolute/path/to/message.txt
+```
+
+The client environment contains its own `OYA_AGENT_PRIVATE_KEY`, whose address is in the node's `allowedSigners`. Require a successful result and verify its published content and Ledger event. Repeating the same command after completion is an intended new submission, subject to general rate and capacity limits.
+
 ## Validation and Acceptance
 
 Completion requires observable evidence for the following behaviors:
@@ -217,9 +274,16 @@ Completion requires observable evidence for the following behaviors:
 5. A pending publication survives Docker's normal ten-second window during an explicit stop, finishes within the selected grace, and exits normally without being killed. Unknown-outcome health stays unhealthy until the operator reconciles and deliberately restarts; health failure does not trigger automatic signing resumption.
 6. Container tests and existing host tests pass on the recorded platform. An arm64 build is recorded separately from native execution. CI builds/tests without publishing images or uploading private fixture data.
 
+Items 1–6 remain the milestone 3 acceptance gate. Only after they pass, the external HTTP follow-ups add these requirements:
+
+7. A configurable general request limit returns HTTP 429 before publication when exhausted, resets as documented, and leaves health checks usable. Signature verification and `allowedSigners` continue to gate every accepted message. Repeated signed messages remain eligible and count like other requests.
+8. An external client submits through verified HTTPS and receives the existing publication result. Proxy-path tests establish rejection behavior, timeout/shutdown handling at both default and longer operation timeouts, repeated-message success, and the intended port exposure. CI covers the fixture; actual reachability from another machine is separately recorded or explicitly pending operator deployment details.
+
 Offline Kubo validation proves publication, pinning, and retrieval within the stack. It does not establish discoverability from unrelated public IPFS peers. A live operator must use online Kubo and check peer connectivity and independent retrieval before relying on public availability. Pinning on one host is not a backup or replicated storage guarantee.
 
 ## Idempotence and Recovery
+
+For the HTTP follow-ups, intentional repeated signed submissions are expected independent operations. Do not add replay rejection or deduplication. Limits reset with the process as documented. To withdraw external access, stop only the overlay's `proxy` service; preserve the node/Kubo state and certificate volumes. Restore the previous proxy configuration and validate the merged Compose model before enabling access again.
 
 Repeated image builds and dependency installation do not deploy contracts. Repeated Compose starts with the same project reuse its named volume. Ordinary `docker compose down` retains named volumes; `down --volumes` deletes them. Restrict destructive cleanup to the test harness's uniquely named project. See [Docker's down command reference](https://docs.docker.com/reference/cli/docker/compose/down/).
 
@@ -232,6 +296,8 @@ Changing the signing key intentionally changes the node identity and needs new g
 ## Artifacts and Notes
 
 Planned implementation files are `node/production/Dockerfile`, `node/production/.dockerignore`, `node/production/compose.yaml`, the three files under `node/production/docker/`, and `node/production/scripts/test-docker.mjs`. Existing `node/production/README.md`, `node/production/package.json`, `.github/workflows/test.yml`, and this plan receive focused updates. No package release, contract modification, or production credential change is part of this work.
+
+After those milestones, external-access files are `node/production/test/http-limits.test.mjs`, `node/production/docker/compose.http.yaml`, `node/production/docker/Caddyfile`, and `node/production/docker/compose.http.test.yaml`. Focused edits extend the existing runtime config/server, Docker harness, npm scripts, CI job, and operator README. The original milestone 3 fixture remains independently runnable.
 
 Record public image digests, tested platform/tool versions, relevant exit statuses, CIDs, transaction hashes, and pass/fail evidence as milestones finish. Keep real environment files, endpoint credentials, account keys, private artifact paths, and full container inspection output out of the plan and committed documentation. Use repository-relative paths or placeholders for examples.
 
@@ -261,3 +327,5 @@ The image preserves `startNode(config, signer, options)`, the direct CLI config-
 Compose inputs are `OYA_CONFIG_FILE` and `OYA_ENV_FILE` (required absolute file paths), `OYA_CONTAINER_USER` (default `1000:1000`), `OYA_HTTP_PORT` (default 8787), and `OYA_STOP_GRACE_PERIOD` (default `4m`). Application credentials remain `OYA_NODE_PRIVATE_KEY` and optional `OYA_RPC_AUTHORIZATION` / `OYA_IPFS_AUTHORIZATION`. Agent and Ledger-deployer credentials belong only to their separate tools.
 
 Additional operational dependencies are Docker Engine with Linux containers, Compose 2.30+, Buildx for multi-platform validation, and the pinned official Node/Kubo images. The container test additionally uses the official Foundry image for Anvil and host Node 24/Foundry for the existing sender and deployer. There are no new application npm dependencies, no Docker socket mounted into services, and no registry credentials required for public dependency pulls or local image builds.
+
+External HTTP follow-ups add the `maxMessageRequestsPerMinute` node-config field, `OYA_PUBLIC_HOSTNAME` and `OYA_PROXY_RESPONSE_TIMEOUT` (default `4m`) for the optional HTTPS overlay, Caddy with persistent certificate/configuration volumes, and the `test:http` harness mode. Real external access additionally needs operator-controlled DNS and host networking; fixture validation uses local certificates. The signed-message schema, allowed-signer policy, and repeated-submission semantics remain unchanged.
