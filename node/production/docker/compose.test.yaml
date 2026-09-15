@@ -1,0 +1,35 @@
+# Disposable fixtures only; scripts/test-docker.mjs supplies private settings.
+services:
+  node:
+    platform: ${OYA_TEST_PLATFORM:?Run through test:docker}
+    image: ${COMPOSE_PROJECT_NAME:?Run through test:docker}-node
+    ports: !override
+      - "127.0.0.1::8787"
+    depends_on:
+      anvil:
+        condition: service_healthy
+
+  ipfs:
+    platform: ${OYA_TEST_PLATFORM:?Run through test:docker}
+    command: [daemon, --offline, --migrate=true]
+    ports: !override
+      - "127.0.0.1::5001"
+
+  anvil:
+    platform: ${OYA_TEST_PLATFORM:?Run through test:docker}
+    image: ghcr.io/foundry-rs/foundry:v1.5.1@sha256:3a70bfa9bd2c732a767bb60d12c8770b40e8f9b6cca28efc4b12b1be81c7f28e
+    entrypoint: [anvil]
+    command: [--host, "0.0.0.0", --chain-id, "31337", --accounts, "0", --silent]
+    ports:
+      - "127.0.0.1::8545"
+    healthcheck:
+      test: [CMD, cast, chain-id, --rpc-url, "http://127.0.0.1:8545"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+    restart: "no"
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"

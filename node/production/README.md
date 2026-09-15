@@ -110,7 +110,35 @@ docker compose -p oya-restore run --rm --no-deps -T --entrypoint ipfs ipfs --off
 
 Compare the restored identity, pins, and message bytes with the original before adopting the backup. To resume the original stack, use `docker compose up -d`. To adopt the restored repository instead, keep the original services stopped, set `COMPOSE_PROJECT_NAME=oya-restore`, and start with the same node settings and key after reconciling pending work. Do not run both signing nodes. Upgrade Kubo separately from the node and take a cold backup first; an image downgrade alone does not undo repository-format changes.
 
-Milestone 2 was validated on Linux arm64 through Docker Desktop 4.37.2 / Engine 27.4.0 and Compose 2.31.0, using Node 24.21.0 and Kubo 0.43.0. Checks covered mounted settings, health probes, startup, persistence, and the cold backup/restore commands above. Validation used offline Kubo, an isolated RPC fixture limited to startup reads, and a dynamic loopback HTTP port. Signed publication through Ledger in Docker and container CI remain milestone 3; amd64 execution, a native Linux host, and Windows file sharing have not been tested here.
+Milestone 2 validated mounted settings, health probes, persistence, and the cold backup/restore commands above on Linux arm64 through Docker Desktop 4.37.2 / Engine 27.4.0 and Compose 2.31.0. Milestone 3 adds the reproducible signed-publication and lifecycle test below.
+
+### Validate the Docker flow
+
+Use Node 24, host Foundry, a reachable Linux Docker daemon, and Compose 2.30+. Run from the repository root:
+
+```sh
+git submodule update --init lib/forge-std
+npm --prefix node/production ci --ignore-scripts
+forge build --root contracts
+npm --prefix node/production run test:docker -- --verbose
+```
+
+Every run builds the image from the repository's Dockerfile and locked dependencies; Docker may reuse unchanged build layers. The harness starts its own Anvil and offline Kubo containers, deploys Ledger with the existing local CLI, and runs the existing sender in a separate process. Host Kubo and Anvil installations are unnecessary. The [test override](docker/compose.test.yaml) pins Foundry 1.5.1 by its multi-platform image digest and replaces production ports with dynamically allocated loopback ports, including a test-only Kubo API port. No swarm or gateway port is published by the fixture.
+
+The test checks exact signed IPFS bytes and Ledger events, disallowed and busy requests, identity/content/pin persistence after container recreation, and absence of startup transactions. It holds a transaction pending for more than ten seconds during Docker SIGTERM, then verifies successful publication and a clean exit. A separate receipt timeout must leave the node unhealthy without restarting; the harness mines and verifies that transaction before deliberately restarting. Finally it restores a cold IPFS backup into a fresh volume and checks identity, content, pins, and config ownership/mode.
+
+All accounts and settings are generated for the disposable chain. The harness removes its own containers, volumes, image tag, and private files on completion, failure, or handled interruption. Output contains public verification evidence; child-process output and the private backup stay within the fixture. `--verbose` prints stages, CIDs, and transaction hashes. Polls and subprocesses are bounded, with a 15-minute test deadline. The original host tests remain independently runnable.
+
+The default platform matches the Docker daemon. To exercise the other image architecture when your daemon supports emulation, add `--platform linux/amd64` or `--platform linux/arm64`. The result reports both the selected image platform and daemon architecture. CI runs the amd64 flow on Ubuntu and separately cross-builds the arm64 image with Buildx without publishing it. Cross-building does not establish native execution; see the [execution plan](../../plans/docker-node-runtime-execplan.md) for recorded results and outstanding platform checks.
+
+Validation on 2026-09-15 used Docker Desktop 4.37.2 / Engine 27.4.0, Compose 2.31.0, host Node 24.21.0, Foundry 1.5.1, and Kubo 0.43.0:
+
+| Image platform | Result |
+| --- | --- |
+| Linux arm64 | Complete flow passed natively on the arm64 Docker daemon; separate Buildx OCI image export passed. |
+| Linux amd64 | Complete flow passed under emulation on the same arm64 daemon. |
+
+The new hosted CI job awaits its first run. Native Linux host permissions and Windows file sharing remain unverified.
 
 ## Install and validate
 
