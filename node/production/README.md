@@ -60,7 +60,7 @@ docker compose ps
 docker compose logs --follow node
 ```
 
-Stopping log-following leaves services running. Node HTTP is published at `http://127.0.0.1:8787`; `OYA_HTTP_PORT` changes only the host port. Kubo's TCP/UDP swarm port 4001 is published on the host, while API 5001 and gateway 8080 remain unpublished. The API is reachable by containers on the Compose network. For agents on other machines, provide TLS termination and access controls through your hosting platform's proxy. Check Kubo peer connectivity and retrieval from an independent peer before relying on public availability:
+Stopping log-following leaves services running. Node HTTP is published at `http://127.0.0.1:8787`; `OYA_HTTP_PORT` changes only the host port. Kubo's TCP/UDP swarm port 4001 is published on the host, while API 5001 and gateway 8080 remain unpublished. The API is reachable by containers on the Compose network. For agents on other machines, use the [optional HTTPS proxy](#receive-messages-over-https). Check Kubo peer connectivity and retrieval from an independent peer before relying on public availability:
 
 ```sh
 docker compose exec ipfs ipfs swarm peers
@@ -76,7 +76,7 @@ docker compose exec ipfs ipfs pin ls --type=recursive
 docker compose exec ipfs ipfs cat /ipfs/REPLACE_WITH_RETURNED_CID
 ```
 
-Stop admission and drain accepted work before replacing the node or updating its settings:
+Stop admission and drain accepted work before replacing the node or updating its settings. When using the HTTPS overlay, follow its [shutdown procedure](#receive-messages-over-https) first:
 
 ```sh
 docker compose stop node
@@ -86,6 +86,63 @@ docker compose up -d --no-deps --force-recreate node
 For an image update, preserve the previous image ID for rollback and run `docker compose build node` between these commands. Recreation reloads changed configuration and environment values; `docker compose restart` does not apply changed service environment. The node has a four-minute stop grace for its default three-minute operation deadline. Increase `OYA_STOP_GRACE_PERIOD` with headroom if you increase `operationTimeoutMs`. A forced shutdown or missing client response requires transaction reconciliation before another start.
 
 `docker compose down` stops services in dependency order and retains the named IPFS volume. Keep the same project name when bringing them back. `down --volumes` deletes the repository. An image moved to another host does not carry its volume or private settings.
+
+### Receive messages over HTTPS
+
+[docker/compose.http.yaml](docker/compose.http.yaml) adds [Caddy 2.11.4](https://hub.docker.com/_/caddy), pinned by its Linux multi-platform image digest. The [Caddyfile](docker/Caddyfile) forwards `/v1/messages` to the node, preserving the method, signed body, response status, and `Retry-After`. Other HTTPS paths return 404, including `/healthz`. The node's host port stays on loopback, and Kubo's API/gateway stay unpublished. HTTP/1.1 and HTTP/2 use TCP; HTTP/3 is disabled.
+
+Choose a public DNS hostname you control. Point its A record, and any AAAA record, to this Docker host; remove an AAAA record if IPv6 is not routed to it. Allow inbound TCP 80 and 443 through the host/cloud firewall and any router forwarding, and ensure those ports are free. Caddy needs outbound DNS and HTTPS access to obtain and renew certificates. Keep port 80 reachable for HTTP redirects and certificate validation. Clients should submit directly to HTTPS. See [Caddy's automatic HTTPS requirements](https://caddyserver.com/docs/automatic-https).
+
+Keep the private config/environment paths and Compose project name from the setup above. Set `allowedSigners` in the node's JSON to the addresses of authorized users and agents; each client keeps its own signing key. Use a hostname only in `OYA_PUBLIC_HOSTNAME`, without a scheme, path, or port. These proxy inputs belong in the shell used by Compose, not in the node's runtime environment file.
+
+Before starting or recreating services, compare their deadlines:
+
+| Setting | Default | Required relationship |
+| --- | --- | --- |
+| `operationTimeoutMs` in node JSON | `180000` (3 minutes) | Bounds the complete publication operation. |
+| `OYA_PROXY_RESPONSE_TIMEOUT` | `4m` | At least `operationTimeoutMs + 60000` milliseconds. |
+| `OYA_PROXY_STOP_GRACE_PERIOD` | `5m` | At least one minute longer than the proxy response timeout. |
+| `OYA_STOP_GRACE_PERIOD` | `4m` | At least `operationTimeoutMs + 60000` milliseconds. |
+
+The proxy waits for the node's response headers for `OYA_PROXY_RESPONSE_TIMEOUT`; its shutdown drain uses that same duration. For example, a five-minute operation timeout (`300000`) requires at least `6m`, `7m`, and `6m` for the three environment settings above, respectively. These comparisons are an operator preflight requirement: Compose and Caddy syntax validation do not compare their durations against the private node JSON. Accepted node work continues after a client disconnects, so every proxy or load balancer in front of it needs sufficient response time. [Caddy documents the response deadline](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy) and [shutdown grace](https://caddyserver.com/docs/caddyfile/options#grace-period).
+
+After DNS, networking, and timeout checks, run from the repository root:
+
+```sh
+export OYA_PUBLIC_HOSTNAME=node.example.com
+export OYA_PROXY_RESPONSE_TIMEOUT=4m
+export OYA_PROXY_STOP_GRACE_PERIOD=5m
+export OYA_STOP_GRACE_PERIOD=4m
+export COMPOSE_FILE=node/production/compose.yaml:node/production/docker/compose.http.yaml
+docker compose config --quiet
+docker compose run --rm --no-deps proxy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+docker compose up -d --build
+docker compose ps
+docker compose logs --follow proxy
+```
+
+Replace the hostname and adjust the durations before running. On Windows, separate `COMPOSE_FILE` entries with `;`, or pass both files in order with `-f` on each Compose command. Keep the overlay selected for subsequent lifecycle commands. `config --quiet` avoids printing the node's credentials; Caddy validation checks its own configuration without opening public listeners. Successful validation does not prove public DNS or certificate issuance.
+
+Caddy obtains and renews certificates automatically. The project's `caddy-data` volume stores certificates and private keys; `caddy-config` retains Caddy configuration state. Preserve both across recreation and ordinary `down`/`up`, protect any backups, and retain the project name. The proxy can restart independently; the signing node still requires deliberate recovery. Access logging is disabled, request metadata is removed from proxy error logs, and Docker rotates proxy logs at 10 MB with three files retained. Do not enable debug or request-body logging for normal operation.
+
+From another machine with Node 24 and the installed sender dependencies, submit directly to your HTTPS hostname:
+
+```sh
+node --env-file=/absolute/path/to/agent.env -- node/production/scripts/send-message.mjs https://node.example.com /absolute/path/to/message.txt
+```
+
+The private client file contains `OYA_AGENT_PRIVATE_KEY`; its address must be allowlisted by the node. The sender signs locally and sends the existing signed envelope. Only valid allowlisted requests count toward the shared message limit. HTTP 429 includes the wait in `Retry-After`; HTTP 503 `node_busy` means another operation is active. Deliberately submitting the same message again remains valid and can create another Ledger transaction. Proxy retries and upstream connection reuse are disabled. After a missing response or uncertain outcome, reconcile the transaction before retrying. The initial workflow supports HTTP clients; browser clients hosted on another origin need a separate CORS policy.
+
+To withdraw public access, or before replacing the node, stop the proxy first and allow its requests to drain while the node and Kubo are still running:
+
+```sh
+docker compose stop proxy
+docker compose stop node
+```
+
+After any required reconciliation and settings/image updates, restart the node with `docker compose up -d --no-deps --force-recreate node`, then run `docker compose up -d proxy`; its dependency check waits for node health. To change proxy settings or its image, stop it and use `docker compose up -d --force-recreate proxy`. The Caddy admin API is disabled, so apply changes by recreation. For a complete shutdown, `docker compose down` respects the proxy → node → Kubo dependencies and keeps the volumes; `down --volumes` also deletes certificate state. Stop the proxy before the IPFS backup procedure below, and use the same merged configuration when bringing the stack back.
+
+Milestone 5 validation on Linux arm64 with Engine 27.4.0 and Compose 2.31.0 checked the merged model and Caddy configuration at four- and six-minute proxy deadlines. A disposable HTTP upstream and locally trusted test certificate verified HTTPS, redirects, blocked routes, exact message forwarding, statuses and `Retry-After`, log filtering, a single attempt on upstream failure, and a twelve-second response drained during Compose shutdown. The test trusted its CA only in the client process. The [HTTPS integration fixture](#validate-the-https-flow) adds real signed publication; public DNS, public certificate issuance, and reachability from another machine require the separate operator check below.
 
 ### Back up and restore IPFS
 
@@ -138,7 +195,40 @@ Validation on 2026-09-15 used Docker Desktop 4.37.2 / Engine 27.4.0, Compose 2.3
 | Linux arm64 | Complete flow passed natively on the arm64 Docker daemon; separate Buildx OCI image export passed. |
 | Linux amd64 | Complete flow passed under emulation on the same arm64 daemon. |
 
-The new hosted CI job awaits its first run. Native Linux host permissions and Windows file sharing remain unverified.
+Hosted CI results, native Linux host permissions, and Windows file sharing remain unverified here.
+
+### Validate the HTTPS flow
+
+After the same Node 24, Foundry, dependencies, and Docker prerequisites above, run:
+
+```sh
+npm --prefix node/production run test:http -- --verbose
+```
+
+This runs the existing Docker harness with `--http`, adding the production HTTPS overlay and [its fixture override](docker/compose.http.test.yaml). It builds the repository image, generates separate deployer/node/agent accounts, and starts Anvil, offline Kubo, and Caddy 2.11.4. All published fixture ports use dynamically allocated host-loopback bindings. The test-only IPFS API mapping supports independent content checks; production configuration is inspected separately to ensure its API/gateway remain unpublished and its node port remains on loopback.
+
+Caddy issues a certificate for `localhost`. The fixture exports only its public root certificate to the test clients, verifies that a client without that trust rejects the certificate, and uses the existing sender in a separate process. TLS verification stays enabled; host trust stores are untouched. Cleanup removes the fixture's containers, volumes, certificate data, and generated settings. Only public publication evidence is printed.
+
+The flow verifies exact signed IPFS bytes and Ledger events, repeated identical messages with the same CID and distinct transactions, malformed/disallowed signatures, body/text limits, HTTP 429 and recovery after `Retry-After`, and busy responses. It also checks HTTPS route isolation, HTTP redirects, and the absence of extra transactions. Shutdown drains accepted work with both default deadlines and five-minute operation/receipt deadlines paired with a six-minute proxy response/drain and seven-minute proxy stop grace. The longer case holds a transaction pending for 245 seconds after proxy shutdown starts, then mines it and requires the successful response to reach the sender before both containers exit normally.
+
+The HTTPS fixture has a twenty-minute overall deadline and normally needs several minutes, including the deliberate rate-limit reset and four-minute wait. `--platform linux/amd64` or `--platform linux/arm64` selects the image architecture, as with `test:docker`. CI runs both modes on amd64 and retains the arm64 image cross-build. The original `test:docker` remains the dedicated persistence, unknown-outcome reconciliation, and backup/restore check.
+
+Validation on 2026-09-21 passed the HTTPS flow in about 347 seconds on native Linux arm64 through Docker Desktop / Engine 27.4.0, Compose 2.31.0, Node 24.21.0, Foundry 1.5.1, Kubo 0.43.0, and Caddy 2.11.4. The original internal Docker flow and all 94 host tests also passed. This milestone's HTTPS flow has not been run on amd64 here; its hosted CI result remains unverified.
+
+### Check a deployed node from another machine
+
+The local fixture does not prove public DNS, publicly trusted certificates, or live external reachability. That check remains pending an operator-owned deployment, hostname, and authorized client. After configuring the [HTTPS service](#receive-messages-over-https), run the existing sender from a different machine with its own key:
+
+```sh
+node --env-file=/absolute/path/to/agent.env -- node/production/scripts/send-message.mjs https://node.example.com /absolute/path/to/message.txt
+curl -i --max-time 10 https://node.example.com/healthz
+nc -vz -w 5 node.example.com 443
+nc -vz -w 5 node.example.com 8787
+nc -vz -w 5 node.example.com 5001
+nc -vz -w 5 node.example.com 8080
+```
+
+Replace the hostname and files, and substitute the configured node host port if it differs from 8787. Require a logged publication and independently verify its IPFS bytes and Ledger receipt/event. The health path must return 404, HTTPS port 443 must connect, and the node/IPFS API/gateway probes must fail. Check each configured IPv4/IPv6 address so an unused DNS record does not hide an exposed listener. Record the UTC time, public hostname, publication CID/transaction hash, and HTTP/port results without credentials or private client paths. Deliberate repeat submissions remain valid; reconcile any uncertain outcome before retrying.
 
 ## Install and validate
 

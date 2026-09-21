@@ -144,6 +144,9 @@ jobs:
       - name: Test Linux amd64 publication and lifecycle
         run: npm --prefix node/production run test:docker -- --verbose --platform linux/amd64
 
+      - name: Test Linux amd64 HTTPS publication and deadlines
+        run: npm --prefix node/production run test:http -- --verbose --platform linux/amd64
+
       - uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64

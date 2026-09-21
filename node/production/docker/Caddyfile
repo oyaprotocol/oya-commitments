@@ -1,0 +1,34 @@
+{
+	admin off
+	grace_period {$OYA_PROXY_RESPONSE_TIMEOUT}
+	log default {
+		format filter {
+			request delete
+			wrap json
+		}
+	}
+	servers {
+		protocols h1 h2
+		max_header_size 8KB
+		timeouts {
+			read_header 10s
+			read_body 10s
+			idle 30s
+		}
+	}
+}
+
+https://{$OYA_PUBLIC_HOSTNAME} {
+	handle /v1/messages {
+		reverse_proxy node:8787 {
+			lb_retries 0
+			transport http {
+				keepalive off
+				response_header_timeout {$OYA_PROXY_RESPONSE_TIMEOUT}
+			}
+		}
+	}
+	handle {
+		respond 404
+	}
+}

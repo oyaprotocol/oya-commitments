@@ -1,0 +1,38 @@
+# Optional HTTPS entrypoint; merge after ../compose.yaml.
+services:
+  proxy:
+    image: caddy:2.11.4-alpine@sha256:de23def33b17fb5d1290b0f6c2add1d70780e52341896c00a4c8a2a2fe9d355e
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    environment:
+      OYA_PUBLIC_HOSTNAME: ${OYA_PUBLIC_HOSTNAME:?Set OYA_PUBLIC_HOSTNAME to your public DNS hostname}
+      OYA_PROXY_RESPONSE_TIMEOUT: ${OYA_PROXY_RESPONSE_TIMEOUT:-4m}
+    volumes:
+      - type: bind
+        source: ./docker/Caddyfile
+        target: /etc/caddy/Caddyfile
+        read_only: true
+        bind:
+          create_host_path: false
+      - caddy-data:/data
+      - caddy-config:/config
+    ports:
+      - "80:80/tcp"
+      - "443:443/tcp"
+    depends_on:
+      node:
+        condition: service_healthy
+    stop_signal: SIGTERM
+    stop_grace_period: ${OYA_PROXY_STOP_GRACE_PERIOD:-5m}
+    restart: unless-stopped
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  caddy-data:
+  caddy-config:
