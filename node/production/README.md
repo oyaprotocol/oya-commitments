@@ -142,7 +142,7 @@ docker compose stop node
 
 After any required reconciliation and settings/image updates, restart the node with `docker compose up -d --no-deps --force-recreate node`, then run `docker compose up -d proxy`; its dependency check waits for node health. To change proxy settings or its image, stop it and use `docker compose up -d --force-recreate proxy`. The Caddy admin API is disabled, so apply changes by recreation. For a complete shutdown, `docker compose down` respects the proxy → node → Kubo dependencies and keeps the volumes; `down --volumes` also deletes certificate state. Stop the proxy before the IPFS backup procedure below, and use the same merged configuration when bringing the stack back.
 
-Milestone 5 validation on Linux arm64 with Engine 27.4.0 and Compose 2.31.0 checked the merged model and Caddy configuration at four- and six-minute proxy deadlines. A disposable HTTP upstream and locally trusted test certificate verified HTTPS, redirects, blocked routes, exact message forwarding, statuses and `Retry-After`, log filtering, a single attempt on upstream failure, and a twelve-second response drained during Compose shutdown. The test trusted its CA only in the client process. The complete signed-publication flow through HTTPS and a check from another machine remain milestone 6; public DNS and certificate issuance have not been exercised here.
+Milestone 5 validation on Linux arm64 with Engine 27.4.0 and Compose 2.31.0 checked the merged model and Caddy configuration at four- and six-minute proxy deadlines. A disposable HTTP upstream and locally trusted test certificate verified HTTPS, redirects, blocked routes, exact message forwarding, statuses and `Retry-After`, log filtering, a single attempt on upstream failure, and a twelve-second response drained during Compose shutdown. The test trusted its CA only in the client process. The [HTTPS integration fixture](#validate-the-https-flow) adds real signed publication; public DNS, public certificate issuance, and reachability from another machine require the separate operator check below.
 
 ### Back up and restore IPFS
 
@@ -195,7 +195,40 @@ Validation on 2026-09-15 used Docker Desktop 4.37.2 / Engine 27.4.0, Compose 2.3
 | Linux arm64 | Complete flow passed natively on the arm64 Docker daemon; separate Buildx OCI image export passed. |
 | Linux amd64 | Complete flow passed under emulation on the same arm64 daemon. |
 
-The new hosted CI job awaits its first run. Native Linux host permissions and Windows file sharing remain unverified.
+Hosted CI results, native Linux host permissions, and Windows file sharing remain unverified here.
+
+### Validate the HTTPS flow
+
+After the same Node 24, Foundry, dependencies, and Docker prerequisites above, run:
+
+```sh
+npm --prefix node/production run test:http -- --verbose
+```
+
+This runs the existing Docker harness with `--http`, adding the production HTTPS overlay and [its fixture override](docker/compose.http.test.yaml). It builds the repository image, generates separate deployer/node/agent accounts, and starts Anvil, offline Kubo, and Caddy 2.11.4. All published fixture ports use dynamically allocated host-loopback bindings. The test-only IPFS API mapping supports independent content checks; production configuration is inspected separately to ensure its API/gateway remain unpublished and its node port remains on loopback.
+
+Caddy issues a certificate for `localhost`. The fixture exports only its public root certificate to the test clients, verifies that a client without that trust rejects the certificate, and uses the existing sender in a separate process. TLS verification stays enabled; host trust stores are untouched. Cleanup removes the fixture's containers, volumes, certificate data, and generated settings. Only public publication evidence is printed.
+
+The flow verifies exact signed IPFS bytes and Ledger events, repeated identical messages with the same CID and distinct transactions, malformed/disallowed signatures, body/text limits, HTTP 429 and recovery after `Retry-After`, and busy responses. It also checks HTTPS route isolation, HTTP redirects, and the absence of extra transactions. Shutdown drains accepted work with both default deadlines and five-minute operation/receipt deadlines paired with a six-minute proxy response/drain and seven-minute proxy stop grace. The longer case holds a transaction pending for 245 seconds after proxy shutdown starts, then mines it and requires the successful response to reach the sender before both containers exit normally.
+
+The HTTPS fixture has a twenty-minute overall deadline and normally needs several minutes, including the deliberate rate-limit reset and four-minute wait. `--platform linux/amd64` or `--platform linux/arm64` selects the image architecture, as with `test:docker`. CI runs both modes on amd64 and retains the arm64 image cross-build. The original `test:docker` remains the dedicated persistence, unknown-outcome reconciliation, and backup/restore check.
+
+Validation on 2026-09-21 passed the HTTPS flow in about 347 seconds on native Linux arm64 through Docker Desktop / Engine 27.4.0, Compose 2.31.0, Node 24.21.0, Foundry 1.5.1, Kubo 0.43.0, and Caddy 2.11.4. The original internal Docker flow and all 94 host tests also passed. This milestone's HTTPS flow has not been run on amd64 here; its hosted CI result remains unverified.
+
+### Check a deployed node from another machine
+
+The local fixture does not prove public DNS, publicly trusted certificates, or live external reachability. That check remains pending an operator-owned deployment, hostname, and authorized client. After configuring the [HTTPS service](#receive-messages-over-https), run the existing sender from a different machine with its own key:
+
+```sh
+node --env-file=/absolute/path/to/agent.env -- node/production/scripts/send-message.mjs https://node.example.com /absolute/path/to/message.txt
+curl -i --max-time 10 https://node.example.com/healthz
+nc -vz -w 5 node.example.com 443
+nc -vz -w 5 node.example.com 8787
+nc -vz -w 5 node.example.com 5001
+nc -vz -w 5 node.example.com 8080
+```
+
+Replace the hostname and files, and substitute the configured node host port if it differs from 8787. Require a logged publication and independently verify its IPFS bytes and Ledger receipt/event. The health path must return 404, HTTPS port 443 must connect, and the node/IPFS API/gateway probes must fail. Check each configured IPv4/IPv6 address so an unused DNS record does not hide an exposed listener. Record the UTC time, public hostname, publication CID/transaction hash, and HTTP/port results without credentials or private client paths. Deliberate repeat submissions remain valid; reconcile any uncertain outcome before retrying.
 
 ## Install and validate
 

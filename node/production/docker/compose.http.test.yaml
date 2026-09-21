@@ -1,0 +1,9 @@
+# Disposable HTTPS fixture; merge after compose.http.yaml and compose.test.yaml.
+services:
+  proxy:
+    platform: ${OYA_TEST_PLATFORM:?Run through test:http}
+    environment:
+      OYA_PUBLIC_HOSTNAME: localhost
+    ports: !override
+      - "127.0.0.1::80"
+      - "127.0.0.1::443"
