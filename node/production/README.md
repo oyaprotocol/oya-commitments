@@ -2,7 +2,7 @@
 
 This standalone runtime accepts an agent's signed text, publishes the signed JSON to IPFS, and submits its CID to Ledger using the node's own account. A `200` response includes the CID, transaction hash, block number, and node address after the kernel verifies a successful receipt and the matching Ledger event.
 
-After request-limit, signature, and allowlist checks, the HTTP handler calls the kernel's `publishAndLogSignedMessage` directly. One complete operation runs at a time, from IPFS publication through the verified receipt. Additional authenticated requests within the request budget receive `503 node_busy`; there is no waiting queue.
+After signature, allowlist, and request-limit checks, the HTTP handler calls the kernel's `publishAndLogSignedMessage` directly. One complete operation runs at a time, from IPFS publication through the verified receipt. Additional authenticated requests within the request budget receive `503 node_busy`; there is no waiting queue.
 
 The Ledger runtime installs the published `@oyaprotocol/ethereum` and `@oyaprotocol/messages` kernels at `0.2.0`, with `@oyaprotocol/ipfs` at `0.1.2` and `@oyaprotocol/utils` at `0.1.1`, and uses ethers in `src/signer.mjs` for local transaction signing. Ethereum and messages are updated together to keep one Ethereum package instance for error classification. The kernels handle publication, transaction preparation, broadcasting, and receipt verification. Kernel signing support remains future work. Reimbursement verification, Safe proposals, and DeFi actions are later integrations.
 
@@ -271,7 +271,7 @@ Startup checks the RPC chain and deployed Ledger bytecode before serving traffic
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `maxMessageRequestsPerMinute` | 60 | Maximum message attempts per node in a fixed 60-second window. |
+| `maxMessageRequestsPerMinute` | 60 | Maximum valid allowlisted message attempts per node in a fixed 60-second window. |
 | `maxBodyBytes` | 16,384 | Maximum HTTP request body size. |
 | `maxTextBytes` | 8,192 | Maximum signed text size. |
 | `bodyTimeoutMs` | 10,000 | Deadline for reading the request body. |
@@ -281,7 +281,7 @@ Startup checks the RPC chain and deployed Ledger bytecode before serving traffic
 | `gasLimit` | 200,000 | Maximum transaction gas limit. |
 | `maxFeePerGasWei` | `"30000000000"` | Maximum fee per gas, as a decimal string. |
 
-`maxMessageRequestsPerMinute` is a positive integer. Every `POST /v1/messages` attempt shares the same budget, including malformed, disallowed, busy, and repeated requests. The node checks the budget before reading the body or verifying the signature. An exhausted budget returns `429 rate_limited` with `started: false`, a `Retry-After` duration in whole seconds rounded up, and a closed connection. Health checks and other routes do not consume this budget. Windows start with the HTTP server and use a monotonic clock; rejected attempts do not move the reset time. Fixed windows allow bursts across a boundary, and restarting the node resets the in-memory budget. Accepted work continues when the budget is exhausted; repeating a signed message remains valid within the request and capacity limits.
+`maxMessageRequestsPerMinute` is a positive integer. Only valid `POST /v1/messages` requests with a verified signature from an `allowedSigners` address consume the budget. All allowlisted signers share one budget per node, including busy and repeated requests. Malformed requests, invalid signatures, and disallowed signers do not consume it. The node reads and validates the body and verifies the signature and allowlist before checking the budget. An exhausted budget returns `429 rate_limited` with `started: false`, a `Retry-After` duration in whole seconds rounded up, and a closed connection. Health checks and other routes do not consume this budget. Windows start with the HTTP server and use a monotonic clock; rejected attempts do not move the reset time. Fixed windows allow bursts across a boundary, and restarting the node resets the in-memory budget. Accepted work continues when the budget is exhausted; repeating a signed message remains valid within the request and capacity limits. Body-size, body-timeout, and connection limits still apply to all senders.
 
 Gas and fee values are ceilings; requests above them stop before signing. Transport attempts have a 10-second timeout and up to two kernel-managed retries. Transaction preparation has the kernel's 30-second deadline. The overall operation deadline bounds all stages together, including those retries; the host does not retry the complete operation.
 
@@ -328,7 +328,7 @@ Every admitted valid request is an independent operation. Repeating the same sig
 | HTTP result | Meaning |
 | --- | --- |
 | `200`, `status: "logged"` | IPFS publication and successful mined Ledger execution were verified. |
-| `429 rate_limited` | The general request budget is exhausted. This request did not start; wait at least the returned `Retry-After` seconds. |
+| `429 rate_limited` | The shared budget for allowlisted messages is exhausted. This request did not start; wait at least the returned `Retry-After` seconds. |
 | `503 node_busy` | Another operation is active. This request did not start; retry later using `Retry-After: 5`. |
 | `503 shutting_down` | The node is draining. This request did not start. |
 | `503 transaction_outcome_unknown` | An earlier transaction outcome is unresolved; the node is unavailable pending operator reconciliation. |
@@ -336,7 +336,7 @@ Every admitted valid request is an independent operation. Repeating the same sig
 | `504 operation_timeout` or `504 receipt_timeout` | The overall operation or receipt deadline elapsed; effects may already have occurred. |
 | `500 internal_error` | An unexpected fault occurred; a started operation with an unknown outcome blocks further work. |
 
-Within the request budget, validation errors retain their HTTP statuses, including `401` for invalid signatures, `403` for disallowed signers, and `413` for oversized requests. These requests cause no publication or signing. Signature and allowlist checks also run when the node is busy or unavailable. Once the budget is exhausted, `429 rate_limited` takes precedence over validation and node-availability responses.
+Validation errors retain their HTTP statuses even when the request budget is exhausted, including `401` for invalid signatures, `403` for disallowed signers, and `413` for oversized requests. These requests cause no publication or signing and do not consume the budget. Signature and allowlist checks also run when the node is busy or unavailable. For valid allowlisted requests, `429 rate_limited` takes precedence over node-availability responses.
 
 Rate-limit, busy, shutdown, and unavailable rejections include `started: false`. Attempted failures include `started: true` and `loggingOutcome`, with a partial `publication` containing any known CID, URI, transaction hash, and mined block number:
 

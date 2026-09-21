@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { request as httpRequest } from 'node:http';
 import { test } from 'node:test';
 import { Wallet } from 'ethers';
 import { parseConfig } from '../src/config.mjs';
@@ -25,7 +24,7 @@ test('message request limit defaults to 60 and validates positive integer overri
     }
 });
 
-test('all message attempts share fixed windows; limited requests do not delay reset or affect health', async (t) => {
+test('allowlisted message attempts share fixed windows; limited requests do not delay reset or affect health', async (t) => {
     let now = 1234;
     t.mock.method(performance, 'now', () => now);
     const setup = await fixture(t, { maxMessageRequestsPerMinute: 3 });
@@ -34,13 +33,11 @@ test('all message attempts share fixed windows; limited requests do not delay re
     assert.equal((await setup.health()).status, 200);
     assert.equal((await fetch(`${setup.url}/v1/messages`)).status, 405);
     assert.equal((await fetch(`${setup.url}/other`, { method: 'POST' })).status, 404);
-    assert.equal((await setup.post(null, { body: '{invalid json' })).status, 400);
-    assert.equal((await setup.post({ ...setup.message, text: 'tampered' })).status, 401);
-    assert.equal((await setup.post(await signedMessage(Wallet.createRandom()))).status, 403);
+    for (let i = 0; i < 3; i++) assert.equal((await setup.post()).status, 200);
     await limited(await setup.post(), 50);
-    assert.equal(setup.state.uploads, 0);
-    assert.equal(setup.state.signs, 0);
-    assert.equal(setup.state.sends, 0);
+    assert.equal(setup.state.uploads, 3);
+    assert.equal(setup.state.signs, 3);
+    assert.equal(setup.state.sends, 3);
     assert.equal((await setup.health()).status, 200);
 
     now = 1234 + 59_999;
@@ -54,48 +51,51 @@ test('all message attempts share fixed windows; limited requests do not delay re
     }
     assert.equal(new Set(publications.map((result) => result.cid)).size, 1);
     assert.equal(new Set(publications.map((result) => result.transactionHash)).size, 3);
-    assert.deepEqual(setup.state.transactions.map((transaction) => transaction.nonce), [0, 1, 2]);
+    assert.deepEqual(setup.state.transactions.map((transaction) => transaction.nonce), [0, 1, 2, 3, 4, 5]);
     await limited(await setup.post(), 60);
-    assert.equal(setup.state.uploads, 3);
-    assert.equal(setup.state.signs, 3);
-    assert.equal(setup.state.sends, 3);
+    assert.equal(setup.state.uploads, 6);
+    assert.equal(setup.state.signs, 6);
+    assert.equal(setup.state.sends, 6);
 
     // Idle windows are skipped without moving the original boundaries.
     now = 1234 + 180_500;
-    for (let i = 0; i < 3; i++) assert.equal((await setup.post(null)).status, 400);
+    for (let i = 0; i < 3; i++) assert.equal((await setup.post()).status, 200);
     await limited(await setup.post(), 60);
     now = 1234 + 239_999;
     await limited(await setup.post(), 1);
     now = 1234 + 240_000;
-    assert.equal((await setup.post(null)).status, 400);
-    assert.equal(setup.state.uploads, 3);
+    assert.equal((await setup.post()).status, 200);
+    assert.equal(setup.state.uploads, 10);
 });
 
-test('a limited request gets a response and closed connection without sending its body', async (t) => {
+test('only verified allowlisted signers share the budget; rejected messages retain their errors at the limit', async (t) => {
     t.mock.method(performance, 'now', () => 0);
-    const setup = await fixture(t, { maxMessageRequestsPerMinute: 1 });
+    const agents = [Wallet.createRandom(), Wallet.createRandom()];
+    const messages = await Promise.all(agents.map((agent) => signedMessage(agent)));
+    const disallowed = await signedMessage(Wallet.createRandom());
+    const setup = await fixture(t, { maxMessageRequestsPerMinute: 2, maxBodyBytes: 512,
+        allowedSigners: agents.map((agent) => agent.address) });
     await setup.start();
-    assert.equal((await setup.post(null)).status, 400);
-    let request;
-    const response = new Promise((resolve, reject) => {
-        request = httpRequest(`${setup.url}/v1/messages`, { method: 'POST', agent: false,
-            signal: AbortSignal.timeout(2000), headers: { 'content-type': 'application/json',
-                'content-length': '100', connection: 'keep-alive' } }, (incoming) => {
-            let body = '';
-            incoming.on('data', (chunk) => { body += chunk; });
-            incoming.on('error', reject);
-            incoming.on('end', () => resolve(new Response(body, { status: incoming.statusCode, headers: incoming.headers })));
-        });
-        request.on('error', reject);
-    });
-    const closed = new Promise((resolve) => request.once('socket', (socket) => socket.once('close', resolve)));
-    t.after(() => request.destroy());
-    request.flushHeaders(); // Deliberately leave the request body incomplete.
-    await limited(await response, 60);
-    await closed;
+    const rejected = async () => {
+        assert.equal((await setup.post(null, { body: '{invalid json' })).status, 400);
+        assert.equal((await setup.post({ ...messages[0], text: 'tampered' })).status, 401);
+        assert.equal((await setup.post({ ...disallowed, signer: agents[0].address })).status, 401);
+        assert.equal((await setup.post(disallowed)).status, 403);
+        assert.equal((await setup.post(null, { body: 'x'.repeat(513) })).status, 413);
+    };
+    await rejected();
     assert.equal(setup.state.uploads, 0);
     assert.equal(setup.state.signs, 0);
     assert.equal(setup.state.sends, 0);
+    assert.equal((await setup.post(messages[0])).status, 200);
+    await rejected();
+    assert.equal((await setup.post(messages[1])).status, 200);
+    await limited(await setup.post(messages[0]), 60);
+    await rejected();
+    await limited(await setup.post(messages[1]), 60);
+    assert.equal(setup.state.uploads, 2);
+    assert.equal(setup.state.signs, 2);
+    assert.equal(setup.state.sends, 2);
 });
 
 test('busy attempts consume the budget while accepted work still completes', async (t) => {
@@ -129,11 +129,11 @@ test('a restarted node starts with a fresh request budget', async (t) => {
     t.mock.method(performance, 'now', () => 0);
     const setup = await fixture(t, { maxMessageRequestsPerMinute: 1 });
     await setup.start();
-    assert.equal((await setup.post(null)).status, 400);
+    assert.equal((await setup.post()).status, 200);
     await limited(await setup.post(), 60);
     await setup.runtime.close();
     await setup.start();
     assert.equal((await setup.post()).status, 200);
-    assert.equal(setup.state.uploads, 1);
-    assert.equal(setup.state.signs, 1);
+    assert.equal(setup.state.uploads, 2);
+    assert.equal(setup.state.signs, 2);
 });
