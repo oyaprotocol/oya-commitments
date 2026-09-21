@@ -9,6 +9,7 @@
     "start": "node src/main.mjs",
     "test": "node --test test/*.test.mjs",
     "test:local": "node scripts/test-local-operations.mjs",
+    "test:docker": "node scripts/test-docker.mjs",
     "smoke:local": "node scripts/smoke-local.mjs"
   },
   "dependencies": {
