@@ -79,6 +79,9 @@ export function createNodeServer({ config, transactionPreparer, nodeAddress, fet
     let outcomeUnknown = false;
     let stopping = false;
     let closing;
+    const messageWindowsStartedAt = performance.now();
+    let messageWindow = 0;
+    let messageRequests = 0;
     const server = createServer({ maxHeaderSize: 8192 }, async (request, response) => {
         // A disconnected upload can emit an error after the body reader has detached.
         request.on('error', () => {});
@@ -98,6 +101,20 @@ export function createNodeServer({ config, transactionPreparer, nodeAddress, fet
             if (request.method !== 'POST') {
                 return respond(response, 405, { code: 'method_not_allowed' }, { allow: 'POST', connection: 'close' });
             }
+            // Count every message attempt before reading its body or checking its signer.
+            const elapsedMs = performance.now() - messageWindowsStartedAt;
+            const window = Math.floor(elapsedMs / 60_000);
+            if (window !== messageWindow) {
+                messageWindow = window;
+                messageRequests = 0;
+            }
+            if (messageRequests >= config.maxMessageRequestsPerMinute) {
+                throw new HttpFailure(429, { code: 'rate_limited', started: false }, {
+                    'retry-after': String(Math.ceil(((window + 1) * 60_000 - elapsedMs) / 1000)),
+                    connection: 'close',
+                });
+            }
+            messageRequests++;
             const body = await readBody(request, config.maxBodyBytes, config.bodyTimeoutMs);
             const result = await handleSignedMessage({ method: request.method, contentType: request.headers['content-type'], body }, {
                 authorize: config.authorize, maxBodyBytes: config.maxBodyBytes, maxTextBytes: config.maxTextBytes,

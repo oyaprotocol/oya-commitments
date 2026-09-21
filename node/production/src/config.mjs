@@ -25,7 +25,7 @@ export function parseConfig(input, { env = process.env } = {}) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Config must be an object.');
     const fields = new Set(['host', 'port', 'chainId', 'ledgerContract', 'allowedSigners', 'rpcUrl', 'ipfsUrl',
         'maxBodyBytes', 'maxTextBytes', 'bodyTimeoutMs', 'receiptTimeoutMs', 'pollIntervalMs',
-        'operationTimeoutMs', 'gasLimit', 'maxFeePerGasWei']);
+        'operationTimeoutMs', 'gasLimit', 'maxFeePerGasWei', 'maxMessageRequestsPerMinute']);
     for (const key of Object.keys(input)) {
         if (!fields.has(key)) throw new Error('Config contains an unsupported field.');
     }
@@ -48,6 +48,7 @@ export function parseConfig(input, { env = process.env } = {}) {
         host: input.host ?? '127.0.0.1', port: integer(input.port, 'port', 8787, 65535),
         chainId: integer(input.chainId, 'chainId', undefined, Number.MAX_SAFE_INTEGER),
         ledgerContract: input.ledgerContract, authorize,
+        maxMessageRequestsPerMinute: integer(input.maxMessageRequestsPerMinute, 'maxMessageRequestsPerMinute', 60),
         maxBodyBytes: integer(input.maxBodyBytes, 'maxBodyBytes', 16_384, 1_048_576),
         maxTextBytes: integer(input.maxTextBytes, 'maxTextBytes', 8192, 1_048_576),
         bodyTimeoutMs: integer(input.bodyTimeoutMs, 'bodyTimeoutMs', 10_000),
