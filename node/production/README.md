@@ -10,6 +10,8 @@ When upgrading an existing local instance, rename `loggerContract` to `ledgerCon
 
 ## Run with Docker Compose
 
+For a first deployment from your laptop to an existing DigitalOcean Docker host, use the [deployment script and setup guide](deploy-droplet.md). It builds locally, transfers over SSH, and validates/starts the HTTPS stack. The manual instructions below also cover updates and recovery.
+
 [compose.yaml](compose.yaml) runs the node and Kubo with persistent IPFS storage. Use a Linux Docker host or Docker Desktop with Linux containers, and Compose 2.30 or newer. Run the commands below from the repository root. Ethereum comes from your selected RPC provider; deploy or verify Ledger and fund a dedicated node account before starting the node.
 
 ### Prepare private settings
