@@ -68,7 +68,8 @@ else if (args[0] === 'image' && args[1] === 'load') {
     if (args[1] === 'up' && mode === 'startup') process.exit(1);
 }
 `);
-    const run = (args = ['oya@example.com', 'node.example.com', configFile, envFile]) => spawnSync('bash', [script, ...args], {
+    const run = (args = ['oya@example.com', 'node.example.com', configFile, envFile], shellCommand) => spawnSync('bash',
+        shellCommand ? ['-c', shellCommand, script, ...args] : [script, ...args], {
         env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TEST_REMOTE: remote,
             TEST_LOG: join(directory, 'commands'), TEST_MODE: mode, TEST_RUNTIME: runtime },
         encoding: 'utf8', timeout: 20_000,
@@ -77,7 +78,7 @@ else if (args[0] === 'image' && args[1] === 'load') {
         try { return readFileSync(join(directory, 'commands'), 'utf8').trim().split('\n').map(JSON.parse); }
         catch { return []; }
     };
-    return { run, commands, remote, configFile, envFile, config, privateKey };
+    return { run, commands, remote, configFile, envFile, config, privateKey, executable };
 }
 
 test('first deployment transfers only required files, preserves secrets, and derives longer deadlines', (t) => {
@@ -103,6 +104,25 @@ test('first deployment transfers only required files, preserves secrets, and der
     assert.equal(f.commands().filter(args => args[0] === 'build').length, 1);
 });
 
+test('deployments with matching timestamps and shell PIDs use distinct tags consistently', (t) => {
+    const f = fixture(t);
+    f.executable('date', '#!/bin/sh\necho 20260924T000000Z\n');
+    // Sourced scripts in subshells share $$, simulating matching PIDs on separate laptops.
+    const result = f.run(undefined, `set -e
+(source "$0" "$@")
+(export TEST_REMOTE="$TEST_REMOTE/second"; mkdir "$TEST_REMOTE"; source "$0" "$@")`);
+    assert.equal(result.status, 0, result.stderr);
+    const images = f.commands().filter(args => args[0] === 'build').map(args => args[args.indexOf('--tag') + 1]);
+    assert.equal(images.length, 2);
+    assert.notEqual(images[0], images[1]);
+    for (const image of images) assert.match(image, /^oya-node:deploy-20260924T000000Z-[0-9]+-[0-9a-f]{32}$/);
+    assert.equal(images[0].slice(0, -32), images[1].slice(0, -32));
+    assert.deepEqual(f.commands().filter(args => args[0] === 'image' && args[1] === 'save').map(args => args[2]), images);
+    for (const [index, remote] of [f.remote, join(f.remote, 'second')].entries()) {
+        assert.equal(readFileSync(join(remote, 'oya/image.yaml'), 'utf8').match(/image: (\S+)/)[1], images[index]);
+    }
+});
+
 test('existing state, wrong platform, and old Compose stop before the local build', async (t) => {
     for (const mode of ['containers', 'volumes', 'architecture', 'version', 'directory']) {
         await t.test(mode, (t) => {
@@ -114,14 +134,17 @@ test('existing state, wrong platform, and old Compose stop before the local buil
     }
 });
 
-test('failed build, transfer, validation, and startup never retry or delete remote state', async (t) => {
-    for (const mode of ['build', 'transfer', 'key', 'config', 'caddy', 'startup']) {
+test('failed entropy, build, transfer, validation, and startup never retry or delete remote state', async (t) => {
+    for (const mode of ['entropy', 'short-entropy', 'build', 'transfer', 'key', 'config', 'caddy', 'startup']) {
         await t.test(mode, (t) => {
             const f = fixture(t, mode);
+            if (mode === 'entropy') f.executable('od', '#!/bin/sh\nexit 1\n');
+            if (mode === 'short-entropy') f.executable('od', '#!/bin/sh\necho 00\n');
             if (mode === 'key') writeFileSync(f.envFile, 'OYA_NODE_PRIVATE_KEY=private-invalid-marker\n');
             if (mode === 'config') writeFileSync(f.configFile, JSON.stringify({ ...f.config, host: '127.0.0.1' }));
             const result = f.run();
             assert.notEqual(result.status, 0);
+            if (mode.endsWith('entropy')) assert.equal(f.commands().some(args => args[0] === 'build'), false);
             assert.equal(f.commands().filter(args => args[1] === 'up').length, mode === 'startup' ? 1 : 0);
             assert.equal(f.commands().some(args => args.includes('down') || args.includes('restart') || args.includes('rm')), false);
             assert.equal((result.stdout + result.stderr).includes('private-invalid-marker'), false);

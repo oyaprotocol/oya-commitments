@@ -13,7 +13,7 @@ hostname=$2
 [[ $target =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.@-]*$ ]] || fail 'Use a user@host or SSH config alias, without shell options.'
 [[ ${#hostname} -le 253 && $hostname =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]] || fail 'Supply a public DNS hostname without a scheme, port, or path.'
 [[ -f $3 && -r $3 && -f $4 && -r $4 ]] || fail 'Supply readable configuration and environment files.'
-for executable in docker ssh tar; do command -v "$executable" >/dev/null || fail "Missing dependency: $executable"; done
+for executable in docker ssh tar od tr; do command -v "$executable" >/dev/null || fail "Missing dependency: $executable"; done
 runtime=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 ssh_options=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10)
 
@@ -34,7 +34,10 @@ chmod 644 "$staging/docker/Caddyfile"
 cat < "$3" > "$staging/node.json"
 cat < "$4" > "$staging/node.env"
 chmod 600 "$staging/node.json" "$staging/node.env"
-image="oya-node:deploy-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+# Image loading precedes the directory claim; separate hosts must not share a tag.
+image_suffix=$(od -An -N16 -tx1 /dev/urandom | tr -d '[:space:]')
+[[ $image_suffix =~ ^[0-9a-f]{32}$ ]] || fail 'Could not generate a 128-bit image tag suffix.'
+image="oya-node:deploy-$(date -u +%Y%m%dT%H%M%SZ)-$$-$image_suffix"
 printf 'services:\n  node:\n    image: %s\n' "$image" > "$staging/image.yaml"
 printf 'export OYA_PUBLIC_HOSTNAME=%s\n' "$hostname" > "$staging/compose.env"
 

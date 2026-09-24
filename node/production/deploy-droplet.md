@@ -10,7 +10,7 @@ Create an Ubuntu 24.04 x64 Droplet in a US region. A 1 GB/25 GB plan is a monito
 
 Attach a DigitalOcean Cloud Firewall allowing SSH TCP 22 from your administration IP, HTTP/HTTPS TCP 80/443 from the internet, and IPFS TCP/UDP 4001 from the internet. Keep outbound traffic allowed. Ports 8787, 5001, and 8080 remain private. Point the hostname's A record at the Droplet; configure IPv6 completely or remove its AAAA record. For the first deployment, use direct DNS without another HTTP proxy. See [Cloud Firewalls](https://docs.digitalocean.com/products/networking/firewalls/getting-started/quickstart/).
 
-Your laptop needs Bash, Docker with Linux amd64 build support, SSH, and tar. Connect interactively once, verify the server's SSH fingerprint, and confirm Docker access:
+Your laptop needs Bash, Docker with Linux amd64 build support, SSH, tar, and the standard `od`/`tr` tools with `/dev/urandom` for random image tags. Connect interactively once, verify the server's SSH fingerprint, and confirm Docker access:
 
 ```sh
 ssh oya@DROPLET_IP 'docker version && docker compose version'
