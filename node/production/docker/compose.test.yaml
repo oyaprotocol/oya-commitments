@@ -16,6 +16,7 @@ services:
       - "127.0.0.1::5001"
 
   anvil:
+    networks: [backend]
     platform: ${OYA_TEST_PLATFORM:?Run through test:docker}
     image: ghcr.io/foundry-rs/foundry:v1.5.1@sha256:3a70bfa9bd2c732a767bb60d12c8770b40e8f9b6cca28efc4b12b1be81c7f28e
     entrypoint: [anvil]

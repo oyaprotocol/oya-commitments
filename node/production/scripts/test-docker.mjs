@@ -316,6 +316,21 @@ test(http ? 'HTTPS preserves signed messages, admission limits, and long-running
         assert.equal((await send(disallowed, 'Disallowed sender.', 1)).code, 'unauthorized_signer');
         assert.equal(await nonce(), '0x1');
         if (http) {
+            progress('Checking proxy network access to the node and isolation from the Kubo API');
+            const ipfsNetworks = JSON.parse((await command('docker', ['inspect', '--format',
+                '{{json .NetworkSettings.Networks}}', await containerId('ipfs')])).toString());
+            const ipfsAddress = ipfsNetworks[`${project}_backend`].IPAddress;
+            assert.match(ipfsAddress, /^\d+\.\d+\.\d+\.\d+$/);
+            // Use the node image as a probe sharing Caddy's actual network namespace.
+            await command('docker', ['run', '--rm', '--network', `container:${await containerId('proxy')}`,
+                '--entrypoint', 'node', `${project}-node`, '--input-type=module', '-e', `
+                    import assert from 'node:assert/strict';
+                    const health = await fetch('http://node:8787/healthz', { signal: AbortSignal.timeout(3000) });
+                    assert.equal(health.status, 200);
+                    await assert.rejects(fetch('http://${ipfsAddress}:5001/api/v0/id', {
+                        method: 'POST', signal: AbortSignal.timeout(3000),
+                    }));
+                `]);
             progress('Checking HTTPS routes, signature/size rejection, and independent identical submissions');
             const redirectUrl = (await endpoint('proxy', 80)).replace('127.0.0.1', 'localhost');
             const redirect = await request(`${redirectUrl}/v1/messages`, { redirect: 'manual' });
