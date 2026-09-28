@@ -127,8 +127,9 @@ test(http ? 'HTTPS preserves signed messages, admission limits, and long-running
         await writeFile(fixtureEnv.OYA_CONFIG_FILE, '{}', { mode: 0o600 });
         if (process.getuid?.() === 0) await chown(fixtureEnv.OYA_CONFIG_FILE, 1000, 1000);
         await writeFile(fixtureEnv.OYA_ENV_FILE, `OYA_NODE_PRIVATE_KEY=${nodeWallet.privateKey}\n`, { mode: 0o600 });
+        if (process.getuid?.() === 0) await chown(fixtureEnv.OYA_ENV_FILE, 1000, 1000);
         await compose(['config', '--quiet']);
-        // Inspect only selected fields; the complete model contains the generated node key.
+        // Keep model assertions/output free of secrets, even if configuration regresses.
         const model = JSON.parse((await compose(['config', '--format', 'json'])).toString());
         const ports = { node: [8787], ipfs: [5001], anvil: [8545], ...(http ? { proxy: [80, 443] } : {}) };
         for (const [service, targets] of Object.entries(ports)) {
@@ -147,7 +148,13 @@ test(http ? 'HTTPS preserves signed messages, admission limits, and long-running
             assert.deepEqual(deployed.services.proxy.ports.map(({ target, protocol }) => [target, protocol]), [[80, 'tcp'], [443, 'tcp']]);
         }
         assert.equal(model.services.node.restart, 'no');
-        assert.deepEqual(Object.keys(model.services.node.environment), ['OYA_NODE_PRIVATE_KEY']);
+        assert.equal(model.services.node.environment, undefined);
+        assert.equal(JSON.stringify(model).includes(nodeWallet.privateKey), false);
+        const secretMount = model.services.node.volumes.find(({ target }) => target === '/run/secrets/node.env');
+        assert.equal(secretMount?.type, 'bind');
+        assert.equal(secretMount.source, fixtureEnv.OYA_ENV_FILE);
+        assert.equal(secretMount.read_only, true);
+        assert.equal(secretMount.bind?.create_host_path ?? false, false); // Compose omits false defaults.
         for (const service of ['ipfs', 'anvil']) assert.equal(model.services.node.depends_on[service].condition, 'service_healthy');
         configured = true;
         progress(`Building the repository image for ${fixtureEnv.OYA_TEST_PLATFORM}`);
@@ -192,12 +199,25 @@ test(http ? 'HTTPS preserves signed messages, admission limits, and long-running
         await writeConfig();
         const start = async () => {
             await compose(['up', '-d', '--no-deps', '--wait', '--wait-timeout', '45', 'node']);
+            const container = JSON.parse((await command('docker', ['inspect', await containerId('node')])).toString())[0];
+            assert.equal(container.Config.Env.some(value => /^OYA_(NODE_PRIVATE_KEY|RPC_AUTHORIZATION|IPFS_AUTHORIZATION)=/.test(value)), false);
+            assert.equal(JSON.stringify(container).includes(nodeWallet.privateKey), false);
+            assert.equal(container.Mounts.find(({ Destination }) => Destination === '/run/secrets/node.env')?.RW, false);
             nodeUrl = await endpoint('node', 8787);
             const health = await (await request(`${nodeUrl}/healthz`)).json();
             assert.equal(health.status, 'ready');
             assert.equal(health.nodeAddress.toLowerCase(), nodeWallet.address.toLowerCase());
             assert.equal(health.ledgerContract.toLowerCase(), metadata.ledgerContract.toLowerCase());
             assert.equal(health.chainId, 31337);
+            await compose(['exec', '-T', 'node', 'node', '--input-type=module', '-e', `
+                import assert from 'node:assert/strict';
+                import { open, readFile } from 'node:fs/promises';
+                assert.notEqual(process.getuid(), 0);
+                await assert.rejects(open('/run/secrets/node.env', 'r+'), { code: 'EROFS' });
+                const keys = Object.keys(process.env);
+                assert.equal(keys.some(key => /^OYA_(NODE_PRIVATE_KEY|RPC_AUTHORIZATION|IPFS_AUTHORIZATION)$/.test(key)), false);
+                assert.equal((await readFile('/proc/1/environ')).includes(Buffer.from('OYA_NODE_PRIVATE_KEY=')), false);
+            `]);
         };
         const nonce = () => rpc('eth_getTransactionCount', [nodeWallet.address, 'pending']);
         const send = async (wallet, text, code = 0) => {

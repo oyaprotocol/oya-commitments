@@ -28,7 +28,7 @@ cp -n node/production/docker/runtime.env.example "$HOME/oya-private/node.env"
 chmod 600 "$HOME/oya-private/node.json" "$HOME/oya-private/node.env"
 ```
 
-Edit those files with your chain ID, RPC endpoint, verified Ledger address, allowed client addresses, and dedicated node key. The node needs gas funds; clients only sign messages. Keep `host` as `0.0.0.0`, `port` as `8787`, and `ipfsUrl` as `http://ipfs:5001`. Use literal, unquoted `KEY=value` entries in the runtime environment file. See [private settings](README.md#prepare-private-settings) and [Ledger deployment](README.md#deploy-or-reuse-ledger). Starting this script does not create/fund keys or deploy Ledger.
+Edit those files with your chain ID, RPC endpoint, verified Ledger address, allowed client addresses, and dedicated node key. The node needs gas funds; clients only sign messages. Keep `host` as `0.0.0.0`, `port` as `8787`, and `ipfsUrl` as `http://ipfs:5001`. `node.env` becomes a read-only secret mount, not container environment variables. Use only the three keys in its example, once each, with literal, unquoted `KEY=value` entries. Both files retain mode 0600 and must be readable by the operator UID used in the container. See [private settings](README.md#prepare-private-settings) and [Ledger deployment](README.md#deploy-or-reuse-ledger). Starting this script does not create/fund keys or deploy Ledger.
 
 ## Deploy
 
@@ -61,7 +61,7 @@ docker compose logs --tail=100 node
 docker stats --no-stream
 ```
 
-The generated `COMPOSE_FILE` uses absolute paths on that host, so these commands work from any directory. Do not print expanded `docker compose config` or full container inspection output: they can expose runtime credentials. Use `docker compose config --quiet` for syntax checks.
+The generated `COMPOSE_FILE` uses absolute paths on that host, so these commands work from any directory. Secret values are absent from the expanded Compose model and Docker container environment. Full inspection/configuration output still exposes deployment paths and metadata; use `docker compose config --quiet` for syntax checks and avoid sharing private files or dumps of application memory.
 
 A failed install leaves remote files and any created containers/volumes for inspection. A repeated install refuses them; it never automatically rolls back, deletes storage, or retries a signing node. A failed registry pull stops before configuration validation or startup. Inspect the failure and reconcile any uncertain transaction before using the [manual recovery procedure](README.md#operate-and-inspect). If private settings change, regenerate the timeout relationships documented in the [HTTPS guide](README.md#receive-messages-over-https) before restarting.
 

@@ -9,4 +9,5 @@ src/**
 !src/config.mjs
 !src/main.mjs
 !src/server.mjs
+!src/secrets.mjs
 !src/signer.mjs

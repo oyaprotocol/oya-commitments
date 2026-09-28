@@ -64,6 +64,7 @@ async function fixture(t) {
             await state.onCheck?.();
             response.end(JSON.stringify({ Version: 'fixture' }));
         } else if (request.url.startsWith('/ipfs/api/v0/add')) {
+            assert.equal(request.headers.authorization, 'Bearer ipfs-secret-marker');
             entered.resolve();
             await released.promise;
             // Finish the held operation with a definite upload failure, without a transaction.
@@ -83,20 +84,23 @@ async function fixture(t) {
     await writeFile(envPath, `OYA_NODE_PRIVATE_KEY=${wallet.privateKey}\n`
         + 'OYA_RPC_AUTHORIZATION="Bearer rpc-secret-marker"\nOYA_IPFS_AUTHORIZATION="Bearer ipfs-secret-marker"\n'
         + `OYA_AGENT_PRIVATE_KEY=${agent.privateKey}\nLEDGER_DEPLOYER_PK=deployer-secret-marker\n`, { mode: 0o600 });
-    return { cwd, wallet, agent, config, configPath, envPath, upstream, calls, state,
+    const secretsPath = join(cwd, 'secrets.env');
+    await writeFile(secretsPath, `OYA_NODE_PRIVATE_KEY=${wallet.privateKey}\n`
+        + 'OYA_RPC_AUTHORIZATION=Bearer rpc-secret-marker\nOYA_IPFS_AUTHORIZATION=Bearer ipfs-secret-marker\n', { mode: 0o600 });
+    return { cwd, wallet, agent, config, configPath, envPath, secretsPath, upstream, calls, state,
         entered: entered.promise, release: released.resolve, url: `http://127.0.0.1:${port}`,
         args: ['--config', 'config.json', '--env-file', 'node.env'],
     };
 }
 
 function launch(t, f, direct = false) {
-    const args = direct ? [join(production, 'src/main.mjs'), f.configPath] : [script, 'run', ...f.args];
+    const args = direct ? [join(production, 'src/main.mjs'), f.configPath, ...(direct === 'file' ? [f.secretsPath] : [])] : [script, 'run', ...f.args];
     const child = spawn(process.execPath, ['--', ...args], {
         cwd: f.cwd, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'],
         env: { ...process.env, INIT_CWD: f.cwd,
-            OYA_NODE_PRIVATE_KEY: direct ? f.wallet.privateKey : Wallet.createRandom().privateKey,
-            OYA_RPC_AUTHORIZATION: direct ? 'Bearer rpc-secret-marker' : 'wrong-secret-marker',
-            OYA_IPFS_AUTHORIZATION: direct ? 'Bearer ipfs-secret-marker' : 'wrong-secret-marker' },
+            OYA_NODE_PRIVATE_KEY: direct === true ? f.wallet.privateKey : Wallet.createRandom().privateKey,
+            OYA_RPC_AUTHORIZATION: direct === true ? 'Bearer rpc-secret-marker' : 'wrong-secret-marker',
+            OYA_IPFS_AUTHORIZATION: direct === true ? 'Bearer ipfs-secret-marker' : 'wrong-secret-marker' },
     });
     let output = '';
     let closed = false;
@@ -144,12 +148,13 @@ test('run and npm status use selected settings, then stop without changing files
     assert.equal(running.output().includes(f.agent.privateKey), false);
 });
 
-test('both launch paths drain admitted requests on SIGINT and SIGTERM', { timeout: 30_000 }, async (t) => {
-    for (const direct of [false, true]) for (const signal of ['SIGINT', 'SIGTERM']) {
-        await t.test(`${direct ? 'direct' : 'local'} ${signal}`, async (t) => {
+test('local, environment, and secret-file launch paths drain admitted requests on SIGINT and SIGTERM', { timeout: 30_000 }, async (t) => {
+    for (const direct of [false, true, 'file']) for (const signal of ['SIGINT', 'SIGTERM']) {
+        await t.test(`${direct === 'file' ? 'secret file' : direct ? 'direct' : 'local'} ${signal}`, async (t) => {
             const f = await fixture(t);
             const running = launch(t, f, direct);
             await running.ready();
+            assert.ok(running.output().includes(f.wallet.address), 'use the selected signing key');
             const text = 'Local lifecycle test';
             const pending = fetch(`${f.url}/v1/messages`, { method: 'POST', headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({ text, signer: f.agent.address, signature: await f.agent.signMessage(text) }) });
@@ -173,6 +178,24 @@ test('both launch paths drain admitted requests on SIGINT and SIGTERM', { timeou
             assert.equal(f.upstream.listening, true);
         });
     }
+});
+
+test('missing or malformed secret files fail before RPC without falling back to valid environment credentials', async (t) => {
+    const f = await fixture(t);
+    for (const contents of [null, 'UNKNOWN=private-input-marker\n']) {
+        if (contents === null) await rm(f.secretsPath);
+        else await writeFile(f.secretsPath, contents, { mode: 0o600 });
+        await assert.rejects(execute(process.execPath, [join(production, 'src/main.mjs'), f.configPath, f.secretsPath], {
+            timeout: 5000, env: { ...process.env, OYA_NODE_PRIVATE_KEY: f.wallet.privateKey,
+                OYA_RPC_AUTHORIZATION: 'Bearer rpc-secret-marker', OYA_IPFS_AUTHORIZATION: 'Bearer ipfs-secret-marker' },
+        }), (error) => {
+            assert.equal(error.code, 1);
+            assert.equal(error.stdout, '');
+            assert.equal(error.stderr, 'Node startup failed. Check config, signer, and RPC/Ledger availability.\n');
+            return true;
+        });
+    }
+    assert.deepEqual(f.calls, []);
 });
 
 test('readiness and occupied-port failures leave no extra node running', { timeout: 15_000 }, async (t) => {

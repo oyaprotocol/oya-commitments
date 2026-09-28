@@ -53,14 +53,11 @@ else if (args[0] === 'compose') {
     if (args[1] === 'pull' && args[2] === 'node' && mode === 'pull') process.exit(1);
     if (args.includes('-e')) {
         const deployment = join(process.env.TEST_REMOTE, 'oya');
-        const code = args.at(-1).replace('"/config/node.json"', JSON.stringify(join(deployment, 'node.json')));
-        const settings = Object.fromEntries(readFileSync(join(deployment, 'node.env'), 'utf8').trim().split('\\n').map(line => {
-            const equals = line.indexOf('=');
-            return [line.slice(0, equals), line.slice(equals + 1)];
-        }));
+        const code = args.at(-1).replace('"/config/node.json"', JSON.stringify(join(deployment, 'node.json')))
+            .replace('"/run/secrets/node.env"', JSON.stringify(join(deployment, 'node.env')));
         try {
             execFileSync(process.execPath, ['--input-type=module', '-e', code], {
-                cwd: process.env.TEST_RUNTIME, env: { ...process.env, ...settings }, stdio: 'inherit',
+                cwd: process.env.TEST_RUNTIME, env: { ...process.env, OYA_NODE_PRIVATE_KEY: 'must-not-use-environment' }, stdio: 'inherit',
             });
         } catch { process.exit(1); }
     }
@@ -133,10 +130,11 @@ test('existing state, wrong platform, and old Compose stop before pulling the im
 });
 
 test('failed transfer, pull, validation, and startup never retry or delete remote state', async (t) => {
-    for (const mode of ['transfer', 'pull', 'key', 'config', 'caddy', 'startup']) {
+    for (const mode of ['transfer', 'pull', 'key', 'secrets', 'config', 'caddy', 'startup']) {
         await t.test(mode, (t) => {
             const f = fixture(t, mode);
             if (mode === 'key') writeFileSync(f.envFile, 'OYA_NODE_PRIVATE_KEY=private-invalid-marker\n');
+            if (mode === 'secrets') writeFileSync(f.envFile, `OYA_NODE_PRIVATE_KEY=${f.privateKey}\nMALFORMED=private-invalid-marker\n`);
             if (mode === 'config') writeFileSync(f.configFile, JSON.stringify({ ...f.config, host: '127.0.0.1' }));
             const result = f.run();
             assert.notEqual(result.status, 0);

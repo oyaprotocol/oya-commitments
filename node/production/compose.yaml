@@ -13,9 +13,12 @@ services:
         read_only: true
         bind:
           create_host_path: false
-    env_file:
-      - path: ${OYA_ENV_FILE:?Set OYA_ENV_FILE to an absolute file path}
-        format: raw
+      - type: bind
+        source: ${OYA_ENV_FILE:?Set OYA_ENV_FILE to an absolute file path}
+        target: /run/secrets/node.env
+        read_only: true
+        bind:
+          create_host_path: false
     ports:
       - "127.0.0.1:${OYA_HTTP_PORT:-8787}:8787"
     depends_on:
