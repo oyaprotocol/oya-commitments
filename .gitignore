@@ -33,6 +33,12 @@ agent/.state/
 
 # Production node local configuration, keys, state, and deployment broadcasts
 node/production/config.local.json
+node.env
+node.json
+ipfs-repo*.tar*
+ipfs-repo*.tgz
+oya-private/
+private-oya/
 deployment.local.json
 *.deployment.local.json
 .oya-logger-*/

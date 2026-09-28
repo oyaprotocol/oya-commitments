@@ -2,6 +2,7 @@ services:
   node:
     build: .
     image: oya-node:local
+    networks: [backend]
     user: ${OYA_CONTAINER_USER:-1000:1000}
     read_only: true
     cap_drop: [ALL]
@@ -13,9 +14,12 @@ services:
         read_only: true
         bind:
           create_host_path: false
-    env_file:
-      - path: ${OYA_ENV_FILE:?Set OYA_ENV_FILE to an absolute file path}
-        format: raw
+      - type: bind
+        source: ${OYA_ENV_FILE:?Set OYA_ENV_FILE to an absolute file path}
+        target: /run/secrets/node.env
+        read_only: true
+        bind:
+          create_host_path: false
     ports:
       - "127.0.0.1:${OYA_HTTP_PORT:-8787}:8787"
     depends_on:
@@ -48,6 +52,7 @@ services:
 
   ipfs:
     image: ipfs/kubo:v0.43.0@sha256:63f5502f7a01b82a675e45bae81b2f5dfa90248ec4a86cd0a58c218347e1f2d2
+    networks: [backend]
     environment:
       IPFS_PROFILE: server
     volumes:
@@ -68,6 +73,9 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+networks:
+  backend:
 
 volumes:
   ipfs-data:

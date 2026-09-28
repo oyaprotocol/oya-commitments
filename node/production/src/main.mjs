@@ -5,6 +5,7 @@ import { hasBytecode } from './bytecode.mjs';
 import { loadConfig } from './config.mjs';
 import { createLocalSigner } from './signer.mjs';
 import { createNodeServer } from './server.mjs';
+import { loadSecrets } from './secrets.mjs';
 
 export async function startNode(config, signer, {
     fetch = globalThis.fetch, log = (record) => console.log(JSON.stringify(record)), handleSignals = false,
@@ -52,9 +53,10 @@ export async function startNode(config, signer, {
 
 async function main() {
     const args = process.argv.slice(2);
-    if (args.length !== 1) throw new Error('Usage: node node/production/src/main.mjs /absolute/path/to/config.json');
-    const config = await loadConfig(args[0]);
-    const signer = createLocalSigner(process.env.OYA_NODE_PRIVATE_KEY);
+    if (args.length < 1 || args.length > 2) throw new Error('Usage: node node/production/src/main.mjs CONFIG_JSON [SECRETS_FILE]');
+    const secrets = args.length === 2 ? await loadSecrets(args[1]) : process.env;
+    const config = await loadConfig(args[0], secrets);
+    const signer = createLocalSigner(secrets.OYA_NODE_PRIVATE_KEY);
     await startNode(config, signer, { handleSignals: true });
 }
 

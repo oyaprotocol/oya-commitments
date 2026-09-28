@@ -10,6 +10,8 @@ When upgrading an existing local instance, rename `loggerContract` to `ledgerCon
 
 ## Run with Docker Compose
 
+For a first deployment from your laptop to an existing DigitalOcean Docker host, use the [deployment script and setup guide](deploy-droplet.md). It transfers private settings over SSH and pulls a published image by its exact digest on the host; local Docker is unnecessary. Maintainers use the [image release guide](release-image.md) to publish tagged revisions and matching deployment bundles. The manual instructions below support source builds; installations from a published bundle use the [pinned-image update procedure](deploy-droplet.md#update-an-existing-node).
+
 [compose.yaml](compose.yaml) runs the node and Kubo with persistent IPFS storage. Use a Linux Docker host or Docker Desktop with Linux containers, and Compose 2.30 or newer. Run the commands below from the repository root. Ethereum comes from your selected RPC provider; deploy or verify Ledger and fund a dedicated node account before starting the node.
 
 ### Prepare private settings
@@ -31,17 +33,19 @@ chmod 600 "$OYA_CONFIG_FILE" "$OYA_ENV_FILE"
 
 Edit both files before continuing. The example chain, RPC URL, Ledger address, and allowed signer address are placeholders. Select your chain and RPC, verified Ledger address, and actual agent allowlist. Keep the internal `host` as `0.0.0.0`, `port` as `8787`, and `ipfsUrl` as `http://ipfs:5001`. Container loopback addresses refer to that container, so an RPC running elsewhere needs an address reachable from Docker.
 
-The environment file contains only the node signing key and optional complete RPC/IPFS Authorization headers. Use literal, unquoted `KEY=value` lines, with no inline comments; Compose's raw format preserves dollar signs and quotes. Leave authorization values empty when unused; the bundled Kubo API requires none. Keep agent and Ledger-deployer keys in separate files for their separate tools. Docker administrators can inspect container environment values; do not share expanded Compose configuration or full container inspection output.
+The secret file contains only `OYA_NODE_PRIVATE_KEY` and optional complete `OYA_RPC_AUTHORIZATION` / `OYA_IPFS_AUTHORIZATION` headers. It keeps the `node.env` filename but is mounted read-only at `/run/secrets/node.env`, not injected through Compose's `env_file`. Use literal, unquoted `KEY=value` lines, with no inline comments or duplicate keys. Blank lines and lines beginning with `#` are allowed. Dollar signs, quotes, spaces, and `=` in values remain literal. Leave authorization values empty or omit them when unused; the bundled Kubo API requires none. Keep agent and Ledger-deployer keys in separate files for their separate tools.
 
-The default container user is `1000:1000`. On a POSIX host, the override above selects the current operator's UID/GID; run it as a non-root user. A mode-0600 config needs a matching owner, or deliberately configured group access. Compose reads the environment file on the host, while the container reads the mounted JSON. On Windows, set the same variables in your shell using absolute host paths and an explicit numeric `OYA_CONTAINER_USER`, such as `1000:1000`, and restrict access with host ACLs. Docker Desktop file sharing can differ from Linux ownership; verify the actual mount below before startup. Do not make private files world-readable to fix access.
+Startup and deployment validation read the same file directly into application settings, without copying its values to `process.env` or falling back to inherited secrets. Missing/unreadable files and malformed/unknown entries fail with sanitized errors. Secret values stay out of Docker's configured environment and expanded Compose model. The host file and application memory still contain them: read-only mounting does not encrypt data or protect it from the application, host root, or Docker administrators.
+
+The default container user is `1000:1000`. On a POSIX host, the override above selects the current operator's UID/GID; run it as a non-root user. Both mode-0600 files need a matching owner, or deliberately configured group access: the container reads both the JSON and the secrets file. On Windows, set the same variables in your shell using absolute host paths and an explicit numeric `OYA_CONTAINER_USER`, such as `1000:1000`, and restrict access with host ACLs. Docker Desktop file sharing can differ from Linux ownership; verify the actual mounts below before startup. Do not make private files world-readable to fix access.
 
 ```sh
 docker compose config --quiet
 docker compose build node
-docker compose run --rm --no-deps --entrypoint node node -e 'require("node:fs").readFileSync("/config/node.json"); console.log("Config is readable")'
+docker compose run --rm --no-deps --entrypoint node node -e 'for (const path of ["/config/node.json", "/run/secrets/node.env"]) require("node:fs").readFileSync(path); console.log("Private files are readable")'
 ```
 
-`config --quiet` checks the Compose model without printing credentials. The mount check confirms file access; application startup validates the JSON and signer. A missing config path fails instead of creating a directory. Re-export these variables in a new terminal before using the remaining commands.
+`config --quiet` checks the Compose model without printing deployment details. The mount check confirms file access; application startup validates the JSON, secret entries, and signer. A missing input path fails instead of creating a directory. Re-export these variables in a new terminal before using the remaining commands.
 
 If Ledger still needs deployment, use the existing [deployment workflow](#deploy-or-reuse-ledger) with host Node.js/npm and Foundry. Prepare a separate host-facing config with `host: "127.0.0.1"`, a host-reachable RPC URL, and the same chain; put only the deployer key in its environment file. The local CLI rejects the container's `0.0.0.0` bind. Preview and then explicitly broadcast:
 
@@ -60,7 +64,7 @@ docker compose ps
 docker compose logs --follow node
 ```
 
-Stopping log-following leaves services running. Node HTTP is published at `http://127.0.0.1:8787`; `OYA_HTTP_PORT` changes only the host port. Kubo's TCP/UDP swarm port 4001 is published on the host, while API 5001 and gateway 8080 remain unpublished. The API is reachable by containers on the Compose network. For agents on other machines, use the [optional HTTPS proxy](#receive-messages-over-https). Check Kubo peer connectivity and retrieval from an independent peer before relying on public availability:
+Stopping log-following leaves services running. Node HTTP is published at `http://127.0.0.1:8787`; `OYA_HTTP_PORT` changes only the host port. Kubo's TCP/UDP swarm port 4001 is published on the host, while API 5001 and gateway 8080 remain unpublished. The node reaches Kubo's API over their shared `backend` network. For agents on other machines, use the [optional HTTPS proxy](#receive-messages-over-https). Check Kubo peer connectivity and retrieval from an independent peer before relying on public availability:
 
 ```sh
 docker compose exec ipfs ipfs swarm peers
@@ -83,13 +87,15 @@ docker compose stop node
 docker compose up -d --no-deps --force-recreate node
 ```
 
-For an image update, preserve the previous image ID for rollback and run `docker compose build node` between these commands. Recreation reloads changed configuration and environment values; `docker compose restart` does not apply changed service environment. The node has a four-minute stop grace for its default three-minute operation deadline. Increase `OYA_STOP_GRACE_PERIOD` with headroom if you increase `operationTimeoutMs`. A forced shutdown or missing client response requires transaction reconciliation before another start.
+For an image update, preserve the previous image ID for rollback and run `docker compose build node` between these commands. Recreation reloads changed configuration and secret files and refreshes bind mounts after atomic file replacement; it also applies changed service environment. The node has a four-minute stop grace for its default three-minute operation deadline. Increase `OYA_STOP_GRACE_PERIOD` with headroom if you increase `operationTimeoutMs`. A forced shutdown or missing client response requires transaction reconciliation before another start.
 
 `docker compose down` stops services in dependency order and retains the named IPFS volume. Keep the same project name when bringing them back. `down --volumes` deletes the repository. An image moved to another host does not carry its volume or private settings.
 
 ### Receive messages over HTTPS
 
 [docker/compose.http.yaml](docker/compose.http.yaml) adds [Caddy 2.11.4](https://hub.docker.com/_/caddy), pinned by its Linux multi-platform image digest. The [Caddyfile](docker/Caddyfile) forwards `/v1/messages` to the node, preserving the method, signed body, response status, and `Retry-After`. Other HTTPS paths return 404, including `/healthz`. The node's host port stays on loopback, and Kubo's API/gateway stay unpublished. HTTP/1.1 and HTTP/2 use TCP; HTTP/3 is disabled.
+
+Caddy and the node share a `frontend` network; only the node joins both `frontend` and `backend`. Caddy cannot connect directly to Kubo's API. Both networks retain outbound connectivity for certificates, RPC calls, and IPFS peers.
 
 Choose a public DNS hostname you control. Point its A record, and any AAAA record, to this Docker host; remove an AAAA record if IPv6 is not routed to it. Allow inbound TCP 80 and 443 through the host/cloud firewall and any router forwarding, and ensure those ports are free. Caddy needs outbound DNS and HTTPS access to obtain and renew certificates. Keep port 80 reachable for HTTP redirects and certificate validation. Clients should submit directly to HTTPS. See [Caddy's automatic HTTPS requirements](https://caddyserver.com/docs/automatic-https).
 
@@ -339,15 +345,15 @@ npm --prefix node/production run local -- status
 
 `status` queries only the local `/healthz` endpoint, with a five-second deadline covering connection and response reading. It verifies the chain ID, Ledger address, and node address against the selected settings. `ready` and `busy` exit 0. `shutting_down`, `transaction_outcome_unknown`, an identity mismatch, an unreachable node, or malformed health data exit 1 with sanitized output. Status never starts or restarts a process and does not probe Ethereum or IPFS. An unknown transaction outcome requires inspection before restarting or retrying.
 
-For direct runtime startup, the existing entrypoint remains available:
+For direct runtime startup with the same literal secret-file format as Docker:
 
 ```sh
-node --env-file=node/production/.env node/production/src/main.mjs node/production/config.local.json
+node node/production/src/main.mjs /absolute/path/to/config.json /absolute/path/to/node.env
 ```
 
-The direct Node.js `--env-file` command gives inherited variables precedence; clear conflicting inherited Oya values when using it after the local commands.
+The second argument selects a required secrets file. Its values stay out of `process.env`, and omitted credentials never inherit environment values. This literal format differs from the local CLI's dotenv parser: use the Docker example file and keep agent/deployer keys separate.
 
-Alternatively, with environment variables already loaded:
+For compatibility, the one-argument entrypoint still supports environment variables already loaded by a host process supervisor:
 
 ```sh
 node -- node/production/src/main.mjs /absolute/path/to/config.json

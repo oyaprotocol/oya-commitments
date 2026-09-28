@@ -10,4 +10,4 @@ COPY src/ ./src/
 
 USER node
 ENTRYPOINT ["node", "src/main.mjs"]
-CMD ["/config/node.json"]
+CMD ["/config/node.json", "/run/secrets/node.env"]
