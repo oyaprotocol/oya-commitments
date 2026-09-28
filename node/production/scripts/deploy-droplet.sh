@@ -2,22 +2,29 @@
 set -euo pipefail
 
 usage() {
-    echo 'Usage: bash deploy-droplet.sh SSH_TARGET PUBLIC_HOSTNAME CONFIG_JSON NODE_ENV'
+    echo 'Usage: bash deploy-droplet.sh SSH_TARGET PUBLIC_HOSTNAME CONFIG_JSON NODE_ENV [IMAGE@sha256:DIGEST]'
     echo 'First deployment only; requires verified SSH access and Docker/Compose on a Linux amd64 host.'
+    echo 'Uses image.txt from the release bundle unless an explicit pinned GHCR image is supplied.'
 }
 fail() { echo "$1" >&2; exit 1; }
 if [[ ${1:-} == --help && $# == 1 ]]; then usage; exit 0; fi
-if [[ $# != 4 ]]; then usage >&2; exit 1; fi
+if [[ $# != 4 && $# != 5 ]]; then usage >&2; exit 1; fi
 target=$1
 hostname=$2
 [[ $target =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.@-]*$ ]] || fail 'Use a user@host or SSH config alias, without shell options.'
 [[ ${#hostname} -le 253 && $hostname =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]] || fail 'Supply a public DNS hostname without a scheme, port, or path.'
 [[ -f $3 && -r $3 && -f $4 && -r $4 ]] || fail 'Supply readable configuration and environment files.'
-for executable in docker ssh tar od tr; do command -v "$executable" >/dev/null || fail "Missing dependency: $executable"; done
+for executable in ssh tar; do command -v "$executable" >/dev/null || fail "Missing dependency: $executable"; done
 runtime=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+image=${5:-}
+if [[ $# == 4 ]]; then
+    [[ -r $runtime/image.txt ]] || fail 'Use a published release bundle or supply a pinned GHCR image as the fifth argument.'
+    image=$(cat "$runtime/image.txt")
+fi
+[[ $image =~ ^ghcr\.io/[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9._-]*@sha256:[0-9a-f]{64}$ ]] || fail 'Supply a GHCR image pinned by its full SHA-256 digest, without a mutable tag.'
 ssh_options=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10)
 
-echo 'Checking the existing Droplet before building.'
+echo 'Checking the existing Droplet before deployment.'
 ssh "${ssh_options[@]}" "$target" 'bash -s -- check' < "$runtime/scripts/deploy-droplet-remote.sh"
 
 umask 077
@@ -34,17 +41,9 @@ chmod 644 "$staging/docker/Caddyfile"
 cat < "$3" > "$staging/node.json"
 cat < "$4" > "$staging/node.env"
 chmod 600 "$staging/node.json" "$staging/node.env"
-# Image loading precedes the directory claim; separate hosts must not share a tag.
-image_suffix=$(od -An -N16 -tx1 /dev/urandom | tr -d '[:space:]')
-[[ $image_suffix =~ ^[0-9a-f]{32}$ ]] || fail 'Could not generate a 128-bit image tag suffix.'
-image="oya-node:deploy-$(date -u +%Y%m%dT%H%M%SZ)-$$-$image_suffix"
-printf 'services:\n  node:\n    image: %s\n' "$image" > "$staging/image.yaml"
+printf 'services:\n  node:\n    build: !reset null\n    image: %s\n' "$image" > "$staging/image.yaml"
 printf 'export OYA_PUBLIC_HOSTNAME=%s\n' "$hostname" > "$staging/compose.env"
 
-echo 'Building the current repository runtime for Linux amd64.'
-docker build --platform linux/amd64 --tag "$image" "$runtime"
-echo 'Transferring the application image over SSH.'
-docker image save "$image" | ssh "${ssh_options[@]}" "$target" 'docker image load'
 echo 'Copying the deployment files into a new private directory.'
 # mkdir claims the directory atomically; concurrent or repeated installs cannot overwrite it.
 tar -C "$staging" -cf - . | ssh "${ssh_options[@]}" "$target" \

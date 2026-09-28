@@ -1,6 +1,6 @@
 # First deployment to a DigitalOcean Droplet
 
-Run `scripts/deploy-droplet.sh` from your laptop to build the current repository runtime for Linux amd64, copy its image and private settings over SSH, validate configuration, and start Node, Kubo, and Caddy. The script uses the existing Compose files and makes no cloud API calls or Ledger transactions. No Git checkout, Node installation, or image build is needed on the server.
+Run `scripts/deploy-droplet.sh` from your laptop to copy private settings over SSH, pull a published Linux amd64 image on the server by its exact digest, validate configuration, and start Node, Kubo, and Caddy. Use the deployment bundle attached to a production-node GitHub Release. The script uses the bundled Compose files and makes no cloud API calls or Ledger transactions. Neither machine needs a source checkout, Node installation, or image build; only the server needs Docker/Compose. Maintainers publish releases using the [image release guide](release-image.md).
 
 This is a first-install command. It refuses an existing deployment directory, Oya project containers (including stopped containers), or volumes whose names begin with `oya_`. Updates and recovery still use the deliberate shutdown/reconciliation procedure in the [operator guide](README.md#receive-messages-over-https). Never run another instance using the same node signing account.
 
@@ -10,7 +10,7 @@ Create an Ubuntu 24.04 x64 Droplet in a US region. A 1 GB/25 GB plan is a monito
 
 Attach a DigitalOcean Cloud Firewall allowing SSH TCP 22 from your administration IP, HTTP/HTTPS TCP 80/443 from the internet, and IPFS TCP/UDP 4001 from the internet. Keep outbound traffic allowed. Ports 8787, 5001, and 8080 remain private. Point the hostname's A record at the Droplet; configure IPv6 completely or remove its AAAA record. For the first deployment, use direct DNS without another HTTP proxy. See [Cloud Firewalls](https://docs.digitalocean.com/products/networking/firewalls/getting-started/quickstart/).
 
-Your laptop needs Bash, Docker with Linux amd64 build support, SSH, tar, and the standard `od`/`tr` tools with `/dev/urandom` for random image tags. Connect interactively once, verify the server's SSH fingerprint, and confirm Docker access:
+Your laptop needs Bash, SSH, and tar. The server needs outbound access to GHCR as well as the Kubo/Caddy registries. Public images require no registry login on the server. Connect interactively once, verify the server's SSH fingerprint, and confirm Docker access:
 
 ```sh
 ssh oya@DROPLET_IP 'docker version && docker compose version'
@@ -18,7 +18,7 @@ ssh oya@DROPLET_IP 'docker version && docker compose version'
 
 The deployment command uses existing SSH keys/agent configuration and requires a previously verified host key. An SSH config alias works for custom users, ports, or identity files. Password prompts and unknown host keys cause it to stop.
 
-From the repository root, prepare private input files outside the checkout:
+Download `oya-node-vVERSION.tar.gz` from the chosen GitHub Release (replace `VERSION` with its actual version), extract it into a new directory, and run commands from the extracted directory containing `node/production`. The bundle includes `node/production/image.txt` with the exact release digest. Keep its scripts, Compose files, and image pin together. Prepare private input files outside that directory:
 
 ```sh
 umask 077
@@ -32,7 +32,7 @@ Edit those files with your chain ID, RPC endpoint, verified Ledger address, allo
 
 ## Deploy
 
-Review the current working-tree runtime, Dockerfile, lockfile, and Compose files before running. The script builds those files, including any uncommitted changes; it does not fetch a different revision or publish an image. Run from the repository root:
+Review the release notes and bundled deployment files before running. The script accepts only a complete GHCR SHA-256 image reference, so moving a registry version tag cannot change this deployment. Run from the extracted bundle root:
 
 ```sh
 bash node/production/scripts/deploy-droplet.sh \
@@ -40,7 +40,9 @@ bash node/production/scripts/deploy-droplet.sh \
   "$HOME/oya-private/node.json" "$HOME/oya-private/node.env"
 ```
 
-Replace the SSH target and hostname. The command checks the host before building, creates a unique image tag, transfers the image, and creates the remote operator's private `$HOME/oya` directory. Only the Compose/Caddy files, image override, generated Compose settings, and the two private input files are copied. Private inputs have mode 0600; the directory has mode 0700. Local staging files are removed on exit; local Docker images/build cache remain.
+Replace the SSH target and hostname. The command checks the host, creates the remote operator's private `$HOME/oya` directory, and pulls the pinned image there. Only the Compose/Caddy files, digest override, generated Compose settings, and the two private input files are copied. Private inputs have mode 0600; the directory has mode 0700. Local staging files are removed on exit. The image override disables the Compose build; missing images must be pulled, never built from local files.
+
+When using a source checkout instead of the bundle, check out the matching release tag and supply the exact reference from that release's `image.txt` as a fifth argument. For example, append `'ghcr.io/oyachat/oya-node@sha256:REPLACE_WITH_RELEASE_DIGEST'` to the command above, replacing the placeholder with all 64 hexadecimal digest characters. Tags such as `latest` or `v0.1.0` are rejected. This explicit argument also overrides a bundle's pin; use matching release files when selecting a different version.
 
 If the remote SSH environment defines `OYA_DEPLOY_DIR`, that directory replaces `$HOME/oya`; its parent must already exist. The generated settings retain the resolved location. This does not change the `oya` project name or allow deployment over existing Oya volumes.
 
@@ -61,6 +63,38 @@ docker stats --no-stream
 
 The generated `COMPOSE_FILE` uses absolute paths on that host, so these commands work from any directory. Do not print expanded `docker compose config` or full container inspection output: they can expose runtime credentials. Use `docker compose config --quiet` for syntax checks.
 
-A failed install leaves remote files and any created containers/volumes for inspection. A repeated install refuses them; it never automatically rolls back, deletes storage, or retries a signing node. Inspect the failure and reconcile any uncertain transaction before using the [manual recovery procedure](README.md#operate-and-inspect). If private settings change, regenerate the timeout relationships documented in the [HTTPS guide](README.md#receive-messages-over-https) before restarting. Transfer interruption before file creation may leave only an unused image, which does not prevent another first-install attempt.
+A failed install leaves remote files and any created containers/volumes for inspection. A repeated install refuses them; it never automatically rolls back, deletes storage, or retries a signing node. A failed registry pull stops before configuration validation or startup. Inspect the failure and reconcile any uncertain transaction before using the [manual recovery procedure](README.md#operate-and-inspect). If private settings change, regenerate the timeout relationships documented in the [HTTPS guide](README.md#receive-messages-over-https) before restarting.
 
 The node deliberately stays stopped after a crash/reboot until operator recovery. Preserve the `oya` project name, IPFS volume, certificate volumes, and private settings; use the [backup procedure](README.md#back-up-and-restore-ipfs), stopping the proxy first. Never use `down --volumes` to recover a deployment you intend to preserve.
+
+## Update an existing node
+
+Do not rerun the first-install script. Read the new release's migration notes and keep a copy of the existing deployment files and digest. The following commands are for a compatible image-only update on the server. If the release changes Compose/Caddy files or private configuration, apply its documented migration and recheck timeout relationships before restarting; do not overwrite private settings with examples.
+
+Load the existing environment, set the exact new digest from the release, pull it before stopping services, and then drain public requests:
+
+```sh
+source "$HOME/oya/compose.env"
+cd "$OYA_DEPLOY_DIR"
+export OYA_NEXT_IMAGE='ghcr.io/oyachat/oya-node@sha256:REPLACE_WITH_RELEASE_DIGEST'
+docker pull "$OYA_NEXT_IMAGE"
+docker compose stop proxy
+docker compose stop node
+```
+
+Replace the digest placeholder before running. Inspect logs and reconcile any unknown transaction outcome or interrupted request before continuing. Preserve the IPFS and certificate volumes. Save the current image override for rollback, set the new pin, and start only the node:
+
+```sh
+cp image.yaml image.previous.yaml
+printf 'services:\n  node:\n    build: !reset null\n    image: %s\n' "$OYA_NEXT_IMAGE" > image.yaml
+docker compose config --quiet
+docker compose up --detach --no-deps --no-build --pull never --force-recreate --wait --wait-timeout 180 node
+```
+
+Only after that command succeeds and the node is healthy, restore public access:
+
+```sh
+docker compose up --detach --no-deps --no-build --pull never --wait --wait-timeout 180 proxy
+```
+
+Verify an external signed submission and independent CID retrieval as for a first deployment. If startup or publication fails, inspect and reconcile before any retry or rollback. For a compatible rollback, drain/stop the proxy and node again, restore `image.previous.yaml`, pull its node image with `docker compose pull node`, and use the same node-then-proxy startup sequence. There is no automatic rollback, and image rollback does not undo a transaction or storage migration.

@@ -31,7 +31,8 @@ export COMPOSE_FILE="$OYA_DEPLOY_DIR/compose.yaml:$OYA_DEPLOY_DIR/docker/compose
 EOF
 source ./compose.env
 docker compose config --quiet
-response_seconds=$(docker compose run --rm --no-deps -T --entrypoint node node --input-type=module -e '
+docker compose pull node
+response_seconds=$(docker compose run --pull never --rm --no-deps -T --entrypoint node node --input-type=module -e '
 import { loadConfig } from "./src/config.mjs";
 import { createLocalSigner } from "./src/signer.mjs";
 try {
