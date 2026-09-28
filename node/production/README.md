@@ -313,6 +313,112 @@ Each invocation of Forge has a separate private `.oya-ledger-*` directory beside
 
 The [local integration test](#install-and-validate) checks deployment-key precedence, blocked redeployment before manual adoption, and reuse after adoption as part of the complete publication flow.
 
+### Deploy Ledger on Sepolia
+
+Use this procedure on your laptop with a reviewed source checkout, Node.js 24, npm, and [Foundry](https://getfoundry.sh/getting-started/installation). The deployment bundle does not include the contract source or local CLI. Run the commands from the repository root in Bash or zsh, stopping if any command fails. This targets **Ethereum Sepolia, chain ID `11155111`**, as listed in the [Sepolia network configuration](https://github.com/eth-clients/sepolia#metadata).
+
+#### Prepare a private deployment directory
+
+Install the locked dependencies and initialize the contract's dependency:
+
+```sh
+npm --prefix node/production ci --ignore-scripts --no-audit --no-fund
+git submodule update --init lib/forge-std
+forge --version
+```
+
+Choose a directory outside the checkout and outside shared or cloud-synced folders. The path below is an example; keep it selected in this terminal for the remaining commands:
+
+```sh
+set +x
+umask 077
+export OYA_SEPOLIA_DIR="$HOME/oya-private/sepolia-ledger"
+mkdir -p "$OYA_SEPOLIA_DIR"
+chmod 700 "$OYA_SEPOLIA_DIR"
+```
+
+#### Create and fund a dedicated testnet deployer
+
+This creates a fresh wallet, writes its private key directly to a mode-0600 file, and prints only its public address. The key is never pasted into a command or copied through the clipboard. The subshell below leaves your terminal in the repository root:
+
+```sh
+(
+  cd node/production || exit 1
+  node --input-type=module <<'NODE'
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { Wallet } from 'ethers';
+
+const wallet = Wallet.createRandom();
+await writeFile(join(process.env.OYA_SEPOLIA_DIR, 'deployer.env'),
+    'LEDGER_DEPLOYER_PK=' + wallet.privateKey + '\nOYA_RPC_AUTHORIZATION=\n',
+    { flag: 'wx', mode: 0o600 });
+console.log('Sepolia deployer address: ' + wallet.address);
+NODE
+)
+```
+
+Run wallet creation once. It refuses to overwrite an existing `deployer.env`; preserve that file when continuing or retrying deployment. The empty authorization entry prevents an inherited RPC authorization header from affecting this workflow.
+
+Request Sepolia ETH for the printed address using a faucet from [Ethereum's Sepolia faucet list](https://ethereum.org/en/developers/docs/networks/#sepolia). Give the faucet only the public address, never the private key or a recovery phrase. Confirm the balance on [Sepolia Etherscan](https://sepolia.etherscan.io/) before proceeding. Use this account only for testnet deployment; the node and message-signing clients use separate accounts.
+
+#### Configure the Sepolia connection
+
+Create a private configuration file without overwriting an existing one:
+
+```sh
+cp -n node/production/config.example.json "$OYA_SEPOLIA_DIR/deploy.json"
+chmod 600 "$OYA_SEPOLIA_DIR/deploy.json"
+```
+
+In a trusted local editor, replace its contents with the JSON below and replace `REPLACE_WITH_SEPOLIA_RPC_ENDPOINT` with your provider's HTTPS URL for Ethereum Sepolia. Keep any API token in this private file. The deployment helper does not support providers requiring a separate HTTP Authorization header.
+
+```json
+{
+  "host": "127.0.0.1",
+  "chainId": 11155111,
+  "ledgerContract": "0x1111111111111111111111111111111111111111",
+  "allowedSigners": ["0x2222222222222222222222222222222222222222"],
+  "rpcUrl": "https://REPLACE_WITH_SEPOLIA_RPC_ENDPOINT",
+  "ipfsUrl": "http://127.0.0.1:5001",
+  "receiptTimeoutMs": 180000
+}
+```
+
+The two addresses are placeholders for this deployment-only configuration. IPFS, a node key, and actual client addresses are not needed for `deploy-ledger`. The helper checks the RPC chain ID before invoking Forge; the Solidity script checks it again before deployment.
+
+#### Simulate, then broadcast
+
+First simulate without submitting a transaction:
+
+```sh
+npm --prefix node/production run local -- deploy-ledger \
+  --config "$OYA_SEPOLIA_DIR/deploy.json" \
+  --env-file "$OYA_SEPOLIA_DIR/deployer.env"
+```
+
+Check that the output names your public deployer address and chain `11155111`, followed by `OK Simulation passed`. If it reports reuse instead, the configured address already has code: stop and establish whether it is the intended Ledger. Code presence alone does not verify the contract implementation.
+
+After a successful simulation, submit the deployment. This spends Sepolia ETH for gas:
+
+```sh
+npm --prefix node/production run local -- deploy-ledger --broadcast \
+  --config "$OYA_SEPOLIA_DIR/deploy.json" \
+  --env-file "$OYA_SEPOLIA_DIR/deployer.env"
+```
+
+Success prints the transaction hash and `OK Verified Ledger` with the deployed address. The helper checks the receipt's success, sender, created address, chain, and deployed code, then writes `deploy.json.deployment.local.json` beside your configuration. Check the transaction and contract address on Sepolia Etherscan. This receipt check does not publish or verify source code on the explorer.
+
+If broadcasting times out or verification fails, retain the private deployment artifacts and reconcile the transaction on Sepolia before another broadcast. A failed command can still have submitted a successful transaction. Do not delete the records or repeatedly retry to get past an error.
+
+#### Use the address in your node
+
+Set `ledgerContract` in `deploy.json` to the verified address so future deployment commands recognize it. In the separate private `node.json` used for the [Droplet deployment](deploy-droplet.md), set `chainId` to `11155111`, `ledgerContract` to that same address, your Sepolia RPC URL, and your actual `allowedSigners`. Keep the Docker settings `host: "0.0.0.0"`, `port: 8787`, and `ipfsUrl: "http://ipfs:5001"`.
+
+Fund the separate node account with Sepolia ETH for message-publication gas. The running node does not need the deployer key: keep `deployer.env` on your laptop and put only the node's own key and supported authorization values in its `node.env` secret file.
+
+The commands above keep the deployer key out of command arguments and shell history, and the helper captures raw Forge output. The key remains plaintext in `deployer.env` and is passed to Forge through its child-process environment while signing. File permissions do not protect it from your account or a machine administrator; use a trusted machine and encrypted storage/backups. Keep private files and raw deployment artifacts out of Git, release bundles, screenshots, and support messages. Public addresses and transaction hashes can be shared, but reveal which account made the deployment.
+
 ### Check and run the node
 
 Check the configuration and services from the repository root:

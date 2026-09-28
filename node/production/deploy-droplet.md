@@ -30,6 +30,8 @@ chmod 600 "$HOME/oya-private/node.json" "$HOME/oya-private/node.env"
 
 Edit those files with your chain ID, RPC endpoint, verified Ledger address, allowed client addresses, and dedicated node key. The node needs gas funds; clients only sign messages. Keep `host` as `0.0.0.0`, `port` as `8787`, and `ipfsUrl` as `http://ipfs:5001`. `node.env` becomes a read-only secret mount, not container environment variables. Use only the three keys in its example, once each, with literal, unquoted `KEY=value` entries. Both files retain mode 0600 and must be readable by the operator UID used in the container. See [private settings](README.md#prepare-private-settings) and [Ledger deployment](README.md#deploy-or-reuse-ledger). Starting this script does not create/fund keys or deploy Ledger.
 
+For a new Ledger on Ethereum Sepolia, follow the [Sepolia deployment instructions](README.md#deploy-ledger-on-sepolia) on your laptop first. They create a separate private deployer file, simulate before broadcasting, and show which verified address to put in your node configuration.
+
 ## Deploy
 
 Review the release notes and bundled deployment files before running. The script accepts only a complete GHCR SHA-256 image reference, so moving a registry version tag cannot change this deployment. Run from the extracted bundle root:
