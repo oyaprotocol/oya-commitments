@@ -31,13 +31,32 @@ async function readDeployment(artifactPath, chainId, deployer) {
 }
 
 export async function deployLedger(configPath, { config, env }, {
-    broadcast = false, execute = promisify(execFile), fetch = globalThis.fetch, log = console.log,
+    broadcast = false, verify = false, execute = promisify(execFile), fetch = globalThis.fetch, log = console.log,
 } = {}) {
     let stage = 'Check Ethereum RPC availability and chainId.';
     let artifactPath;
     let submitted = false;
     let deployment;
     let deployer;
+    // Retain ordinary process settings, but isolate Foundry and Oya configuration.
+    const baseEnv = Object.fromEntries(Object.entries(env).filter(([key]) =>
+        !/^(OYA_|LEDGER_|LOGGER_|FOUNDRY_|DAPP_|ETH_|ETHERSCAN_|VERIFIER_)/.test(key)));
+    const verifySource = async (address) => {
+        log(`Verifying Ledger source on Etherscan for ${address} on chain ${config.chainId}.`);
+        try {
+            // Verification needs only the explorer key, never the deployer key or private RPC URL.
+            await execute('forge', ['verify-contract', '--root', 'contracts', '--chain', String(config.chainId),
+                '--verifier', 'etherscan', '--watch', address, 'src/Ledger.sol:Ledger'], {
+                cwd: root, env: { ...baseEnv, ETHERSCAN_API_KEY: env.ETHERSCAN_API_KEY },
+                timeout: 180_000, maxBuffer: 1_048_576,
+            });
+            log(`OK Source verified on Etherscan for Ledger ${address} on chain ${config.chainId}.`);
+            return 0;
+        } catch {
+            log('FAIL Etherscan source verification failed. Check the API key, explorer availability, and matching source/compiler settings. Retry verification only; do not deploy again.');
+            return 1;
+        }
+    };
     const rpc = async (method, params = []) => {
         const timeout = createTimeoutSignal(10_000);
         try {
@@ -52,6 +71,10 @@ export async function deployLedger(configPath, { config, env }, {
         }
     };
     try {
+        if (verify && (!broadcast || !env.ETHERSCAN_API_KEY?.trim())) {
+            log('FAIL --verify requires --broadcast and ETHERSCAN_API_KEY in the selected environment file or inherited environment.');
+            return 1;
+        }
         if (config.rpc.headers.authorization) {
             log('FAIL deploy-ledger does not support RPC Authorization headers yet. Use an RPC endpoint without that requirement.');
             return 1;
@@ -60,7 +83,7 @@ export async function deployLedger(configPath, { config, env }, {
         stage = 'Check the configured Ledger address and RPC bytecode response.';
         if (hasBytecode(await rpc('eth_getCode', [config.ledgerContract, 'latest']))) {
             log(`OK Reusing configured Ledger ${config.ledgerContract} on chain ${config.chainId}; no deployment submitted.`);
-            return 0;
+            return verify ? await verifySource(config.ledgerContract) : 0;
         }
         stage = 'Set a valid LEDGER_DEPLOYER_PK in the selected environment file or inherited environment.';
         deployer = createLocalSigner(env.LEDGER_DEPLOYER_PK).address;
@@ -74,9 +97,6 @@ export async function deployLedger(configPath, { config, env }, {
         const directory = await mkdtemp(join(dirname(configPath), '.oya-ledger-'));
         artifactPath = join(directory, 'broadcast', 'DeployLedger.s.sol', String(config.chainId), 'run-latest.json');
         log(`Deployment artifacts: ${directory}`);
-        // Retain ordinary process settings, but isolate Foundry and Oya configuration.
-        const baseEnv = Object.fromEntries(Object.entries(env).filter(([key]) =>
-            !/^(OYA_|LEDGER_|LOGGER_|FOUNDRY_|DAPP_|ETH_|ETHERSCAN_|VERIFIER_)/.test(key)));
         stage = 'Install Foundry and initialize lib/forge-std before deploying.';
         try { await access(join(root, 'lib/forge-std/src/Script.sol')); } catch (error) {
             if (error.code !== 'ENOENT') throw error;
@@ -116,7 +136,7 @@ export async function deployLedger(configPath, { config, env }, {
             transactionHash: deployment.transactionHash, blockNumber: receipt.blockNumber.toString(), deployer };
         await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
         log(`OK Deployment recorded. Set ledgerContract to ${deployment.address} in ${configPath}, then run local check.`);
-        return 0;
+        return verify ? await verifySource(deployment.address) : 0;
     } catch {
         log(`FAIL ${stage}`);
         if (submitted) {
