@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { chown, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chown, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { request as requestHttps } from 'node:https';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,12 +12,15 @@ import { parseArgs } from 'node:util';
 import { Interface, Wallet, keccak256, toUtf8Bytes } from 'ethers';
 
 const production = fileURLToPath(new URL('../', import.meta.url));
-const { values: { verbose, platform, http } } = parseArgs({ options: {
+const { values: { verbose, platform, http, testing } } = parseArgs({ options: {
     verbose: { type: 'boolean', default: false }, platform: { type: 'string' }, http: { type: 'boolean', default: false },
+    testing: { type: 'boolean', default: false },
 } });
 if (platform && !['linux/amd64', 'linux/arm64'].includes(platform)) throw new Error('Select linux/amd64 or linux/arm64.');
+if (testing && http) throw new Error('Run the testing and HTTPS fixtures separately.');
 
-test(http ? 'HTTPS preserves signed messages, admission limits, and long-running operations' :
+test(testing ? 'Optional testing profile signs and logs an hourly agent message' :
+    http ? 'HTTPS preserves signed messages, admission limits, and long-running operations' :
     'Docker publishes signed messages, preserves IPFS, drains work, and requires reconciliation', { timeout: http ? 1_200_000 : 900_000 }, async (t) => {
     const directory = await mkdtemp(join(tmpdir(), 'oya-docker-'));
     const project = `oya-test-${randomUUID()}`;
@@ -34,6 +37,8 @@ test(http ? 'HTTPS preserves signed messages, admission limits, and long-running
             'NODE_TLS_REJECT_UNAUTHORIZED', 'NODE_USE_ENV_PROXY'].includes(key)));
     const fixtureEnv = { ...baseEnv, OYA_CONFIG_FILE: join(directory, 'node.json'),
         OYA_ENV_FILE: join(directory, 'node.env'),
+        ...(testing ? { OYA_TEST_AGENT_IMAGE: `${project}-node`, OYA_TEST_AGENT_DIR: join(directory, 'test-agent-private'),
+            OYA_TEST_AGENT_SOURCE: join(production, '../../agent-library/agents/hourly-message-test') } : {}),
         ...(http ? { OYA_PUBLIC_HOSTNAME: 'localhost' } : {}),
         OYA_CONTAINER_USER: process.getuid?.() ? `${process.getuid()}:${process.getgid()}` : '1000:1000' };
     let stage = 'prerequisites';
@@ -65,9 +70,11 @@ test(http ? 'HTTPS preserves signed messages, admission limits, and long-running
             child.stdin.end(input);
         });
     }
-    const compose = (args, { name = project, fixture = true, ...options } = {}) => command('docker', [
+    const compose = (args, { name = project, fixture = true, profile = testing, ...options } = {}) => command('docker', [
         'compose', '--project-name', name, '--env-file', join(directory, 'empty.env'),
+        ...(profile ? ['--profile', 'testing'] : []),
         ...['compose.yaml', ...(http ? ['docker/compose.http.yaml'] : []),
+            ...(testing ? ['docker/compose.testing.yaml'] : []),
             ...(fixture ? ['docker/compose.test.yaml', ...(http ? ['docker/compose.http.test.yaml'] : [])] : [])]
             .flatMap((file) => ['-f', join(production, file)]), ...args,
     ], { ...options, env: { ...fixtureEnv, COMPOSE_PROJECT_NAME: name } });
@@ -121,7 +128,7 @@ test(http ? 'HTTPS preserves signed messages, admission limits, and long-running
         await readFile(join(production, '../../lib/forge-std/src/Script.sol'));
         const deployer = Wallet.createRandom();
         const nodeWallet = Wallet.createRandom();
-        const agent = Wallet.createRandom();
+        let agent = Wallet.createRandom();
         const disallowed = Wallet.createRandom();
         await writeFile(join(directory, 'empty.env'), '', { mode: 0o600 });
         await writeFile(fixtureEnv.OYA_CONFIG_FILE, '{}', { mode: 0o600 });
@@ -131,6 +138,15 @@ test(http ? 'HTTPS preserves signed messages, admission limits, and long-running
         await compose(['config', '--quiet']);
         // Keep model assertions/output free of secrets, even if configuration regresses.
         const model = JSON.parse((await compose(['config', '--format', 'json'])).toString());
+        if (testing) {
+            const disabled = JSON.parse((await compose(['config', '--format', 'json'], { profile: false })).toString());
+            assert.equal(disabled.services['test-agent'], undefined);
+            assert.deepEqual(Object.keys(model.services['test-agent'].networks), ['testing']);
+            assert.equal(model.services['test-agent'].ports, undefined);
+            assert.equal(model.services['test-agent'].restart, 'no');
+            assert.ok(model.services['test-agent'].volumes.every(mount => mount.read_only));
+            assert.equal(model.services.ipfs.networks.testing, undefined);
+        }
         const ports = { node: [8787], ipfs: [5001], anvil: [8545], ...(http ? { proxy: [80, 443] } : {}) };
         for (const [service, targets] of Object.entries(ports)) {
             assert.equal(model.services[service].ports.length, targets.length);
@@ -162,6 +178,13 @@ test(http ? 'HTTPS preserves signed messages, admission limits, and long-running
         built = true;
         const imagePlatform = (await command('docker', ['image', 'inspect', '--format', '{{.Os}}/{{.Architecture}}', `${project}-node`])).toString().trim();
         assert.equal(imagePlatform, fixtureEnv.OYA_TEST_PLATFORM);
+        if (testing) {
+            progress('Running hourly agent unit tests in the runtime image');
+            await command('docker', ['run', '--rm', '--network', 'none', '--read-only', '--platform', fixtureEnv.OYA_TEST_PLATFORM,
+                '--tmpfs', '/tmp:rw,noexec,nosuid,size=32m',
+                '--mount', `type=bind,src=${fixtureEnv.OYA_TEST_AGENT_SOURCE},dst=/app/test-agent,readonly`,
+                '--entrypoint', 'node', `${project}-node`, '--test', '/app/test-agent/test-agent.test.mjs']);
+        }
         progress('Starting disposable Anvil and offline Kubo');
         await compose(['up', '-d', '--wait', '--wait-timeout', '90', 'anvil', 'ipfs'], { timeout: 240_000 });
         const rpcUrl = await endpoint('anvil', 8545);
@@ -302,6 +325,41 @@ test(http ? 'HTTPS preserves signed messages, admission limits, and long-running
         };
 
         progress('Publishing through the Compose node from a separate agent process');
+        if (testing) {
+            progress('Generating a cloud agent key and enrolling it before node startup');
+            await mkdir(fixtureEnv.OYA_TEST_AGENT_DIR, { mode: 0o700 });
+            if (process.getuid?.() === 0) await chown(fixtureEnv.OYA_TEST_AGENT_DIR, 1000, 1000);
+            await command('docker', ['run', '--rm', '--network', 'none', '--read-only', '--cap-drop', 'ALL',
+                '--security-opt', 'no-new-privileges', '--user', fixtureEnv.OYA_CONTAINER_USER,
+                '--platform', fixtureEnv.OYA_TEST_PLATFORM,
+                '--mount', `type=bind,src=${fixtureEnv.OYA_TEST_AGENT_SOURCE},dst=/app/test-agent,readonly`,
+                '--mount', `type=bind,src=${fixtureEnv.OYA_TEST_AGENT_DIR},dst=/setup`,
+                '--mount', `type=bind,src=${fixtureEnv.OYA_CONFIG_FILE},dst=/config/node.json`,
+                '--entrypoint', 'node', `${project}-node`, '/app/test-agent/agent.mjs', 'init', '/setup/key', '/config/node.json']);
+            agent = new Wallet((await readFile(join(fixtureEnv.OYA_TEST_AGENT_DIR, 'key'), 'utf8')).trim());
+            await start();
+            assert.equal(await nonce(), '0x0');
+            progress('Starting the optional profile and verifying its first real publication');
+            await compose(['up', '-d', '--no-build', '--pull', 'never', '--wait', 'test-agent']);
+            const result = await until(async () => {
+                const lines = (await compose(['logs', '--no-log-prefix', 'test-agent'])).toString().trim();
+                return lines && lines.split('\n').map(line => JSON.parse(line)).find(line => line.event === 'test_message_logged');
+            });
+            const envelope = await (await ipfs(`cat?arg=${result.cid}`)).json();
+            assert.match(envelope.text, /^Hourly test message /);
+            assert.equal(envelope.signer, agent.address);
+            await verify({ ...result, uri: `ipfs://${result.cid}` }, envelope.text);
+            const container = JSON.parse((await command('docker', ['inspect', await containerId('test-agent')])).toString())[0];
+            assert.deepEqual(Object.keys(container.NetworkSettings.Networks), [`${project}_testing`]);
+            assert.ok(container.Mounts.every(mount => !mount.RW));
+            assert.equal(JSON.stringify(container).includes(agent.privateKey), false);
+            assert.equal(container.Mounts.some(mount => mount.Destination.includes('node.env')), false);
+            await compose(['stop', '--timeout', '5', 'test-agent']);
+            assert.equal((await state(await containerId('test-agent'))).ExitCode, 0);
+            assert.equal(await nonce(), '0x1');
+            t.diagnostic(JSON.stringify({ platform: imagePlatform, agentAddress: agent.address, ...result }));
+            return;
+        }
         await start();
         if (http) await startProxy(240_000);
         for (const [service, targets] of Object.entries(ports)) {

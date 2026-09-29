@@ -52,6 +52,40 @@ The remote validation checks configuration and key format without broadcasting o
 
 On success, verify a signed submission from another machine using the [external deployment check](README.md#check-a-deployed-node-from-another-machine). Confirm its transaction and retrieve the CID through a separate online IPFS node. A public `/healthz` request should return 404. Observe memory, disk, peer connectivity, and announcements for 48–72 hours before depending on a 1 GB host. This script retains the existing Kubo settings and does not apply experimental low-memory tuning.
 
+## Optional hourly testing profile
+
+For a first Sepolia installation, add `--with-test-agent` before the ordinary arguments:
+
+```sh
+bash node/production/scripts/deploy-droplet.sh --with-test-agent \
+  oya@DROPLET_IP node.example.com \
+  "$HOME/oya-private/node.json" "$HOME/oya-private/node.env"
+```
+
+As with the normal command, a source checkout needs the pinned image reference as the final argument. Use the matching deployment bundle, which includes the test-agent source. No local agent key, signed message file, or LLM API key is required.
+
+The installer generates a separate agent key on the Droplet, saves it in `test-agent-private/key` with mode 0600 inside the private deployment directory, and appends its public address to the deployed `node.json` allowlist. It preserves existing entries and leaves your laptop's input files unchanged. With this option, the input `allowedSigners` may be an empty array; initialization fills it before node validation. The node continues to use the funded wallet in `node.env`, including a reused Ledger-deployer wallet. The agent account needs no ETH. Initialization accepts Sepolia (`11155111`) and disposable Anvil (`31337`), and refuses other chains.
+
+The Compose `testing` profile adds one `test-agent` container using the same pinned image as the node, with the reviewed agent source and its own key directory mounted read-only. It shares a separate network with the node, has no public port or direct Kubo connection, and receives no node key or RPC credentials. Its HTTP deadline follows `operationTimeoutMs` with 30 seconds of headroom; the installer also sets the longer stop grace.
+
+After the node becomes healthy, the agent sends its first generated message immediately, then starts another once per hour (about 24 submissions per day). It waits for each result before scheduling the next; there is no catch-up queue. Messages and their signatures become public through IPFS, and each successful submission spends the node's Sepolia gas. Logs contain `test_message_logged`, the agent address, CID, and transaction hash. This exercises the internal node-to-IPFS-to-Ledger flow; public DNS/TLS and independent IPFS retrieval still need the external check above.
+
+On the Droplet, inspect or pause it with:
+
+```sh
+source "$HOME/oya/compose.env"
+docker compose logs --tail=20 test-agent
+docker compose stop test-agent
+```
+
+Any rejected, failed, timed-out, or unconfirmed submission stops the agent with `test_agent_stopped`; it does not retry or automatically restart. Check node logs and Ledger before resuming an uncertain result. After reconciliation, with the node healthy:
+
+```sh
+docker compose up --detach --no-deps --no-build --pull never test-agent
+```
+
+An explicit restart sends immediately and starts a new hourly schedule. A normal stop interrupts the hourly wait; an in-flight request gets its bounded completion time. Both node and agent require deliberate recovery after a host reboot. To leave testing disabled, stop the agent and remove `export COMPOSE_PROFILES=testing` from `compose.env`, then use a new SSH session. Preserve `test-agent-private/key` and the deployed allowlist when backing up, recovering, or updating; initialization never replaces an existing key.
+
 ## Operate or recover
 
 In a new SSH session, load the generated settings before any Compose command:
@@ -69,9 +103,13 @@ A failed install leaves remote files and any created containers/volumes for insp
 
 The node deliberately stays stopped after a crash/reboot until operator recovery. Preserve the `oya` project name, IPFS volume, certificate volumes, and private settings; use the [backup procedure](README.md#back-up-and-restore-ipfs), stopping the proxy first. Never use `down --volumes` to recover a deployment you intend to preserve.
 
+If the testing profile is enabled, stop `test-agent` before stopping the proxy or node for backup, maintenance, or recovery. Keep its private key in protected backups as well.
+
 ## Update an existing node
 
 Do not rerun the first-install script. Read the new release's migration notes and keep a copy of the existing deployment files and digest. The following commands are for a compatible image-only update on the server. If the release changes Compose/Caddy files or private configuration, apply its documented migration and recheck timeout relationships before restarting; do not overwrite private settings with examples.
+
+With the testing profile enabled, stop `test-agent` first. Update `OYA_TEST_AGENT_IMAGE` in `compose.env` to the same new digest, and carry over any reviewed changes to `test-agent/agent.mjs` and `docker/compose.testing.yaml` from the matching release. Preserve `test-agent-private/key`. Keep the agent stopped until the node and proxy have passed the checks below, then start it explicitly using the command above.
 
 Load the existing environment, set the exact new digest from the release, pull it before stopping services, and then drain public requests:
 

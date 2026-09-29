@@ -43,7 +43,11 @@ mkdir -p "$bundle/docker" "$bundle/scripts"
 cp "$staging/source/compose.yaml" "$staging/source/README.md" \
     "$staging/source/deploy-droplet.md" "$staging/source/release-image.md" "$bundle/"
 cp "$staging/source/docker/compose.http.yaml" "$staging/source/docker/Caddyfile" \
+    "$staging/source/docker/compose.testing.yaml" \
     "$staging/source/docker/config.example.json" "$staging/source/docker/runtime.env.example" "$bundle/docker/"
+mkdir -p "$staging/bundle/agent-library/agents/hourly-message-test"
+git -C "$root" show "$revision:agent-library/agents/hourly-message-test/agent.mjs" \
+    > "$staging/bundle/agent-library/agents/hourly-message-test/agent.mjs"
 cp "$staging/source/scripts/deploy-droplet.sh" "$staging/source/scripts/deploy-droplet-remote.sh" "$bundle/scripts/"
 printf '%s@%s\n' "$repository" "$digest" > "$bundle/image.txt"
 cp "$bundle/image.txt" "$output/image.txt"

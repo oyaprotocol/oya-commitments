@@ -26,6 +26,9 @@ function fixture(t) {
     for (const name of ['publish-image.sh', 'deploy-droplet.sh', 'deploy-droplet-remote.sh']) {
         cpSync(join(runtime, 'scripts', name), join(source, 'scripts', name));
     }
+    const agent = 'agent-library/agents/hourly-message-test/agent.mjs';
+    mkdirSync(join(checkout, 'agent-library/agents/hourly-message-test'), { recursive: true });
+    cpSync(join(runtime, '../..', agent), join(checkout, agent));
     writeFileSync(join(checkout, '.gitignore'), 'node.env\nnode.json\n');
     const git = (...args) => execFileSync('git', ['-C', checkout, ...args], { encoding: 'utf8' }).trim();
     git('init', '--quiet');
@@ -81,7 +84,9 @@ test('publishes committed source and bundles matching scripts with this build’
     const bundle = join(unpacked, 'node/production');
     assert.deepEqual(readdirSync(bundle).sort(), ['README.md', 'compose.yaml', 'deploy-droplet.md', 'docker', 'image.txt', 'release-image.md', 'scripts']);
     assert.deepEqual(readdirSync(join(bundle, 'scripts')).sort(), ['deploy-droplet-remote.sh', 'deploy-droplet.sh']);
-    assert.deepEqual(readdirSync(join(bundle, 'docker')).sort(), ['Caddyfile', 'compose.http.yaml', 'config.example.json', 'runtime.env.example']);
+    assert.deepEqual(readdirSync(join(bundle, 'docker')).sort(), ['Caddyfile', 'compose.http.yaml', 'compose.testing.yaml', 'config.example.json', 'runtime.env.example']);
+    const agent = 'agent-library/agents/hourly-message-test/agent.mjs';
+    assert.equal(readFileSync(join(unpacked, agent), 'utf8'), readFileSync(join(f.checkout, agent), 'utf8'));
     assert.equal(readFileSync(join(bundle, 'image.txt'), 'utf8'), `${repository}@${digest}\n`);
     for (const name of ['deploy-droplet.sh', 'deploy-droplet-remote.sh']) {
         assert.equal(readFileSync(join(bundle, 'scripts', name), 'utf8'), readFileSync(join(f.source, 'scripts', name), 'utf8'));

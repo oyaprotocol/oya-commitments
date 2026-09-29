@@ -30,8 +30,28 @@ export COMPOSE_PROJECT_NAME=oya
 export COMPOSE_FILE="$OYA_DEPLOY_DIR/compose.yaml:$OYA_DEPLOY_DIR/docker/compose.http.yaml:$OYA_DEPLOY_DIR/image.yaml"
 EOF
 source ./compose.env
+# Clear inherited profiles: only the staged testing overlay enables the test sender.
+if [[ -f docker/compose.testing.yaml ]]; then
+    export COMPOSE_PROFILES=testing
+else
+    unset COMPOSE_PROFILES
+fi
 docker compose config --quiet
 docker compose pull node
+if [[ -f docker/compose.testing.yaml ]]; then
+    mkdir -m 700 test-agent-private
+    docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+        --user "$OYA_CONTAINER_USER" \
+        --mount "type=bind,src=$PWD/test-agent,dst=/app/test-agent,readonly" \
+        --mount "type=bind,src=$PWD/test-agent-private,dst=/setup" \
+        --mount "type=bind,src=$PWD/node.json,dst=/config/node.json" \
+        --entrypoint node "$OYA_TEST_AGENT_IMAGE" /app/test-agent/agent.mjs init /setup/key /config/node.json
+    cat >> compose.env <<'EOF'
+export COMPOSE_FILE="$COMPOSE_FILE:$OYA_DEPLOY_DIR/docker/compose.testing.yaml"
+export OYA_TEST_AGENT_SOURCE="$OYA_DEPLOY_DIR/test-agent"
+export OYA_TEST_AGENT_DIR="$OYA_DEPLOY_DIR/test-agent-private"
+EOF
+fi
 response_seconds=$(docker compose run --pull never --rm --no-deps -T --entrypoint node node --input-type=module -e '
 import { loadConfig } from "./src/config.mjs";
 import { createLocalSigner } from "./src/signer.mjs";
@@ -50,6 +70,9 @@ try {
 [[ $response_seconds =~ ^[0-9]+$ ]] || fail 'Could not calculate operation deadlines.'
 printf 'export OYA_PROXY_RESPONSE_TIMEOUT=%ss\nexport OYA_STOP_GRACE_PERIOD=%ss\nexport OYA_PROXY_STOP_GRACE_PERIOD=%ss\n' \
     "$response_seconds" "$response_seconds" "$((response_seconds + 60))" >> compose.env
+if [[ -f docker/compose.testing.yaml ]]; then
+    printf 'export OYA_TEST_AGENT_TIMEOUT_MS=%s\n' "$(((response_seconds - 30) * 1000))" >> compose.env
+fi
 source ./compose.env
 docker compose config --quiet
 docker compose pull ipfs proxy

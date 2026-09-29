@@ -11,6 +11,7 @@
     "test:local": "node scripts/test-local-operations.mjs",
     "test:docker": "node scripts/test-docker.mjs",
     "test:http": "node scripts/test-docker.mjs --http",
+    "test:testing": "node scripts/test-docker.mjs --testing",
     "smoke:local": "node scripts/smoke-local.mjs"
   },
   "dependencies": {

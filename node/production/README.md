@@ -10,6 +10,8 @@ When upgrading an existing local instance, rename `loggerContract` to `ledgerCon
 
 ## Run with Docker Compose
 
+For a cloud test that generates and signs messages without a local client, the [optional hourly testing profile](deploy-droplet.md#optional-hourly-testing-profile) deploys a small agent alongside the node. It sends immediately after startup and then once per hour, using a separate key generated on the server.
+
 For a first deployment from your laptop to an existing DigitalOcean Docker host, use the [deployment script and setup guide](deploy-droplet.md). It transfers private settings over SSH and pulls a published image by its exact digest on the host; local Docker is unnecessary. Maintainers use the [image release guide](release-image.md) to publish tagged revisions and matching deployment bundles. The manual instructions below support source builds; installations from a published bundle use the [pinned-image update procedure](deploy-droplet.md#update-an-existing-node).
 
 [compose.yaml](compose.yaml) runs the node and Kubo with persistent IPFS storage. Use a Linux Docker host or Docker Desktop with Linux containers, and Compose 2.30 or newer. Run the commands below from the repository root. Ethereum comes from your selected RPC provider; deploy or verify Ledger and fund a dedicated node account before starting the node.
@@ -220,6 +222,16 @@ The flow verifies exact signed IPFS bytes and Ledger events, repeated identical 
 The HTTPS fixture has a twenty-minute overall deadline and normally needs several minutes, including the deliberate rate-limit reset and four-minute wait. `--platform linux/amd64` or `--platform linux/arm64` selects the image architecture, as with `test:docker`. CI runs both modes on amd64 and retains the arm64 image cross-build. The original `test:docker` remains the dedicated persistence, unknown-outcome reconciliation, and backup/restore check.
 
 Validation on 2026-09-21 passed the HTTPS flow in about 347 seconds on native Linux arm64 through Docker Desktop / Engine 27.4.0, Compose 2.31.0, Node 24.21.0, Foundry 1.5.1, Kubo 0.43.0, and Caddy 2.11.4. The original internal Docker flow and all 94 host tests also passed. This milestone's HTTPS flow has not been run on amd64 here; its hosted CI result remains unverified.
+
+### Validate the hourly testing profile
+
+With the same Docker, Node 24, and Foundry prerequisites, run from the repository root:
+
+```sh
+npm --prefix node/production run test:testing -- --verbose
+```
+
+This builds the runtime image, runs the agent's module tests inside it, then initializes and starts the real `testing` profile against disposable Anvil and Kubo. It verifies the first message's signature, exact IPFS bytes, Ledger event, private mounts, network separation, disabled-profile behavior, and clean shutdown. Module tests use a controlled clock to verify the one-hour interval without waiting an hour. Add `--platform linux/amd64` to check the Droplet image architecture. No cloud credentials, funded testnet accounts, or public image publication are involved.
 
 ### Check a deployed node from another machine
 

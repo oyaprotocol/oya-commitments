@@ -36,6 +36,8 @@ Use a new output directory outside the checkout; its parent must exist. The regi
 - `release.txt`: the Git tag, full commit ID, and pinned image reference.
 - `oya-node-v0.1.0.tar.gz`: matching Compose/Caddy files, deployment helpers, configuration examples, documentation, and `node/production/image.txt`. It contains no operator settings, source checkout, or build tools.
 
+The bundle also carries the `testing` Compose overlay and `agent-library/agents/hourly-message-test/agent.mjs` from the same Git tag. The test agent uses the node image's existing Node.js/ethers installation with its source mounted read-only. Generated agent keys are private operator state and never belong in a release. Validate this optional service with `npm --prefix node/production run test:testing -- --platform linux/amd64` before release.
+
 The digest comes from [Buildx build metadata](https://docs.docker.com/reference/cli/docker/buildx/build/#write-build-result-metadata-to-a-file---metadata-file), rather than looking up the version tag later. Deployments use that immutable digest. Building the same source again can yield a different digest; retain the original assets and record a new version for a new publication.
 
 On the first publication, change the GHCR package visibility to **public** in its package settings; a public source repository does not automatically make a newly published package public. Verify that a host without GHCR credentials can pull the exact reference from `image.txt`. GitHub documents [package visibility settings](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility). An authenticated maintainer pull alone does not test anonymous access.
