@@ -307,9 +307,11 @@ npm --prefix node/production run local -- deploy-ledger --broadcast
 
 Both commands accept `--config <path>` and `--env-file <path>`, with the same file-first environment precedence as the other local commands. The selected chain and RPC endpoint are used by both the kernel checks and Forge. Deployment through RPC endpoints requiring Authorization headers is deferred; `deploy-ledger` rejects a nonempty `OYA_RPC_AUTHORIZATION`. The config must be readable, and its directory must be writable for deployment records and artifacts. `--broadcast` is rejected for all other actions.
 
+On Etherscan-supported chains, add `--verify` alongside `--broadcast` and set `ETHERSCAN_API_KEY` in the selected private environment file. The helper records a successful deployment before running `forge verify-contract --watch`; an explorer failure exits with status 1 while preserving the deployment record. If the configured address already has code, it verifies that address without deploying. A missing API key stops the command before any deployment. Local Anvil deployments do not need this option.
+
 A successful broadcast is checked against its receipt, deployer, contract address, chain, and deployed code before public deployment metadata is saved. The record goes into the ignored `node/production/deployment.local.json`; a custom config such as `settings.json` uses the sibling `settings.json.deployment.local.json`. The command leaves the config untouched and prints the verified Ledger address. Set `ledgerContract` to that address in the selected config, then run `local check` after funding the node and starting IPFS. After this manual update, repeating the deployment command reuses the configured address without another transaction.
 
-Each invocation of Forge has a separate private `.oya-ledger-*` directory beside the config, printed for inspection and ignored by Git. After an uncertain broadcast, inspect those artifacts and reconcile the transaction before another attempt; the wrapper does not relaunch Forge or use `--resume`. If recording fails after verification, the verified address remains in the output for manual adoption. Existing metadata with no code at the configured address blocks deployment until the operator reconciles the record and chain, including adopting a newly deployed address in the config. Run one deployment command at a time per configuration.
+Each deployment attempt uses a separate private `.oya-ledger-*` directory beside the config, printed for inspection and ignored by Git. After an uncertain broadcast, inspect those artifacts and reconcile the transaction before another attempt; the wrapper does not retry deployment or use `--resume`. If recording fails after the receipt check, the verified address remains in the output for manual adoption. Existing metadata with no code at the configured address blocks deployment until the operator reconciles the record and chain, including adopting a newly deployed address in the config. Run one deployment command at a time per configuration.
 
 The [local integration test](#install-and-validate) checks deployment-key precedence, blocked redeployment before manual adoption, and reuse after adoption as part of the complete publication flow.
 
@@ -387,7 +389,17 @@ In a trusted local editor, replace its contents with the JSON below and replace 
 
 The two addresses are placeholders for this deployment-only configuration. IPFS, a node key, and actual client addresses are not needed for `deploy-ledger`. The helper checks the RPC chain ID before invoking Forge; the Solidity script checks it again before deployment.
 
-#### Simulate, then broadcast
+#### Configure source verification
+
+Create an API key in your [Etherscan account](https://etherscan.io/myapikey). In a trusted local editor, add this entry to the existing private `deployer.env`, replacing the placeholder with the API key and preserving the other entries:
+
+```dotenv
+ETHERSCAN_API_KEY=REPLACE_WITH_ETHERSCAN_API_KEY
+```
+
+Keep this key out of Git and command arguments. The helper passes it only to the verification process, which receives neither the deployer key nor the private RPC URL. Verification publishes the Ledger source and compiler settings on Etherscan; it submits no transaction and spends no Sepolia ETH. See [Etherscan's Foundry verification guide](https://docs.etherscan.io/contract-verification/verify-with-foundry).
+
+#### Simulate, then deploy and verify
 
 First simulate without submitting a transaction:
 
@@ -399,17 +411,38 @@ npm --prefix node/production run local -- deploy-ledger \
 
 Check that the output names your public deployer address and chain `11155111`, followed by `OK Simulation passed`. If it reports reuse instead, the configured address already has code: stop and establish whether it is the intended Ledger. Code presence alone does not verify the contract implementation.
 
-After a successful simulation, submit the deployment. This spends Sepolia ETH for gas:
+After a successful simulation, submit the deployment and automatically verify its source. Deployment spends Sepolia ETH for gas:
 
 ```sh
-npm --prefix node/production run local -- deploy-ledger --broadcast \
+npm --prefix node/production run local -- deploy-ledger --broadcast --verify \
   --config "$OYA_SEPOLIA_DIR/deploy.json" \
   --env-file "$OYA_SEPOLIA_DIR/deployer.env"
 ```
 
-Success prints the transaction hash and `OK Verified Ledger` with the deployed address. The helper checks the receipt's success, sender, created address, chain, and deployed code, then writes `deploy.json.deployment.local.json` beside your configuration. Check the transaction and contract address on Sepolia Etherscan. This receipt check does not publish or verify source code on the explorer.
+The helper first prints the transaction hash and `OK Verified Ledger` after checking the receipt's success, sender, created address, chain, and deployed code. It writes `deploy.json.deployment.local.json` beside your configuration, then submits source verification and waits for Etherscan's result. Full success prints `OK Source verified on Etherscan`. Check the contract's **Contract** tab on Sepolia Etherscan for verified source code.
 
-If broadcasting times out or verification fails, retain the private deployment artifacts and reconcile the transaction on Sepolia before another broadcast. A failed command can still have submitted a successful transaction. Do not delete the records or repeatedly retry to get past an error.
+If broadcasting times out or the receipt check fails, retain the private deployment artifacts and reconcile the transaction on Sepolia before another broadcast. A failed command can still have submitted a successful transaction. Do not delete the records or repeatedly retry to get past an error. If only Etherscan verification fails or times out, the confirmed deployment record remains saved: use the verification-only command below for that address. Do not redeploy to retry source verification.
+
+#### Verify an already deployed Ledger
+
+Use the same source revision and `contracts/foundry.toml` settings used for deployment. The current project selects Solidity `0.8.23`, optimizer enabled with `200` runs, and EVM target `paris`. Ledger has no constructor arguments. Run from the repository root and replace `REPLACE_WITH_LEDGER_ADDRESS` with your deployed contract's public address, available in the saved deployment record or successful deployment output.
+
+This Bash/zsh command prompts for your Etherscan API key without echoing it or putting it in shell history. Paste the API key at the prompt, not into a command. It does not load `deployer.env` or require a wallet key or RPC URL. The subshell keeps the exported API key scoped to this invocation:
+
+```sh
+(
+  set +x
+  printf 'Etherscan API key: '
+  IFS= read -r -s ETHERSCAN_API_KEY || exit 1
+  printf '\n'
+  export ETHERSCAN_API_KEY
+  forge verify-contract --root contracts --chain 11155111 \
+    --verifier etherscan --watch \
+    REPLACE_WITH_LEDGER_ADDRESS src/Ledger.sol:Ledger
+)
+```
+
+[`--watch`](https://getfoundry.sh/forge/reference/verify-contract/) waits for the verification result. After fixing an API-key or source/settings error, or allowing time for explorer indexing, repeating this verification-only command is safe and cannot deploy another contract. Verification makes the source inspectable; it is not a security audit.
 
 #### Use the address in your node
 

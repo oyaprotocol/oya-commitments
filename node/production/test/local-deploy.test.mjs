@@ -22,7 +22,7 @@ async function fixture(t) {
     const original = `${JSON.stringify(input, null, 2)}\n`;
     await writeFile(configPath, original, { mode: 0o600 });
     await chmod(configPath, 0o640);
-    await writeFile(envPath, `LEDGER_DEPLOYER_PK=${deployer.privateKey}\n`, { mode: 0o600 });
+    await writeFile(envPath, `LEDGER_DEPLOYER_PK=${deployer.privateKey}\nETHERSCAN_API_KEY=etherscan-secret-marker\n`, { mode: 0o600 });
     const output = [];
     const log = (line) => output.push(line);
     const settings = await loadLocalConfig(configPath, envPath, { log, env: {
@@ -30,6 +30,7 @@ async function fixture(t) {
         LOGGER_DEPLOYER_PK: 'legacy-deployer-secret-marker',
         OYA_NODE_PRIVATE_KEY: 'node-secret-marker', OYA_AGENT_PRIVATE_KEY: 'agent-secret-marker',
         OYA_IPFS_AUTHORIZATION: 'ipfs-secret-marker', FOUNDRY_ETH_RPC_URL: 'wrong-secret-marker',
+        ETHERSCAN_API_KEY: 'wrong-explorer-secret-marker', VERIFIER_URL: 'https://verifier.invalid/secret-marker',
     } });
     const receipt = { transactionHash: hash, transactionIndex: '0x0', blockHash: `0x${'cd'.repeat(32)}`,
         blockNumber: '0x1', from: deployer.address, to: null, contractAddress: address,
@@ -86,7 +87,7 @@ test('simulation uses only selected deployment settings and leaves config and me
     assert.equal(options.env.LEDGER_DEPLOYER_PK, f.deployer.privateKey);
     assert.equal(options.env.FOUNDRY_ETH_RPC_URL, f.input.rpcUrl);
     assert.equal(options.env.FOUNDRY_ETH_RPC_HEADERS, undefined);
-    for (const key of ['OYA_NODE_PRIVATE_KEY', 'OYA_AGENT_PRIVATE_KEY', 'OYA_IPFS_AUTHORIZATION', 'OYA_RPC_AUTHORIZATION', 'LOGGER_DEPLOYER_PK']) {
+    for (const key of ['OYA_NODE_PRIVATE_KEY', 'OYA_AGENT_PRIVATE_KEY', 'OYA_IPFS_AUTHORIZATION', 'OYA_RPC_AUTHORIZATION', 'LOGGER_DEPLOYER_PK', 'ETHERSCAN_API_KEY', 'VERIFIER_URL']) {
         assert.equal(options.env[key], undefined);
     }
     assert.equal(await readFile(f.configPath, 'utf8'), f.original);
@@ -114,7 +115,7 @@ test('verified broadcast records public metadata, leaves a read-only config unto
 
 test('recording failure preserves existing files and reports the verified deployment for recovery', async (t) => {
     const f = await fixture(t);
-    assert.equal(await f.run({ broadcast: true, execute: async (command, ...args) => {
+    assert.equal(await f.run({ broadcast: true, verify: true, execute: async (command, ...args) => {
         await f.execute(command, ...args);
         if (command === 'forge') await writeFile(deploymentPath(f.configPath), 'existing-record');
     } }), 1);
@@ -165,7 +166,7 @@ test('failed or unverified broadcasts retain artifacts, leave config unchanged, 
         if (reason === 'address') f.state.receipt.contractAddress = f.input.ledgerContract;
         if (reason === 'missing-code') f.state.deployedCode = '0x';
         if (reason === 'missing-receipt') f.state.receipt = null;
-        assert.equal(await f.run({ broadcast: true }), 1);
+        assert.equal(await f.run({ broadcast: true, verify: true }), 1);
         assert.equal(f.forgeCommands.length, 1);
         assert.equal(await readFile(f.configPath, 'utf8'), f.original);
         await assert.rejects(readFile(deploymentPath(f.configPath)), { code: 'ENOENT' });
@@ -191,6 +192,70 @@ test('broadcast flag is rejected for every non-deployment action before effects'
     for (const action of ['setup', 'check', 'run', 'status']) {
         const output = [];
         assert.equal(await main([action, '--broadcast'], { log: (line) => output.push(line), execute: () => {
+            assert.fail('Invalid arguments must not execute a child process.');
+        } }), 1);
+        assert.match(output[0], /Invalid arguments/);
+    }
+});
+
+test('source verification runs only after recording deployment and receives no deployment credentials', async (t) => {
+    const f = await fixture(t);
+    assert.equal(await f.run({ broadcast: true, verify: true, execute: async (command, args, options) => {
+        if (args[0] === 'verify-contract') {
+            const metadata = JSON.parse(await readFile(deploymentPath(f.configPath), 'utf8'));
+            assert.equal(metadata.ledgerContract, f.address);
+        }
+        await f.execute(command, args, options);
+    } }), 0);
+    assert.equal(f.forgeCommands.length, 2);
+    const [{ options: deployOptions }, { args, options }] = f.forgeCommands;
+    assert.equal(deployOptions.env.ETHERSCAN_API_KEY, undefined);
+    assert.deepEqual(args, ['verify-contract', '--root', 'contracts', '--chain', '31337',
+        '--verifier', 'etherscan', '--watch', f.address, 'src/Ledger.sol:Ledger']);
+    assert.deepEqual(options.env, { PATH: process.env.PATH, ETHERSCAN_API_KEY: 'etherscan-secret-marker' });
+    assert.match(f.output.join('\n'), /OK Source verified on Etherscan/);
+});
+
+test('explorer failure preserves confirmed deployment and blocks a second deployment', async (t) => {
+    const f = await fixture(t);
+    assert.equal(await f.run({ broadcast: true, verify: true, execute: async (command, args, options) => {
+        await f.execute(command, args, options);
+        if (args[0] === 'verify-contract') throw new Error('etherscan-secret-marker');
+    } }), 1);
+    assert.equal(JSON.parse(await readFile(deploymentPath(f.configPath), 'utf8')).ledgerContract, f.address);
+    assert.equal(await readFile(f.configPath, 'utf8'), f.original);
+    assert.match(f.output.join('\n'), /Retry verification only; do not deploy again/);
+    assert.doesNotMatch(f.output.join('\n'), /OK Source verified/);
+    assert.equal(await f.run({ broadcast: true, verify: true }), 1);
+    assert.equal(f.forgeCommands.length, 2);
+});
+
+test('source verification of reused code needs no deployer key and writes no deployment files', async (t) => {
+    const f = await fixture(t);
+    f.state.configuredCode = '0x6000';
+    delete f.settings.env.LEDGER_DEPLOYER_PK;
+    const files = await readdir(f.directory);
+    assert.equal(await f.run({ broadcast: true, verify: true }), 0);
+    assert.equal(f.forgeCommands.length, 1);
+    assert.equal(f.forgeCommands[0].args[0], 'verify-contract');
+    assert.ok(f.forgeCommands[0].args.includes(f.input.ledgerContract));
+    assert.deepEqual(await readdir(f.directory), files);
+});
+
+test('verification without broadcast or an API key fails before RPC or Forge', async (t) => {
+    for (const reason of ['broadcast', 'key']) await t.test(reason, async (t) => {
+        const f = await fixture(t);
+        if (reason === 'key') f.settings.env.ETHERSCAN_API_KEY = ' ';
+        assert.equal(await f.run({ broadcast: reason !== 'broadcast', verify: true }), 1);
+        assert.equal(f.calls.length, 0);
+        assert.equal(f.commands.length, 0);
+    });
+});
+
+test('CLI rejects verification outside a deployment broadcast before effects', async () => {
+    for (const args of [['deploy-ledger', '--verify'], ...['setup', 'check', 'run', 'status'].map((action) => [action, '--verify'])]) {
+        const output = [];
+        assert.equal(await main(args, { log: (line) => output.push(line), execute: () => {
             assert.fail('Invalid arguments must not execute a child process.');
         } }), 1);
         assert.match(output[0], /Invalid arguments/);
