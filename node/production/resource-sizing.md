@@ -1,5 +1,7 @@
 # Resource sizing for a small US deployment
 
+Historical measurements for the direct node/Kubo/Caddy stack. The default now runs [the node locally](run-locally.md) with a separate [PostgreSQL inbox](host-inbox.md). These VM measurements and prices do not size the new inbox/database service; measure that service's queue growth, backups, connections, and polling load independently.
+
 Research date: 2026-09-23. Starting workload: 100 small text messages/day, US hosting, with growth planned. Retention is assumed indefinite until an explicit policy is chosen. This report covers the existing Node 24 / Kubo 0.43.0 / Caddy 2.11.4 Compose stack. Recommendations are provisional sizing decisions, not a cloud capacity certification.
 
 The likely economical choice is a single 1–2 GB Linux VM with 25–60 GB SSD, keeping Kubo beside the application. A 1 GB VM is a candidate for a monitored pilot; 2 GB offers more operating margin. The earlier 4 GB recommendation was an unmeasured estimate. The smallest 512 MiB VM leaves much less room for the operating system, updates, and IPFS bursts.

@@ -11,6 +11,8 @@
     "test:local": "node scripts/test-local-operations.mjs",
     "test:docker": "node scripts/test-docker.mjs",
     "test:ipfs": "node scripts/test-docker-ipfs.mjs",
+    "test:inbox": "node scripts/test-inbox.mjs",
+    "test:inbox:docker": "node scripts/test-inbox-docker.mjs",
     "test:http": "node scripts/test-docker.mjs --http",
     "test:testing": "node scripts/test-docker.mjs --testing",
     "smoke:local": "node scripts/smoke-local.mjs"
@@ -20,6 +22,7 @@
     "@oyaprotocol/ipfs": "0.1.2",
     "@oyaprotocol/messages": "0.2.0",
     "@oyaprotocol/utils": "0.1.1",
-    "ethers": "6.17.0"
+    "ethers": "6.17.0",
+    "pg": "8.23.1"
   }
 }

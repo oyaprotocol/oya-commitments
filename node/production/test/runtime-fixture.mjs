@@ -89,7 +89,7 @@ export async function fixture(t, overrides = {}) {
         }
         return new Response(JSON.stringify({ jsonrpc: '2.0', id, result }));
     };
-    const setup = { config, state, logs, wallet, agent, message: await signedMessage(agent),
+    const setup = { config, state, logs, wallet, agent, signer, transport, message: await signedMessage(agent),
         async start() {
             setup.runtime = await startNode(config, signer, { fetch: transport, log: (record) => logs.push(record) });
             t.after(() => setup.runtime.close());

@@ -1,0 +1,27 @@
+services:
+  proxy:
+    image: caddy:2.11.4-alpine@sha256:de23def33b17fb5d1290b0f6c2add1d70780e52341896c00a4c8a2a2fe9d355e
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    environment:
+      OYA_PUBLIC_HOSTNAME: ${OYA_PUBLIC_HOSTNAME:?Set a public inbox hostname}
+    volumes:
+      - type: bind
+        source: ./Caddyfile
+        target: /etc/caddy/Caddyfile
+        read_only: true
+        bind: {create_host_path: false}
+      - caddy-data:/data
+      - caddy-config:/config
+    ports: ["80:80", "443:443"]
+    depends_on:
+      inbox: {condition: service_healthy}
+    restart: unless-stopped
+    logging:
+      driver: local
+      options: {max-size: 10m, max-file: "3"}
+volumes:
+  caddy-data:
+  caddy-config:

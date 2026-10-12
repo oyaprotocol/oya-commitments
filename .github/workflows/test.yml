@@ -114,6 +114,34 @@ jobs:
       - name: Test production node
         run: npm --prefix node/production test
 
+  inbox-node:
+    name: PostgreSQL inbox and local worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: node/production/package-lock.json
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.5.1
+      - name: Prepare node dependencies and Ledger fixture
+        run: |
+          npm --prefix node/production ci --ignore-scripts
+          forge build --root contracts
+      - name: Test durable queue and transaction recovery
+        run: npm --prefix node/production run test:inbox
+      - name: Test packaged inbox and both local worker modes
+        run: npm --prefix node/production run test:inbox:docker
+
   docker-node:
     name: Docker node publication and lifecycle
     runs-on: ubuntu-latest

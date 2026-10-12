@@ -11,3 +11,6 @@ src/**
 !src/server.mjs
 !src/secrets.mjs
 !src/signer.mjs
+!src/inbox/
+!src/inbox/*.mjs
+!src/inbox/schema.sql

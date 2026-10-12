@@ -1,0 +1,32 @@
+# Inbox host only. Add compose.postgres.yaml for a bundled database and compose.https.yaml for public HTTPS.
+services:
+  inbox:
+    image: ${OYA_NODE_IMAGE:-oya-node:local}
+    user: ${OYA_CONTAINER_USER:-1000:1000}
+    entrypoint: [node, /app/src/inbox/main.mjs]
+    command: [/config/inbox.json, /run/secrets/inbox.json]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - type: bind
+        source: ${OYA_INBOX_DIR:?Set OYA_INBOX_DIR}/inbox.json
+        target: /config/inbox.json
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${OYA_INBOX_DIR:?Set OYA_INBOX_DIR}/inbox-secrets.json
+        target: /run/secrets/inbox.json
+        read_only: true
+        bind: {create_host_path: false}
+    ports: ["127.0.0.1:${OYA_INBOX_PORT:-8788}:8788"]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8788/healthz',{signal:AbortSignal.timeout(3000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    stop_grace_period: 30s
+    logging:
+      driver: local
+      options: {max-size: 10m, max-file: "3"}
