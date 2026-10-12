@@ -4,6 +4,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
+import { Pool } from 'pg';
 import { Wallet, keccak256 } from 'ethers';
 import { encodeLedgerCall } from '@oyaprotocol/ethereum';
 import { InboxStore } from '../src/inbox/store.mjs';
@@ -12,6 +13,7 @@ import { parseInboxConfig } from '../src/inbox/config.mjs';
 import { signJob, executionIdentity } from '../src/inbox/protocol.mjs';
 import { runOne } from '../src/inbox/worker.mjs';
 import { fixture, cid } from '../test/runtime-fixture.mjs';
+import { waitForPostgres } from './postgres-readiness.mjs';
 
 const execute = promisify(execFile);
 const postgresImage = 'postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24';
@@ -31,19 +33,23 @@ test('PostgreSQL inbox persists offline work and fences competing workers and tr
     await docker(['run', '-d', '--name', name, '-e', 'POSTGRES_PASSWORD', '-p', '127.0.0.1::5432', postgresImage]);
     const port = Number((await docker(['port', name, '5432'])).split(':').at(-1));
     const database = { host: '127.0.0.1', port, user: 'postgres', password, database: 'postgres', max: 5, connectionTimeoutMillis: 1000 };
+    const waitForDatabase = async () => {
+        const pool = new Pool({ ...database, max: 1, statement_timeout: 1000, query_timeout: 1000 });
+        pool.on('error', () => {});
+        try { await waitForPostgres(pool, { signal: t.signal }); }
+        finally { await pool.end(); }
+    };
+    // docker run returns before PostgreSQL is ready. Linux runners can reset TCP
+    // connections during that interval; wait once before starting any subtests.
+    await waitForDatabase();
     const agent = Wallet.createRandom();
     const newStore = async (overrides = {}) => {
         const config = parseInboxConfig({ target: `test-${randomUUID()}`, allowedSigners: [agent.address],
             execution: { mode: 'ipfs' }, leaseMs: 3000, ...overrides });
         const store = new InboxStore(database, config);
         stores.push(store);
-        for (let attempt = 0; ; attempt++) {
-            try { await store.initialize(); break; }
-            catch (error) {
-                if (attempt > 100 || (!['ECONNREFUSED', '57P03'].includes(error.code) && error.message !== 'Connection terminated unexpectedly')) throw error;
-                await delay(200);
-            }
-        }
+        // Readiness is separate from schema setup: initialization errors must fail immediately.
+        await store.initialize();
         return store;
     };
     const serve = async store => {
@@ -75,6 +81,7 @@ test('PostgreSQL inbox persists offline work and fences competing workers and tr
         await docker(['restart', name]);
         // Docker Desktop may allocate a new published ephemeral port on restart.
         database.port = Number((await docker(['port', name, '5432'])).split(':').at(-1));
+        await waitForDatabase();
         store = await newStore({ target: store.config.target, maxJobs: 2 });
         const restarted = await serve(store);
         assert.equal((await restarted.publicApi('/v1/status', job)).status, 'queued');

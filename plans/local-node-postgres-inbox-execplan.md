@@ -14,6 +14,7 @@ An agent submits a signed message to an always available inbox. PostgreSQL retai
 - [x] 2026-10-11: Added portable Compose deployments, local/inbox/API guides, release assets, and a separate inbox CI job. Retained direct-node guides as advanced/historical references.
 - [x] 2026-10-11: Initial PostgreSQL recovery tests passed; the packaged HTTPS flow published and retrieved messages in both modes against real PostgreSQL, Kubo, and Anvil. All 157 production tests passed.
 - [x] 2026-10-11: Completed all nine database-suite tests, including immutable checkpoint conflicts and long-running lease renewal. Packaged client creation/overwrite protection and both modes passed through the shipping Caddy routes, with private health routing verified. Reviewed source, configuration, docs, release contents, and plan.
+- [x] 2026-10-12: Added bounded PostgreSQL readiness checks for startup connection resets reported by GitHub Actions. All nine database-suite tests and 160 runtime tests passed locally, including three new readiness regression tests. GitHub validation awaits pushing the fix to the PR branch.
 
 ## Surprises & Discoveries
 
@@ -22,6 +23,8 @@ The existing Ledger preparer returns signed transaction bytes without broadcasti
 The PostgreSQL client accepts URL options that can override TLS settings. Inbox configuration rejects connection-string query options and uses explicit certificate verification, with plaintext permitted only by explicit configuration for private networks.
 
 Docker Desktop can change a dynamically allocated host port when a database container restarts. The integration fixture now rediscovers the port and recreates its connection pool; this corrected fixture connection failures without changing runtime behavior.
+
+The reported GitHub Actions PR run failed all database subtests with `ECONNRESET` while acquiring a startup connection. The previous retry loop handled refused connections and PostgreSQL startup errors but omitted connection resets. The fixture now probes `SELECT 1` through the published TCP endpoint before subtests and after database restart, with a bounded wait for transient connection failures. Schema initialization remains outside that retry loop so SQL and configuration errors fail immediately.
 
 ## Decision Log
 
@@ -36,6 +39,8 @@ Docker Desktop can change a dynamically allocated host port when a database cont
 The default documentation describes local execution and a separately hosted inbox. Both modes passed the packaged flow with PostgreSQL, HTTPS, Kubo, and Anvil, including offline acceptance, worker restart, content retrieval, and the private health route. All 157 runtime tests and nine database-suite tests passed. The final container check completed in about 81 seconds. Release-bundle tests cover the new guides and Compose assets. The database is trusted execution infrastructure and stores signed transaction bytes before broadcast; it does not store private signing keys. The direct API remains compatible.
 
 Implementation and review are complete. An operator still needs a new source build or future inbox-capable image release; v0.2.0 cannot run this feature. No external deployment, image publication, or Git commit was performed. Provider-specific PostgreSQL services and real-chain transactions were not exercised; local disposable fixtures cover the portable implementation. Operational limits remain explicit: one job per target, bounded queue retention, no automatic fee replacement, and reconciliation before database rollback.
+
+The 2026-10-12 CI follow-up changes only the integration fixture and its regression coverage. `npm --prefix node/production run test:inbox` passed all nine tests against disposable PostgreSQL, including database restart; `npm --prefix node/production test` passed all 160 tests. Injected connection resets verify the reported failure path, and separate checks verify fatal errors, startup timeout, and cancellation. The GitHub Actions rerun remains pending; no production runtime or image changes are required for this fix.
 
 ## Context and Orientation
 
