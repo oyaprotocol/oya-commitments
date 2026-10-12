@@ -1,6 +1,6 @@
 # Publish a production node image
 
-Maintainers use `scripts/publish-image.sh` to publish a Linux amd64 image to GitHub Container Registry (GHCR). Operators use the resulting deployment bundle; they do not need Git, Node.js, or Docker on their laptop. Docker/Compose remains required on the server. This is an explicit release command, not an automatic push on every commit.
+Maintainers use `scripts/publish-image.sh` to publish a Linux amd64 image to GitHub Container Registry (GHCR). Operators use the resulting deployment bundle. For a Droplet deployment, they do not need Git, Node.js, or Docker on their local computer; Docker/Compose runs on the server. For a [local node](run-locally.md), Docker/Compose runs on the local computer. This is an explicit release command, not an automatic push on every commit.
 
 ## Version control and release preparation
 
@@ -34,7 +34,7 @@ Use a new output directory outside the checkout; its parent must exist. The regi
 
 - `image.txt`: the exact `ghcr.io/OWNER/IMAGE@sha256:...` reference returned by this build.
 - `release.txt`: the Git tag, full commit ID, and pinned image reference.
-- `oya-node-v0.1.0.tar.gz`: matching Compose/Caddy files, deployment helpers, configuration examples, documentation, and `node/production/image.txt`. It contains no operator settings, source checkout, or build tools.
+- `oya-node-v0.1.0.tar.gz`: matching Compose/Caddy files, deployment helpers, configuration examples, local and Droplet deployment guides, release documentation, and `node/production/image.txt`. It contains no operator settings, source checkout, or build tools.
 
 The bundle also carries the `testing` Compose overlay and `agent-library/agents/hourly-message-test/agent.mjs` from the same Git tag. The test agent uses the node image's existing Node.js/ethers installation with its source mounted read-only. Generated agent keys are private operator state and never belong in a release. Validate this optional service with `npm --prefix node/production run test:testing -- --platform linux/amd64` before release.
 

@@ -2,6 +2,8 @@
 
 This standalone runtime accepts an agent's signed text and publishes the signed JSON to IPFS. The default `ledger` mode also submits its CID to Ledger using the node's own account; a `200` / `logged` response includes the CID, transaction hash, block number, and node address after receipt/event verification. Explicit `ipfs` mode returns `200` / `published` with the CID and URI, without Ethereum access or a node transaction key.
 
+For a complete local setup using the published image, follow [Run a live node locally](run-locally.md). It covers IPFS-only and full Ledger modes, agent keys, manual and hourly messages, persistent storage, and restart/recovery. Use the [Droplet guide](deploy-droplet.md) for a remote cloud host.
+
 After signature, allowlist, and request-limit checks, the HTTP handler calls the kernel's `publishSignedMessage` in IPFS mode or `publishAndLogSignedMessage` in Ledger mode. One complete operation runs at a time. Additional authenticated requests within the request budget receive `503 node_busy`; there is no waiting queue.
 
 The Ledger runtime installs the published `@oyaprotocol/ethereum` and `@oyaprotocol/messages` kernels at `0.2.0`, with `@oyaprotocol/ipfs` at `0.1.2` and `@oyaprotocol/utils` at `0.1.1`, and uses ethers in `src/signer.mjs` for local transaction signing. Ethereum and messages are updated together to keep one Ethereum package instance for error classification. The kernels handle publication, transaction preparation, broadcasting, and receipt verification. Kernel signing support remains future work. Reimbursement verification, Safe proposals, and DeFi actions are later integrations.
@@ -40,13 +42,15 @@ An IPFS success has this shape:
 
 The result confirms the configured IPFS API accepted and pinned the signed bytes; it does not create an onchain record or prove retrieval from an independent peer. Upload failures and timeouts return sanitized errors with `started: true`, without `loggingOutcome` or transaction fields. Content may already have been uploaded, but subsequent requests can proceed without restarting. The same one-operation limit, request budget, signature checks, and shutdown draining apply. There is no new automatic retry or restart policy.
 
-This mode requires a new image built from these changes; the published `node-v0.1.0` release does not support it. Publish a new release tag and matching bundle after validation. When changing an existing Ledger node to IPFS mode, first drain work and reconcile any uncertain Ledger transaction, then deliberately restart with the new configuration.
+This mode is available in `node-v0.2.0`; `node-v0.1.0` does not support it. Use matching image and deployment files from a release containing this mode. When changing an existing Ledger node to IPFS mode, first drain work and reconcile any uncertain Ledger transaction, then deliberately restart with the new configuration.
 
 ## Run with Docker Compose
 
+The [local setup walkthrough](run-locally.md) uses a pinned release image and needs no source build or host Node.js installation. The manual source-build workflow follows below.
+
 For a cloud test that generates and signs messages without a local client, the [optional hourly testing profile](deploy-droplet.md#optional-hourly-testing-profile) deploys a small agent alongside the node. It sends immediately after startup and then once per hour, using a separate key generated on the server.
 
-For a first deployment from your laptop to an existing DigitalOcean Docker host, use the [deployment script and setup guide](deploy-droplet.md). It transfers private settings over SSH and pulls a published image by its exact digest on the host; local Docker is unnecessary. Maintainers use the [image release guide](release-image.md) to publish tagged revisions and matching deployment bundles. The manual instructions below support source builds; installations from a published bundle use the [pinned-image update procedure](deploy-droplet.md#update-an-existing-node).
+For a first deployment from your local computer to an existing DigitalOcean Docker host, use the [deployment script and setup guide](deploy-droplet.md). It transfers private settings over SSH and pulls a published image by its exact digest on the host; local Docker is unnecessary. Maintainers use the [image release guide](release-image.md) to publish tagged revisions and matching deployment bundles. The manual instructions below support source builds; installations from a published bundle use the [pinned-image update procedure](deploy-droplet.md#update-an-existing-node).
 
 [compose.yaml](compose.yaml) runs the node and Kubo with persistent IPFS storage. Use a Linux Docker host or Docker Desktop with Linux containers, and Compose 2.30 or newer. Run the commands below from the repository root. In Ledger mode, Ethereum comes from your selected RPC provider; deploy or verify Ledger and fund a dedicated node account before starting the node. In IPFS mode, use the configuration above and skip Ledger deployment and funding.
 
@@ -373,7 +377,7 @@ The [local integration test](#install-and-validate) checks deployment-key preced
 
 ### Deploy Ledger on Sepolia
 
-Use this procedure on your laptop with a reviewed source checkout, Node.js 24, npm, and [Foundry](https://getfoundry.sh/getting-started/installation). The deployment bundle does not include the contract source or local CLI. Run the commands from the repository root in Bash or zsh, stopping if any command fails. This targets **Ethereum Sepolia, chain ID `11155111`**, as listed in the [Sepolia network configuration](https://github.com/eth-clients/sepolia#metadata).
+Use this procedure on your local computer with a reviewed source checkout, Node.js 24, npm, and [Foundry](https://getfoundry.sh/getting-started/installation). The deployment bundle does not include the contract source or local CLI. Run the commands from the repository root in Bash or zsh, stopping if any command fails. This targets **Ethereum Sepolia, chain ID `11155111`**, as listed in the [Sepolia network configuration](https://github.com/eth-clients/sepolia#metadata).
 
 #### Prepare a private deployment directory
 
@@ -504,7 +508,7 @@ This Bash/zsh command prompts for your Etherscan API key without echoing it or p
 
 Set `ledgerContract` in `deploy.json` to the verified address so future deployment commands recognize it. In the separate private `node.json` used for the [Droplet deployment](deploy-droplet.md), set `chainId` to `11155111`, `ledgerContract` to that same address, your Sepolia RPC URL, and your actual `allowedSigners`. Keep the Docker settings `host: "0.0.0.0"`, `port: 8787`, and `ipfsUrl: "http://ipfs:5001"`.
 
-Fund the separate node account with Sepolia ETH for message-publication gas. The running node does not need the deployer key: keep `deployer.env` on your laptop and put only the node's own key and supported authorization values in its `node.env` secret file.
+Fund the separate node account with Sepolia ETH for message-publication gas. The running node does not need the deployer key: keep `deployer.env` on your local computer and put only the node's own key and supported authorization values in its `node.env` secret file.
 
 The commands above keep the deployer key out of command arguments and shell history, and the helper captures raw Forge output. The key remains plaintext in `deployer.env` and is passed to Forge through its child-process environment while signing. File permissions do not protect it from your account or a machine administrator; use a trusted machine and encrypted storage/backups. Keep private files and raw deployment artifacts out of Git, release bundles, screenshots, and support messages. Public addresses and transaction hashes can be shared, but reveal which account made the deployment.
 
