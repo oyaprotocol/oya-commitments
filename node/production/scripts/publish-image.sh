@@ -41,7 +41,8 @@ console.log(JSON.parse(readFileSync(process.argv[1], "utf8"))["containerimage.di
 bundle="$staging/bundle/node/production"
 mkdir -p "$bundle/docker" "$bundle/scripts"
 cp "$staging/source/compose.yaml" "$staging/source/README.md" \
-    "$staging/source/deploy-droplet.md" "$staging/source/release-image.md" "$bundle/"
+    "$staging/source/deploy-droplet.md" "$staging/source/run-locally.md" \
+    "$staging/source/release-image.md" "$bundle/"
 cp "$staging/source/docker/compose.http.yaml" "$staging/source/docker/Caddyfile" \
     "$staging/source/docker/compose.testing.yaml" \
     "$staging/source/docker/config.example.json" "$staging/source/docker/runtime.env.example" "$bundle/docker/"

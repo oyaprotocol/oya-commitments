@@ -4,6 +4,8 @@
 
 The Oya production runtime lives in [`production/`](production/README.md). It installs independently, accepts signed messages over HTTP, and calls the hardened kernels to publish to IPFS. The default Ledger mode also logs CIDs onchain; [IPFS-only mode](production/README.md#ipfs-only-configuration) needs no Ethereum connection or funded node wallet. It processes one complete operation at a time and returns the final result, without a publication journal or restart replay. See its guide for setup and local end-to-end deployment. The experimental daemons described below use the earlier shared agent infrastructure.
 
+To run the released production node on your own computer, follow [Run a live node locally](production/run-locally.md), covering IPFS-only and full Ledger modes with Docker, persistent IPFS storage, and an optional hourly agent.
+
 From the repository root, `npm --prefix node/production run test:local` validates the operating CLI and a separate message sender against disposable Anvil and offline Kubo, including Ledger deployment/reuse, publication, and node restart. See the [production validation guide](production/README.md#install-and-validate) for prerequisites and evidence output.
 
 These daemons are separate from the commitment-serving agent loop in `agent/`:
