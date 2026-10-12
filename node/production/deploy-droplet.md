@@ -44,7 +44,7 @@ bash node/production/scripts/deploy-droplet.sh \
 
 Replace the SSH target and hostname. The command checks the host, creates the remote operator's private `$HOME/oya` directory, and pulls the pinned image there. Only the Compose/Caddy files, digest override, generated Compose settings, and the two private input files are copied. Private inputs have mode 0600; the directory has mode 0700. Local staging files are removed on exit. The image override disables the Compose build; missing images must be pulled, never built from local files.
 
-When using a source checkout instead of the bundle, check out the matching release tag and supply the exact reference from that release's `image.txt` as a fifth argument. For example, append `'ghcr.io/oyachat/oya-node@sha256:REPLACE_WITH_RELEASE_DIGEST'` to the command above, replacing the placeholder with all 64 hexadecimal digest characters. Tags such as `latest` or `v0.1.0` are rejected. This explicit argument also overrides a bundle's pin; use matching release files when selecting a different version.
+When using a source checkout instead of the bundle, check out the matching release tag and supply the exact reference from that release's `image.txt` as a fifth argument. For example, append `'ghcr.io/oyaprotocol/oya-node@sha256:REPLACE_WITH_RELEASE_DIGEST'` to the command above, replacing the placeholder with all 64 hexadecimal digest characters. Tags such as `latest` or `v0.1.0` are rejected. This explicit argument also overrides a bundle's pin; use matching release files when selecting a different version.
 
 If the remote SSH environment defines `OYA_DEPLOY_DIR`, that directory replaces `$HOME/oya`; its parent must already exist. The generated settings retain the resolved location. This does not change the `oya` project name or allow deployment over existing Oya volumes.
 
@@ -116,7 +116,7 @@ Load the existing environment, set the exact new digest from the release, pull i
 ```sh
 source "$HOME/oya/compose.env"
 cd "$OYA_DEPLOY_DIR"
-export OYA_NEXT_IMAGE='ghcr.io/oyachat/oya-node@sha256:REPLACE_WITH_RELEASE_DIGEST'
+export OYA_NEXT_IMAGE='ghcr.io/oyaprotocol/oya-node@sha256:REPLACE_WITH_RELEASE_DIGEST'
 docker pull "$OYA_NEXT_IMAGE"
 docker compose stop proxy
 docker compose stop node

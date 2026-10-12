@@ -27,7 +27,7 @@ Authenticate interactively with a GitHub personal access token (classic) with `w
 docker login ghcr.io --username YOUR_GITHUB_USERNAME
 mkdir -p "$HOME/oya-releases"
 bash node/production/scripts/publish-image.sh \
-  ghcr.io/oyachat/oya-node node-v0.1.0 "$HOME/oya-releases/node-v0.1.0"
+  ghcr.io/oyaprotocol/oya-node node-v0.1.0 "$HOME/oya-releases/node-v0.1.0"
 ```
 
 Use a new output directory outside the checkout; its parent must exist. The registry repository is configurable for forks. The source label identifies this GitHub repository; forks should update that label in the publisher. The script pushes the image and creates three public release assets:
