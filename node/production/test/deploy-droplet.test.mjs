@@ -158,6 +158,32 @@ test('optional testing profile generates its own secret, enrolls its address, an
     assert.equal(f.commands().filter(args => args[1] === 'up').length, 1);
 });
 
+test('IPFS deployment validates an empty secrets file and enrolls an optional agent without Ethereum settings', async (t) => {
+    for (const testing of [false, true]) {
+        await t.test(testing ? 'hourly agent' : 'node only', (t) => {
+            const f = fixture(t);
+            const config = { mode: 'ipfs', host: '0.0.0.0', port: 8787, ipfsUrl: 'http://ipfs:5001',
+                allowedSigners: testing ? [] : f.config.allowedSigners };
+            writeFileSync(f.configFile, JSON.stringify(config));
+            writeFileSync(f.envFile, '');
+            const result = f.run([...(testing ? ['--with-test-agent'] : []), 'oya@example.com', 'node.example.com', f.configFile, f.envFile, image]);
+            assert.equal(result.status, 0, result.stderr);
+            const deployment = join(f.remote, 'oya');
+            const installed = JSON.parse(readFileSync(join(deployment, 'node.json')));
+            assert.equal(installed.mode, 'ipfs');
+            assert.equal(installed.chainId, undefined);
+            assert.equal(installed.rpcUrl, undefined);
+            assert.equal(readFileSync(join(deployment, 'node.env'), 'utf8'), '');
+            assert.deepEqual(JSON.parse(readFileSync(f.configFile)), config);
+            if (testing) {
+                const key = readFileSync(join(deployment, 'test-agent-private/key'), 'utf8').trim();
+                assert.deepEqual(installed.allowedSigners, [new Wallet(key).address]);
+                assert.equal((result.stdout + result.stderr).includes(key), false);
+            }
+        });
+    }
+});
+
 test('testing on an unsupported chain stops before any services start', (t) => {
     const f = fixture(t);
     const result = f.run(['--with-test-agent', 'oya@example.com', 'node.example.com', f.configFile, f.envFile, image]);

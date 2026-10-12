@@ -28,9 +28,11 @@ cp -n node/production/docker/runtime.env.example "$HOME/oya-private/node.env"
 chmod 600 "$HOME/oya-private/node.json" "$HOME/oya-private/node.env"
 ```
 
-Edit those files with your chain ID, RPC endpoint, verified Ledger address, allowed client addresses, and dedicated node key. The node needs gas funds; clients only sign messages. Keep `host` as `0.0.0.0`, `port` as `8787`, and `ipfsUrl` as `http://ipfs:5001`. `node.env` becomes a read-only secret mount, not container environment variables. Use only the three keys in its example, once each, with literal, unquoted `KEY=value` entries. Both files retain mode 0600 and must be readable by the operator UID used in the container. See [private settings](README.md#prepare-private-settings) and [Ledger deployment](README.md#deploy-or-reuse-ledger). Starting this script does not create/fund keys or deploy Ledger.
+Choose the publishing mode before editing the files. The copied example defaults to Ledger mode: set your chain ID, RPC endpoint, verified Ledger address, allowed client addresses, and dedicated node key. That mode needs gas funds; clients only sign messages. For IPFS-only operation, replace `node.json` with the [IPFS-only example](README.md#ipfs-only-configuration), set your allowlist, and leave `node.env` empty unless an IPFS authorization header is needed. No Ledger, RPC, node key, or funding is needed in IPFS mode. It requires a new release containing IPFS mode; `node-v0.1.0` does not support it.
 
-For a new Ledger on Ethereum Sepolia, follow the [Sepolia deployment instructions](README.md#deploy-ledger-on-sepolia) on your laptop first. They create a separate private deployer file, simulate before broadcasting, and show which verified address to put in your node configuration.
+In both modes keep `host` as `0.0.0.0`, `port` as `8787`, and `ipfsUrl` as `http://ipfs:5001`. `node.env` is a required readable file mounted read-only, not container environment variables. Use only the three keys in its example, once each, with literal, unquoted `KEY=value` entries. Both files retain mode 0600 and must be readable by the operator UID used in the container. See [private settings](README.md#prepare-private-settings). Starting the ordinary installer does not create/fund a node key or deploy Ledger; the optional testing profile creates only an agent key.
+
+For Ledger mode with a new contract on Ethereum Sepolia, follow the [Sepolia deployment instructions](README.md#deploy-ledger-on-sepolia) on your laptop first. They create a separate private deployer file, simulate before broadcasting, and show which verified address to put in your node configuration. Skip this step for IPFS mode.
 
 ## Deploy
 
@@ -48,13 +50,13 @@ When using a source checkout instead of the bundle, check out the matching relea
 
 If the remote SSH environment defines `OYA_DEPLOY_DIR`, that directory replaces `$HOME/oya`; its parent must already exist. The generated settings retain the resolved location. This does not change the `oya` project name or allow deployment over existing Oya volumes.
 
-The remote validation checks configuration and key format without broadcasting or contacting Ethereum/IPFS. It sets node stop grace and proxy response time to `ceil(operationTimeoutMs / 1000) + 60` seconds, and proxy stop grace to another 60 seconds. It validates Caddy and waits up to 180 seconds for startup health. Startup checks the RPC chain and contract code; it does not prove the contract implementation, sufficient gas funds, public TLS, or successful message publication.
+The remote validation checks configuration and, only in Ledger mode, the node key format without broadcasting or contacting Ethereum/IPFS. It sets node stop grace and proxy response time to `ceil(operationTimeoutMs / 1000) + 60` seconds, and proxy stop grace to another 60 seconds. It validates Caddy and waits up to 180 seconds for startup health. Ledger startup checks the RPC chain and contract code. Neither mode's startup proves public TLS or successful message publication; Ledger startup also does not prove the contract implementation or sufficient gas funds.
 
-On success, verify a signed submission from another machine using the [external deployment check](README.md#check-a-deployed-node-from-another-machine). Confirm its transaction and retrieve the CID through a separate online IPFS node. A public `/healthz` request should return 404. Observe memory, disk, peer connectivity, and announcements for 48–72 hours before depending on a 1 GB host. This script retains the existing Kubo settings and does not apply experimental low-memory tuning.
+On success, verify a signed submission from another machine using the [external deployment check](README.md#check-a-deployed-node-from-another-machine). Retrieve the CID through a separate online IPFS node and, in Ledger mode, confirm its transaction. A public `/healthz` request should return 404. Observe memory, disk, peer connectivity, and announcements for 48–72 hours before depending on a 1 GB host. This script retains the existing Kubo settings and does not apply experimental low-memory tuning.
 
 ## Optional hourly testing profile
 
-For a first Sepolia installation, add `--with-test-agent` before the ordinary arguments:
+For a first IPFS-only or Sepolia installation, add `--with-test-agent` before the ordinary arguments:
 
 ```sh
 bash node/production/scripts/deploy-droplet.sh --with-test-agent \
@@ -64,11 +66,11 @@ bash node/production/scripts/deploy-droplet.sh --with-test-agent \
 
 As with the normal command, a source checkout needs the pinned image reference as the final argument. Use the matching deployment bundle, which includes the test-agent source. No local agent key, signed message file, or LLM API key is required.
 
-The installer generates a separate agent key on the Droplet, saves it in `test-agent-private/key` with mode 0600 inside the private deployment directory, and appends its public address to the deployed `node.json` allowlist. It preserves existing entries and leaves your laptop's input files unchanged. With this option, the input `allowedSigners` may be an empty array; initialization fills it before node validation. The node continues to use the funded wallet in `node.env`, including a reused Ledger-deployer wallet. The agent account needs no ETH. Initialization accepts Sepolia (`11155111`) and disposable Anvil (`31337`), and refuses other chains.
+The installer generates a separate agent key on the Droplet, saves it in `test-agent-private/key` with mode 0600 inside the private deployment directory, and appends its public address to the deployed `node.json` allowlist. It preserves existing entries and leaves your laptop's input files unchanged. With this option, the input `allowedSigners` may be an empty array; initialization fills it before node validation. In Ledger mode, the node continues to use the funded wallet in `node.env`, including a reused Ledger-deployer wallet. IPFS mode needs no node wallet. The agent account needs no ETH. Initialization accepts IPFS mode without chain fields, or Ledger mode on Sepolia (`11155111`) and disposable Anvil (`31337`); other chains are refused.
 
 The Compose `testing` profile adds one `test-agent` container using the same pinned image as the node, with the reviewed agent source and its own key directory mounted read-only. It shares a separate network with the node, has no public port or direct Kubo connection, and receives no node key or RPC credentials. Its HTTP deadline follows `operationTimeoutMs` with 30 seconds of headroom; the installer also sets the longer stop grace.
 
-After the node becomes healthy, the agent sends its first generated message immediately, then starts another once per hour (about 24 submissions per day). It waits for each result before scheduling the next; there is no catch-up queue. Messages and their signatures become public through IPFS, and each successful submission spends the node's Sepolia gas. Logs contain `test_message_logged`, the agent address, CID, and transaction hash. This exercises the internal node-to-IPFS-to-Ledger flow; public DNS/TLS and independent IPFS retrieval still need the external check above.
+After the node becomes healthy, the agent sends its first generated message immediately, then starts another once per hour (about 24 submissions per day). It waits for each result before scheduling the next; there is no catch-up queue. Messages and their signatures become public through IPFS. In Ledger mode, each successful submission spends the node's Sepolia gas, and logs contain `test_message_logged`, the agent address, CID, and transaction hash. IPFS mode spends no gas and logs `test_message_published`, the agent address, and CID. This exercises the internal publication flow; public DNS/TLS and independent IPFS retrieval still need the external check above.
 
 On the Droplet, inspect or pause it with:
 
@@ -78,7 +80,7 @@ docker compose logs --tail=20 test-agent
 docker compose stop test-agent
 ```
 
-Any rejected, failed, timed-out, or unconfirmed submission stops the agent with `test_agent_stopped`; it does not retry or automatically restart. Check node logs and Ledger before resuming an uncertain result. After reconciliation, with the node healthy:
+Any rejected, failed, timed-out, or unconfirmed submission stops the agent with `test_agent_stopped`; it does not retry or automatically restart. Check node logs and, in Ledger mode, the transaction before resuming an uncertain result. With the outcome inspected and the node healthy:
 
 ```sh
 docker compose up --detach --no-deps --no-build --pull never test-agent

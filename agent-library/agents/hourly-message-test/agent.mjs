@@ -9,8 +9,12 @@ export const intervalMs = 60 * 60 * 1000;
 
 export async function initialize(keyPath, configPath) {
     const config = JSON.parse(await readFile(configPath, 'utf8'));
-    if (![11155111, 31337].includes(config.chainId) || !Array.isArray(config.allowedSigners)) {
-        throw new Error('Testing requires Sepolia or Anvil and an existing signer allowlist.');
+    const mode = config.mode === undefined ? 'ledger' : config.mode;
+    if (!['ledger', 'ipfs'].includes(mode) || !Array.isArray(config.allowedSigners)
+        || (mode === 'ledger' && ![11155111, 31337].includes(config.chainId))
+        || (mode === 'ipfs' && ['chainId', 'ledgerContract', 'rpcUrl', 'receiptTimeoutMs', 'pollIntervalMs', 'gasLimit', 'maxFeePerGasWei']
+            .some(key => Object.hasOwn(config, key)))) {
+        throw new Error('Testing requires IPFS mode or Sepolia/Anvil Ledger mode and an existing signer allowlist.');
     }
     let key;
     try { key = await readFile(keyPath, 'utf8'); } catch (error) {
@@ -47,15 +51,16 @@ export async function runAgent(wallet, { timeoutMs = 210_000, signal, fetch = gl
             });
             const result = await response.json();
             const publication = result.publication;
-            if (response.status !== 200 || result.status !== 'logged' || publication?.status !== 'logged'
-                || typeof publication.cid !== 'string'
-                || !/^[a-zA-Z0-9]{1,128}$/.test(publication.cid)
-                || !/^0x[0-9a-fA-F]{64}$/.test(publication.transactionHash)) throw new Error();
-            log(JSON.stringify({ event: 'test_message_logged', signer: wallet.address,
-                cid: publication.cid, transactionHash: publication.transactionHash }));
+            const logged = result.status === 'logged';
+            if (response.status !== 200 || (!logged && result.status !== 'published') || publication?.status !== result.status
+                || typeof publication.cid !== 'string' || !/^[a-zA-Z0-9]{1,128}$/.test(publication.cid)
+                || (logged ? !/^0x[0-9a-fA-F]{64}$/.test(publication.transactionHash)
+                    : publication.uri !== `ipfs://${publication.cid}` || publication.transactionHash !== undefined)) throw new Error();
+            log(JSON.stringify({ event: logged ? 'test_message_logged' : 'test_message_published', signer: wallet.address,
+                cid: publication.cid, ...(logged ? { transactionHash: publication.transactionHash } : {}) }));
         } catch {
             log(JSON.stringify({ event: 'test_agent_stopped', httpStatus: response?.status,
-                reason: 'Publication was not confirmed. Inspect node logs and Ledger before restarting; no retry was made.' }));
+                reason: 'Publication was not confirmed. Inspect node logs and any Ledger transaction before restarting; no retry was made.' }));
             return 1;
         }
         try {

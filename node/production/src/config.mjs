@@ -23,13 +23,19 @@ function endpoint(value, name) {
 
 export function parseConfig(input, { env = process.env } = {}) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Config must be an object.');
-    const fields = new Set(['host', 'port', 'chainId', 'ledgerContract', 'allowedSigners', 'rpcUrl', 'ipfsUrl',
+    const mode = input.mode === undefined ? 'ledger' : input.mode;
+    if (!['ledger', 'ipfs'].includes(mode)) throw new Error('mode must be ledger or ipfs.');
+    const fields = new Set(['mode', 'host', 'port', 'chainId', 'ledgerContract', 'allowedSigners', 'rpcUrl', 'ipfsUrl',
         'maxBodyBytes', 'maxTextBytes', 'bodyTimeoutMs', 'receiptTimeoutMs', 'pollIntervalMs',
         'operationTimeoutMs', 'gasLimit', 'maxFeePerGasWei', 'maxMessageRequestsPerMinute']);
     for (const key of Object.keys(input)) {
         if (!fields.has(key)) throw new Error('Config contains an unsupported field.');
     }
-    if (!/^0x[0-9a-fA-F]{40}$/.test(input.ledgerContract ?? '') || /^0x0{40}$/i.test(input.ledgerContract)) {
+    const ledgerFields = ['chainId', 'ledgerContract', 'rpcUrl', 'receiptTimeoutMs', 'pollIntervalMs', 'gasLimit', 'maxFeePerGasWei'];
+    if (mode === 'ipfs' && ledgerFields.some(key => Object.hasOwn(input, key))) {
+        throw new Error('IPFS mode does not accept Ethereum or Ledger settings.');
+    }
+    if (mode === 'ledger' && (!/^0x[0-9a-fA-F]{40}$/.test(input.ledgerContract ?? '') || /^0x0{40}$/i.test(input.ledgerContract))) {
         throw new Error('ledgerContract must be a nonzero Ethereum address.');
     }
     const authorize = createSignedMessageAuthorizer(input.allowedSigners);
@@ -45,22 +51,24 @@ export function parseConfig(input, { env = process.env } = {}) {
         maxRetries: 2, retryDelayMs: 250,
     });
     return Object.freeze({
-        host: input.host ?? '127.0.0.1', port: integer(input.port, 'port', 8787, 65535),
-        chainId: integer(input.chainId, 'chainId', undefined, Number.MAX_SAFE_INTEGER),
-        ledgerContract: input.ledgerContract, authorize,
+        mode, host: input.host ?? '127.0.0.1', port: integer(input.port, 'port', 8787, 65535), authorize,
         maxMessageRequestsPerMinute: integer(input.maxMessageRequestsPerMinute, 'maxMessageRequestsPerMinute', 60),
         maxBodyBytes: integer(input.maxBodyBytes, 'maxBodyBytes', 16_384, 1_048_576),
         maxTextBytes: integer(input.maxTextBytes, 'maxTextBytes', 8192, 1_048_576),
         bodyTimeoutMs: integer(input.bodyTimeoutMs, 'bodyTimeoutMs', 10_000),
-        receiptTimeoutMs: integer(input.receiptTimeoutMs, 'receiptTimeoutMs', 60_000),
         operationTimeoutMs: integer(input.operationTimeoutMs, 'operationTimeoutMs', 180_000),
-        pollIntervalMs: integer(input.pollIntervalMs, 'pollIntervalMs', 1000),
-        limits: {
-            gasLimit: BigInt(integer(input.gasLimit, 'gasLimit', 200_000)),
-            feePerGas: BigInt(input.maxFeePerGasWei ?? '30000000000'),
-        },
-        rpc: createHttpConfig(transport(endpoint(input.rpcUrl, 'rpcUrl'), env.OYA_RPC_AUTHORIZATION)),
         ipfs: createIpfsConfig(transport(endpoint(input.ipfsUrl, 'ipfsUrl'), env.OYA_IPFS_AUTHORIZATION)),
+        ...(mode === 'ledger' ? {
+            chainId: integer(input.chainId, 'chainId', undefined, Number.MAX_SAFE_INTEGER),
+            ledgerContract: input.ledgerContract,
+            receiptTimeoutMs: integer(input.receiptTimeoutMs, 'receiptTimeoutMs', 60_000),
+            pollIntervalMs: integer(input.pollIntervalMs, 'pollIntervalMs', 1000),
+            limits: {
+                gasLimit: BigInt(integer(input.gasLimit, 'gasLimit', 200_000)),
+                feePerGas: BigInt(input.maxFeePerGasWei ?? '30000000000'),
+            },
+            rpc: createHttpConfig(transport(endpoint(input.rpcUrl, 'rpcUrl'), env.OYA_RPC_AUTHORIZATION)),
+        } : {}),
     });
 }
 

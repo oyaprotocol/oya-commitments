@@ -20,10 +20,21 @@ export async function statusLocalNode({ config, nodeAddress }, {
         timeout.cleanup();
     }
     const running = health?.status === 'ready' || health?.status === 'busy';
-    const unavailable = health?.status === 'shutting_down' || health?.status === 'transaction_outcome_unknown';
+    const ipfsOnly = config.mode === 'ipfs';
+    const unavailable = health?.status === 'shutting_down' || (!ipfsOnly && health?.status === 'transaction_outcome_unknown');
     if ((!running && !unavailable) || response.status !== (running ? 200 : 503)
-        || typeof health.busy !== 'boolean' || (running && health.busy !== (health.status === 'busy'))
-        || !Number.isSafeInteger(health.chainId) || health.chainId < 1
+        || typeof health.busy !== 'boolean' || (running && health.busy !== (health.status === 'busy'))) {
+        return fail('Malformed node health response. Check the service at the configured local port.');
+    }
+    if ((health.mode === undefined ? 'ledger' : health.mode) !== config.mode) return fail('Node mode mismatch. Check mode and the local port.');
+    if (ipfsOnly) {
+        if (['chainId', 'ledgerContract', 'nodeAddress'].some(key => Object.hasOwn(health, key))) {
+            return fail('Malformed IPFS node health response.');
+        }
+        log(`${running ? 'OK' : 'FAIL'} ${health.status} at ${localUrl(config)}; IPFS-only node.`);
+        return running ? 0 : 1;
+    }
+    if (!Number.isSafeInteger(health.chainId) || health.chainId < 1
         || !/^0x[0-9a-fA-F]{40}$/.test(health.ledgerContract ?? '')
         || !/^0x[0-9a-fA-F]{40}$/.test(health.nodeAddress ?? '')
         || typeof health.ledgerContract !== 'string' || typeof health.nodeAddress !== 'string') {

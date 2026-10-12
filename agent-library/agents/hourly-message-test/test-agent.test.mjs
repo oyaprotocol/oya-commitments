@@ -40,6 +40,20 @@ test('initialization persists a private key and enrolls it once without replacin
     assert.equal((await stat(f.keyPath)).mode & 0o777, 0o600);
 });
 
+test('IPFS initialization needs only an allowlist and preserves a generated key across runs', async (t) => {
+    const f = await fixture(t);
+    await writeFile(f.configPath, JSON.stringify({ mode: 'ipfs', allowedSigners: [] }));
+    const address = await initialize(f.keyPath, f.configPath);
+    assert.equal(await initialize(f.keyPath, f.configPath), address);
+    assert.deepEqual(JSON.parse(await readFile(f.configPath, 'utf8')), { mode: 'ipfs', allowedSigners: [address] });
+    assert.equal((await stat(f.keyPath)).mode & 0o777, 0o600);
+    for (const config of [{ mode: 'unknown', allowedSigners: [] }, { mode: null, allowedSigners: [] },
+        { mode: 'ipfs', chainId: 1, allowedSigners: [] }]) {
+        await writeFile(f.configPath, JSON.stringify(config));
+        await assert.rejects(initialize(f.keyPath, f.configPath));
+    }
+});
+
 test('unsupported chains and invalid saved keys fail without replacing secrets or settings', async (t) => {
     const f = await fixture(t);
     const original = JSON.stringify({ ...f.config, chainId: 1 });
@@ -83,6 +97,37 @@ test('sends immediately, signs each message, and spaces starts one hour apart wi
     assert.equal(logs.length, 2);
     assert.ok(logs.every(line => JSON.parse(line).event === 'test_message_logged'));
     assert.equal(logs.join('').includes(wallet.privateKey), false);
+});
+
+test('IPFS results schedule another message and report the CID without a transaction', async () => {
+    const stopped = new AbortController();
+    const logs = [];
+    const code = await runAgent(Wallet.createRandom(), { signal: stopped.signal,
+        log: line => logs.push(JSON.parse(line)), wait: async () => stopped.abort(),
+        fetch: async () => Response.json({ status: 'published', publication: {
+            status: 'published', cid: publication.cid, uri: `ipfs://${publication.cid}`,
+        } }),
+    });
+    assert.equal(code, 0);
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0].event, 'test_message_published');
+    assert.equal(logs[0].cid, publication.cid);
+    assert.equal(Object.hasOwn(logs[0], 'transactionHash'), false);
+});
+
+test('malformed IPFS successes stop the agent instead of being treated as Ledger results', async (t) => {
+    for (const change of [{ status: 'logged' }, { cid: undefined }, { uri: 'https://example.com' },
+        { transactionHash: publication.transactionHash }]) {
+        await t.test(JSON.stringify(change), async () => {
+            const code = await runAgent(Wallet.createRandom(), { signal: new AbortController().signal,
+                log: () => {}, wait: () => assert.fail('must stop'),
+                fetch: async () => Response.json({ status: 'published', publication: {
+                    status: 'published', cid: publication.cid, uri: `ipfs://${publication.cid}`, ...change,
+                } }),
+            });
+            assert.equal(code, 1);
+        });
+    }
 });
 
 test('unconfirmed and malformed responses stop without retries or raw error output', async (t) => {

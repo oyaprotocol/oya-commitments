@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { handleSignedMessage, publishAndLogSignedMessage, PublishAndLogSignedMessageError } from '@oyaprotocol/messages';
+import { handleSignedMessage, publishSignedMessage, publishAndLogSignedMessage, PublishAndLogSignedMessageError } from '@oyaprotocol/messages';
 import { EthereumTransactionReceiptTimeoutError, LogCidError } from '@oyaprotocol/ethereum';
 
 class HttpFailure extends Error {
@@ -11,7 +11,7 @@ class HttpFailure extends Error {
     }
 }
 
-function operationFailure(error, timedOut) {
+function operationFailure(error, timedOut, ipfsOnly) {
     const published = error instanceof PublishAndLogSignedMessageError ? error : null;
     const logging = published?.cause instanceof LogCidError ? published.cause : null;
     const cause = logging?.cause ?? error;
@@ -24,7 +24,7 @@ function operationFailure(error, timedOut) {
     return new HttpFailure(status, {
         code: unexpected ? 'internal_error' : timedOut ? 'operation_timeout' : receiptTimeout ? 'receipt_timeout' : 'publication_failed',
         started: true,
-        loggingOutcome: unknown ? 'unknown' : logging?.receipt ? 'failed' : 'not_submitted',
+        ...(!ipfsOnly ? { loggingOutcome: unknown ? 'unknown' : logging?.receipt ? 'failed' : 'not_submitted' } : {}),
         ...(published ? { publication: {
             cid: published.publication.cid, uri: published.publication.uri,
             ...(logging?.transactionHash ? { transactionHash: logging.transactionHash } : {}),
@@ -79,6 +79,7 @@ export function createNodeServer({ config, transactionPreparer, nodeAddress, fet
     let outcomeUnknown = false;
     let stopping = false;
     let closing;
+    const ipfsOnly = config.mode === 'ipfs';
     const messageWindowsStartedAt = performance.now();
     let messageWindow = 0;
     let messageRequests = 0;
@@ -92,7 +93,8 @@ export function createNodeServer({ config, transactionPreparer, nodeAddress, fet
             if (request.url === '/healthz' && request.method === 'GET') {
                 return respond(response, stopping || outcomeUnknown ? 503 : 200, {
                     status: stopping ? 'shutting_down' : outcomeUnknown ? 'transaction_outcome_unknown' : active ? 'busy' : 'ready',
-                    chainId: config.chainId, ledgerContract: config.ledgerContract, nodeAddress, busy: active !== null,
+                    mode: config.mode, busy: active !== null,
+                    ...(!ipfsOnly ? { chainId: config.chainId, ledgerContract: config.ledgerContract, nodeAddress } : {}),
                 }, { connection: 'close' });
             }
             if (request.url !== '/v1/messages') {
@@ -127,6 +129,12 @@ export function createNodeServer({ config, transactionPreparer, nodeAddress, fet
                     timer = setTimeout(() => controller.abort(), config.operationTimeoutMs);
                     let completed;
                     try {
+                        if (ipfsOnly) {
+                            const publication = await publishSignedMessage(message, {
+                                config: config.ipfs, fetch, signal: controller.signal,
+                            });
+                            return { status: 'published', cid: publication.cid, uri: publication.uri };
+                        }
                         completed = await publishAndLogSignedMessage(message, {
                             ipfs: { config: config.ipfs, fetch },
                             ledger: {
@@ -136,7 +144,7 @@ export function createNodeServer({ config, transactionPreparer, nodeAddress, fet
                             signal: controller.signal,
                         });
                     } catch (error) {
-                        const failure = operationFailure(error, controller.signal.aborted);
+                        const failure = operationFailure(error, controller.signal.aborted, ipfsOnly);
                         outcomeUnknown = failure.body.loggingOutcome === 'unknown';
                         throw failure;
                     }
@@ -149,15 +157,15 @@ export function createNodeServer({ config, transactionPreparer, nodeAddress, fet
                 },
             });
             outcome = result.status === 202 ? { status: 200, body: {
-                status: 'logged', signer: result.body.signer, publication: result.handleSignedMessageResult,
+                status: ipfsOnly ? 'published' : 'logged', signer: result.body.signer, publication: result.handleSignedMessageResult,
             } } : result;
         } catch (error) {
             if (error instanceof HttpFailure) {
                 outcome = error;
             } else {
-                if (release) outcomeUnknown = true;
+                if (release && !ipfsOnly) outcomeUnknown = true;
                 outcome = new HttpFailure(500, {
-                    code: 'internal_error', ...(release ? { started: true, loggingOutcome: 'unknown' } : {}),
+                    code: 'internal_error', ...(release ? { started: true, ...(!ipfsOnly ? { loggingOutcome: 'unknown' } : {}) } : {}),
                 }, { connection: 'close' });
             }
         }
