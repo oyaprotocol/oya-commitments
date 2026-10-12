@@ -4,7 +4,7 @@ Maintainers use `scripts/publish-image.sh` to publish a Linux amd64 image to Git
 
 ## Version control and release preparation
 
-Review and merge the runtime, Dockerfile, dependency lockfile, deployment scripts, and documentation before releasing. Inspect the complete release contents for sensitive information. Run the production tests and Docker integration checks documented in the [runtime guide](README.md#validate-the-docker-flow), including the amd64 HTTPS check. Existing CI runs those checks; it does not publish images.
+Review and merge the runtime, Dockerfile, dependency lockfile, deployment scripts, and documentation before releasing. Inspect the complete release contents for sensitive information. Run the production tests and Docker integration checks documented in the [runtime guide](README.md#validate-the-docker-flow), including the amd64 HTTPS check and `npm --prefix node/production run test:ipfs -- --platform linux/amd64` for IPFS-only operation. Existing CI runs those checks; it does not publish images.
 
 Use a Git tag such as `node-v0.1.0` for the reviewed commit. The script publishes the corresponding image tag `v0.1.0` and labels it with the full Git commit ID. This version identifies the complete Docker deployment release, independently of the private runtime's npm package version and published kernel versions. Use patch versions for compatible fixes and dependency refreshes, minor versions for compatible features, and major versions for breaking operator/configuration changes; document migrations explicitly, including during `0.x` development.
 

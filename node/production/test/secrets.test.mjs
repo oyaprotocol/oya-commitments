@@ -37,11 +37,20 @@ test('missing, unreadable, malformed, duplicate, and unknown secrets fail withou
     await assert.rejects(loadSecrets(path), { message });
     await assert.rejects(loadSecrets(join(path, '..')), { message });
     const valid = `OYA_NODE_PRIVATE_KEY=${Wallet.createRandom().privateKey}\n`;
-    for (const content of ['', '# No key\n', 'OYA_NODE_PRIVATE_KEY=\n',
-        valid + 'OYA_NODE_PRIVATE_KEY=private-marker\n', valid + 'UNKNOWN=private-marker\n',
+    for (const content of [valid + 'OYA_NODE_PRIVATE_KEY=private-marker\n', valid + 'UNKNOWN=private-marker\n',
         valid + 'export OYA_RPC_AUTHORIZATION=private-marker\n', valid + 'private-marker\n',
         valid + 'OYA_RPC_AUTHORIZATION=private-marker\0\n']) {
         await writeFile(path, content, { mode: 0o600 });
         await assert.rejects(loadSecrets(path), { message });
+    }
+});
+
+test('IPFS secrets can omit the node key without falling back to the environment', async (t) => {
+    const path = await fixture(t);
+    for (const content of ['', '# IPFS-only node\n', 'OYA_NODE_PRIVATE_KEY=\n', 'OYA_IPFS_AUTHORIZATION=Bearer fixture\n']) {
+        await writeFile(path, content, { mode: 0o600 });
+        const secrets = await loadSecrets(path);
+        assert.ok(!secrets.OYA_NODE_PRIVATE_KEY);
+        assert.equal(secrets.OYA_RPC_AUTHORIZATION, undefined);
     }
 });

@@ -150,6 +150,9 @@ jobs:
       - name: Test Linux amd64 hourly agent profile
         run: npm --prefix node/production run test:testing -- --verbose --platform linux/amd64
 
+      - name: Test Linux amd64 IPFS-only publication and hourly agent
+        run: npm --prefix node/production run test:ipfs -- --verbose --platform linux/amd64
+
       - uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64

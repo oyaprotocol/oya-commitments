@@ -3,7 +3,7 @@ import test from 'node:test';
 import { statusLocalNode } from '../scripts/local-status.mjs';
 
 const settings = {
-    config: { host: '127.0.0.1', port: 8787, chainId: 31337,
+    config: { mode: 'ledger', host: '127.0.0.1', port: 8787, chainId: 31337,
         ledgerContract: '0x1111111111111111111111111111111111111111' },
     nodeAddress: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd',
 };

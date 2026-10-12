@@ -1,0 +1,16 @@
+# Disposable IPFS-only fixture. No Ethereum service or node signing key.
+services:
+  node:
+    platform: ${OYA_TEST_PLATFORM:?Run through test:ipfs}
+    image: ${OYA_TEST_AGENT_IMAGE:?Run through test:ipfs}
+    ports: !override
+      - "127.0.0.1::8787"
+
+  ipfs:
+    platform: ${OYA_TEST_PLATFORM:?Run through test:ipfs}
+    command: [daemon, --offline, --migrate=true]
+    ports: !override
+      - "127.0.0.1::5001"
+
+  test-agent:
+    platform: ${OYA_TEST_PLATFORM:?Run through test:ipfs}

@@ -1,12 +1,46 @@
 # Oya production node
 
-This standalone runtime accepts an agent's signed text, publishes the signed JSON to IPFS, and submits its CID to Ledger using the node's own account. A `200` response includes the CID, transaction hash, block number, and node address after the kernel verifies a successful receipt and the matching Ledger event.
+This standalone runtime accepts an agent's signed text and publishes the signed JSON to IPFS. The default `ledger` mode also submits its CID to Ledger using the node's own account; a `200` / `logged` response includes the CID, transaction hash, block number, and node address after receipt/event verification. Explicit `ipfs` mode returns `200` / `published` with the CID and URI, without Ethereum access or a node transaction key.
 
-After signature, allowlist, and request-limit checks, the HTTP handler calls the kernel's `publishAndLogSignedMessage` directly. One complete operation runs at a time, from IPFS publication through the verified receipt. Additional authenticated requests within the request budget receive `503 node_busy`; there is no waiting queue.
+After signature, allowlist, and request-limit checks, the HTTP handler calls the kernel's `publishSignedMessage` in IPFS mode or `publishAndLogSignedMessage` in Ledger mode. One complete operation runs at a time. Additional authenticated requests within the request budget receive `503 node_busy`; there is no waiting queue.
 
 The Ledger runtime installs the published `@oyaprotocol/ethereum` and `@oyaprotocol/messages` kernels at `0.2.0`, with `@oyaprotocol/ipfs` at `0.1.2` and `@oyaprotocol/utils` at `0.1.1`, and uses ethers in `src/signer.mjs` for local transaction signing. Ethereum and messages are updated together to keep one Ethereum package instance for error classification. The kernels handle publication, transaction preparation, broadcasting, and receipt verification. Kernel signing support remains future work. Reimbursement verification, Safe proposals, and DeFi actions are later integrations.
 
 When upgrading an existing local instance, rename `loggerContract` to `ledgerContract` in its config and deployment record, and `LOGGER_DEPLOYER_PK` / `LOGGER_CHAIN_ID` to `LEDGER_DEPLOYER_PK` / `LEDGER_CHAIN_ID` where used. Use `deploy-ledger` for deployment/reuse. The existing contract address remains valid because the ABI is unchanged. Private settings and prior deployment artifacts are not rewritten automatically.
+
+## IPFS-only configuration
+
+Set `"mode": "ipfs"` to publish and pin signed messages without an RPC endpoint, Ledger contract, funded node account, or gas fees. Agents still need their own message-signing keys. For Docker or a Droplet, use this private `node.json`, replacing the signer placeholder:
+
+```json
+{
+  "mode": "ipfs",
+  "host": "0.0.0.0",
+  "port": 8787,
+  "allowedSigners": ["0x2222222222222222222222222222222222222222"],
+  "ipfsUrl": "http://ipfs:5001"
+}
+```
+
+Supply a readable private `node.env` file; it can be empty with the bundled Kubo service. If the IPFS API needs authentication, set only `OYA_IPFS_AUTHORIZATION`. Node-key and RPC secrets are unused in this mode. Keep the same Docker mount and file-permission setup below. With `--with-test-agent`, the Droplet installer may receive an empty `allowedSigners` array and enrolls the generated agent before starting the node; ordinary startup requires a nonempty allowlist.
+
+For a host process, set `host` to `127.0.0.1` and `ipfsUrl` to your host-reachable Kubo API. The local `check`, `run`, and `status` commands support this mode with an empty selected environment file. `check` probes only IPFS, and `deploy-ledger` refuses IPFS mode before any deployment or RPC request.
+
+Omitting `mode` preserves Ledger behavior; `"mode": "ledger"` selects it explicitly. IPFS mode rejects the Ethereum-only settings `chainId`, `ledgerContract`, `rpcUrl`, `receiptTimeoutMs`, `pollIntervalMs`, `gasLimit`, and `maxFeePerGasWei`; remove those fields instead of leaving placeholders. HTTP limits and `operationTimeoutMs` work in both modes.
+
+An IPFS success has this shape:
+
+```json
+{
+  "status": "published",
+  "signer": "0x...",
+  "publication": { "status": "published", "cid": "bafk...", "uri": "ipfs://bafk..." }
+}
+```
+
+The result confirms the configured IPFS API accepted and pinned the signed bytes; it does not create an onchain record or prove retrieval from an independent peer. Upload failures and timeouts return sanitized errors with `started: true`, without `loggingOutcome` or transaction fields. Content may already have been uploaded, but subsequent requests can proceed without restarting. The same one-operation limit, request budget, signature checks, and shutdown draining apply. There is no new automatic retry or restart policy.
+
+This mode requires a new image built from these changes; the published `node-v0.1.0` release does not support it. Publish a new release tag and matching bundle after validation. When changing an existing Ledger node to IPFS mode, first drain work and reconcile any uncertain Ledger transaction, then deliberately restart with the new configuration.
 
 ## Run with Docker Compose
 
@@ -14,7 +48,7 @@ For a cloud test that generates and signs messages without a local client, the [
 
 For a first deployment from your laptop to an existing DigitalOcean Docker host, use the [deployment script and setup guide](deploy-droplet.md). It transfers private settings over SSH and pulls a published image by its exact digest on the host; local Docker is unnecessary. Maintainers use the [image release guide](release-image.md) to publish tagged revisions and matching deployment bundles. The manual instructions below support source builds; installations from a published bundle use the [pinned-image update procedure](deploy-droplet.md#update-an-existing-node).
 
-[compose.yaml](compose.yaml) runs the node and Kubo with persistent IPFS storage. Use a Linux Docker host or Docker Desktop with Linux containers, and Compose 2.30 or newer. Run the commands below from the repository root. Ethereum comes from your selected RPC provider; deploy or verify Ledger and fund a dedicated node account before starting the node.
+[compose.yaml](compose.yaml) runs the node and Kubo with persistent IPFS storage. Use a Linux Docker host or Docker Desktop with Linux containers, and Compose 2.30 or newer. Run the commands below from the repository root. In Ledger mode, Ethereum comes from your selected RPC provider; deploy or verify Ledger and fund a dedicated node account before starting the node. In IPFS mode, use the configuration above and skip Ledger deployment and funding.
 
 ### Prepare private settings
 
@@ -33,9 +67,9 @@ cp -n node/production/docker/runtime.env.example "$OYA_ENV_FILE"
 chmod 600 "$OYA_CONFIG_FILE" "$OYA_ENV_FILE"
 ```
 
-Edit both files before continuing. The example chain, RPC URL, Ledger address, and allowed signer address are placeholders. Select your chain and RPC, verified Ledger address, and actual agent allowlist. Keep the internal `host` as `0.0.0.0`, `port` as `8787`, and `ipfsUrl` as `http://ipfs:5001`. Container loopback addresses refer to that container, so an RPC running elsewhere needs an address reachable from Docker.
+Edit both files before continuing. The copied example selects Ledger mode and its chain, RPC URL, Ledger address, and allowed signer address are placeholders. Select your chain and RPC, verified Ledger address, and actual agent allowlist, or replace the JSON with the IPFS-only example above. Keep the internal `host` as `0.0.0.0`, `port` as `8787`, and `ipfsUrl` as `http://ipfs:5001`. Container loopback addresses refer to that container, so an RPC running elsewhere needs an address reachable from Docker.
 
-The secret file contains only `OYA_NODE_PRIVATE_KEY` and optional complete `OYA_RPC_AUTHORIZATION` / `OYA_IPFS_AUTHORIZATION` headers. It keeps the `node.env` filename but is mounted read-only at `/run/secrets/node.env`, not injected through Compose's `env_file`. Use literal, unquoted `KEY=value` lines, with no inline comments or duplicate keys. Blank lines and lines beginning with `#` are allowed. Dollar signs, quotes, spaces, and `=` in values remain literal. Leave authorization values empty or omit them when unused; the bundled Kubo API requires none. Keep agent and Ledger-deployer keys in separate files for their separate tools.
+The secret file accepts only `OYA_NODE_PRIVATE_KEY` and optional complete `OYA_RPC_AUTHORIZATION` / `OYA_IPFS_AUTHORIZATION` headers. Only Ledger mode requires the node key; IPFS mode permits an empty file. It keeps the `node.env` filename but is mounted read-only at `/run/secrets/node.env`, not injected through Compose's `env_file`. Use literal, unquoted `KEY=value` lines, with no inline comments or duplicate keys. Blank lines and lines beginning with `#` are allowed. Dollar signs, quotes, spaces, and `=` in values remain literal. Leave authorization values empty or omit them when unused; the bundled Kubo API requires none. Keep agent and Ledger-deployer keys in separate files for their separate tools.
 
 Startup and deployment validation read the same file directly into application settings, without copying its values to `process.env` or falling back to inherited secrets. Missing/unreadable files and malformed/unknown entries fail with sanitized errors. Secret values stay out of Docker's configured environment and expanded Compose model. The host file and application memory still contain them: read-only mounting does not encrypt data or protect it from the application, host root, or Docker administrators.
 
@@ -72,7 +106,7 @@ Stopping log-following leaves services running. Node HTTP is published at `http:
 docker compose exec ipfs ipfs swarm peers
 ```
 
-The node waits for Kubo's API health check before startup. Node health reports local lifecycle state: ready and busy are healthy; shutdown and unknown transaction outcomes are unhealthy. It does not continuously test Ethereum or IPFS. Both services rotate logs at 10 MB per file with three files retained. Kubo can restart automatically; the signing node has `restart: "no"` because restarting clears its in-memory unknown-outcome guard. Reconcile uncertain transactions before restarting or retrying, and run only one instance per node account.
+The node waits for Kubo's API health check before startup. Node health reports local lifecycle state: ready and busy are healthy; shutdown and Ledger-mode unknown transaction outcomes are unhealthy. It does not continuously test Ethereum or IPFS. Both services rotate logs at 10 MB per file with three files retained. Kubo can restart automatically; the node retains `restart: "no"` in both modes. In Ledger mode, restarting clears the in-memory unknown-outcome guard: reconcile uncertain transactions first and run only one instance per node account.
 
 From a separate terminal with host Node.js and the installed `node/production` dependencies, use the [existing sender](#submit-a-message) with only the agent key loaded. Substitute your text file and returned CID:
 
@@ -89,7 +123,7 @@ docker compose stop node
 docker compose up -d --no-deps --force-recreate node
 ```
 
-For an image update, preserve the previous image ID for rollback and run `docker compose build node` between these commands. Recreation reloads changed configuration and secret files and refreshes bind mounts after atomic file replacement; it also applies changed service environment. The node has a four-minute stop grace for its default three-minute operation deadline. Increase `OYA_STOP_GRACE_PERIOD` with headroom if you increase `operationTimeoutMs`. A forced shutdown or missing client response requires transaction reconciliation before another start.
+For an image update, preserve the previous image ID for rollback and run `docker compose build node` between these commands. Recreation reloads changed configuration and secret files and refreshes bind mounts after atomic file replacement; it also applies changed service environment. The node has a four-minute stop grace for its default three-minute operation deadline. Increase `OYA_STOP_GRACE_PERIOD` with headroom if you increase `operationTimeoutMs`. In Ledger mode, a forced shutdown or missing client response requires transaction reconciliation before another start.
 
 `docker compose down` stops services in dependency order and retains the named IPFS volume. Keep the same project name when bringing them back. `down --volumes` deletes the repository. An image moved to another host does not carry its volume or private settings.
 
@@ -223,6 +257,16 @@ The HTTPS fixture has a twenty-minute overall deadline and normally needs severa
 
 Validation on 2026-09-21 passed the HTTPS flow in about 347 seconds on native Linux arm64 through Docker Desktop / Engine 27.4.0, Compose 2.31.0, Node 24.21.0, Foundry 1.5.1, Kubo 0.43.0, and Caddy 2.11.4. The original internal Docker flow and all 94 host tests also passed. This milestone's HTTPS flow has not been run on amd64 here; its hosted CI result remains unverified.
 
+### Validate IPFS-only operation
+
+With Node 24 and Docker/Compose, run from the repository root:
+
+```sh
+npm --prefix node/production run test:ipfs -- --verbose
+```
+
+This builds the working tree image and runs disposable Kubo, HTTPS, node, and hourly-agent containers with an empty node secrets file and no Ethereum service. It checks exact signed content retrieval, authorization, repeated publication, IPFS outage recovery, persistent IPFS identity/content after container replacement, and the agent's first `test_message_published` event. It also runs the agent module tests. Add `--platform linux/amd64` to validate the Droplet architecture. No Foundry, funded accounts, public DNS, or cloud deployment is involved; the fixture cleans up its own containers and volumes.
+
 ### Validate the hourly testing profile
 
 With the same Docker, Node 24, and Foundry prerequisites, run from the repository root:
@@ -246,7 +290,7 @@ nc -vz -w 5 node.example.com 5001
 nc -vz -w 5 node.example.com 8080
 ```
 
-Replace the hostname and files, and substitute the configured node host port if it differs from 8787. Require a logged publication and independently verify its IPFS bytes and Ledger receipt/event. The health path must return 404, HTTPS port 443 must connect, and the node/IPFS API/gateway probes must fail. Check each configured IPv4/IPv6 address so an unused DNS record does not hide an exposed listener. Record the UTC time, public hostname, publication CID/transaction hash, and HTTP/port results without credentials or private client paths. Deliberate repeat submissions remain valid; reconcile any uncertain outcome before retrying.
+Replace the hostname and files, and substitute the configured node host port if it differs from 8787. Require a `published` result in IPFS mode or `logged` in Ledger mode, and independently verify the IPFS bytes; Ledger mode also requires receipt/event verification. The health path must return 404, HTTPS port 443 must connect, and the node/IPFS API/gateway probes must fail. Check each configured IPv4/IPv6 address so an unused DNS record does not hide an exposed listener. Record the UTC time, public hostname, publication CID (and transaction hash in Ledger mode), and HTTP/port results without credentials or private client paths. Deliberate repeat submissions remain valid; reconcile any uncertain Ledger outcome before retrying.
 
 ## Install and validate
 
@@ -297,9 +341,9 @@ npm --prefix node/production run local -- setup
 
 Setup installs the host and published kernels from `node/production/package-lock.json` and creates missing `config.local.json` and `.env` files with mode `0600`. No kernel source build or TypeScript installation is needed. Repeating it preserves existing files and their permissions. It uses Node.js built-ins and needs Node 22 or newer and npm; it does not deploy Ledger or start services. Template addresses and empty keys must be filled before use. For different file locations, add `--config /absolute/path/to/node.json --env-file /absolute/path/to/node.env`; parent directories must already exist. Relative paths resolve from the directory where you invoked the command. Keep custom files outside the checkout or ignore them in Git.
 
-Edit the ignored `config.local.json` (or copy `config.example.json` there when configuring manually). Replace the example Ledger and agent addresses with your deployment and allowlisted signer addresses. Set `chainId`, `rpcUrl`, and `ipfsUrl` for the intended environment. `ipfsUrl` must be a Kubo-compatible API, with `/api/v0/add` support; a read-only gateway or unrelated pinning API is insufficient.
+Edit the ignored `config.local.json` (or copy `config.example.json` there when configuring manually). For IPFS mode, replace it with the [IPFS-only configuration](#ipfs-only-configuration), using a loopback host and host-reachable IPFS endpoint. For Ledger mode, replace the example Ledger and agent addresses with your deployment and allowlisted signer addresses, and set `chainId`, `rpcUrl`, and `ipfsUrl`. In both modes, `ipfsUrl` must be a Kubo-compatible API, with `/api/v0/add` support; a read-only gateway or unrelated pinning API is insufficient.
 
-The node account must have gas funds and be dedicated to one runtime. The agent signing key is distinct; it does not need gas to sign a message. Store `OYA_NODE_PRIVATE_KEY` in the ignored `node/production/.env`, or inject it through your process supervisor. Optional `OYA_RPC_AUTHORIZATION` and `OYA_IPFS_AUTHORIZATION` contain complete HTTP Authorization header values. Keep RPC URLs containing credentials in private local config too.
+In Ledger mode, the node account must have gas funds and be dedicated to one runtime. The agent signing key is distinct; it does not need gas to sign a message. Store `OYA_NODE_PRIVATE_KEY` in the ignored `node/production/.env`, or inject it through your process supervisor. IPFS mode creates no node signer and needs no node key. Optional `OYA_RPC_AUTHORIZATION` and `OYA_IPFS_AUTHORIZATION` contain complete HTTP Authorization header values. Keep RPC URLs containing credentials in private local config too.
 
 ### Deploy or reuse Ledger
 
@@ -472,9 +516,9 @@ Check the configuration and services from the repository root:
 npm --prefix node/production run local -- check
 ```
 
-`check`, `run`, and `status` accept the same `--config` and `--env-file` overrides as setup and share one settings loader. The selected environment file must be readable; it may be empty when credentials are injected. Its values override inherited environment values, including explicitly empty values; omitted entries use the inherited environment. These local commands require `host` to be `127.0.0.1` or `::1` and use the existing config validator and node signer.
+`check`, `run`, and `status` accept the same `--config` and `--env-file` overrides as setup and share one settings loader. The selected environment file must be readable; it may be empty in IPFS mode or when credentials are injected. Its values override inherited environment values, including explicitly empty values; omitted entries use the inherited environment. These local commands require `host` to be `127.0.0.1` or `::1`. Only Ledger mode creates a node signer.
 
-The command checks the Ethereum chain ID, nonempty code at the Ledger address, a positive native-currency balance for the node, and the Kubo `/api/v0/version` endpoint, in that order. Each probe has a 10-second deadline, including response reading and any RPC retries. It prints public addresses and an `OK` for each passing probe, exits 0 when all pass, or stops with a sanitized `FAIL` and exit 1 at the first failure. It submits no transactions, uploads no content, and changes no files. Code presence does not verify Ledger's implementation, a positive balance does not guarantee sufficient gas for a particular transaction, and the IPFS probe does not prove publication permissions.
+In IPFS mode, the command checks only the Kubo `/api/v0/version` endpoint. Ledger mode first checks the Ethereum chain ID, nonempty code at the Ledger address, and a positive native-currency balance for the node. Each probe has a 10-second deadline, including response reading and any RPC retries. It prints public addresses when applicable and an `OK` for each passing probe, exits 0 when all pass, or stops with a sanitized `FAIL` and exit 1 at the first failure. It submits no transactions, uploads no content, and changes no files. Code presence does not verify Ledger's implementation, a positive balance does not guarantee sufficient gas for a particular transaction, and the IPFS probe does not prove publication permissions.
 
 Start the node in the foreground from the repository root:
 
@@ -494,7 +538,7 @@ In another terminal, using the same path overrides if any:
 npm --prefix node/production run local -- status
 ```
 
-`status` queries only the local `/healthz` endpoint, with a five-second deadline covering connection and response reading. It verifies the chain ID, Ledger address, and node address against the selected settings. `ready` and `busy` exit 0. `shutting_down`, `transaction_outcome_unknown`, an identity mismatch, an unreachable node, or malformed health data exit 1 with sanitized output. Status never starts or restarts a process and does not probe Ethereum or IPFS. An unknown transaction outcome requires inspection before restarting or retrying.
+`status` queries only the local `/healthz` endpoint, with a five-second deadline covering connection and response reading. It verifies the mode, and in Ledger mode also the chain ID, Ledger address, and node address against the selected settings. `ready` and `busy` exit 0. `shutting_down`, `transaction_outcome_unknown`, an identity/mode mismatch, an unreachable node, or malformed health data exit 1 with sanitized output. Status never starts or restarts a process and does not probe Ethereum or IPFS. An unknown Ledger transaction outcome requires inspection before restarting or retrying.
 
 For direct runtime startup with the same literal secret-file format as Docker:
 
@@ -512,21 +556,22 @@ node -- node/production/src/main.mjs /absolute/path/to/config.json
 
 Both CLI paths use `startNode(config, signer, { handleSignals: true })` from `src/main.mjs`, which starts the HTTP server and enables shared lifecycle logs and SIGINT/SIGTERM handling. Programmatic callers omit `handleSignals` and use the returned runtime's `close()` method themselves. Signal listeners remain installed until accepted work has drained and are then removed.
 
-Startup checks the RPC chain and deployed Ledger bytecode before serving traffic. Configuration rejects unsupported fields. There is no state directory, publication journal, process lock, or startup replay.
+Ledger startup checks the RPC chain and deployed Ledger bytecode before serving traffic. IPFS runtime startup loads settings without contacting Ethereum; use `local check` or Compose's Kubo health check to establish basic IPFS readiness. Configuration rejects unsupported fields. There is no state directory, publication journal, process lock, or startup replay.
 
 `host` defaults to `127.0.0.1`, and `port` to `8787`. To host it remotely, use the direct runtime entrypoint, choose the binding explicitly, and provide HTTPS through your hosting environment. Other optional settings are:
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
+| `mode` | `ledger` | `ledger` publishes and logs a CID onchain; `ipfs` only publishes to IPFS. |
 | `maxMessageRequestsPerMinute` | 60 | Maximum valid allowlisted message attempts per node in a fixed 60-second window. |
 | `maxBodyBytes` | 16,384 | Maximum HTTP request body size. |
 | `maxTextBytes` | 8,192 | Maximum signed text size. |
 | `bodyTimeoutMs` | 10,000 | Deadline for reading the request body. |
-| `receiptTimeoutMs` | 60,000 | Deadline for observing a transaction receipt. |
-| `operationTimeoutMs` | 180,000 | Overall deadline for the combined publication and logging operation. |
-| `pollIntervalMs` | 1,000 | Interval between receipt polls. |
-| `gasLimit` | 200,000 | Maximum transaction gas limit. |
-| `maxFeePerGasWei` | `"30000000000"` | Maximum fee per gas, as a decimal string. |
+| `receiptTimeoutMs` | 60,000 | Ledger only: deadline for observing a transaction receipt. |
+| `operationTimeoutMs` | 180,000 | Overall deadline for publication and any Ledger logging. |
+| `pollIntervalMs` | 1,000 | Ledger only: interval between receipt polls. |
+| `gasLimit` | 200,000 | Ledger only: maximum transaction gas limit. |
+| `maxFeePerGasWei` | `"30000000000"` | Ledger only: maximum fee per gas, as a decimal string. |
 
 `maxMessageRequestsPerMinute` is a positive integer. Only valid `POST /v1/messages` requests with a verified signature from an `allowedSigners` address consume the budget. All allowlisted signers share one budget per node, including busy and repeated requests. Malformed requests, invalid signatures, and disallowed signers do not consume it. The node reads and validates the body and verifies the signature and allowlist before checking the budget. An exhausted budget returns `429 rate_limited` with `started: false`, a `Retry-After` duration in whole seconds rounded up, and a closed connection. Health checks and other routes do not consume this budget. Windows start with the HTTP server and use a monotonic clock; rejected attempts do not move the reset time. Fixed windows allow bursts across a boundary, and restarting the node resets the in-memory budget. Accepted work continues when the budget is exhausted; repeating a signed message remains valid within the request and capacity limits. Body-size, body-timeout, and connection limits still apply to all senders.
 
@@ -548,7 +593,7 @@ Put ASCII text in a file and store `OYA_AGENT_PRIVATE_KEY` in a separate private
 node --env-file=/absolute/path/to/agent.env -- node/production/scripts/send-message.mjs http://127.0.0.1:8787 /absolute/path/to/message.txt
 ```
 
-The script signs the complete file, including any final newline. A successful response looks like:
+The script signs the complete file, including any final newline, and accepts successful results from either mode. A successful Ledger response looks like:
 
 ```json
 {
@@ -570,10 +615,11 @@ Retrieve the original signed JSON with `ipfs cat <cid>` against the relevant Kub
 
 ## Results, retries, and shutdown
 
-Every admitted valid request is an independent operation. Repeating the same signed envelope can return the same IPFS CID while producing a new Ledger transaction and another gas charge. There is no durable deduplication, exactly-once guarantee, or automatic restart recovery. Even a previously completed message receives `node_busy` while another operation is active, provided the request budget has not been exhausted.
+Every admitted valid request is an independent operation. Repeating the same signed envelope can return the same IPFS CID; in Ledger mode it also produces a new transaction and another gas charge. There is no durable deduplication, exactly-once guarantee, or automatic restart recovery. Even a previously completed message receives `node_busy` while another operation is active, provided the request budget has not been exhausted.
 
 | HTTP result | Meaning |
 | --- | --- |
+| `200`, `status: "published"` | IPFS mode: the signed envelope was published and pinned; no transaction was attempted. |
 | `200`, `status: "logged"` | IPFS publication and successful mined Ledger execution were verified. |
 | `429 rate_limited` | The shared budget for allowlisted messages is exhausted. This request did not start; wait at least the returned `Retry-After` seconds. |
 | `503 node_busy` | Another operation is active. This request did not start; retry later using `Retry-After: 5`. |
@@ -581,20 +627,20 @@ Every admitted valid request is an independent operation. Repeating the same sig
 | `503 transaction_outcome_unknown` | An earlier transaction outcome is unresolved; the node is unavailable pending operator reconciliation. |
 | `502 publication_failed` | An upstream publication or logging step failed; inspect the outcome and available CID/hash. |
 | `504 operation_timeout` or `504 receipt_timeout` | The overall operation or receipt deadline elapsed; effects may already have occurred. |
-| `500 internal_error` | An unexpected fault occurred; a started operation with an unknown outcome blocks further work. |
+| `500 internal_error` | An unexpected fault occurred; in Ledger mode a started operation with an unknown outcome blocks further work. |
 
 Validation errors retain their HTTP statuses even when the request budget is exhausted, including `401` for invalid signatures, `403` for disallowed signers, and `413` for oversized requests. These requests cause no publication or signing and do not consume the budget. Signature and allowlist checks also run when the node is busy or unavailable. For valid allowlisted requests, `429 rate_limited` takes precedence over node-availability responses.
 
-Rate-limit, busy, shutdown, and unavailable rejections include `started: false`. Attempted failures include `started: true` and `loggingOutcome`, with a partial `publication` containing any known CID, URI, transaction hash, and mined block number:
+Rate-limit, busy, shutdown, and unavailable rejections include `started: false`. Attempted failures include `started: true`. In IPFS mode, an upload may have occurred, but there are no transaction fields or logging outcome and the node can accept new work. In Ledger mode, failures also include `loggingOutcome`, with a partial `publication` containing any known CID, URI, transaction hash, and mined block number:
 
 - `not_submitted`: No Ledger transaction was submitted. IPFS publication may still have occurred. The node can accept another operation.
 - `failed`: A validated mined receipt was observed, but execution reverted or Ledger verification failed. The nonce was consumed, so the node can accept another operation.
 - `unknown`: The node cannot establish the logging outcome. A known transaction hash is not proof of acceptance or mining. Further authenticated requests receive `503 transaction_outcome_unknown` with no automatic retry advice.
 
-An HTTP failure or lost connection cannot undo IPFS publication or transaction submission. Inspect the returned identifiers and the node account on the configured chain before retrying attempted work. For an unknown outcome, reconcile the transaction externally and deliberately restart only once it is resolved. Restart loses the in-memory unavailable flag; it does not reconcile transactions or recover a lost response. The signing account must be used exclusively by this one process, including across restarts.
+An HTTP failure or lost connection cannot undo IPFS publication or transaction submission. In Ledger mode, inspect the returned identifiers and node account before retrying attempted work. For an unknown transaction outcome, reconcile the transaction externally and deliberately restart only once it is resolved. Restart loses the in-memory unavailable flag; it does not reconcile transactions or recover a lost response. The Ledger signing account must be used exclusively by this one process, including across restarts.
 
-`GET /healthz` returns `200` with `status: "ready"` or `"busy"`, or `503` with `"transaction_outcome_unknown"` or `"shutting_down"`. It includes `busy`, chain ID, Ledger address, and node address. It describes local lifecycle state and does not continuously probe RPC or IPFS.
+`GET /healthz` returns `200` with `status: "ready"` or `"busy"`, or `503` during shutdown or a Ledger-mode unknown transaction outcome. It includes `mode` and `busy`; only Ledger mode includes chain ID, Ledger address, and node address. It describes local lifecycle state and does not continuously probe RPC or IPFS.
 
 A disconnected client does not cancel an admitted operation or release its guard. The operation finishes or reaches its deadline, and the node emits a sanitized `message_result` log containing its final public result. SIGINT/SIGTERM stops admission and waits for active work, including work whose client disconnected. Logs never include raw provider errors or signed transaction bytes; the host persists no intermediate progress.
 
-A successful response confirms mined execution as reported by the configured RPC, without additional confirmation depth or protection against later chain reorganizations. IPFS content is public once published, including the signed text. Ledger records CID claims; consumers still verify retrieved content and the agent signature.
+A successful Ledger response confirms mined execution as reported by the configured RPC, without additional confirmation depth or protection against later chain reorganizations. IPFS mode provides no onchain record. IPFS content is public once published, including the signed text. Ledger records CID claims; consumers of either mode still verify retrieved content and the agent signature.

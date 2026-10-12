@@ -10,17 +10,21 @@ import { loadSecrets } from './secrets.mjs';
 export async function startNode(config, signer, {
     fetch = globalThis.fetch, log = (record) => console.log(JSON.stringify(record)), handleSignals = false,
 } = {}) {
-    const rpc = async (method, params = []) => (await requestEthereumJsonRpc({
-        config: config.rpc, fetch, method, params,
-    })).result;
-    if (BigInt(await rpc('eth_chainId')) !== BigInt(config.chainId)) throw new Error('RPC chain ID does not match configuration.');
-    if (!hasBytecode(await rpc('eth_getCode', [config.ledgerContract, 'latest']))) {
-        throw new Error('No contract bytecode exists at ledgerContract.');
+    let transactionPreparer;
+    if (config.mode === 'ledger') {
+        const rpc = async (method, params = []) => (await requestEthereumJsonRpc({
+            config: config.rpc, fetch, method, params,
+        })).result;
+        if (BigInt(await rpc('eth_chainId')) !== BigInt(config.chainId)) throw new Error('RPC chain ID does not match configuration.');
+        if (!hasBytecode(await rpc('eth_getCode', [config.ledgerContract, 'latest']))) {
+            throw new Error('No contract bytecode exists at ledgerContract.');
+        }
+        transactionPreparer = createTransactionPreparer({
+            config: config.rpc, fetch, chainId: config.chainId, signer, limits: config.limits,
+        });
     }
-    const transactionPreparer = createTransactionPreparer({
-        config: config.rpc, fetch, chainId: config.chainId, signer, limits: config.limits,
-    });
-    const runtime = createNodeServer({ config, transactionPreparer, nodeAddress: signer.address, fetch, log });
+    const nodeAddress = config.mode === 'ledger' ? signer.address : undefined;
+    const runtime = createNodeServer({ config, transactionPreparer, nodeAddress, fetch, log });
     await new Promise((resolveListening, reject) => {
         runtime.server.once('error', reject);
         runtime.server.listen(config.port, config.host, resolveListening);
@@ -45,8 +49,8 @@ export async function startNode(config, signer, {
             for (const signal of signals) process.off(signal, stop);
         });
         for (const signal of signals) process.on(signal, stop);
-        logLifecycle({ event: 'listening', host: config.host, port: config.port, chainId: config.chainId,
-            ledgerContract: config.ledgerContract, nodeAddress: signer.address });
+        logLifecycle({ event: 'listening', mode: config.mode, host: config.host, port: config.port,
+            ...(config.mode === 'ledger' ? { chainId: config.chainId, ledgerContract: config.ledgerContract, nodeAddress } : {}) });
     }
     return runtime;
 }
@@ -56,14 +60,14 @@ async function main() {
     if (args.length < 1 || args.length > 2) throw new Error('Usage: node node/production/src/main.mjs CONFIG_JSON [SECRETS_FILE]');
     const secrets = args.length === 2 ? await loadSecrets(args[1]) : process.env;
     const config = await loadConfig(args[0], secrets);
-    const signer = createLocalSigner(secrets.OYA_NODE_PRIVATE_KEY);
+    const signer = config.mode === 'ledger' ? createLocalSigner(secrets.OYA_NODE_PRIVATE_KEY) : undefined;
     await startNode(config, signer, { handleSignals: true });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
     main().catch(() => {
         // RPC URLs, IPFS headers, and wallet errors may contain secrets.
-        console.error('Node startup failed. Check config, signer, and RPC/Ledger availability.');
+        console.error('Node startup failed. Check config and secrets; Ledger mode also requires a signer and RPC/Ledger availability.');
         process.exitCode = 1;
     });
 }

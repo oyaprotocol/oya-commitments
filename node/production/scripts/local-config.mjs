@@ -19,7 +19,7 @@ export async function loadLocalConfig(configPath, envPath, { env = process.env, 
     try {
         config = parseConfig(JSON.parse(await readFile(configPath, 'utf8')), { env: selectedEnv });
     } catch {
-        return fail('Configuration. Check the JSON, chainId, ledgerContract, allowedSigners, rpcUrl, and ipfsUrl.');
+        return fail('Configuration. Check mode, allowedSigners, and ipfsUrl; Ledger mode also requires chainId, ledgerContract, and rpcUrl.');
     }
     if (!['127.0.0.1', '::1'].includes(config.host)) {
         return fail('Local binding. Set host to 127.0.0.1 or ::1.');
@@ -31,6 +31,7 @@ export async function loadLocalSettings(configPath, envPath, options = {}) {
     const settings = await loadLocalConfig(configPath, envPath, options);
     if (!settings) return null;
     const { config, env: selectedEnv } = settings;
+    if (config.mode === 'ipfs') return { config };
     let signer;
     try {
         signer = createLocalSigner(selectedEnv.OYA_NODE_PRIVATE_KEY);

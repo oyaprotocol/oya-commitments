@@ -12,7 +12,6 @@ export async function loadSecrets(path) {
             // Values are literal: no shell expansion, quote removal, or inline comments.
             secrets[entry[1]] = entry[2];
         }
-        if (!secrets.OYA_NODE_PRIVATE_KEY) throw new Error();
         return Object.freeze(secrets);
     } catch {
         throw new Error('Cannot load node secrets. Check file access and literal KEY=value entries.');

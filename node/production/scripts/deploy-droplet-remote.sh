@@ -59,7 +59,7 @@ import { loadSecrets } from "./src/secrets.mjs";
 try {
     const secrets = await loadSecrets("/run/secrets/node.env");
     const config = await loadConfig("/config/node.json", secrets);
-    createLocalSigner(secrets.OYA_NODE_PRIVATE_KEY);
+    if (config.mode === "ledger") createLocalSigner(secrets.OYA_NODE_PRIVATE_KEY);
     if (config.host !== "0.0.0.0" || config.port !== 8787 ||
         new URL(config.ipfs.url).href !== "http://ipfs:5001/") throw new Error();
     console.log(Math.ceil(config.operationTimeoutMs / 1000) + 60);

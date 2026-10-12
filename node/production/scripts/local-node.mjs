@@ -50,7 +50,7 @@ export async function main(args, {
     const { values, positionals } = parsed;
     if (values.help) {
         log(`${usage}\nsetup: Install locked dependencies and create missing private config files.\n`
-            + 'check: Load settings and check Ethereum, Ledger, gas balance, and IPFS without writes.\n'
+            + 'check: Check IPFS without writes; Ledger mode also checks Ethereum, Ledger, and gas balance.\n'
             + 'run: Check settings and services, then run the node in the foreground; Ctrl-C drains active work.\n'
             + 'status: Query local node health and identity without checking upstream services or restarting.\n'
             + 'deploy-ledger: Reuse configured code or simulate deployment; only --broadcast submits and records a new Ledger.\n'
@@ -108,7 +108,7 @@ export async function main(args, {
                 });
                 return 0;
             } catch {
-                return fail('Node startup failed. Check config, signer, RPC/Ledger availability, and the listening port.');
+                return fail('Node startup failed. Check config and the listening port; Ledger mode also requires a signer and RPC/Ledger availability.');
             }
         } catch {
             return fail('Local command failed. Run local setup and verify the selected settings.');
@@ -134,7 +134,7 @@ export async function main(args, {
             return fail(`Could not prepare ${template}. Check destination directories and file permissions.`);
         }
     }
-    log('Setup complete. Configure chainId, ledgerContract, allowedSigners, rpcUrl, ipfsUrl, and OYA_NODE_PRIVATE_KEY before starting the node.');
+    log('Setup complete. Configure allowedSigners and ipfsUrl. Ledger mode also requires chainId, ledgerContract, rpcUrl, and OYA_NODE_PRIVATE_KEY. For IPFS-only operation, set mode to ipfs and remove Ethereum settings.');
     return 0;
 }
 

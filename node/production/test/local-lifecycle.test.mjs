@@ -180,9 +180,40 @@ test('local, environment, and secret-file launch paths drain admitted requests o
     }
 });
 
+test('IPFS local run and status skip Ethereum and drain an upload without a configured node key', { timeout: 15_000 }, async (t) => {
+    const f = await fixture(t);
+    const config = { mode: 'ipfs', host: f.config.host, port: f.config.port,
+        allowedSigners: f.config.allowedSigners, ipfsUrl: f.config.ipfsUrl };
+    await writeFile(f.configPath, JSON.stringify(config));
+    await writeFile(f.envPath, 'OYA_NODE_PRIVATE_KEY=unused-invalid-key\nOYA_IPFS_AUTHORIZATION="Bearer ipfs-secret-marker"\n');
+    const running = launch(t, f);
+    await running.ready();
+    assert.deepEqual(f.calls, ['/ipfs/api/v0/version']);
+    assert.deepEqual(await (await fetch(`${f.url}/healthz`)).json(), { mode: 'ipfs', status: 'ready', busy: false });
+    const { stdout } = await execute(process.execPath, ['--', script, 'status', ...f.args], {
+        cwd: f.cwd, env: { ...process.env, INIT_CWD: f.cwd }, timeout: 5000,
+    });
+    assert.match(stdout, /OK ready.*IPFS-only/);
+    const text = 'IPFS local lifecycle test';
+    const pending = fetch(`${f.url}/v1/messages`, { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text, signer: f.agent.address, signature: await f.agent.signMessage(text) }) });
+    await f.entered;
+    running.child.kill('SIGTERM');
+    await until(() => running.output().includes('Stopping node;'));
+    assert.equal(running.closed(), false);
+    f.release();
+    const response = await pending;
+    assert.equal(response.status, 502);
+    assert.deepEqual(await response.json(), { code: 'publication_failed', started: true });
+    assert.deepEqual(await running.exited, { code: 0, signal: null });
+    assert.equal(f.calls.some(path => path === '/rpc'), false);
+    assert.equal(running.output().includes('secret-marker'), false);
+    assert.equal(running.output().includes('unused-invalid-key'), false);
+});
+
 test('missing or malformed secret files fail before RPC without falling back to valid environment credentials', async (t) => {
     const f = await fixture(t);
-    for (const contents of [null, 'UNKNOWN=private-input-marker\n']) {
+    for (const contents of [null, '', 'OYA_NODE_PRIVATE_KEY=\n', 'UNKNOWN=private-input-marker\n']) {
         if (contents === null) await rm(f.secretsPath);
         else await writeFile(f.secretsPath, contents, { mode: 0o600 });
         await assert.rejects(execute(process.execPath, [join(production, 'src/main.mjs'), f.configPath, f.secretsPath], {
@@ -191,7 +222,7 @@ test('missing or malformed secret files fail before RPC without falling back to 
         }), (error) => {
             assert.equal(error.code, 1);
             assert.equal(error.stdout, '');
-            assert.equal(error.stderr, 'Node startup failed. Check config, signer, and RPC/Ledger availability.\n');
+            assert.equal(error.stderr, 'Node startup failed. Check config and secrets; Ledger mode also requires a signer and RPC/Ledger availability.\n');
             return true;
         });
     }

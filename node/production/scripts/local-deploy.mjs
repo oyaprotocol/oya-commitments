@@ -33,6 +33,10 @@ async function readDeployment(artifactPath, chainId, deployer) {
 export async function deployLedger(configPath, { config, env }, {
     broadcast = false, verify = false, execute = promisify(execFile), fetch = globalThis.fetch, log = console.log,
 } = {}) {
+    if (config.mode === 'ipfs') {
+        log('FAIL deploy-ledger requires Ledger mode. IPFS mode does not use a contract.');
+        return 1;
+    }
     let stage = 'Check Ethereum RPC availability and chainId.';
     let artifactPath;
     let submitted = false;
