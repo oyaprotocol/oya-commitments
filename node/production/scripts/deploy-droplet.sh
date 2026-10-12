@@ -2,12 +2,14 @@
 set -euo pipefail
 
 usage() {
-    echo 'Usage: bash deploy-droplet.sh SSH_TARGET PUBLIC_HOSTNAME CONFIG_JSON NODE_ENV [IMAGE@sha256:DIGEST]'
+    echo 'Usage: bash deploy-droplet.sh [--with-test-agent] SSH_TARGET PUBLIC_HOSTNAME CONFIG_JSON NODE_ENV [IMAGE@sha256:DIGEST]'
     echo 'First deployment only; requires verified SSH access and Docker/Compose on a Linux amd64 host.'
     echo 'Uses image.txt from the release bundle unless an explicit pinned GHCR image is supplied.'
 }
 fail() { echo "$1" >&2; exit 1; }
 if [[ ${1:-} == --help && $# == 1 ]]; then usage; exit 0; fi
+testing=false
+if [[ ${1:-} == --with-test-agent ]]; then testing=true; shift; fi
 if [[ $# != 4 && $# != 5 ]]; then usage >&2; exit 1; fi
 target=$1
 hostname=$2
@@ -43,6 +45,12 @@ cat < "$4" > "$staging/node.env"
 chmod 600 "$staging/node.json" "$staging/node.env"
 printf 'services:\n  node:\n    build: !reset null\n    image: %s\n' "$image" > "$staging/image.yaml"
 printf 'export OYA_PUBLIC_HOSTNAME=%s\n' "$hostname" > "$staging/compose.env"
+if [[ $testing == true ]]; then
+    mkdir "$staging/test-agent"
+    cp "$runtime/../../agent-library/agents/hourly-message-test/agent.mjs" "$staging/test-agent/"
+    cp "$runtime/docker/compose.testing.yaml" "$staging/docker/"
+    printf 'export COMPOSE_PROFILES=testing\nexport OYA_TEST_AGENT_IMAGE=%s\n' "$image" >> "$staging/compose.env"
+fi
 
 echo 'Copying the deployment files into a new private directory.'
 # mkdir claims the directory atomically; concurrent or repeated installs cannot overwrite it.

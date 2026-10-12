@@ -1,0 +1,43 @@
+# Optional hourly sender. Paths resolve from the base compose.yaml directory.
+services:
+  node:
+    networks: [testing]
+
+  test-agent:
+    profiles: [testing]
+    image: ${OYA_TEST_AGENT_IMAGE:-oya-node:local}
+    user: ${OYA_CONTAINER_USER:-1000:1000}
+    entrypoint: [node, /app/test-agent/agent.mjs]
+    command: [run, /run/test-agent/key, "${OYA_TEST_AGENT_TIMEOUT_MS:-210000}"]
+    networks: [testing]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - type: bind
+        source: ${OYA_TEST_AGENT_SOURCE:-../../agent-library/agents/hourly-message-test}
+        target: /app/test-agent
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${OYA_TEST_AGENT_DIR:-./test-agent-private}
+        target: /run/test-agent
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      node:
+        condition: service_healthy
+    stop_signal: SIGTERM
+    stop_grace_period: ${OYA_STOP_GRACE_PERIOD:-4m}
+    restart: "no"
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  testing:
+    internal: true

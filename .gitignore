@@ -35,6 +35,7 @@ agent/.state/
 node/production/config.local.json
 node.env
 node.json
+test-agent-private/
 ipfs-repo*.tar*
 ipfs-repo*.tgz
 oya-private/

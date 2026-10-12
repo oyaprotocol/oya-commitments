@@ -48,6 +48,17 @@ const mode = process.env.TEST_MODE;
 if (args[0] === 'info') console.log(mode === 'architecture' ? 'linux/arm64' : 'linux/amd64');
 else if (args[0] === 'ps' && mode === 'containers') console.log('existing-container');
 else if (args[0] === 'volume' && mode === 'volumes') console.log('oya_ipfs-data');
+else if (args[0] === 'run') {
+    const deployment = join(process.env.TEST_REMOTE, 'oya');
+    const source = readFileSync(join(deployment, 'test-agent/agent.mjs'), 'utf8');
+    const initArgs = ['init', join(deployment, 'test-agent-private/key'), join(deployment, 'node.json')];
+    try {
+        execFileSync(process.execPath, ['--input-type=module', '-e', source +
+            '\\nprocess.exitCode = await main(' + JSON.stringify(initArgs) + ');'], {
+            cwd: process.env.TEST_RUNTIME, stdio: 'inherit',
+        });
+    } catch { process.exit(1); }
+}
 else if (args[0] === 'compose') {
     if (args[1] === 'version') console.log(mode === 'version' ? 'v2.29.0' : 'v2.31.0');
     if (args[1] === 'pull' && args[2] === 'node' && mode === 'pull') process.exit(1);
@@ -116,6 +127,43 @@ test('release bundle deploys its default pin without a checkout or local Docker'
     const result = f.run(['oya@example.com', 'node.example.com', f.configFile, f.envFile], join(bundle, 'scripts/deploy-droplet.sh'));
     assert.equal(result.status, 0, result.stderr);
     assert.ok(readFileSync(join(f.remote, 'oya/image.yaml'), 'utf8').includes(image));
+});
+
+test('optional testing profile generates its own secret, enrolls its address, and preserves private inputs', (t) => {
+    const f = fixture(t);
+    f.config.chainId = 11155111;
+    writeFileSync(f.configFile, JSON.stringify(f.config));
+    const result = f.run(['--with-test-agent', 'oya@example.com', 'node.example.com', f.configFile, f.envFile, image]);
+    assert.equal(result.status, 0, result.stderr);
+    const deployment = join(f.remote, 'oya');
+    const key = readFileSync(join(deployment, 'test-agent-private/key'), 'utf8').trim();
+    const wallet = new Wallet(key);
+    assert.notEqual(key, f.privateKey);
+    assert.equal(statSync(join(deployment, 'test-agent-private')).mode & 0o777, 0o700);
+    assert.equal(statSync(join(deployment, 'test-agent-private/key')).mode & 0o777, 0o600);
+    assert.deepEqual(JSON.parse(readFileSync(join(deployment, 'node.json'))).allowedSigners,
+        [...f.config.allowedSigners, wallet.address]);
+    assert.deepEqual(JSON.parse(readFileSync(f.configFile)), f.config);
+    assert.equal(readFileSync(join(deployment, 'node.env'), 'utf8'), readFileSync(f.envFile, 'utf8'));
+    assert.equal((result.stdout + result.stderr).includes(key), false);
+    assert.equal((result.stdout + result.stderr).includes(f.privateKey), false);
+    const exports = execFileSync('bash', ['-c',
+        'source "$1"; printf "%s\\n%s\\n%s\\n%s" "$COMPOSE_PROFILES" "$OYA_TEST_AGENT_IMAGE" "$OYA_TEST_AGENT_TIMEOUT_MS" "$COMPOSE_FILE"',
+        'bash', join(deployment, 'compose.env')], { encoding: 'utf8' }).split('\n');
+    assert.deepEqual(exports.slice(0, 3), ['testing', image, '331000']);
+    assert.ok(exports[3].endsWith('/docker/compose.testing.yaml'));
+    const init = f.commands().find(args => args[0] === 'run');
+    assert.ok(init.includes(image));
+    assert.equal(init[init.indexOf('--network') + 1], 'none');
+    assert.equal(f.commands().filter(args => args[1] === 'up').length, 1);
+});
+
+test('testing on an unsupported chain stops before any services start', (t) => {
+    const f = fixture(t);
+    const result = f.run(['--with-test-agent', 'oya@example.com', 'node.example.com', f.configFile, f.envFile, image]);
+    assert.notEqual(result.status, 0);
+    assert.equal(f.commands().some(args => args[1] === 'up'), false);
+    assert.equal((result.stdout + result.stderr).includes(f.privateKey), false);
 });
 
 test('existing state, wrong platform, and old Compose stop before pulling the image', async (t) => {
