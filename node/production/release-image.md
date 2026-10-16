@@ -1,6 +1,22 @@
 # Publish a production node image
 
-Maintainers use `scripts/publish-image.sh` to publish a Linux amd64 image to GitHub Container Registry (GHCR). The same image contains the local worker, PostgreSQL inbox service, sender client, and advanced direct runtime. Operators use the matching bundle to [run locally](run-locally.md) and [host the inbox](host-inbox.md) wherever they choose. Docker/Compose runs on each selected host. Publication is an explicit release command, not an automatic push on every commit. v0.2.0 images predate the inbox; publish a new version before distributing inbox deployment instructions with a release image.
+Maintainers use `scripts/publish-image.sh` to publish a Linux amd64 image to GitHub Container Registry (GHCR). The same image contains the local worker, PostgreSQL inbox service, sender client, and advanced direct runtime. Operators use the matching bundle to [run locally](run-locally.md) and [host the inbox](host-inbox.md) wherever they choose. Docker/Compose runs on each selected host. Publication is an explicit release command, not an automatic push on every commit. v0.3.0 is the first published inbox-capable release; v0.2.0 supports only the direct API.
+
+## Published deployment release
+
+The deployment guides use [node-v0.3.0](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.0), built from commit `07acda6b247b34f5061275904d209ad071b80029`. Its public Linux amd64 image is `ghcr.io/oyaprotocol/oya-node:v0.3.0`; deployments use the immutable reference recorded in the release's `image.txt`:
+
+```text
+ghcr.io/oyaprotocol/oya-node@sha256:848806de43f0afa056d1dea533320bfc1b503cb4409a96abb3101d7cedbb69de
+```
+
+The matching `oya-node-v0.3.0.tar.gz` has SHA-256:
+
+```text
+8c8cd6f5ecf4c9de1b0704b8f81a7be05d574a68af8ce6eef45a17e2f8c4ae73
+```
+
+Check the downloaded archive with `sha256sum` on Linux or `shasum -a 256` on macOS and compare it with this value before extraction. The release also includes `release.txt` recording the tag, commit, and image reference. Follow the current [local-worker](run-locally.md) and [inbox-host](host-inbox.md) guides with these released Compose assets. Documentation embedded in the immutable v0.3.0 archive still describes a source build; the current guides supply the published-image instructions. Both IPFS-only and full Ledger modes are included.
 
 ## Version control and release preparation
 

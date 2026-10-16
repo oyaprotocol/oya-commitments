@@ -4,7 +4,7 @@
 
 The Oya production runtime lives in [`production/`](production/README.md). Its default deployment runs on a local device and polls a portable [PostgreSQL inbox](production/host-inbox.md) over outbound HTTPS. The inbox receives signed messages, tracks publication, and keeps execution checkpoints for restart recovery. Full Ledger mode logs CIDs onchain; IPFS-only mode needs no Ethereum connection or funded node wallet. A synchronous direct API remains available separately. The experimental daemons described below use the earlier shared agent infrastructure.
 
-Follow [Run a live node locally](production/run-locally.md) for both modes, Docker, persistent IPFS storage, external messages, monitoring, and recovery. The inbox requires a source build until a release containing it is published; v0.2.0 supports the older direct API.
+Follow [Run a live node locally](production/run-locally.md) for both modes, Docker, persistent IPFS storage, external messages, monitoring, and recovery. The guides use the published [node-v0.3.0 image and deployment bundle](production/release-image.md#published-deployment-release); no source build is required. v0.2.0 supports the older direct API.
 
 From the repository root, `npm --prefix node/production run test:local` validates the operating CLI and a separate message sender against disposable Anvil and offline Kubo, including Ledger deployment/reuse, publication, and node restart. See the [production validation guide](production/README.md#install-and-validate) for prerequisites and evidence output.
 
