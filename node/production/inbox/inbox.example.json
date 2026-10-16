@@ -1,0 +1,9 @@
+{
+  "target": "my-node",
+  "host": "0.0.0.0",
+  "port": 8788,
+  "allowedSigners": ["0x2222222222222222222222222222222222222222"],
+  "execution": {"mode": "ipfs"},
+  "maxJobs": 10000,
+  "databaseTls": true
+}

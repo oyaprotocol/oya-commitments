@@ -29,7 +29,7 @@ git -C "$root" -c tar.umask=0022 archive "$revision:node/production" | tar -xpf 
 version=${release#node-}
 echo "Publishing $repository:$version from $revision for Linux amd64."
 docker buildx build --platform linux/amd64 --push --tag "$repository:$version" \
-    --label "org.opencontainers.image.source=https://github.com/OyaChat/oya-commitments" \
+    --label "org.opencontainers.image.source=https://github.com/oyaprotocol/oya-commitments" \
     --label "org.opencontainers.image.revision=$revision" --label "org.opencontainers.image.version=$version" \
     --metadata-file "$staging/build.json" "$staging/source"
 # Use this build's digest, never a later lookup of the mutable version tag.
@@ -39,13 +39,17 @@ console.log(JSON.parse(readFileSync(process.argv[1], "utf8"))["containerimage.di
 ' "$staging/build.json")
 [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || fail 'Build did not return a valid image digest; inspect the registry before retrying.'
 bundle="$staging/bundle/node/production"
-mkdir -p "$bundle/docker" "$bundle/scripts"
+mkdir -p "$bundle/docker" "$bundle/scripts" "$bundle/inbox"
 cp "$staging/source/compose.yaml" "$staging/source/README.md" \
-    "$staging/source/deploy-droplet.md" "$staging/source/run-locally.md" \
+    "$staging/source/deploy-droplet.md" "$staging/source/run-locally.md" "$staging/source/run-direct.md" \
+    "$staging/source/host-inbox.md" "$staging/source/inbox-api.md" \
     "$staging/source/release-image.md" "$bundle/"
 cp "$staging/source/docker/compose.http.yaml" "$staging/source/docker/Caddyfile" \
     "$staging/source/docker/compose.testing.yaml" \
     "$staging/source/docker/config.example.json" "$staging/source/docker/runtime.env.example" "$bundle/docker/"
+for file in compose.yaml compose.postgres.yaml compose.https.yaml compose.worker.yaml Caddyfile inbox.example.json worker.example.json; do
+    cp "$staging/source/inbox/$file" "$bundle/inbox/"
+done
 mkdir -p "$staging/bundle/agent-library/agents/hourly-message-test"
 git -C "$root" show "$revision:agent-library/agents/hourly-message-test/agent.mjs" \
     > "$staging/bundle/agent-library/agents/hourly-message-test/agent.mjs"

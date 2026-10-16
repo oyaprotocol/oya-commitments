@@ -1,0 +1,5 @@
+{
+  "url": "https://inbox.example.com",
+  "target": "my-node",
+  "pollIntervalMs": 5000
+}

@@ -1,293 +1,145 @@
 # Run a live node locally
 
-Run the production node and Kubo locally with Docker Compose, persistent IPFS storage, and an optional hourly message agent. This guide uses the published **v0.2.0 Linux amd64 image** in either mode:
+Run Oya and Kubo on your own computer, mini PC, or other local device. Agents send signed messages to an HTTPS inbox backed by PostgreSQL. Your node polls using outbound requests, so it needs no public IP address, router forwarding, tunnel, or inbound message endpoint. The inbox and PostgreSQL can be hosted wherever you choose, together or separately.
 
-| Mode | Successful publication | Additional requirements |
+Messages remain queued while the local device is asleep or offline. `202` means the inbox saved the job; check its status for publication. This feature requires a **new image built from this source revision**. Released v0.2.0 images do not contain the inbox or worker. Until an inbox-capable release is published, build locally as shown below. For an existing v0.2.0 installation or local-only clients, use the [advanced direct HTTP guide](run-direct.md).
+
+| Mode | Completed job | Local requirements |
 | --- | --- | --- |
-| `ipfs` | Pins the signed message to IPFS and returns its CID and URI | No Ethereum connection or node transaction key |
-| `ledger` (full mode, also the default) | Publishes to IPFS, then logs the CID onchain and verifies the receipt/event | Ethereum RPC, verified Ledger contract, and a funded node signing account |
+| IPFS-only (`ipfs`) | `published`, with CID | Kubo; no Ethereum RPC, node transaction key, or gas |
+| Full (`ledger`) | `logged`, with CID and transaction hash | Kubo, Ethereum RPC, deployed Ledger, funded dedicated node key |
 
-Full mode uses an RPC provider; it does not synchronize an Ethereum full node. Both modes verify agent signatures and enforce the signer allowlist. The Ledger example below uses Ethereum Sepolia for a live test without spending mainnet ETH. Agents need signing keys but no gas funds; the Ledger node pays transaction gas.
+Both modes verify signatures and enforce allowlists at the inbox and again locally. Full mode uses an RPC provider; it does not synchronize an Ethereum full node. The inbox stores message content, signatures, progress, and prepared Ledger transaction bytes, but never needs the node private key. A local IPFS pin may be unavailable while the only device holding it is offline; arrange replication separately if continuous retrieval matters.
 
-The API stays at `http://127.0.0.1:8787`, available to clients on your local computer. Kubo joins the public IPFS network. No domain, HTTPS proxy, cloud account, or LLM API key is required for this setup. The [Droplet installer](deploy-droplet.md) is for a remote Linux host and is not used here.
+## 1. Prepare the image and private local directory
 
-## Prerequisites and availability
-
-- macOS with Docker Desktop, or Linux with Docker Engine; use Linux containers and Compose **2.30 or newer**. Commands below use Bash or zsh, `curl`, and `tar`, as a non-root user. Check `docker version` and `docker compose version` with Docker running.
-- The published v0.2.0 image is amd64. Apple Silicon uses Docker Desktop's amd64 emulation; both native arm64 source builds and amd64 emulation passed the runtime integration checks. This guide selects amd64 explicitly for the node and agent. Kubo uses its native platform. A source build is an alternative in the [Compose guide](README.md#run-with-docker-compose).
-- Keep Docker running and the host computer awake and online during service. Sleep, network changes, or stopping Docker interrupt availability. On laptops, closing the lid may suspend service. The node and hourly agent require deliberate startup after Docker or the host computer restarts.
-- Allow disk space for Docker and growing pinned content. Keep keys/configuration outside the checkout and shared or cloud-synced folders. Preserve the Docker volume when upgrading or restarting.
-- A local pin retains content on this computer; it does not arrange permanent replicas elsewhere. If this is the only available copy, content may be unreachable while the host computer is offline. See [IPFS persistence](https://docs.ipfs.tech/concepts/persistence/).
-
-Use this guide for a first installation. Stop if a command fails. If the chosen directories or Compose project already exist, use their saved settings and the [resume procedure](#stop-and-resume); do not repeat first-time configuration or overwrite keys.
-
-## 1. Download the matching release files
-
-Run on your local computer. These example directories are outside the source checkout; choose different locations before starting if needed.
+Use Docker Desktop on macOS or Docker Engine on Linux, Linux containers, Compose 2.30+, and Bash or zsh. Run from the repository root as a non-root operator. Keep Docker running and the device awake when you want it to process jobs.
 
 ```sh
-export OYA_LOCAL_BUNDLE="$HOME/oya-bundles/node-v0.2.0"
-export OYA_LOCAL_DIR="$HOME/oya-private/local-v0.2.0"
-
-mkdir -p "$(dirname "$OYA_LOCAL_BUNDLE")" "$(dirname "$OYA_LOCAL_DIR")"
-mkdir "$OYA_LOCAL_BUNDLE"
-umask 077
-mkdir -m 700 "$OYA_LOCAL_DIR"
-mkdir -m 700 "$OYA_LOCAL_DIR/agent-private"
-
-curl -fL \
-  https://github.com/oyaprotocol/oya-commitments/releases/download/node-v0.2.0/oya-node-v0.2.0.tar.gz \
-  -o "$OYA_LOCAL_BUNDLE/oya-node-v0.2.0.tar.gz"
-tar -xzf "$OYA_LOCAL_BUNDLE/oya-node-v0.2.0.tar.gz" -C "$OYA_LOCAL_BUNDLE"
-cat "$OYA_LOCAL_BUNDLE/node/production/image.txt"
-```
-
-The [v0.2.0 release](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.2.0) pins:
-
-```text
-ghcr.io/oyaprotocol/oya-node@sha256:560714a91cbb438e43bc8f0e0854d9e01b76eb304a673d8f13d56822a687fa81
-```
-
-Keep the bundle and private directory in these locations. The commands below record their absolute paths. The bundle supplies Compose files and agent source; Node.js and ethers run inside the image, so the host computer needs neither npm dependencies nor a Node.js installation. Deploying a new Ledger contract separately requires the tools described in the Ledger deployment guide.
-
-## 2. Save the local Compose settings
-
-Create a private settings file that can be sourced in later terminals:
-
-```sh
-{
-  printf 'export OYA_LOCAL_BUNDLE=%q\n' "$OYA_LOCAL_BUNDLE"
-  printf 'export OYA_LOCAL_DIR=%q\n' "$OYA_LOCAL_DIR"
-  cat <<'ENV'
-export OYA_CONFIG_FILE="$OYA_LOCAL_DIR/node.json"
-export OYA_ENV_FILE="$OYA_LOCAL_DIR/node.env"
+docker version
+docker compose version
+docker build -t oya-node:local node/production
+export OYA_NODE_IMAGE=oya-node:local
+export OYA_LOCAL_DIR="$HOME/oya-private/local-inbox-node"
 export OYA_CONTAINER_USER="$(id -u):$(id -g)"
-export OYA_NODE_IMAGE="$(cat "$OYA_LOCAL_BUNDLE/node/production/image.txt")"
-export OYA_TEST_AGENT_IMAGE="$OYA_NODE_IMAGE"
-export OYA_TEST_AGENT_SOURCE="$OYA_LOCAL_BUNDLE/agent-library/agents/hourly-message-test"
-export OYA_TEST_AGENT_DIR="$OYA_LOCAL_DIR/agent-private"
-export OYA_HTTP_PORT=8787
-export OYA_STOP_GRACE_PERIOD=4m
-export OYA_TEST_AGENT_TIMEOUT_MS=210000
-export COMPOSE_PROJECT_NAME=oya-local
-export COMPOSE_FILE="$OYA_LOCAL_BUNDLE/node/production/compose.yaml:$OYA_LOCAL_DIR/image.yaml:$OYA_LOCAL_BUNDLE/node/production/docker/compose.testing.yaml"
-export COMPOSE_PROFILES=testing
-ENV
-} > "$OYA_LOCAL_DIR/compose.env"
-
-cat > "$OYA_LOCAL_DIR/image.yaml" <<'YAML'
-services:
-  node:
-    build: !reset null
-    image: ${OYA_NODE_IMAGE:?Source compose.env first}
-    platform: linux/amd64
-    pull_policy: never
-  test-agent:
-    platform: linux/amd64
-    pull_policy: never
-YAML
-
-chmod 600 "$OYA_LOCAL_DIR/compose.env" "$OYA_LOCAL_DIR/image.yaml"
-source "$OYA_LOCAL_DIR/compose.env"
-docker pull --platform linux/amd64 "$OYA_NODE_IMAGE"
+export COMPOSE_PROJECT_NAME=oya-local-inbox
+export COMPOSE_FILE="$PWD/node/production/inbox/compose.worker.yaml"
+umask 077
+mkdir -p "$(dirname "$OYA_LOCAL_DIR")"
+mkdir -m 700 "$OYA_LOCAL_DIR"
 ```
 
-The public image requires no GHCR login. The override disables local builds and keeps the node and agent on the same digest. The `oya-local` project has separate storage from the Droplet guide's `oya` project. Keep its name stable. If port 8787 is occupied, change `OYA_HTTP_PORT` in `compose.env`, source it again, and use that port for local requests; keep `port: 8787` inside the node JSON.
+Choose a new directory outside the checkout and shared/cloud-synced folders. If it already exists, reuse its settings; do not regenerate keys. Save these exports in a private shell file for later terminals, including the absolute Compose path and stable project name, which owns the IPFS volume. For a future release, extract the matching bundle, select its `node/production/inbox/compose.worker.yaml`, set `OYA_NODE_IMAGE` from `image.txt`, and pull instead of building. An amd64 release needs emulation on Apple Silicon; a source build uses the native platform.
 
-The testing profile makes the helper service available. It will not run the hourly sender until the explicit command in step 6: startup commands select only `ipfs` and `node`.
-
-## 3. Choose one node mode
-
-Run **one** of the following configuration paths. The initially empty allowlist is filled by step 4 before starting the node; an empty allowlist is never accepted at normal startup.
-
-### IPFS-only mode
+Define a helper to run the bundled client:
 
 ```sh
-cat > "$OYA_CONFIG_FILE" <<'JSON'
+oya_client() {
+  docker run --rm --user "$OYA_CONTAINER_USER" \
+    --mount "type=bind,src=$OYA_LOCAL_DIR,dst=/private" \
+    --entrypoint node "$OYA_NODE_IMAGE" /app/src/inbox/client.mjs "$@"
+}
+oya_client keygen /private/agent-key
+```
+
+Record the printed public agent address. The private key is written only to `agent-key` with mode 0600 and is not mounted into the worker. Existing agents can use an existing key with the new signed envelope. Choose a target such as `my-node`; use the same name throughout both guides.
+
+## 2. Configure one execution mode
+
+For **IPFS-only**, create `$OYA_LOCAL_DIR/node.json`, replacing the agent placeholder:
+
+```json
 {
   "mode": "ipfs",
   "host": "0.0.0.0",
   "port": 8787,
-  "allowedSigners": [],
+  "allowedSigners": ["AGENT_ADDRESS"],
   "ipfsUrl": "http://ipfs:5001"
 }
-JSON
-
-: > "$OYA_ENV_FILE"
-chmod 600 "$OYA_CONFIG_FILE" "$OYA_ENV_FILE"
 ```
 
-The empty `node.env` is a required readable mount, not a missing credential. No node wallet, RPC endpoint, contract, or funding is needed. Do not include `chainId`, `ledgerContract`, `rpcUrl`, `receiptTimeoutMs`, `pollIntervalMs`, `gasLimit`, or `maxFeePerGasWei` in this mode. Continue to step 4.
+Create a readable empty `$OYA_LOCAL_DIR/node.env` using `touch`. No node account, RPC, contract, or funding is needed.
 
-### Full mode: IPFS plus Ledger
+For **full Ledger mode**, use this `node.json` instead. Replace all placeholders and verify the contract on your selected chain. Sepolia is useful for testing without mainnet funds; [deploy or verify Ledger](README.md#deploy-ledger-on-sepolia) separately if needed.
 
-Obtain a Sepolia RPC endpoint and the address of a verified Oya Ledger contract on that chain. If you need to deploy one, follow [Deploy Ledger on Sepolia](README.md#deploy-ledger-on-sepolia) from a source checkout first; the release bundle has no contract source or deployment CLI. Keep that separate deployer key out of the running node.
-
-Create the node configuration, then replace both placeholders in a trusted editor before starting:
-
-```sh
-cat > "$OYA_CONFIG_FILE" <<'JSON'
+```json
 {
   "mode": "ledger",
   "host": "0.0.0.0",
   "port": 8787,
+  "allowedSigners": ["AGENT_ADDRESS"],
+  "ipfsUrl": "http://ipfs:5001",
   "chainId": 11155111,
-  "ledgerContract": "REPLACE_WITH_VERIFIED_LEDGER_ADDRESS",
-  "allowedSigners": [],
-  "rpcUrl": "https://REPLACE_WITH_SEPOLIA_RPC_ENDPOINT",
-  "ipfsUrl": "http://ipfs:5001"
+  "rpcUrl": "https://YOUR_RPC_ENDPOINT",
+  "ledgerContract": "LEDGER_ADDRESS",
+  "receiptTimeoutMs": 60000,
+  "operationTimeoutMs": 180000,
+  "gasLimit": 200000,
+  "maxFeePerGasWei": "30000000000"
 }
-JSON
-chmod 600 "$OYA_CONFIG_FILE"
 ```
 
-Create a separate node transaction key directly in `node.env`. This command has no network access, prints only the public address, and refuses to overwrite an existing secrets file:
+Generate a separate node account with `oya_client keygen /private/node-key` and record/fund its public address. In a trusted local editor, create `node.env` containing `OYA_NODE_PRIVATE_KEY=` followed by the contents of `node-key`. Use literal, unquoted `KEY=value` lines. Optional complete headers are `OYA_RPC_AUTHORIZATION` and `OYA_IPFS_AUTHORIZATION`. Never use the worker's node account in another transaction-sending process. Keep agent and deployer keys separate.
 
 ```sh
-docker run --rm -i --platform linux/amd64 --network none --read-only \
-  --cap-drop ALL --security-opt no-new-privileges \
-  --user "$OYA_CONTAINER_USER" \
-  --mount "type=bind,src=$OYA_LOCAL_DIR,dst=/setup" \
-  --entrypoint node "$OYA_NODE_IMAGE" --input-type=module <<'NODE'
-import { writeFile } from 'node:fs/promises';
-import { Wallet } from 'ethers';
-const wallet = Wallet.createRandom();
-await writeFile('/setup/node.env', 'OYA_NODE_PRIVATE_KEY=' + wallet.privateKey + '\n',
-    { flag: 'wx', mode: 0o600 });
-console.log('Fund this Sepolia node address: ' + wallet.address);
-NODE
+chmod 600 "$OYA_LOCAL_DIR/node.json" "$OYA_LOCAL_DIR/node.env"
 ```
 
-Fund the printed address with Sepolia ETH and confirm the balance before publishing. See the [Sepolia funding instructions](README.md#create-and-fund-a-dedicated-testnet-deployer), using the **node address printed above**, not a new deployer account. Each accepted publication spends the node's gas, including repeated messages. Do not use this signing account in another process or node.
+## 3. Host and connect the inbox
 
-If the RPC needs an authorization header, add a literal `OYA_RPC_AUTHORIZATION=...` line in `node.env` with a trusted editor. Keep URL tokens in private `node.json`. The secrets file accepts unquoted, literal values; do not source it as shell code. The only supported entries are `OYA_NODE_PRIVATE_KEY`, `OYA_RPC_AUTHORIZATION`, and `OYA_IPFS_AUTHORIZATION`.
+Follow [Host the PostgreSQL inbox](host-inbox.md) on your chosen host. It supports bundled PostgreSQL or an existing managed/private database. It needs the same target, agent allowlist, and mode. Full mode also requires the public node address, chain ID, and Ledger address. The database binds the target to these execution settings.
 
-Full mode also supports other configured chains, but the bundled demo initializer accepts only Sepolia (`11155111`) and disposable Anvil (`31337`). For another chain, provide your own nonempty signer allowlist and client, skip the demo initializer/hourly sender, and use [Submit a message](README.md#submit-a-message) for that client's signed request. A Docker RPC URL must be reachable from the container: `127.0.0.1` there refers to the container, not the host computer. A host RPC on Docker Desktop can use `host.docker.internal` if the host service allows that connection.
+Copy only the generated `worker-secrets.json` from that setup into `$OYA_LOCAL_DIR` over a trusted channel. This is a shared worker token; the local node does not need the database password. Create `$OYA_LOCAL_DIR/worker.json`:
 
-## 4. Create and authorize the message agent
-
-For the IPFS-only or Sepolia walkthrough, run this with the node stopped. It creates `agent-private/key`, preserves it on subsequent initialization, and appends its public address to `node.json`. It does not create or fund the Ledger node account.
-
-```sh
-docker run --rm --platform linux/amd64 --network none --read-only \
-  --cap-drop ALL --security-opt no-new-privileges \
-  --user "$OYA_CONTAINER_USER" \
-  --mount "type=bind,src=$OYA_TEST_AGENT_SOURCE,dst=/app/test-agent,readonly" \
-  --mount "type=bind,src=$OYA_TEST_AGENT_DIR,dst=/setup" \
-  --mount "type=bind,src=$OYA_CONFIG_FILE,dst=/config/node.json" \
-  --entrypoint node "$OYA_NODE_IMAGE" \
-  /app/test-agent/agent.mjs init /setup/key /config/node.json
+```json
+{
+  "url": "https://inbox.example.com",
+  "target": "my-node",
+  "pollIntervalMs": 5000
+}
 ```
 
-Agent keys are private local state and are not part of the image or release. Keep the node and agent keys separate. The JSON binds to `0.0.0.0` **inside** Docker, while the Compose host binding exposes the API only on host loopback. Kubo's administrative API and gateway are not published to the host; its peer port 4001 is published on TCP and UDP.
-
-## 5. Validate settings and start the node
-
-Check Compose and validate the actual private mounts/configuration before starting services. This validation makes no RPC calls or transactions:
+Use your actual HTTPS inbox origin and target. HTTP is allowed only at loopback for testing. For an inbox on the same computer as a Docker worker, use HTTPS with a hostname reachable from that container; its `127.0.0.1` refers to the container itself.
 
 ```sh
+chmod 600 "$OYA_LOCAL_DIR/worker.json" "$OYA_LOCAL_DIR/worker-secrets.json"
 docker compose config --quiet
-docker compose run --rm --no-deps -T --entrypoint node node --input-type=module -e '
-import { loadConfig } from "./src/config.mjs";
-import { loadSecrets } from "./src/secrets.mjs";
-import { createLocalSigner } from "./src/signer.mjs";
-try {
-  const secrets = await loadSecrets("/run/secrets/node.env");
-  const config = await loadConfig("/config/node.json", secrets);
-  if (config.mode === "ledger") createLocalSigner(secrets.OYA_NODE_PRIVATE_KEY);
-  console.log("Private settings are readable and valid for " + config.mode + " mode.");
-} catch {
-  console.error("Check private file access, config, allowlist, and the Ledger node key.");
-  process.exitCode = 1;
-}
-'
-
-docker compose pull ipfs
-docker compose up -d --no-build --pull never --wait --wait-timeout 180 ipfs node
-docker compose ps
-curl -fsS "http://127.0.0.1:$OYA_HTTP_PORT/healthz"
+docker compose up -d --wait --wait-timeout 120
 ```
 
-IPFS mode should report `{"status":"ready","mode":"ipfs","busy":false}`. Ledger health also includes the chain ID, Ledger address, and node address. Ledger startup checks the RPC chain and contract bytecode; it does not prove gas funding or that arbitrary bytecode implements Ledger. Health is not a continuous IPFS/RPC connectivity check.
+The container UID/GID must read the mode-0600 mounts. Preserve ownership when copying secrets instead of making them world-readable. An unhealthy worker can indicate an inaccessible inbox, mismatched token/identity, or a publication retry; inspect its logs. If ports conflict with an existing node, choose `OYA_HTTP_PORT` and `OYA_IPFS_PORT` before startup. Stop an old signer before starting a worker using that account.
 
-Inspect startup problems with `docker compose logs --tail=100 node ipfs`. If private mounts fail, check Docker Desktop file sharing and file ownership; retain mode 0600 instead of making keys world-readable. Other local IPFS installations may already occupy peer port 4001.
+## 4. Submit and track a message
 
-## 6. Publish and verify a signed message
-
-Generate a signed request with the authorized agent, using a one-off container. This does not start the hourly loop or submit a transaction:
+On the agent's device, with the helper above:
 
 ```sh
-docker compose run --rm --no-deps -T --entrypoint node test-agent --input-type=module -e '
-import { readFile } from "node:fs/promises";
-import { Wallet } from "ethers";
-const wallet = new Wallet((await readFile("/run/test-agent/key", "utf8")).trim());
-const text = `Local publication check ${new Date().toISOString()}`;
-console.log(JSON.stringify({text, signer: wallet.address, signature: await wallet.signMessage(text)}));
-' > "$OYA_LOCAL_DIR/message.json"
+printf '%s\n' 'Hello from my locally hosted Oya node.' > "$OYA_LOCAL_DIR/message.txt"
+oya_client prepare /private/agent-key my-node /private/message.txt /private/job.json
+oya_client submit https://inbox.example.com /private/job.json
+oya_client status https://inbox.example.com /private/job.json
 ```
 
-Submit from the host computer through the loopback API. This step publishes public content and, in Ledger mode, spends gas:
+`prepare` saves a signed request with a random ID and a 24-hour submission/start deadline. It refuses to overwrite an existing file. Retry **the same job file** after a failed submission or lost response. Preparing another ID authorizes another job, including another Ledger transaction. Status reads require the saved signed envelope, even after its deadline. Keep the file private until you intend to publish its contents.
+
+To verify offline delivery, run `docker compose stop node`, prepare a different job file, submit it, and observe `queued`. Run `docker compose start node`; that job becomes `published` or `logged`. Unstarted jobs become `expired` on a worker claim after their deadline. Started jobs continue recovery after the deadline. The old hourly agent uses the synchronous API; use it only with the [direct profile](run-direct.md). New senders use this client or the [inbox API](inbox-api.md).
+
+## Monitor, stop, and resume
 
 ```sh
-curl --fail-with-body --show-error --max-time 210 \
-  -H 'Content-Type: application/json' \
-  --data-binary @"$OYA_LOCAL_DIR/message.json" \
-  "http://127.0.0.1:$OYA_HTTP_PORT/v1/messages"
+docker compose logs -f --tail 100 node
+docker stats
+curl -fsS http://127.0.0.1:8787/healthz
+docker compose stop
+docker compose start
 ```
 
-Expect HTTP 200 and top-level `status: "published"` in IPFS mode, or `status: "logged"` in Ledger mode. Both return `publication.cid` and `publication.uri`. Ledger also returns `publication.transactionHash`, `blockNumber`, `nodeAddress`, and `ledgerContract`; inspect the transaction and Ledger event on the configured chain (for this example, [Sepolia Etherscan](https://sepolia.etherscan.io/)). A lost response is not proof that nothing happened. In Ledger mode, reconcile the transaction before retrying or restarting an unavailable node; repeating the request can spend gas again.
+Logs show idle, claim, IPFS publication, pending Ledger transaction, result, and retry events with request IDs and public results. They omit message bodies, tokens, keys, RPC credentials, and raw transaction bytes. Health reports role, mode, activity, last inbox poll, and completions since startup. Port 8787 is monitoring-only in worker mode. `docker stats` shows CPU, memory, network, and disk I/O. Closing the log viewer does not stop the node.
 
-Copy the returned CID, then retrieve the envelope locally and through a separate public gateway:
+The worker and Kubo restart with Docker unless deliberately stopped. Sleep suspends processing while the independently hosted inbox keeps receiving jobs. Preserve the IPFS volume: `down --volumes` deletes it. Back up IPFS data, settings, keys, and PostgreSQL separately.
 
-```sh
-export OYA_MESSAGE_CID='REPLACE_WITH_RETURNED_CID'
-docker compose exec -T ipfs ipfs cat "/ipfs/$OYA_MESSAGE_CID"
-curl -fL --max-time 120 "https://ipfs.io/ipfs/$OYA_MESSAGE_CID"
-```
+One target executes one job at a time. Transient failures retry; ten attempts before a transaction checkpoint produce `failed`. Once a transaction is saved, unknown outcomes remain `processing` with `awaiting_reconciliation` and block later jobs. Recovery checks its receipt and can resend the same signed bytes. It never selects a new nonce or replaces fees automatically. Investigate the saved hash, RPC, funding, and fees; do not delete the row or submit another ID to clear it. A mined revert is terminal. Missing/malformed Ledger events remain unresolved. Results use receipt verification without additional finality confirmations.
 
-Compare `text`, `signer`, and `signature` with `message.json`. The first command verifies your stored bytes; the gateway request tests availability beyond your local Kubo. Discovery can take time. Home NAT, ISP restrictions, VPNs, and host firewalls can interfere: inspect `docker compose exec -T ipfs ipfs swarm peers` and the [IPFS NAT/port-forwarding guide](https://docs.ipfs.tech/how-to/nat-configuration/). A successful local pin alone does not prove internet retrieval.
+For upgrades, stop the worker, retain the target/database/IPFS volume/secrets, select a reviewed image, and recreate it. Pending work resumes from PostgreSQL. Stop all workers before a database restore or migration; an older backup can lose transaction checkpoints and replay protection. Reconcile transactions before resuming. Changing mode, chain, contract, or node account requires a new target after reconciling the old one. Do not share a Ledger account across targets or direct nodes. Moving devices also requires transferring IPFS storage or arranging replication.
 
-Optionally start the hourly sender after the manual check:
-
-```sh
-docker compose up -d --no-deps --no-build --pull never test-agent
-docker compose logs --tail=20 test-agent
-```
-
-It sends immediately and then approximately once per hour, logging `test_message_published` (IPFS) or `test_message_logged` (Ledger). Each Ledger submission costs gas. It stops after an unconfirmed result and does not retry or automatically restart. Stop it with `docker compose stop test-agent`; the node remains available for other authorized clients. Restarting the sender starts a new immediate publication and hourly schedule.
-
-## Stop and resume
-
-Load the saved settings in each new terminal. Use your chosen private directory if different. Existing installations should keep their saved settings, original directories, and Compose project name; changing the project name selects a different IPFS volume:
-
-```sh
-source "$HOME/oya-private/local-v0.2.0/compose.env"
-docker compose ps
-docker compose logs --tail=100 node
-docker stats --no-stream
-```
-
-For planned shutdown, stop the sender first, then drain node work while IPFS stays available, then stop IPFS:
-
-```sh
-docker compose stop test-agent
-docker compose stop node
-docker compose stop ipfs
-```
-
-After sleep, a crash, or Docker restart, inspect logs and health. In Ledger mode, reconcile any pending or unknown transaction before restarting: restart clears the in-memory unavailable flag but does not recover receipts or resolve nonces. Only run one process using the node signing account. Once it is appropriate to resume:
-
-```sh
-docker compose up -d --no-build --pull never --wait --wait-timeout 180 ipfs node
-curl -fsS "http://127.0.0.1:$OYA_HTTP_PORT/healthz"
-```
-
-Start `test-agent` separately only if you want hourly publication again. Preserve `agent-private/key`, `node.env`, `node.json`, saved Compose settings, the release bundle, and the `oya-local_ipfs-data` volume. `docker compose down` preserves that volume; **`down --volumes` deletes it**. A Docker Desktop reset or removal of its data can also destroy the repository. For a cold IPFS backup, stop the sender and node first and follow [Back up and restore IPFS](README.md#back-up-and-restore-ipfs), retaining this guide's Compose environment/project. Keep protected copies of both private settings and the IPFS backup on another device; the IPFS backup contains Kubo's private identity.
-
-Keep the default `operationTimeoutMs` (180000), node stop grace (4m), and agent deadline (210000) unless deliberately changing all related settings. The agent deadline must allow the operation plus 30 seconds; node stop grace must allow the operation plus at least 60 seconds. See [deadline relationships](README.md#receive-messages-over-https) if adding a proxy.
-
-To switch modes on an existing node, stop the agent and drain the node first. In Ledger mode resolve any uncertain transaction. Preserve storage and the agent allowlist; add or remove the mode-specific settings and node key deliberately, validate as in step 5, then restart. Do not rerun first-install commands or replace an existing signing key.
-
-## Accepting messages from other machines
-
-This guide deliberately keeps message ingress on host loopback. Remote agents need a separately configured reachable HTTPS endpoint. Follow [Receive messages over HTTPS](README.md#receive-messages-over-https) for Caddy, DNS, router/firewall access, and deadlines, or configure a suitable authenticated tunnel. Keep signature/allowlist checks and the private Kubo API intact. An HTTP tunnel does not by itself make Kubo's peer port reachable or replicate IPFS content. Host sleep and network changes still affect availability; validate both external signed submission and independent IPFS retrieval.
+To migrate from direct HTTP, stop senders, drain active work, reconcile uncertain transactions, and stop the old node. Requests are not automatically imported. Preserve its IPFS volume: explicitly map the worker's `ipfs-data` to the existing volume or copy the repository before switching. Create a new inbox target; never let the old HTTP signer and new worker run concurrently with the same key.

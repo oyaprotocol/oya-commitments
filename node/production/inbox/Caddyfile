@@ -1,0 +1,16 @@
+{$OYA_PUBLIC_HOSTNAME} {
+    @api path /v1/jobs /v1/status /v1/worker/*
+    handle @api {
+        request_body {
+            max_size 64KB
+        }
+        reverse_proxy inbox:8788 {
+            transport http {
+                response_header_timeout 20s
+            }
+        }
+    }
+    handle {
+        respond "Not found" 404
+    }
+}

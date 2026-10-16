@@ -19,8 +19,8 @@ function fixture(t) {
     const bin = join(directory, 'bin');
     mkdirSync(join(source, 'scripts'), { recursive: true });
     mkdirSync(bin);
-    for (const name of ['src', 'docker', 'Dockerfile', '.dockerignore', 'package.json', 'package-lock.json',
-        'compose.yaml', 'README.md', 'deploy-droplet.md', 'run-locally.md', 'release-image.md']) {
+    for (const name of ['src', 'docker', 'inbox', 'Dockerfile', '.dockerignore', 'package.json', 'package-lock.json',
+        'compose.yaml', 'README.md', 'deploy-droplet.md', 'run-locally.md', 'run-direct.md', 'host-inbox.md', 'inbox-api.md', 'release-image.md']) {
         cpSync(join(runtime, name), join(source, name), { recursive: true });
     }
     for (const name of ['publish-image.sh', 'deploy-droplet.sh', 'deploy-droplet-remote.sh']) {
@@ -82,7 +82,10 @@ test('publishes committed source and bundles matching scripts with this build’
     mkdirSync(unpacked);
     execFileSync('tar', ['-xzf', join(f.output, 'oya-node-v0.1.0.tar.gz'), '-C', unpacked]);
     const bundle = join(unpacked, 'node/production');
-    assert.deepEqual(readdirSync(bundle).sort(), ['README.md', 'compose.yaml', 'deploy-droplet.md', 'docker', 'image.txt', 'release-image.md', 'run-locally.md', 'scripts']);
+    assert.deepEqual(readdirSync(bundle).sort(), ['README.md', 'compose.yaml', 'deploy-droplet.md', 'docker', 'host-inbox.md', 'image.txt',
+        'inbox', 'inbox-api.md', 'release-image.md', 'run-direct.md', 'run-locally.md', 'scripts']);
+    assert.deepEqual(readdirSync(join(bundle, 'inbox')).sort(), ['Caddyfile', 'compose.https.yaml', 'compose.postgres.yaml',
+        'compose.worker.yaml', 'compose.yaml', 'inbox.example.json', 'worker.example.json']);
     assert.deepEqual(readdirSync(join(bundle, 'scripts')).sort(), ['deploy-droplet-remote.sh', 'deploy-droplet.sh']);
     assert.deepEqual(readdirSync(join(bundle, 'docker')).sort(), ['Caddyfile', 'compose.http.yaml', 'compose.testing.yaml', 'config.example.json', 'runtime.env.example']);
     const agent = 'agent-library/agents/hourly-message-test/agent.mjs';

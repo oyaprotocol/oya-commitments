@@ -1,4 +1,6 @@
-# First deployment to a DigitalOcean Droplet
+# Historical direct-node deployment to a DigitalOcean Droplet
+
+This guide is retained for existing direct-HTTP deployments and their update/recovery procedures. New installations should [run the node locally](run-locally.md) and [host a PostgreSQL inbox](host-inbox.md) wherever they choose. The inbox architecture keeps signing and IPFS execution local and receives messages while the local device is offline. The old installer below deploys the entire node remotely and is not the repository default.
 
 Run `scripts/deploy-droplet.sh` from your laptop to copy private settings over SSH, pull a published Linux amd64 image on the server by its exact digest, validate configuration, and start Node, Kubo, and Caddy. Use the deployment bundle attached to a production-node GitHub Release. The script uses the bundled Compose files and makes no cloud API calls or Ledger transactions. Neither machine needs a source checkout, Node installation, or image build; only the server needs Docker/Compose. Maintainers publish releases using the [image release guide](release-image.md).
 

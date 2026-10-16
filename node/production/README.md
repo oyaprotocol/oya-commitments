@@ -1,8 +1,19 @@
 # Oya production node
 
-This standalone runtime accepts an agent's signed text and publishes the signed JSON to IPFS. The default `ledger` mode also submits its CID to Ledger using the node's own account; a `200` / `logged` response includes the CID, transaction hash, block number, and node address after receipt/event verification. Explicit `ipfs` mode returns `200` / `published` with the CID and URI, without Ethereum access or a node transaction key.
+The default deployment runs Oya and Kubo on your local device, with a portable PostgreSQL inbox receiving external messages. Agents submit signed jobs over HTTPS; the local worker polls with outbound requests, publishes to IPFS, optionally records the CID in Ledger, and reports the result. PostgreSQL retains queued messages and execution checkpoints through disconnects and worker restarts. You choose where to host the inbox and database.
 
-For a complete local setup using the published image, follow [Run a live node locally](run-locally.md). It covers IPFS-only and full Ledger modes, agent keys, manual and hourly messages, persistent storage, and restart/recovery. Use the [Droplet guide](deploy-droplet.md) for a remote cloud host.
+Start with [Run a live node locally](run-locally.md) and [Host the PostgreSQL inbox](host-inbox.md). They cover IPFS-only and full Ledger modes, signing keys, monitoring, offline delivery, and recovery. The [inbox API](inbox-api.md) defines signed jobs, status, leases, and transaction checkpoints. This feature needs a new source build or future inbox-capable release; v0.2.0 images support only the direct API.
+
+```mermaid
+flowchart LR
+    A[Agents] -->|Signed jobs and status over HTTPS| I[Inbox service]
+    I <--> P[(PostgreSQL at your chosen host)]
+    N[Local Oya worker] -->|Outbound polling and results| I
+    N --> K[Local Kubo / IPFS]
+    N -. Full mode via RPC .-> L[Ledger]
+```
+
+The remaining sections document the **advanced synchronous HTTP runtime** and shared configuration/contract tools. For existing released local installations, see [direct HTTP setup](run-direct.md). A direct node accepts signed text and returns `200 / published` in IPFS mode or `200 / logged` after Ledger receipt verification; it has no durable inbox. Do not run it concurrently with a worker using the same node signing account.
 
 After signature, allowlist, and request-limit checks, the HTTP handler calls the kernel's `publishSignedMessage` in IPFS mode or `publishAndLogSignedMessage` in Ledger mode. One complete operation runs at a time. Additional authenticated requests within the request budget receive `503 node_busy`; there is no waiting queue.
 
@@ -12,7 +23,7 @@ When upgrading an existing local instance, rename `loggerContract` to `ledgerCon
 
 ## IPFS-only configuration
 
-Set `"mode": "ipfs"` to publish and pin signed messages without an RPC endpoint, Ledger contract, funded node account, or gas fees. Agents still need their own message-signing keys. For Docker or a Droplet, use this private `node.json`, replacing the signer placeholder:
+Set `"mode": "ipfs"` to publish and pin signed messages without an RPC endpoint, Ledger contract, funded node account, or gas fees. Agents still need message-signing keys. For a Docker worker or direct node, use this private `node.json`, replacing the signer placeholder:
 
 ```json
 {
@@ -24,7 +35,7 @@ Set `"mode": "ipfs"` to publish and pin signed messages without an RPC endpoint,
 }
 ```
 
-Supply a readable private `node.env` file; it can be empty with the bundled Kubo service. If the IPFS API needs authentication, set only `OYA_IPFS_AUTHORIZATION`. Node-key and RPC secrets are unused in this mode. Keep the same Docker mount and file-permission setup below. With `--with-test-agent`, the Droplet installer may receive an empty `allowedSigners` array and enrolls the generated agent before starting the node; ordinary startup requires a nonempty allowlist.
+Supply a readable private `node.env` file; it can be empty with the bundled Kubo service. If the IPFS API needs authentication, set only `OYA_IPFS_AUTHORIZATION`. Node-key and RPC secrets are unused in this mode. Keep the same Docker mount and file-permission setup below. Startup requires a nonempty allowlist.
 
 For a host process, set `host` to `127.0.0.1` and `ipfsUrl` to your host-reachable Kubo API. The local `check`, `run`, and `status` commands support this mode with an empty selected environment file. `check` probes only IPFS, and `deploy-ledger` refuses IPFS mode before any deployment or RPC request.
 
@@ -46,11 +57,7 @@ This mode is available in `node-v0.2.0`; `node-v0.1.0` does not support it. Use 
 
 ## Run with Docker Compose
 
-The [local setup walkthrough](run-locally.md) uses a pinned release image and needs no source build or host Node.js installation. The manual source-build workflow follows below.
-
-For a cloud test that generates and signs messages without a local client, the [optional hourly testing profile](deploy-droplet.md#optional-hourly-testing-profile) deploys a small agent alongside the node. It sends immediately after startup and then once per hour, using a separate key generated on the server.
-
-For a first deployment from your local computer to an existing DigitalOcean Docker host, use the [deployment script and setup guide](deploy-droplet.md). It transfers private settings over SSH and pulls a published image by its exact digest on the host; local Docker is unnecessary. Maintainers use the [image release guide](release-image.md) to publish tagged revisions and matching deployment bundles. The manual instructions below support source builds; installations from a published bundle use the [pinned-image update procedure](deploy-droplet.md#update-an-existing-node).
+The default [local worker walkthrough](run-locally.md) uses `inbox/compose.worker.yaml`. The manual workflow below uses the synchronous `compose.yaml` for local-only clients or advanced direct deployments. Its optional hourly testing profile is documented in the [direct setup guide](run-direct.md). Maintainers use the [image release guide](release-image.md) to publish tagged revisions and matching bundles.
 
 [compose.yaml](compose.yaml) runs the node and Kubo with persistent IPFS storage. Use a Linux Docker host or Docker Desktop with Linux containers, and Compose 2.30 or newer. Run the commands below from the repository root. In Ledger mode, Ethereum comes from your selected RPC provider; deploy or verify Ledger and fund a dedicated node account before starting the node. In IPFS mode, use the configuration above and skip Ledger deployment and funding.
 
@@ -217,6 +224,8 @@ Milestone 2 validated mounted settings, health probes, persistence, and the cold
 
 ### Validate the Docker flow
 
+For the default inbox/local-worker deployment, build the Ledger fixture with `forge build --root contracts`, then run `npm --prefix node/production run test:inbox` and `npm --prefix node/production run test:inbox:docker`. They exercise real PostgreSQL persistence, claims and recovery, plus both packaged worker modes through HTTPS with Kubo and Anvil. Tests use disposable resources and do not publish images or use real-chain funds. The checks below retain coverage for the advanced direct API.
+
 Use Node 24, host Foundry, a reachable Linux Docker daemon, and Compose 2.30+. Run from the repository root:
 
 ```sh
@@ -269,7 +278,7 @@ With Node 24 and Docker/Compose, run from the repository root:
 npm --prefix node/production run test:ipfs -- --verbose
 ```
 
-This builds the working tree image and runs disposable Kubo, HTTPS, node, and hourly-agent containers with an empty node secrets file and no Ethereum service. It checks exact signed content retrieval, authorization, repeated publication, IPFS outage recovery, persistent IPFS identity/content after container replacement, and the agent's first `test_message_published` event. It also runs the agent module tests. Add `--platform linux/amd64` to validate the Droplet architecture. No Foundry, funded accounts, public DNS, or cloud deployment is involved; the fixture cleans up its own containers and volumes.
+This builds the working tree image and runs disposable Kubo, HTTPS, node, and hourly-agent containers with an empty node secrets file and no Ethereum service. It checks exact signed content retrieval, authorization, repeated publication, IPFS outage recovery, persistent IPFS identity/content after container replacement, and the agent's first `test_message_published` event. It also runs the agent module tests. Add `--platform linux/amd64` to validate the release image architecture. No Foundry, funded accounts, public DNS, or cloud deployment is involved; the fixture cleans up its own containers and volumes.
 
 ### Validate the hourly testing profile
 
@@ -279,7 +288,7 @@ With the same Docker, Node 24, and Foundry prerequisites, run from the repositor
 npm --prefix node/production run test:testing -- --verbose
 ```
 
-This builds the runtime image, runs the agent's module tests inside it, then initializes and starts the real `testing` profile against disposable Anvil and Kubo. It verifies the first message's signature, exact IPFS bytes, Ledger event, private mounts, network separation, disabled-profile behavior, and clean shutdown. Module tests use a controlled clock to verify the one-hour interval without waiting an hour. Add `--platform linux/amd64` to check the Droplet image architecture. No cloud credentials, funded testnet accounts, or public image publication are involved.
+This builds the runtime image, runs the agent's module tests inside it, then initializes and starts the real `testing` profile against disposable Anvil and Kubo. It verifies the first message's signature, exact IPFS bytes, Ledger event, private mounts, network separation, disabled-profile behavior, and clean shutdown. Module tests use a controlled clock to verify the one-hour interval without waiting an hour. Add `--platform linux/amd64` to check the release image architecture. No cloud credentials, funded testnet accounts, or public image publication are involved.
 
 ### Check a deployed node from another machine
 
@@ -506,7 +515,7 @@ This Bash/zsh command prompts for your Etherscan API key without echoing it or p
 
 #### Use the address in your node
 
-Set `ledgerContract` in `deploy.json` to the verified address so future deployment commands recognize it. In the separate private `node.json` used for the [Droplet deployment](deploy-droplet.md), set `chainId` to `11155111`, `ledgerContract` to that same address, your Sepolia RPC URL, and your actual `allowedSigners`. Keep the Docker settings `host: "0.0.0.0"`, `port: 8787`, and `ipfsUrl: "http://ipfs:5001"`.
+Set `ledgerContract` in `deploy.json` to the verified address so future deployment commands recognize it. In the separate private `node.json` used for the [local worker](run-locally.md), set `chainId` to `11155111`, `ledgerContract` to that same address, your Sepolia RPC URL, and your actual `allowedSigners`. Keep Docker settings `host: "0.0.0.0"`, `port: 8787`, and `ipfsUrl: "http://ipfs:5001"`. Match the public execution identity in the inbox configuration.
 
 Fund the separate node account with Sepolia ETH for message-publication gas. The running node does not need the deployer key: keep `deployer.env` on your local computer and put only the node's own key and supported authorization values in its `node.env` secret file.
 

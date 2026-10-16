@@ -1,0 +1,30 @@
+# Optional self-hosted PostgreSQL. No database port is published to the host.
+services:
+  inbox:
+    depends_on:
+      postgres: {condition: service_healthy}
+  postgres:
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    environment:
+      POSTGRES_USER: oya
+      POSTGRES_DB: oya
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - type: bind
+        source: ${OYA_INBOX_DIR:?Set OYA_INBOX_DIR}/postgres-password
+        target: /run/secrets/postgres-password
+        read_only: true
+        bind: {create_host_path: false}
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U oya -d oya"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    restart: unless-stopped
+    stop_grace_period: 1m
+    logging:
+      driver: local
+      options: {max-size: 10m, max-file: "3"}
+volumes:
+  postgres-data:
