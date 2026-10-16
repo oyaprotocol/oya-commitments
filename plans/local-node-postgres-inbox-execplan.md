@@ -14,7 +14,8 @@ An agent submits a signed message to an always available inbox. PostgreSQL retai
 - [x] 2026-10-11: Added portable Compose deployments, local/inbox/API guides, release assets, and a separate inbox CI job. Retained direct-node guides as advanced/historical references.
 - [x] 2026-10-11: Initial PostgreSQL recovery tests passed; the packaged HTTPS flow published and retrieved messages in both modes against real PostgreSQL, Kubo, and Anvil. All 157 production tests passed.
 - [x] 2026-10-11: Completed all nine database-suite tests, including immutable checkpoint conflicts and long-running lease renewal. Packaged client creation/overwrite protection and both modes passed through the shipping Caddy routes, with private health routing verified. Reviewed source, configuration, docs, release contents, and plan.
-- [x] 2026-10-12: Added bounded PostgreSQL readiness checks for startup connection resets reported by GitHub Actions. All nine database-suite tests and 160 runtime tests passed locally, including three new readiness regression tests. GitHub validation awaits pushing the fix to the PR branch.
+- [x] 2026-10-12: Added bounded PostgreSQL readiness checks for startup connection resets reported by GitHub Actions. All nine database-suite tests and 160 runtime tests passed locally, including three new readiness regression tests. GitHub job 117021722870 subsequently passed all nine database tests.
+- [x] 2026-10-16: Reproduced the Caddyfile permission failure on a Linux volume and corrected its mode. The Linux permissions check and both packaged worker modes passed in about 69 seconds; all 161 runtime tests passed. Added bounded waits and credential-redacted failure diagnostics. The updated packaged test still needs a GitHub Actions rerun.
 
 ## Surprises & Discoveries
 
@@ -26,6 +27,8 @@ Docker Desktop can change a dynamically allocated host port when a database cont
 
 The reported GitHub Actions PR run failed all database subtests with `ECONNRESET` while acquiring a startup connection. The previous retry loop handled refused connections and PostgreSQL startup errors but omitted connection resets. The fixture now probes `SELECT 1` through the published TCP endpoint before subtests and after database restart, with a bounded wait for transient connection failures. Schema initialization remains outside that retry loop so SQL and configuration errors fail immediately.
 
+GitHub job 117021722870 passed the PostgreSQL suite but timed out reading the proxy's internal CA certificate in the packaged HTTPS fixture. The fixture wrote its generated Caddyfile with mode `0600`, owned by the runner, while the proxy drops the capabilities needed to bypass Linux file permissions. Copying that file with its ownership preserved onto a Linux Docker volume reproduced `open /etc/caddy/Caddyfile: permission denied` with the pinned Caddy image. Changing only this non-secret configuration to `0644` made the same check pass. Docker Desktop bind mounts had hidden the permission mismatch locally; the old command wrapper discarded Caddy's error output.
+
 ## Decision Log
 
 - 2026-10-11 / Codex: Replace SSH forwarding with an application inbox, as requested by the user. Keep direct HTTP operation as an advanced option.
@@ -33,6 +36,7 @@ The reported GitHub Actions PR run failed all database subtests with `ECONNRESET
 - 2026-10-11 / Codex: Process one job per inbox target at a time. An unresolved transaction blocks later jobs. A lease controls ownership of mutations; immutable transaction bytes protect against a delayed worker broadcasting after lease expiry.
 - 2026-10-11 / Codex: Bind the request ID and target in an agent signature in addition to the existing signed message. Retain idempotency records through the signed submission expiry. PostgreSQL and the authenticated worker are trusted execution infrastructure; neither receives the node private key.
 - 2026-10-11 / User and Codex: Pin `pg@8.23.1`, the release reported by npm during implementation. The user confirmed the choice; exact pinning and the lockfile keep dependency installation reproducible.
+- 2026-10-16 / Codex: Make only the generated test Caddyfile readable by the proxy, retain owner-only secret files and proxy capability restrictions, and exercise file ownership on a Linux volume before starting the stack. Keep the pinned image's verified CA path, allow a two-minute CA wait, and report bounded, credential-redacted command errors and service logs on failure.
 
 ## Outcomes & Retrospective
 
@@ -40,7 +44,9 @@ The default documentation describes local execution and a separately hosted inbo
 
 Implementation and review are complete. The repository changes, including this plan, are committed. An operator still needs a new source build or future inbox-capable image release; v0.2.0 cannot run this feature. No external deployment or image publication was performed as part of this work. Provider-specific PostgreSQL services and real-chain transactions were not exercised; local disposable fixtures cover the portable implementation. Operational limits remain explicit: one job per target, bounded queue retention, no automatic fee replacement, and reconciliation before database rollback.
 
-The 2026-10-12 CI follow-up changes only the integration fixture and its regression coverage. `npm --prefix node/production run test:inbox` passed all nine tests against disposable PostgreSQL, including database restart; `npm --prefix node/production test` passed all 160 tests. Injected connection resets verify the reported failure path, and separate checks verify fatal errors, startup timeout, and cancellation. The GitHub Actions rerun remains pending; no production runtime or image changes are required for this fix.
+The 2026-10-12 CI follow-up changes only the integration fixture and its regression coverage. `npm --prefix node/production run test:inbox` passed all nine tests against disposable PostgreSQL, including database restart; `npm --prefix node/production test` passed all 160 tests. Injected connection resets verify the reported failure path, and separate checks verify fatal errors, startup timeout, and cancellation. GitHub job 117021722870 also passed the database suite; its later packaged HTTPS failure is tracked in the 2026-10-16 follow-up.
+
+The 2026-10-16 follow-up fixes a Linux permission mismatch in the generated test Caddyfile. The new check preserves the runner's file ownership and permissions on a Linux Docker volume and runs the pinned proxy image with its capability restrictions. It failed with `permission denied` before the mode correction and passed afterward. `npm --prefix node/production run test:inbox:docker` then passed both modes in about 69 seconds, and `npm --prefix node/production test` passed all 161 tests, including diagnostic credential redaction. Failure output now includes the last polling error and bounded service logs before cleanup. These changes affect test infrastructure only; GitHub validation of this follow-up remains pending.
 
 ## Context and Orientation
 
