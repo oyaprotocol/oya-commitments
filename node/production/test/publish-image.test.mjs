@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -79,9 +79,27 @@ test('publishes committed source and bundles matching scripts with this build’
     assert.equal(readFileSync(join(f.output, 'image.txt'), 'utf8'), `${repository}@${digest}\n`);
     assert.ok(readFileSync(join(f.output, 'release.txt'), 'utf8').includes(f.git('rev-parse', 'HEAD')));
     const unpacked = join(f.directory, 'unpacked');
+    const privateDirectory = join(f.directory, 'operator-private');
     mkdirSync(unpacked);
-    execFileSync('tar', ['-xzf', join(f.output, 'oya-node-v0.1.0.tar.gz'), '-C', unpacked]);
+    // Match the documented extraction command while retaining the operator's private umask.
+    execFileSync('sh', ['-ec', `
+umask 077
+tar -xzpf "$1" -C "$2"
+mkdir "$3"
+: > "$3/node.env"
+`, 'extract-bundle', join(f.output, 'oya-node-v0.1.0.tar.gz'), unpacked, privateDirectory]);
     const bundle = join(unpacked, 'node/production');
+    for (const file of ['docker/Caddyfile', 'inbox/Caddyfile']) {
+        assert.equal(statSync(join(bundle, file)).mode & 0o777, 0o644,
+            'Hardened Caddy must be able to read its configuration after a non-root operator extracts the bundle.');
+    }
+    for (const path of [unpacked, join(unpacked, 'node'), bundle, join(bundle, 'inbox'), join(bundle, 'docker'),
+        join(unpacked, 'agent-library'), join(unpacked, 'agent-library/agents'), join(unpacked, 'agent-library/agents/hourly-message-test')]) {
+        assert.equal(statSync(path).mode & 0o777, 0o755, 'Public bundle directories must allow traversal.');
+    }
+    assert.equal(statSync(f.output).mode & 0o777, 0o700, 'The operator release output directory stays private.');
+    assert.equal(statSync(privateDirectory).mode & 0o777, 0o700, 'Subsequent private directories retain the operator umask.');
+    assert.equal(statSync(join(privateDirectory, 'node.env')).mode & 0o777, 0o600, 'Subsequent private files retain the operator umask.');
     assert.deepEqual(readdirSync(bundle).sort(), ['README.md', 'compose.yaml', 'deploy-droplet.md', 'docker', 'host-inbox.md', 'image.txt',
         'inbox', 'inbox-api.md', 'release-image.md', 'run-direct.md', 'run-locally.md', 'scripts']);
     assert.deepEqual(readdirSync(join(bundle, 'inbox')).sort(), ['Caddyfile', 'compose.https.yaml', 'compose.postgres.yaml',
@@ -89,6 +107,7 @@ test('publishes committed source and bundles matching scripts with this build’
     assert.deepEqual(readdirSync(join(bundle, 'scripts')).sort(), ['deploy-droplet-remote.sh', 'deploy-droplet.sh']);
     assert.deepEqual(readdirSync(join(bundle, 'docker')).sort(), ['Caddyfile', 'compose.http.yaml', 'compose.testing.yaml', 'config.example.json', 'runtime.env.example']);
     const agent = 'agent-library/agents/hourly-message-test/agent.mjs';
+    assert.equal(statSync(join(unpacked, agent)).mode & 0o777, 0o644, 'The container user must be able to read the mounted agent source.');
     assert.equal(readFileSync(join(unpacked, agent), 'utf8'), readFileSync(join(f.checkout, agent), 'utf8'));
     assert.equal(readFileSync(join(bundle, 'image.txt'), 'utf8'), `${repository}@${digest}\n`);
     for (const name of ['deploy-droplet.sh', 'deploy-droplet-remote.sh']) {

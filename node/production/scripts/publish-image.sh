@@ -57,5 +57,8 @@ cp "$staging/source/scripts/deploy-droplet.sh" "$staging/source/scripts/deploy-d
 printf '%s@%s\n' "$repository" "$digest" > "$bundle/image.txt"
 cp "$bundle/image.txt" "$output/image.txt"
 printf 'Git tag: %s\nGit commit: %s\nImage: %s@%s\n' "$release" "$revision" "$repository" "$digest" > "$output/release.txt"
+# Public bundle files must be readable by hardened containers after extraction.
+# Keep the surrounding staging/output directories private, not the archived files.
+chmod -R a+rX "$staging/bundle"
 tar -C "$staging/bundle" -czf "$output/oya-node-$version.tar.gz" .
 echo "Release files written to $output. Make the GHCR package public and verify anonymous access before sharing."
