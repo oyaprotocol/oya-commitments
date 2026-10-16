@@ -2,7 +2,7 @@
 
 The default deployment runs Oya and Kubo on your local device, with a portable PostgreSQL inbox receiving external messages. Agents submit signed jobs over HTTPS; the local worker polls with outbound requests, publishes to IPFS, optionally records the CID in Ledger, and reports the result. PostgreSQL retains queued messages and execution checkpoints through disconnects and worker restarts. You choose where to host the inbox and database.
 
-Start with [Run a live node locally](run-locally.md) and [Host the PostgreSQL inbox](host-inbox.md). They cover IPFS-only and full Ledger modes, signing keys, monitoring, offline delivery, and recovery. The [inbox API](inbox-api.md) defines signed jobs, status, leases, and transaction checkpoints. This feature needs a new source build or future inbox-capable release; v0.2.0 images support only the direct API.
+Start with [Run a live node locally](run-locally.md) and [Host the PostgreSQL inbox](host-inbox.md). They use the published [node-v0.3.0 image and matching bundle](release-image.md#published-deployment-release) and cover IPFS-only and full Ledger modes, signing keys, monitoring, offline delivery, and recovery. No source build is required; native source builds remain an option. The [inbox API](inbox-api.md) defines signed jobs, status, leases, and transaction checkpoints. v0.2.0 images support only the direct API.
 
 ```mermaid
 flowchart LR

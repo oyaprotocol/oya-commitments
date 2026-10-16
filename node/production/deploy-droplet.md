@@ -20,7 +20,7 @@ ssh oya@DROPLET_IP 'docker version && docker compose version'
 
 The deployment command uses existing SSH keys/agent configuration and requires a previously verified host key. An SSH config alias works for custom users, ports, or identity files. Password prompts and unknown host keys cause it to stop.
 
-Download `oya-node-vVERSION.tar.gz` from the chosen GitHub Release (replace `VERSION` with its actual version), extract it into a new directory, and run commands from the extracted directory containing `node/production`. The bundle includes `node/production/image.txt` with the exact release digest. Keep its scripts, Compose files, and image pin together. Prepare private input files outside that directory:
+Download `oya-node-vVERSION.tar.gz` from the chosen GitHub Release (replace `VERSION` with its actual version), extract it into a new directory with `tar -xzpf ARCHIVE -C BUNDLE_DIRECTORY` (replace the placeholders with your paths), and run commands from the extracted directory containing `node/production`. The bundle includes `node/production/image.txt` with the exact release digest. Keep its scripts, Compose files, and image pin together. See the [v0.3.0 release reference](release-image.md#published-deployment-release) for the digest and checksum; older v0.2.0 archives also need the [public-file permission repair](run-direct.md#1-download-the-matching-release-files). Prepare private input files outside that directory:
 
 ```sh
 umask 077
@@ -30,7 +30,7 @@ cp -n node/production/docker/runtime.env.example "$HOME/oya-private/node.env"
 chmod 600 "$HOME/oya-private/node.json" "$HOME/oya-private/node.env"
 ```
 
-Choose the publishing mode before editing the files. The copied example defaults to Ledger mode: set your chain ID, RPC endpoint, verified Ledger address, allowed client addresses, and dedicated node key. That mode needs gas funds; clients only sign messages. For IPFS-only operation, replace `node.json` with the [IPFS-only example](README.md#ipfs-only-configuration), set your allowlist, and leave `node.env` empty unless an IPFS authorization header is needed. No Ledger, RPC, node key, or funding is needed in IPFS mode. It requires a new release containing IPFS mode; `node-v0.1.0` does not support it.
+Choose the publishing mode before editing the files. The copied example defaults to Ledger mode: set your chain ID, RPC endpoint, verified Ledger address, allowed client addresses, and dedicated node key. That mode needs gas funds; clients only sign messages. For IPFS-only operation, replace `node.json` with the [IPFS-only example](README.md#ipfs-only-configuration), set your allowlist, and leave `node.env` empty unless an IPFS authorization header is needed. No Ledger, RPC, node key, or funding is needed in IPFS mode. It is supported by v0.2.0 and v0.3.0; `node-v0.1.0` does not support it.
 
 In both modes keep `host` as `0.0.0.0`, `port` as `8787`, and `ipfsUrl` as `http://ipfs:5001`. `node.env` is a required readable file mounted read-only, not container environment variables. Use only the three keys in its example, once each, with literal, unquoted `KEY=value` entries. Both files retain mode 0600 and must be readable by the operator UID used in the container. See [private settings](README.md#prepare-private-settings). Starting the ordinary installer does not create/fund a node key or deploy Ledger; the optional testing profile creates only an agent key.
 

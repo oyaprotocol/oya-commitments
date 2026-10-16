@@ -19,6 +19,7 @@ An agent submits a signed message to an always available inbox. PostgreSQL retai
 - [x] 2026-10-16: Published `node-v0.3.0` and `ghcr.io/oyaprotocol/oya-node:v0.3.0` from the merged commit, verified anonymous image access, and published the three matching GitHub Release assets. Verified all 24 bundle files against the tag and all 17 image source/manifest files against the tagged source.
 - [x] 2026-10-16: Corrected public bundle permissions before upload and added the same correction to the publisher with regression coverage; all 13 publisher tests passed. The publisher/test correction and release record were committed in `f05e385` after the tagged source.
 - [x] 2026-10-16: Aligned operator extraction instructions with the permission-preserving test command and covered `umask 077`; all 13 publisher tests passed. GNU tar checks as a non-root Linux user passed for both published bundles, including the public-file repair required by v0.2.0.
+- [x] 2026-10-16: Updated deployment guides to use the published v0.3.0 bundle and pinned image, with explicit Oya platform selection, saved Compose settings, upgrades, and optional source builds. Bash/zsh syntax and Compose checks passed for the worker and both database-hosting options against the actual release bundle. Both mode examples passed the published image's configuration parsers; all 13 publisher tests passed.
 
 ## Surprises & Discoveries
 
@@ -36,6 +37,8 @@ Release review found that the publisher's private `umask` also gave archived pub
 
 The extraction review found a separate operator-side permission issue: the direct guide used `tar -xzf` after `umask 077`, while the regression test used `-p`. The documented command now preserves archived permissions. The pinned v0.2.0 archive itself stores owner-only modes, so that historical walkthrough also repairs only its extracted public `node` and `agent-library` trees. Private operator configuration remains separate.
 
+The released v0.3.0 bundle contains the pre-publication source-build guides. Updated repository guides now supply the published-image workflow while retaining the immutable bundle's matching Compose assets. Those assets have no Oya platform field; private overrides select amd64 for Oya alone so Kubo, Caddy, and PostgreSQL can retain their native platforms.
+
 ## Decision Log
 
 - 2026-10-11 / Codex: Replace SSH forwarding with an application inbox, as requested by the user. Keep direct HTTP operation as an advanced option.
@@ -45,6 +48,7 @@ The extraction review found a separate operator-side permission issue: the direc
 - 2026-10-11 / User and Codex: Pin `pg@8.23.1`, the release reported by npm during implementation. The user confirmed the choice; exact pinning and the lockfile keep dependency installation reproducible.
 - 2026-10-16 / Codex: Make only the generated test Caddyfile readable by the proxy, retain owner-only secret files and proxy capability restrictions, and exercise file ownership on a Linux volume before starting the stack. Keep the pinned image's verified CA path, allow a two-minute CA wait, and report bounded, credential-redacted command errors and service logs on failure.
 - 2026-10-16 / User and Codex: Publish the first inbox-capable image as v0.3.0 from the merged, CI-tested source. Verify the immutable image digest anonymously and upload the matching bundle only after content and permissions checks. Keep the publisher-only follow-up separate from the already tested runtime release.
+- 2026-10-16 / User and Codex: Make the existing v0.3.0 release the deployment-guide default. Keep native source builds optional and save image, platform, project, and Compose paths for reliable restarts. Update repository documentation without replacing published release assets.
 
 ## Outcomes & Retrospective
 
@@ -59,6 +63,8 @@ The 2026-10-16 follow-up fixes a Linux permission mismatch in the generated test
 The release image is Linux amd64 and was built from tag `node-v0.3.0` at commit `07acda6b247b34f5061275904d209ad071b80029`. An empty Docker credential configuration successfully pulled its exact digest. The published image also passed non-root, offline module-load and source-hash checks. GitHub's uploaded-asset digests matched all three local files. The publisher permissions regression passed all 13 tests using `node --test node/production/test/publish-image.test.mjs`; that source fix and release record were subsequently committed in `f05e385`. The next operational milestone is an external inbox/PostgreSQL deployment connected to a local worker, starting with IPFS-only offline-delivery verification.
 
 The extraction follow-up documents `tar -xzpf` and keeps the private `umask` active. The publisher suite passed all 13 tests with explicit `umask 077`, checking both Caddyfiles, mounted agent source, directory traversal, and subsequent private file creation. Separate offline GNU tar checks ran the documented commands against the published v0.2.0 and v0.3.0 archives as an ordinary Linux user. Both retained readable public assets and owner-only private settings; removing `-p` from the v0.3.0 command reproduced the restrictive file modes. Existing release assets and image contents were unchanged.
+
+The deployment-guide follow-up replaces the required source build with bundle download and a digest-pinned pull. GitHub release metadata and the downloaded archive's checksum match the documented release. Validation used the actual bundle to resolve worker, bundled-database inbox, and external-database inbox Compose configurations in Bash and zsh, including fresh-shell restoration and paths containing spaces. An offline container using the published digest accepted both IPFS-only and Ledger configuration examples. All 13 publisher tests and added local documentation links passed. No external deployment or real-chain transaction was part of this documentation update.
 
 ## Context and Orientation
 
@@ -86,9 +92,9 @@ Agents retain their signed job file and retry that exact file. New IDs mean new 
 
 ## Artifacts and Notes
 
-Primary documentation consulted: [PostgreSQL row locking](https://www.postgresql.org/docs/current/sql-select.html) and [node-postgres TLS configuration](https://node-postgres.com/features/ssl). Deployment documentation must distinguish the new source build from released v0.2.0 images, which do not contain the inbox implementation.
+Primary documentation consulted: [PostgreSQL row locking](https://www.postgresql.org/docs/current/sql-select.html) and [node-postgres TLS configuration](https://node-postgres.com/features/ssl). Deployment documentation uses the published v0.3.0 image and matching bundle. v0.2.0 images do not contain the inbox implementation; native source builds remain optional.
 
-Published release: [node-v0.3.0](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.0). The assets are `image.txt`, `release.txt`, and `oya-node-v0.3.0.tar.gz`. The immutable image reference is `ghcr.io/oyaprotocol/oya-node@sha256:848806de43f0afa056d1dea533320bfc1b503cb4409a96abb3101d7cedbb69de`. The bundle SHA256 is `8c8cd6f5ecf4c9de1b0704b8f81a7be05d574a68af8ce6eef45a17e2f8c4ae73`. The release notes explain using this digest where the tagged guides still describe a source build or future release.
+Published release: [node-v0.3.0](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.0). The assets are `image.txt`, `release.txt`, and `oya-node-v0.3.0.tar.gz`. The immutable image reference is `ghcr.io/oyaprotocol/oya-node@sha256:848806de43f0afa056d1dea533320bfc1b503cb4409a96abb3101d7cedbb69de`. The bundle SHA256 is `8c8cd6f5ecf4c9de1b0704b8f81a7be05d574a68af8ce6eef45a17e2f8c4ae73`. The current deployment guides use this release directly. The immutable guides embedded in its archive still describe a source build; follow the current repository instructions with the matching released Compose assets.
 
 ## Interfaces and Dependencies
 

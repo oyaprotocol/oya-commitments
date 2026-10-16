@@ -1,5 +1,7 @@
 # Deployment and Configuration
 
+For an Oya publication node, follow [Run a live node locally](../node/production/run-locally.md) and [Host the PostgreSQL inbox](../node/production/host-inbox.md). Those guides use the published v0.3.0 Docker image and matching bundle for IPFS-only or full Ledger operation. The sections below cover commitment contracts and related deployment tools.
+
 ## Deploy a Commitment
 
 ```shell
