@@ -151,14 +151,13 @@ contract OyaTestERC1155ScriptTest is Test {
     }
 
     function test_MintScriptMintsConfiguredTokenId() public {
-        DeployOyaTestERC1155 deployScript = new DeployOyaTestERC1155();
         MintOyaTestERC1155 mintScript = new MintOyaTestERC1155();
         address recipient = address(0xCAFE);
 
-        vm.setEnv("DEPLOYER_PK", "1");
-        vm.setEnv("TEST_ERC1155_OWNER", vm.toString(vm.addr(1)));
-        deployScript.run();
-        OyaTestERC1155 deployedToken = deployScript.token();
+        // vm.setEnv is process-wide: keep this fixture independent of the deploy test's environment.
+        OyaTestERC1155 deployedToken = new OyaTestERC1155(
+            vm.addr(1), "Oya Test ERC1155", "OYAT1155", "https://example.invalid/oya-test-erc1155/{id}.json"
+        );
 
         vm.setEnv("MINTER_PK", "1");
         vm.setEnv("TEST_ERC1155_TOKEN", vm.toString(address(deployedToken)));
