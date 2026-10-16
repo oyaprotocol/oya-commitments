@@ -40,9 +40,12 @@ mkdir -m 700 "$OYA_LOCAL_DIR/agent-private"
 curl -fL \
   https://github.com/oyaprotocol/oya-commitments/releases/download/node-v0.2.0/oya-node-v0.2.0.tar.gz \
   -o "$OYA_LOCAL_BUNDLE/oya-node-v0.2.0.tar.gz"
-tar -xzf "$OYA_LOCAL_BUNDLE/oya-node-v0.2.0.tar.gz" -C "$OYA_LOCAL_BUNDLE"
+tar -xzpf "$OYA_LOCAL_BUNDLE/oya-node-v0.2.0.tar.gz" -C "$OYA_LOCAL_BUNDLE"
+chmod -R a+rX "$OYA_LOCAL_BUNDLE/node" "$OYA_LOCAL_BUNDLE/agent-library"
 cat "$OYA_LOCAL_BUNDLE/node/production/image.txt"
 ```
+
+The `-p` flag preserves archived permissions even with `umask 077`. The v0.2.0 archive itself has owner-only permissions, so the `chmod` step also makes its public configuration and agent source readable by containers running under a different UID. Apply it only to the two extracted public trees shown above. Keep `$OYA_LOCAL_DIR` and its keys private; leave `umask 077` in effect for subsequent configuration files. Newer bundles have public file permissions recorded in the archive and need only `tar -xzpf`.
 
 The [v0.2.0 release](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.2.0) pins:
 
