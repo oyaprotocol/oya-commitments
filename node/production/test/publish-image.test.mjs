@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -80,8 +80,16 @@ test('publishes committed source and bundles matching scripts with this build’
     assert.ok(readFileSync(join(f.output, 'release.txt'), 'utf8').includes(f.git('rev-parse', 'HEAD')));
     const unpacked = join(f.directory, 'unpacked');
     mkdirSync(unpacked);
-    execFileSync('tar', ['-xzf', join(f.output, 'oya-node-v0.1.0.tar.gz'), '-C', unpacked]);
+    execFileSync('tar', ['-xzpf', join(f.output, 'oya-node-v0.1.0.tar.gz'), '-C', unpacked]);
     const bundle = join(unpacked, 'node/production');
+    for (const file of ['docker/Caddyfile', 'inbox/Caddyfile']) {
+        assert.equal(statSync(join(bundle, file)).mode & 0o777, 0o644,
+            'Hardened Caddy must be able to read its configuration after a non-root operator extracts the bundle.');
+    }
+    for (const path of [unpacked, bundle, join(bundle, 'inbox'), join(bundle, 'docker')]) {
+        assert.equal(statSync(path).mode & 0o777, 0o755, 'Public bundle directories must allow traversal.');
+    }
+    assert.equal(statSync(f.output).mode & 0o777, 0o700, 'The operator release output directory stays private.');
     assert.deepEqual(readdirSync(bundle).sort(), ['README.md', 'compose.yaml', 'deploy-droplet.md', 'docker', 'host-inbox.md', 'image.txt',
         'inbox', 'inbox-api.md', 'release-image.md', 'run-direct.md', 'run-locally.md', 'scripts']);
     assert.deepEqual(readdirSync(join(bundle, 'inbox')).sort(), ['Caddyfile', 'compose.https.yaml', 'compose.postgres.yaml',
