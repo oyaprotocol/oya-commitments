@@ -57,6 +57,7 @@ The copied `default` module now starts as a minimal standard scaffold using the 
 - Runner config, message APIs, publication nodes, and harness usage: `agent/README.md`
 - Standalone node daemons and startup commands: `node/README.md`
 - [Run Oya locally](node/production/run-locally.md), with IPFS-only or full Ledger execution and a [PostgreSQL inbox hosted where you choose](node/production/host-inbox.md).
+- [Ask an agent to deploy your node](node/production/deploy-with-agent.md): secure credential handoff, hosting, verification, and operations.
 - [Production runtime, Ledger deployment, and validation](node/production/README.md).
 - Deployment and configuration: `docs/deployment.md`
 - Signer options and `with-signer` helper: `docs/signers.md`

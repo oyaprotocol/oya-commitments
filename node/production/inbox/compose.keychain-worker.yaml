@@ -1,0 +1,11 @@
+# macOS: start/stop through scripts/keychain-worker.py after sourcing compose.env.
+# The helper removes its temporary host file after the worker has read it.
+services:
+  node:
+    restart: "no"
+    volumes:
+      - type: bind
+        source: ${OYA_WORKER_SECRET_FILE:?Use the Keychain worker helper}
+        target: /run/secrets/worker.json
+        read_only: true
+        bind: {create_host_path: false}

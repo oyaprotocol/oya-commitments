@@ -40,6 +40,10 @@ What changed and why.
 Tests run.
 Any config or environment variable impacts.
 
+## Node Deployment Workflows
+
+For node deployment changes, keep `node/production/deploy-with-agent.md`, the local/inbox role guides, and `skills/deploy-node/SKILL.md` aligned. Include new operator assets in release packaging and run its focused tests. `npm --prefix node/production test` also requires Python 3 for the Keychain lifecycle tests; those tests mock macOS/Docker access and run on Linux or macOS. Keep real installation identities and credentials in private records outside the checkout.
+
 ## Agent Extension Policy
 
 New agent behavior must be added to that agent's own library files instead of shared generalized files.

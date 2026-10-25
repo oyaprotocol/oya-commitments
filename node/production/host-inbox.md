@@ -2,6 +2,8 @@
 
 The inbox is a small Oya HTTP service backed by ordinary PostgreSQL. Host it on a VM, a container platform, a home server with reachable HTTPS, or another location you control. PostgreSQL can be in the same Compose stack or on a separate self-hosted/managed service. The local Oya worker needs only outbound HTTPS to the inbox, with no tunnel or direct database access. This guide replaces cloud-hosted node deployment as the default architecture.
 
+To have an agent provision and verify this setup using secure credential references, start with [Deploy with an agent](deploy-with-agent.md). Provider tokens and application runtime secrets have separate storage and access requirements.
+
 The inbox stores signed message bodies, job status, and transaction checkpoints. Treat its database and worker token as trusted infrastructure. A database administrator can alter execution state; this is not an untrusted queue protocol. Keep node, deployer, and agent private keys off this host. PostgreSQL contains prepared signed Ledger transactions, which can be broadcast, but cannot authorize other transactions without the node key.
 
 This guide uses the published [node-v0.3.0 image and deployment bundle](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.0). Use the same release for the [local worker](run-locally.md). v0.2.0 images support only the direct API and cannot serve an inbox.

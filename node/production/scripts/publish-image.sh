@@ -42,18 +42,19 @@ bundle="$staging/bundle/node/production"
 mkdir -p "$bundle/docker" "$bundle/scripts" "$bundle/inbox"
 cp "$staging/source/compose.yaml" "$staging/source/README.md" \
     "$staging/source/deploy-droplet.md" "$staging/source/run-locally.md" "$staging/source/run-direct.md" \
-    "$staging/source/host-inbox.md" "$staging/source/inbox-api.md" \
+    "$staging/source/host-inbox.md" "$staging/source/inbox-api.md" "$staging/source/deploy-with-agent.md" \
     "$staging/source/release-image.md" "$bundle/"
 cp "$staging/source/docker/compose.http.yaml" "$staging/source/docker/Caddyfile" \
     "$staging/source/docker/compose.testing.yaml" \
     "$staging/source/docker/config.example.json" "$staging/source/docker/runtime.env.example" "$bundle/docker/"
-for file in compose.yaml compose.postgres.yaml compose.https.yaml compose.worker.yaml Caddyfile inbox.example.json worker.example.json; do
+for file in compose.yaml compose.postgres.yaml compose.https.yaml compose.worker.yaml compose.keychain-worker.yaml Caddyfile inbox.example.json worker.example.json; do
     cp "$staging/source/inbox/$file" "$bundle/inbox/"
 done
 mkdir -p "$staging/bundle/agent-library/agents/hourly-message-test"
 git -C "$root" show "$revision:agent-library/agents/hourly-message-test/agent.mjs" \
     > "$staging/bundle/agent-library/agents/hourly-message-test/agent.mjs"
 cp "$staging/source/scripts/deploy-droplet.sh" "$staging/source/scripts/deploy-droplet-remote.sh" "$bundle/scripts/"
+cp "$staging/source/scripts/keychain-worker.py" "$bundle/scripts/"
 printf '%s@%s\n' "$repository" "$digest" > "$bundle/image.txt"
 cp "$bundle/image.txt" "$output/image.txt"
 printf 'Git tag: %s\nGit commit: %s\nImage: %s@%s\n' "$release" "$revision" "$repository" "$digest" > "$output/release.txt"

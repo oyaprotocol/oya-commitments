@@ -2,6 +2,8 @@
 
 Run Oya and Kubo on your own computer, mini PC, or other local device. Agents send signed messages to an HTTPS inbox backed by PostgreSQL. Your node polls using outbound requests, so it needs no public IP address, router forwarding, tunnel, or inbound message endpoint. The inbox and PostgreSQL can be hosted wherever you choose, together or separately.
 
+For agent-managed setup, secure credential handoff, and optional macOS Keychain-backed worker startup, see [Deploy with an agent](deploy-with-agent.md). The commands below use persistent protected runtime files; the Keychain helper replaces the worker token's storage and startup lifecycle.
+
 Messages remain queued while the local device is asleep or offline. `202` means the inbox saved the job; check its status for publication. This guide uses the published [node-v0.3.0 image and deployment bundle](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.0), which support both modes below. Released v0.2.0 images do not contain the inbox or worker. For an existing v0.2.0 installation or local-only clients, use the [advanced direct HTTP guide](run-direct.md).
 
 | Mode | Completed job | Local requirements |
