@@ -15,7 +15,7 @@ The default deployment runs Oya and Kubo on your local device, with a portable P
 | Develop or validate the runtime | [Install and validate](#install-and-validate). |
 | Publish an image and bundle | [Maintainer release guide](release-image.md). |
 
-The setup guides use the published [node-v0.3.0 image and matching bundle](release-image.md#published-deployment-release) and cover IPFS-only and full Ledger modes. No source build is required; native source builds remain an option. Full Ledger mode adds an onchain CID record and requires RPC access and a funded account. IPFS-only does not. v0.2.0 images support only the direct API.
+The setup guides use the published [node-v0.3.1 image and matching bundle](release-image.md#published-deployment-release) and cover IPFS-only and full Ledger modes. No source build is required; native source builds remain an option. Full Ledger mode adds an onchain CID record and requires RPC access and a funded account. IPFS-only does not. v0.2.0 images support only the direct API.
 
 ## Default architecture
 
