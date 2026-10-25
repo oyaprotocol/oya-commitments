@@ -1,6 +1,21 @@
-# Deployment and Configuration
+# Deploy a commitment: Safe and Optimistic Governor
 
 For an Oya publication node, follow [Run a live node locally](../node/production/run-locally.md) and [Host the PostgreSQL inbox](../node/production/host-inbox.md). Those guides use the published v0.3.0 Docker image and matching bundle for IPFS-only or full Ledger operation. The sections below cover commitment contracts and related deployment tools.
+
+## Before you start
+
+Use this guide to create a commitment on your selected chain. Run the commands from the repository root in Bash or zsh. You need [Foundry](https://book.getfoundry.sh/) (`forge`, `cast`, and `anvil`), an RPC endpoint, a deployer account funded for gas, and the chain-specific contract addresses and commitment parameters described below. The [frontend](../frontend/README.md) offers a browser-wallet alternative.
+
+Initialize the Solidity dependencies in a fresh checkout and verify that the root project builds:
+
+```sh
+git submodule update --init --recursive
+forge build
+```
+
+Select the [required settings](#required-environment-variables), choose rules using the [rule templates](../agent-library/RULE_TEMPLATES.md), and keep credential values in a private environment file or use a [supported signer](signers.md). `ENV_FILE` can point to your protected file outside the checkout; the examples use the ignored `agent/.env`. Never commit a populated credential file. The optional `contracts/` project contains Ledger for publication nodes; deploying Ledger is not a step in this Safe/Optimistic Governor workflow.
+
+For an initial rehearsal, follow [Local testing with Anvil](#local-testing-anvil) or use a testnet with the correct dependencies deployed. The wrapper in the next section always broadcasts transactions; the local-testing section includes a direct Forge dry-run command.
 
 ## Deploy a Commitment
 
@@ -55,7 +70,7 @@ bash script/deploy-commitment.sh --owners 0x111111111111111111111111111111111111
 DEPLOYER_PK=0xabc123...
 OG_COLLATERAL=0x1111111111111111111111111111111111111111
 OG_BOND_AMOUNT=250000000
-OG_RULES="Any assets deposited in this Commitment may be transferred back to the depositor before January 15th, 2026 (12:00AM PST). After the deadline, assets may only be transferred to jdshutt.eth. If a third party is initiating the transfer after the deadline, they may take a 10% cut of the assets being transferred as a fee."
+OG_RULES="REPLACE_WITH_YOUR_REVIEWED_COMMITMENT_RULES"
 RPC_URL=https://sepolia.infura.io/v3/your-key
 
 # Safe overrides

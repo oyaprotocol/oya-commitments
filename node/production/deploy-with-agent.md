@@ -1,14 +1,30 @@
 # Deploy a local Oya node with an agent
 
-Give your coding agent the task below. It can provision an inbox, configure the local worker, verify delivery, and leave a private operations record. You supply hosting authorization and access through a secure local mechanism. The default architecture runs Oya and Kubo locally, with an HTTPS inbox and PostgreSQL on a host you choose. No tunnel or inbound message port is needed on the local device.
+Start here to have a coding agent set up your first Oya node. The recommended mode is **IPFS-only**: Oya and Kubo (the IPFS service) run on your device, while an HTTPS inbox and PostgreSQL store incoming work on a host you choose. The worker polls the inbox; no tunnel or inbound message port is needed on your device. A sender must sign messages with an address approved by both the inbox and worker.
+
+This installs a publication node. It does not deploy a commitment's Safe/Optimistic Governor or start a commitment-serving agent. IPFS-only needs no blockchain account, gas, RPC service, or Foundry installation. For manual setup, use [Run locally](run-locally.md).
+
+## Quick start
+
+1. **Make Docker available on your local device.** The agent can check Docker, existing installations, and compatibility before changing anything. It needs permission to run local commands and administer the selected inbox host.
+2. **Choose hosting and a hostname, or give a budget and ask for options.** You can reuse a Linux server or authorize a new one. A free hostname or your own domain works. Account signup, billing verification, and MFA happen in your own trusted interfaces.
+3. **Open a current checkout of this repository in your coding agent and paste the task below.** Fill in what you know; mark missing inputs as undecided. The checkout supplies current instructions and helpers; the runtime uses a released Docker image.
+4. **Provide access through secure credential references when needed.** Use [What you supply](#what-you-supply) and [Keychain and runtime secrets](#keychain-and-runtime-secrets-are-different). Share item names or protected file paths, never secret values in chat. The agent generates application credentials during setup.
+5. **Have the agent verify delivery and leave operating instructions.** Completion means an authorized message queues while the worker is stopped, publishes after it resumes, and can be retrieved by its content identifier (CID). The full [acceptance checks](#acceptance-before-handoff) also cover unauthorized senders, restarts, and backup restoration.
+
+## Task to give your agent
 
 ```text
 Read the repository's skills/deploy-node/SKILL.md and deployment guides.
 Deploy an IPFS-only local Oya worker and a separately hosted PostgreSQL inbox.
-Hosting: [existing SSH alias, or provider, region preference, and monthly budget].
-Provisioning authorization: [whether you may create the specified paid resources].
-Inbox hostname: [registered hostname].
-Credentials: [Keychain item references or protected file paths; no secret values].
+Hosting: [existing SSH alias, or provider, region preference, and monthly budget;
+if undecided, propose options within my budget before creating resources].
+Provisioning authorization: [specific resources and spending limit, or plan only].
+Inbox hostname: [registered hostname, or help me choose one].
+Credentials: [Keychain item references or protected file paths; if not ready,
+tell me which credentials and scopes I need and how to store them securely].
+Message senders: [approved public addresses, or generate a local sender key].
+Local worker credential: [Keychain on macOS, or protected runtime files].
 Inspect and preserve any existing installation. Use a matching released image
 and bundle. Verify HTTPS, unauthorized access rejection, offline queuing,
 publication, content retrieval, restart persistence, and backup restoration.
@@ -17,6 +33,10 @@ Continue within this scope; ask only for missing access or scope changes.
 ```
 
 The [repository skill](https://github.com/oyaprotocol/oya-commitments/blob/main/skills/deploy-node/SKILL.md) provides the agent workflow. Detailed configuration remains in [Run locally](run-locally.md) and [Host the inbox](host-inbox.md). This guide is also included in future deployment bundles; an older bundle can use the current repository instructions with its matching released assets.
+
+After setup, use the private handoff record for commands to monitor, send messages, stop/start, and back up your installation. Docker must be running and the local device awake to process jobs. The inbox can accept work while it is offline, subject to queue limits and job deadlines; default client jobs expire after 24 hours. Keychain-backed workers require the startup helper after a reboot or failure and may prompt for approval. A local IPFS pin alone does not guarantee retrieval while the device sleeps.
+
+The rest of this guide is reference material for the operator and agent: [inputs](#what-you-supply), [credential storage](#keychain-and-runtime-secrets-are-different), [deployment work](#work-the-agent-performs), [acceptance](#acceptance-before-handoff), and [daily operation](#private-handoff-and-daily-operation).
 
 ## What you supply
 

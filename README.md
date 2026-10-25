@@ -1,79 +1,85 @@
 # Oya Commitments
 
-Oya Commitments are Safe-based commitments controlled by plain-language rules and enforced via an Optimistic Governor module. This repo contains the Solidity contracts, deployment scripts, an optional web UI, and an offchain agent scaffold.
+Oya combines commitments governed by written rules, agents that act on those rules, and nodes that publish signed messages. This repository contains several related applications and libraries. Start with the task you want to perform; each area has its own setup and dependencies.
 
-## Beta Disclaimer
+## Start here
 
-This is beta software provided “as is.” Use at your own risk. No guarantees of safety, correctness, or fitness for any purpose.
+| I want to… | Start with | What I need |
+| --- | --- | --- |
+| **Run a node on my own device** | [Node setup](#run-a-node), preferably [with a coding agent](node/production/deploy-with-agent.md) | Docker; an inbox host and DNS hostname for external messages. IPFS-only mode needs no funded wallet. |
+| **Deploy a commitment** | [Commitment deployment](#deploy-a-commitment) | Foundry, a chain RPC endpoint, deployment parameters, and a funded deployer account. |
+| **Build or run a commitment-serving agent** | [Agent setup](#build-or-run-a-commitment-serving-agent) | The shared Node.js runner, an agent module, and that module's configuration and credentials. |
+| **Deploy a commitment from a browser wallet** | [Web frontend](frontend/README.md) | Node.js/npm to run the UI and a wallet for deployment transactions. |
+| **Use Oya libraries in another application** | [Kernel packages](packages/README.md) | The published packages for signed messages, IPFS, and Ethereum integration. |
+| **Develop or test this repository** | [Contributing](CONTRIBUTING.md) and [testing by area](docs/testing.md) | The tools for the area you are changing; there is no single install step for the whole repo. |
 
-## How It Works (At a Glance)
+## How the parts fit together
 
-- Write plain-language rules that define what the commitment may do.
-- Deploy a Safe wired to an Optimistic Governor module with those rules.
-- An agent or user proposes transactions via the module and posts a bond.
-- If no challenge occurs during the window, the proposal is executed by the Safe.
+- A **commitment** is a Safe account connected to an Optimistic Governor module. Written rules describe permitted actions; users or agents propose transactions and post a bond. Undisputed proposals can execute after the challenge window.
+- A **commitment-serving agent** monitors a commitment and runs module-specific decision logic. The shared runner lives in `agent/`; individual implementations live in `agent-library/`.
+- A **publication node** verifies authorized senders' signed messages and stores them in IPFS. Its optional Ledger mode also records the content identifier (CID) onchain. The node's Ledger contract is separate from a commitment's Safe and Optimistic Governor.
 
-## Quick Start
+You can run an IPFS-only node independently of any commitment or commitment-serving agent. A coding agent helping you install the software is also separate from the agents that submit messages or serve commitments.
 
-1. Install Foundry: https://book.getfoundry.sh/
-2. Set required environment variables (see `docs/deployment.md`).
-3. Run the deployment script:
+## Run a node
 
-```shell
-ENV_FILE=agent/.env \
-bash script/deploy-commitment.sh
-```
+The recommended first setup is **IPFS-only**, with Oya and Kubo (the IPFS service) on your local device, plus a separately hosted HTTPS inbox backed by PostgreSQL. The inbox accepts signed messages from approved addresses and queues them while your device is offline. Your local worker polls over outbound HTTPS, checks authorization again, and publishes accepted messages. It needs no inbound message port, router forwarding, or tunnel.
 
-By default this leaves the deployer as the Safe's sole owner so you can do a testing phase before finalizing ownership. Pass `--owners 0x` to remove all human owners immediately, or `--owners <a>,<b>,<c>` to finalize an `N/N` Safe.
+- **For agent-assisted setup, open [Deploy with an agent](node/production/deploy-with-agent.md).** It has a task prompt, the inputs you supply, secure credential instructions, and the checks the agent must complete. If you have no hosting or hostname yet, the prompt lets you ask for options within a budget.
+- **For manual setup, start with [Run locally](node/production/run-locally.md).** It walks through local configuration and sends you to [Host the inbox](node/production/host-inbox.md) when the remote role is needed.
 
-## Build An Agentic Commitment
+Either path finishes by submitting a signed message and retrieving its CID. The guides also cover offline delivery, monitoring, restart, and backup verification.
 
-The fastest path to a new commitment/agent combo is:
-1. Copy `agent-library/agents/default/` to `agent-library/agents/<agent-name>/`.
-2. Review `agent-library/RULE_TEMPLATES.md` and select the rule templates that apply to the new commitment.
-3. Assemble `agent-library/agents/<agent-name>/commitment.txt` from those templates, filling the placeholders and replacing the copied default rule text. If a reusable rule pattern is missing, suggest a new template for `agent-library/RULE_TEMPLATES.md`.
-4. Set `agent-library/agents/<agent-name>/agent.json` `commitmentType` to `standard` for template-based commitments. Use `freeform` only for legacy or intentionally custom rule sets. Keep the existing top-level `type` field reserved for the ERC-8004 document type. `standard` is strongly encouraged, especially for production commitments.
-5. Implement commitment-specific behavior in `agent-library/agents/<agent-name>/agent.js`.
-6. Put non-secret runtime settings in `agent-library/agents/<agent-name>/config.json`.
-7. Keep only secrets in `agent/.env`.
-8. Validate and smoke test locally:
+| Node mode | Result | Additional requirements |
+| --- | --- | --- |
+| **IPFS-only** | Signed message published and pinned in local IPFS | No Ethereum RPC, Ledger deployment, funded account, or gas. |
+| **Full / Ledger** | IPFS publication plus a verified Ledger transaction | Ethereum RPC access, a deployed Ledger contract, and a dedicated funded node account. This does not run an Ethereum full node. |
 
-```bash
-node agent/scripts/validate-agent.mjs --module=<agent-name>
-node agent/scripts/testnet-harness.mjs smoke --module=<agent-name> --profile=local-mock
-node agent/scripts/testnet-harness.mjs down --module=<agent-name> --profile=local-mock
-```
+The [released image and deployment bundle](node/production/release-image.md#published-deployment-release) provide the runtime and deployment assets. The manual release path needs no source build, host Node.js, or Foundry. The optional macOS Keychain startup helper needs Python 3. Follow the current guides' release compatibility notes, including any helper files absent from an older bundle.
 
-The detailed workflow for module structure, `config.json`, and local/remote harness profiles is in `agent/README.md` and `agent-library/README.md`.
+Default client jobs have a 24-hour deadline; queued work does not wait indefinitely. If your local device holds the only IPFS copy, continuous content retrieval also requires replication elsewhere. Advanced options include the [direct HTTP API without an inbox](node/production/run-direct.md). The [node directory guide](node/README.md) distinguishes the production runtime from experimental daemons.
 
-The copied `default` module now starts as a minimal standard scaffold using the `Agent Proxy` and `Account Recovery and Rule Updates` templates. Treat it as a starter to customize, not as the final rules for a new commitment.
+## Deploy a commitment
 
-## Documentation
+This path creates a Safe and Optimistic Governor on your selected chain. Start with the [commitment deployment guide](docs/deployment.md), which explains prerequisites, required settings, and the command to run from the repository root.
 
-- Contribution workflow and policy: `CONTRIBUTING.md`
-- Shared commitment rule templates: `agent-library/RULE_TEMPLATES.md`
-- Skill for new agent/commitment combos: `skills/add-agent-commitment/SKILL.md`
-- Agent module layout and new-commitment workflow: `agent-library/README.md`
-- Runner config, message APIs, publication nodes, and harness usage: `agent/README.md`
-- Standalone node daemons and startup commands: `node/README.md`
-- [Run Oya locally](node/production/run-locally.md), with IPFS-only or full Ledger execution and a [PostgreSQL inbox hosted where you choose](node/production/host-inbox.md).
-- [Ask an agent to deploy your node](node/production/deploy-with-agent.md): secure credential handoff, hosting, verification, and operations.
-- [Production runtime, Ledger deployment, and validation](node/production/README.md).
-- Deployment and configuration: `docs/deployment.md`
-- Signer options and `with-signer` helper: `docs/signers.md`
-- Offchain agent usage: `docs/agent.md`
-- Agent extension decision rules: `docs/agent-extension-guidelines.md`
-- Web frontend: `docs/frontend.md`
-- Testing and common commands: `docs/testing.md`
+1. Select the chain, collateral token, bond, and rules. Use the [shared rule templates](agent-library/RULE_TEMPLATES.md) when drafting a commitment for an agent.
+2. Install Foundry, initialize the repository's contract dependencies, and configure a funded deployer and RPC access using the guide. See [signer options](docs/signers.md) for credential handling.
+3. Deploy, record the resulting addresses, and verify ownership before configuring an agent to serve the commitment.
 
-## Repo Layout
+The deployment script broadcasts transactions. By default, the deployer remains the Safe's sole owner for testing. The guide explains how to finalize ownership later or choose a different owner set at deployment. The [web frontend](frontend/README.md) provides a browser-wallet alternative.
 
-- `contracts/` Hardened onchain contracts, including Ledger; separate Foundry project (see `contracts/README.md`)
-- `packages/` Hardened offchain libraries consumed by nodes
-- `src/` Existing Solidity contracts
-- `script/` Foundry deployment and ops scripts
-- `test/` Foundry tests
-- `agent/` Offchain agent scaffold
-- `node/` Standalone Oya node daemons and node-focused tests
-- `frontend/` Web UI
-- `lib/` External dependencies (Foundry)
+## Build or run a commitment-serving agent
+
+To run an existing module, follow the [agent setup guide](docs/agent.md) and that module's instructions. Configure the commitment addresses and non-secret behavior in `agent-library/agents/<name>/config.json`; use the runner's supported secret/signing configuration for credentials.
+
+To build a new module, follow [Building a new agentic commitment](agent-library/README.md#building-a-new-agentic-commitment): copy the default scaffold, select [rule templates](agent-library/RULE_TEMPLATES.md), implement local behavior, and validate it with the local harness before live use. The guide includes the exact validation and smoke-test commands. Coding agents can use the [add-agent-commitment skill](skills/add-agent-commitment/SKILL.md).
+
+Use the [runner reference](agent/README.md) for configuration, signing, signals, and APIs. Keep behavior for one commitment in its own module; see the [extension policy](docs/agent-extension-guidelines.md) before modifying shared infrastructure.
+
+## Repository map
+
+| Path | Responsibility and entry point |
+| --- | --- |
+| [`node/production/`](node/production/README.md) | Production publication runtime, local worker, PostgreSQL inbox, Docker assets, and operator guides. |
+| [`node/`](node/README.md) | Node overview plus experimental message/proposal/control daemons and their tests. New production deployments start in `node/production/`. |
+| [`agent/`](agent/README.md) | Shared commitment-serving runner, signer integrations, APIs, and local harness tools. |
+| [`agent-library/`](agent-library/README.md) | Individual agent modules, commitment text, configuration, and shared rule templates. |
+| [`src/`](src/), [`script/`](script/), [`test/`](test/) | Root Foundry project: existing application contracts, commitment deployment/management scripts, and Solidity tests. |
+| [`contracts/`](contracts/README.md) | Separate Foundry project for hardened onchain components, currently Ledger. Use its own build/test commands. |
+| [`packages/`](packages/README.md) | Reusable offchain kernels published as `@oyaprotocol/*` packages. |
+| [`frontend/`](frontend/README.md) | Web UI for deploying commitments through a browser wallet. |
+| [`docs/`](docs/) | Commitment, agent, signer, frontend, and testing guides. Node operations guides live with `node/production/`. |
+| [`skills/`](skills/) | Workflows coding agents can follow for deployment and new commitment/agent modules. |
+| [`plans/`](plans/) | Design and implementation records. Use the task guides above for current setup instructions. |
+| [`lib/`](lib/) | External Solidity dependencies used by Foundry. |
+
+## Contribute or release software
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) and the applicable [AGENTS.md](AGENTS.md) before changing code. [Testing and common commands](docs/testing.md) points to checks for each area. Substantial work uses an execution plan following [PLANS.md](PLANS.md).
+
+Maintainers publish node images and matching bundles through the [node release guide](node/production/release-image.md). Installing or operating a released node does not require publishing anything. Kernel library releases have a separate [package workflow](packages/README.md#validate-a-release).
+
+## Project status
+
+This is beta software provided “as is.” Use at your own risk. No guarantees of safety, correctness, or fitness for any purpose. Keep credentials and private installation records out of Git; follow the selected guide's secure credential setup.
