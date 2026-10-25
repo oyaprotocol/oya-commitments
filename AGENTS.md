@@ -26,6 +26,7 @@
 - For repository-wide or cross-cutting work, keep the ExecPlan in a clearly named Markdown file at the repo root or in a dedicated `plans/` subdirectory. For tightly scoped work, place it near the affected area when that improves locality.
 
 ## Project Structure & Module Organization
+- For local node/inbox deployment or operations, follow `skills/deploy-node/SKILL.md` and `node/production/deploy-with-agent.md`. Preserve existing authorization, keep installation records outside Git, and verify the complete delivery path before declaring deployment complete.
 - **`contracts/`**: Hardened onchain contracts, including Ledger, in a separate Foundry project. Follow `contracts/AGENTS.md` for local organization and validation guidance.
 - **`packages/`**: Hardened offchain libraries consumed by nodes. Follow `packages/AGENTS.md` for package-specific guidance.
 - **`src/`**: Existing Solidity contracts (e.g., `Counter.sol`). Keep modules grouped by domain and include SPDX + pragma headers.
