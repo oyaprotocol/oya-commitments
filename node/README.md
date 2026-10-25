@@ -1,14 +1,27 @@
 # Oya Node
 
-`node/` is the primary home for standalone Oya node daemons.
+`node/` contains the production publication runtime and experimental daemons. For a new installation, use the production path below. For commitment deployment or a commitment-serving agent, return to the [repository task guide](../README.md#start-here).
+
+## Run a production node
 
 The Oya production runtime lives in [`production/`](production/README.md). Its default deployment runs on a local device and polls a portable [PostgreSQL inbox](production/host-inbox.md) over outbound HTTPS. The inbox receives signed messages, tracks publication, and keeps execution checkpoints for restart recovery. Full Ledger mode logs CIDs onchain; IPFS-only mode needs no Ethereum connection or funded node wallet. A synchronous direct API remains available separately. The experimental daemons described below use the earlier shared agent infrastructure.
 
-Follow [Run a live node locally](production/run-locally.md) for both modes, Docker, persistent IPFS storage, external messages, monitoring, and recovery. The guides use the published [node-v0.3.0 image and deployment bundle](production/release-image.md#published-deployment-release); no source build is required. v0.2.0 supports the older direct API.
+Start with **IPFS-only** for a first deployment. Choose one setup path:
+
+- **[Deploy with an agent](production/deploy-with-agent.md):** supply hosting preferences and secure credential references, then have the agent configure and verify both roles.
+- **[Run locally yourself](production/run-locally.md):** follow the local worker walkthrough, then its linked inbox-hosting steps. Both IPFS-only and full Ledger modes are covered.
+
+The guides use the published [node-v0.3.0 image and deployment bundle](production/release-image.md#published-deployment-release); no source build is required. v0.2.0 supports the older direct API. See the [production reference](production/README.md) for APIs, advanced direct deployments, and development checks.
+
+## Develop the production runtime
 
 From the repository root, `npm --prefix node/production run test:local` validates the operating CLI and a separate message sender against disposable Anvil and offline Kubo, including Ledger deployment/reuse, publication, and node restart. See the [production validation guide](production/README.md#install-and-validate) for prerequisites and evidence output.
 
-These daemons are separate from the commitment-serving agent loop in `agent/`:
+## Experimental daemons
+
+The remaining sections describe the earlier daemons in `node/scripts/`, which share libraries with `agent/`. Their APIs and configuration differ from the production inbox/worker flow above. Use these sections when developing their proposal, control, or commitment-specific integrations.
+
+These daemons run separately from the commitment-serving agent loop in `agent/`:
 
 - the message publication node archives signed agent-authored messages to IPFS
 - the message publication node can optionally run a module-exported validator and sign validator output into the published artifact

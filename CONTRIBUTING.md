@@ -5,6 +5,8 @@ This repository uses two kinds of contribution guidance:
 - `AGENTS.md` for machine-targeted, normative instructions.
 - `README.md` for human-oriented architecture and workflow context.
 
+If you want to deploy or operate software, start with the [task guide in the README](README.md#start-here). This document covers changing the repository. Use [testing by area](docs/testing.md) to select the relevant development environment and checks.
+
 ## Precedence Rules
 
 When instructions conflict:
@@ -17,11 +19,14 @@ When instructions conflict:
 
 - `contracts/`: hardened onchain contracts and their local tests/tooling, including Ledger; see `contracts/README.md` and `contracts/AGENTS.md`.
 - `packages/`: hardened offchain libraries consumed by nodes.
+- `node/production/`: production publication node, PostgreSQL inbox, and operator guides; see its [task directory](node/production/README.md#choose-your-task).
+- `node/`: experimental publication/control daemons alongside the production directory; see the [node overview](node/README.md).
 - `src/`, `script/`, `test/`: existing Solidity contracts, scripts, and tests.
 - `agent/`: shared offchain runner and reusable agent infrastructure.
 - `agent-library/agents/<name>/`: agent-specific implementations.
 - `agent-library/RULE_TEMPLATES.md`: shared rule templates for drafting new commitment rules.
 - `docs/`: operational and architecture docs.
+- `frontend/`: commitment deployment UI; see its [development guide](frontend/README.md).
 
 ## Required Contributor Workflow
 

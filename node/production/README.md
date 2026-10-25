@@ -2,9 +2,22 @@
 
 The default deployment runs Oya and Kubo on your local device, with a portable PostgreSQL inbox receiving external messages. Agents submit signed jobs over HTTPS; the local worker polls with outbound requests, publishes to IPFS, optionally records the CID in Ledger, and reports the result. PostgreSQL retains queued messages and execution checkpoints through disconnects and worker restarts. You choose where to host the inbox and database.
 
-To delegate setup and operations, use [Deploy with an agent](deploy-with-agent.md). It covers the task prompt, secure credential handoff, optional macOS Keychain-backed worker startup, and acceptance checks.
+## Choose your task
 
-Start with [Run a live node locally](run-locally.md) and [Host the PostgreSQL inbox](host-inbox.md). They use the published [node-v0.3.0 image and matching bundle](release-image.md#published-deployment-release) and cover IPFS-only and full Ledger modes, signing keys, monitoring, offline delivery, and recovery. No source build is required; native source builds remain an option. The [inbox API](inbox-api.md) defines signed jobs, status, leases, and transaction checkpoints. v0.2.0 images support only the direct API.
+| Task | Guide |
+| --- | --- |
+| **Set up a first node with a coding agent** | **[Deploy with an agent](deploy-with-agent.md)** — recommended IPFS-only setup, a task prompt, secure credential handoff, and acceptance checks. |
+| Set up a node manually | [Run locally](run-locally.md) — start here, then follow its [inbox hosting](host-inbox.md) step. |
+| Monitor or resume an existing worker | [Local operation](run-locally.md#monitor-stop-and-resume), or [Keychain startup](deploy-with-agent.md#keychain-and-runtime-secrets-are-different) if configured. |
+| Maintain or recover the inbox | [Retention, recovery, and migration](host-inbox.md#retention-recovery-and-migration). |
+| Write a message sender | [Submit and track a message](run-locally.md#4-submit-and-track-a-message) and the [inbox API](inbox-api.md). |
+| Use a synchronous API without an inbox | [Advanced direct HTTP setup](run-direct.md). |
+| Develop or validate the runtime | [Install and validate](#install-and-validate). |
+| Publish an image and bundle | [Maintainer release guide](release-image.md). |
+
+The setup guides use the published [node-v0.3.0 image and matching bundle](release-image.md#published-deployment-release) and cover IPFS-only and full Ledger modes. No source build is required; native source builds remain an option. Full Ledger mode adds an onchain CID record and requires RPC access and a funded account. IPFS-only does not. v0.2.0 images support only the direct API.
+
+## Default architecture
 
 ```mermaid
 flowchart LR
@@ -15,7 +28,9 @@ flowchart LR
     N -. Full mode via RPC .-> L[Ledger]
 ```
 
-The remaining sections document the **advanced synchronous HTTP runtime** and shared configuration/contract tools. For existing released local installations, see [direct HTTP setup](run-direct.md). A direct node accepts signed text and returns `200 / published` in IPFS mode or `200 / logged` after Ledger receipt verification; it has no durable inbox. Do not run it concurrently with a worker using the same node signing account.
+## Advanced direct runtime reference
+
+For normal inbox/worker installation, follow the task guides above. The remaining sections document the **advanced synchronous HTTP runtime** and shared configuration/contract tools. For existing released local installations, see [direct HTTP setup](run-direct.md). A direct node accepts signed text and returns `200 / published` in IPFS mode or `200 / logged` after Ledger receipt verification; it has no durable inbox. Do not run it concurrently with a worker using the same node signing account.
 
 After signature, allowlist, and request-limit checks, the HTTP handler calls the kernel's `publishSignedMessage` in IPFS mode or `publishAndLogSignedMessage` in Ledger mode. One complete operation runs at a time. Additional authenticated requests within the request budget receive `503 node_busy`; there is no waiting queue.
 
