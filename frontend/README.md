@@ -8,13 +8,13 @@ This is beta software provided “as is.” Use at your own risk. No guarantees 
 
 ## Prerequisites
 
-- Node.js 18+
+- Node.js 24 (also used in CI)
 - npm (or pnpm/yarn)
 
 ## Install & Run
 
 ```shell
-npm install
+npm ci
 npm run dev
 ```
 
@@ -34,6 +34,27 @@ All other Safe / Optimistic Governor defaults are currently hardcoded in `src/Ap
 npm run build
 npm run preview
 ```
+
+## Dependency validation
+
+Run these commands from `frontend/` after changing dependencies:
+
+```shell
+npm ci
+npm test
+npm run build
+npm audit --package-lock-only
+```
+
+CI installs with `npm ci --ignore-scripts` and checks wallet URI parsing, wallet message schemas, transaction-policy validation, the production build, and the dependency audit. No dependency patch or install script is required.
+
+The security overrides in `package.json` have specific purposes:
+
+- WalletConnect's `query-string` override uses 9.5.1 and its patched URI decoder while retaining the existing WalletConnect SDK. The parser is now ESM; Node.js 24 supports its use from the SDK's CommonJS entry point.
+- Zod 4.6.6 fixes oversized collection validation and supports the legacy record-schema API used by Coinbase. ABIType 1.2.3 supports Zod 4. Tests exercise Coinbase's ESM and CommonJS policy validators with these overrides.
+- The existing UUID and WebSocket overrides keep older transitive copies on patched releases.
+
+The lockfile also updates Coinbase CDP SDK to 1.60.0, removing the old Solana dependency chain containing `stream-json`. Keep the Zod and ABIType overrides until all consumers request compatible patched versions. Remove the URI-parser override when the supported wallet SDK no longer brings in a vulnerable decoder, then repeat these checks.
 
 ## What It Does
 
