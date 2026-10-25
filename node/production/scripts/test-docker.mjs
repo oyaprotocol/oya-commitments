@@ -10,6 +10,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { Interface, Wallet, keccak256, toUtf8Bytes } from 'ethers';
+import { supportsComposeVersion } from './docker-prerequisites.mjs';
 
 const production = fileURLToPath(new URL('../', import.meta.url));
 const { values: { verbose, platform, http, testing } } = parseArgs({ options: {
@@ -121,9 +122,11 @@ test(testing ? 'Optional testing profile signs and logs an hourly agent message'
         const docker = JSON.parse((await command('docker', ['version', '--format', '{{json .Server}}'])).toString());
         assert.equal(docker.Os, 'linux');
         fixtureEnv.OYA_TEST_PLATFORM = platform ?? `linux/${docker.Arch}`;
+        progress('Checking Docker Compose 2.30 or newer');
         const composeVersion = (await command('docker', ['compose', 'version', '--short'])).toString().trim();
-        assert.match(composeVersion, /^v?2\.(\d+)/);
-        assert.ok(Number(composeVersion.match(/^v?2\.(\d+)/)[1]) >= 30, 'Compose 2.30+ is required.');
+        assert.ok(supportsComposeVersion(composeVersion), 'Compose 2.30 or newer is required.');
+        if (verbose) console.log(`[docker] Compose ${composeVersion}`);
+        progress('Checking Foundry and fixture prerequisites');
         const forgeVersion = (await command('forge', ['--version'])).toString().split('\n')[0];
         await readFile(join(production, '../../lib/forge-std/src/Script.sol'));
         const deployer = Wallet.createRandom();

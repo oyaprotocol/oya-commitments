@@ -15,6 +15,8 @@ Resolve every open Dependabot alert in `oyaprotocol/oya-commitments` without bre
 - [x] 2026-10-25: Updated the frontend manifest/lockfile, documented maintenance, and added frontend validation to CI. Confirmed Zod 4.6.6 already supports Coinbase's record API, so no vendored patch or install script is needed.
 - [x] 2026-10-25: A clean install with scripts disabled passed all 11 compatibility tests and the production build. All five lockfiles report zero audit vulnerabilities. An isolated headless Chrome check rendered the production page and opened the wallet picker with all default wallets and no uncaught browser errors; external page requests were blocked.
 - [x] 2026-10-25: Re-fetched all 29 open GitHub alerts and checked every matching package version against each advisory's affected range. None remain vulnerable in the final lockfile. Reviewed repository changes and recorded remaining merge and deployment work.
+- [x] 2026-10-25: After commit `6ded777`, the frontend, production-node, inbox, kernel, and contract CI jobs passed. Both Docker lifecycle jobs failed before building at the Compose prerequisite check. The runner image includes Compose 5.1.3; the old check accepted only major version 2.
+- [x] 2026-10-25: The corrected version check passed three regression tests and all 164 production-node tests. The previously failing Linux amd64 Docker lifecycle fixture passed with the official Compose 5.1.3 binary in about 149 seconds, including publication, persistence, draining, receipt reconciliation, and backup restoration. A new GitHub run remains pending the follow-up commit and push.
 
 ## Surprises & Discoveries
 
@@ -24,11 +26,14 @@ Both parser fixes change module/API compatibility. Coinbase's compatible parent 
 
 Zod has no patched 3.x release. Its upstream collection-size fix is in the v4 implementation, so importing the bundled `zod/v3` compatibility entry would not remediate it. Coinbase CDP SDK 1.60.0 uses the legacy single-argument `z.record(valueSchema)` form. An initial compatibility-patch prototype proved unnecessary: Zod 4.6.6's `v4/classic/schemas.js` already handles that form with a string key schema. Both ESM and CommonJS typed-data validation tests pass without modifying Coinbase. No patch, vendored SDK code, postinstall hook, or patch tooling is included. Older ABIType 1.x copies move to 1.2.3, which declares Zod 4 support.
 
+The follow-up Docker CI failure is in `node/production/scripts/test-docker.mjs`: `/^v?2\.(\d+)/` rejects Compose 5.1.3 before any images are built. Both push run `40216761818` and PR run `40216785980` failed at the same assertion. The runner's [published software inventory](https://github.com/actions/runner-images/blob/ubuntu26/20261012.163/images/ubuntu/Ubuntu2604-Readme.md) confirms Compose 5.1.3. The intended requirement remains Compose 2.30 or newer, matching the deployment script and guides.
+
 ## Decision Log
 
 - 2026-10-25 / User and Codex: Resolve dependency alerts before resuming deployment. Prefer maintained parent upgrades and compatible transitive updates, using narrowly scoped overrides only with compatibility evidence. Preserve application behavior and keep the existing node release immutable.
 - 2026-10-25 / Codex: Use Zod 4.6.6 and runtime compatibility tests for its consumers. Discard the Coinbase patch prototype after checking the installed Zod implementation and testing the unmodified SDK. A clean install must pass with install scripts disabled.
 - 2026-10-25 / Codex: Keep the existing WalletConnect SDK versions and apply a tested parser override, avoiding the newer WalletConnect license as part of a security maintenance change. Update all older ABIType 1.x copies to 1.2.3 for declared Zod 4 support. CI installs with scripts disabled, then runs compatibility tests, the frontend build, and an audit.
+- 2026-10-25 / Codex: Compare Compose major and minor versions against the minimum instead of restricting the Docker fixture to major version 2. Put the predicate in `node/production/scripts/docker-prerequisites.mjs`, cover it with the existing production-node unit suite, and make verbose fixture output identify the Compose prerequisite and installed version.
 
 ## Outcomes & Retrospective
 
@@ -37,6 +42,8 @@ The repository changes address all 29 open Dependabot alerts, plus the additiona
 The new frontend CI job repeats the clean installation, compatibility tests, build, and audit. GitHub's alert status will update after these changes reach the default branch and the dependency graph refreshes; no alerts were dismissed. Review, commit, and merge this work before resuming deployment. Node runtime dependencies and existing release images are unchanged, so this cleanup alone does not require a new node image.
 
 Validation used offline fixtures and blocked external browser requests; it did not perform authenticated wallet sessions or real-chain transactions. Vite still reports large wallet bundles and a browser externalization warning for an unused Node worker import in a transitive SDK. The production build and browser smoke check pass. Generated frontend output was removed from the working tree.
+
+The dependency commit's frontend and other non-lifecycle CI jobs passed. The subsequent Docker failure exposed a pre-existing major-version restriction in the test harness after the hosted runner moved to Compose 5.1.3. That restriction is now replaced by a minimum-version check, with regression coverage and clearer prerequisite output. All 164 production-node tests and the failing lifecycle fixture pass locally. Container validation used Compose 5.1.3, Docker Desktop's Linux daemon, and Linux amd64 containers; it does not substitute for rerunning the complete hosted Docker job after pushing this follow-up fix.
 
 ## Context and Orientation
 
@@ -75,6 +82,15 @@ The final validation sequence, matching CI, is:
 Expect all 11 tests to pass, a successful production build, and zero audit vulnerabilities. The tests exercise unmodified CommonJS and ESM Coinbase schemas, its ABI validators, Reown wallet event schemas, both WalletConnect utility versions, and RainbowKit's default wallet factories without credentials or live transactions. `npm --prefix frontend ls abitype zod @coinbase/cdp-sdk query-string decode-uri-component --all` must finish successfully with the documented overrides and no invalid dependencies.
 
 For a manual browser smoke check, run `npm --prefix frontend run preview -- --host 127.0.0.1`, open its printed local URL in an isolated browser profile, and confirm that the deployment page and Connect Wallet picker display. The completed automated smoke check performed the same actions against the production output in headless Chrome with external requests blocked. Actual wallet authorization and transaction submission are separate operator checks.
+
+For the Compose CI follow-up, run these commands from the repository root with Docker running and Compose 5.1.3 selected:
+
+    docker compose version --short
+    node --test node/production/test/docker-prerequisites.test.mjs
+    npm --prefix node/production test
+    npm --prefix node/production run test:docker -- --verbose --platform linux/amd64
+
+The three version tests, all 164 runtime tests, and the lifecycle fixture passed. The isolated validation used the official macOS Compose 5.1.3 release binary after checking its SHA-256 against Docker's release metadata; the installed Docker tools and settings were unchanged. No image was published or external node deployed.
 
 ## Validation and Acceptance
 
