@@ -4,19 +4,13 @@ Maintainers use `scripts/publish-image.sh` to publish a Linux amd64 image to Git
 
 ## Published deployment release
 
-The deployment guides use [node-v0.3.0](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.0), built from commit `07acda6b247b34f5061275904d209ad071b80029`. Its public Linux amd64 image is `ghcr.io/oyaprotocol/oya-node:v0.3.0`; deployments use the immutable reference recorded in the release's `image.txt`:
+The deployment guides target [node-v0.3.1](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.1). Its Linux amd64 image is `ghcr.io/oyaprotocol/oya-node:v0.3.1`; deployments use the immutable digest recorded in the release's `image.txt` and the bundle's `node/production/image.txt`.
 
-```text
-ghcr.io/oyaprotocol/oya-node@sha256:848806de43f0afa056d1dea533320bfc1b503cb4409a96abb3101d7cedbb69de
-```
+Download `oya-node-v0.3.1.tar.gz` from that release. Before extraction, compute its SHA-256 with `sha256sum` on Linux or `shasum -a 256` on macOS and compare it with the **archive SHA-256 in the release notes**. The checksum is recorded after packaging, so it is not embedded in the archive itself. `release.txt` records the Git tag, full source commit, and pinned image reference. Keep these public records with the archive.
 
-The matching `oya-node-v0.3.0.tar.gz` has SHA-256:
+The bundle includes the current [local-worker](run-locally.md), [inbox-host](host-inbox.md), and [agent-assisted](deploy-with-agent.md) guides, plus the Keychain worker startup helper and its Compose overlay. Both IPFS-only and full Ledger modes are supported. The v0.3.1 release updates operator assets; it requires no database migration or change to existing signing identities. Existing v0.3.0 installations can keep their recorded runtime digest and adopt the host helper separately.
 
-```text
-8c8cd6f5ecf4c9de1b0704b8f81a7be05d574a68af8ce6eef45a17e2f8c4ae73
-```
-
-Check the downloaded archive with `sha256sum` on Linux or `shasum -a 256` on macOS and compare it with this value before extraction. The release also includes `release.txt` recording the tag, commit, and image reference. Follow the current [local-worker](run-locally.md) and [inbox-host](host-inbox.md) guides with these released Compose assets. Documentation embedded in the immutable v0.3.0 archive still describes a source build; the current guides supply the published-image instructions. Both IPFS-only and full Ledger modes are included.
+Older [node-v0.3.0 assets](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.0) remain available with their original image pin and checksum. That archive predates the Keychain helper and its embedded guides describe the earlier source-build workflow. Do not overwrite an existing bundle or replace its `image.txt` with another version's pin.
 
 ## Version control and release preparation
 
@@ -50,7 +44,7 @@ Use a new output directory outside the checkout; its parent must exist. The regi
 
 - `image.txt`: the exact `ghcr.io/OWNER/IMAGE@sha256:...` reference returned by this build.
 - `release.txt`: the Git tag, full commit ID, and pinned image reference.
-- `oya-node-v0.1.0.tar.gz`: matching Compose/Caddy files, inbox/worker configuration examples, local hosting and PostgreSQL guides, API and release documentation, compatibility guides/helpers for older direct nodes, and `node/production/image.txt`. It contains no operator settings, signing keys, database passwords, source checkout, or build tools.
+- `oya-node-v0.1.0.tar.gz`: matching Compose/Caddy files, inbox/worker configuration examples, local hosting, PostgreSQL, and agent-assisted guides, the Keychain worker helper and overlay, API and release documentation, compatibility guides/helpers for older direct nodes, and `node/production/image.txt`. It contains no operator settings, signing keys, database passwords, source checkout, or build tools.
 
 The bundle also carries the `testing` Compose overlay and `agent-library/agents/hourly-message-test/agent.mjs` from the same Git tag. The test agent uses the node image's existing Node.js/ethers installation with its source mounted read-only. Generated agent keys are private operator state and never belong in a release. Validate this optional service with `npm --prefix node/production run test:testing -- --platform linux/amd64` before release.
 
@@ -60,7 +54,7 @@ The digest comes from [Buildx build metadata](https://docs.docker.com/reference/
 
 On the first publication, change the GHCR package visibility to **public** in its package settings; a public source repository does not automatically make a newly published package public. Verify that a host without GHCR credentials can pull the exact reference from `image.txt`. GitHub documents [package visibility settings](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility). An authenticated maintainer pull alone does not test anonymous access.
 
-Create a GitHub Release attached to the same Git tag, attach all three assets, and include the contents of `release.txt` plus changes, checks performed, and any upgrade instructions in the release notes. Inspect the assets before uploading. The generated archive and digest records are release assets, not additional source commits; the digest is only known after building the tagged commit. No registry credentials, `node.json`, or `node.env` belong in Git or these assets.
+Create a GitHub Release attached to the same Git tag, attach all three assets, and include the contents of `release.txt` plus the archive SHA-256, changes, checks performed, and any upgrade instructions in the release notes. Compute the archive checksum with `shasum -a 256` on macOS or `sha256sum` on Linux after packaging. Inspect the assets before uploading. The generated archive and digest records are release assets, not additional source commits; the digest is only known after building the tagged commit. No registry credentials, `node.json`, or `node.env` belong in Git or these assets.
 
 If publishing fails, inspect the output directory and registry before another attempt: a push can succeed before bundle creation fails. The script refuses an existing output directory and does not undo a public push. Keep completed assets; do not delete an image used by existing deployments. This script does not create Git tags, push Git changes, change package visibility, or create GitHub Releases for you.
 
