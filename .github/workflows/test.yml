@@ -11,6 +11,35 @@ env:
   FOUNDRY_PROFILE: ci
 
 jobs:
+  frontend:
+    name: Frontend dependency compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci --ignore-scripts
+
+      - name: Test wallet dependency compatibility
+        run: npm --prefix frontend test
+
+      - name: Build frontend
+        run: npm --prefix frontend run build
+
+      - name: Audit frontend dependencies
+        run: npm --prefix frontend audit --package-lock-only
+
   check:
     name: Foundry project
     runs-on: ubuntu-latest
