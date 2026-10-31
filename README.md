@@ -80,6 +80,18 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) and the applicable [AGENTS.md](AGENTS.md
 
 Maintainers publish node images and matching bundles through the [node release guide](node/production/release-image.md). Installing or operating a released node does not require publishing anything. Kernel library releases have a separate [package workflow](packages/README.md#validate-a-release).
 
+## Contributors
+
+Thanks to the people and automation helping Oya Commitments grow:
+
+- **[John Shutt (@pemulis)](https://github.com/pemulis)** is an Oya Protocol co-founder and contributor across this repository's commitments, agents, and node infrastructure.
+- **[Vanessa Conyers (@nesseps)](https://github.com/nesseps)** is an Oya Protocol co-founder and product visionary helping shape the protocol's direction.
+- **[drk (@dkuthoore)](https://github.com/dkuthoore)** contributes limit-order agents, commitment rules, and their testing and simulation tools.
+- **[Dependabot](https://github.com/apps/dependabot)** is GitHub's dependency-update bot, contributing automated dependency maintenance pull requests.
+- **[Oya Gardener (@oyagardener)](https://github.com/oyagardener)** is a software gardener growing, testing, and documenting software for Oya Commitments and the wider Oya ecosystem.
+
+See the [contributor history](https://github.com/oyaprotocol/oya-commitments/graphs/contributors) for commit-based credits; contributions beyond commits are welcome too, and this list can grow with the project.
+
 ## Project status
 
 This is beta software provided “as is.” Use at your own risk. No guarantees of safety, correctness, or fitness for any purpose. Keep credentials and private installation records out of Git; follow the selected guide's secure credential setup.
