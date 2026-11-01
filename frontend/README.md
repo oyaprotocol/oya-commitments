@@ -9,7 +9,13 @@ This is beta software provided “as is.” Use at your own risk. No guarantees 
 ## Prerequisites
 
 - Node.js 24 (also used in CI)
-- npm (or pnpm/yarn)
+- npm (the supported package manager for this frontend)
+
+Use `npm ci` with the committed `package-lock.json`. The security overrides in
+`package.json` and dependency validation below are maintained for npm; pnpm and
+Yarn installs are not supported. In particular, pnpm 10 ignores npm's top-level
+`overrides`, which can reintroduce vulnerable transitive dependencies even while
+the npm lockfile regression test passes.
 
 ## Install & Run
 
