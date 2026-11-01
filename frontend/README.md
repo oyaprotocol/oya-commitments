@@ -9,7 +9,13 @@ This is beta software provided “as is.” Use at your own risk. No guarantees 
 ## Prerequisites
 
 - Node.js 24 (also used in CI)
-- npm (or pnpm/yarn)
+- npm (the supported package manager for this frontend)
+
+Use `npm ci` with the committed `package-lock.json`. The security overrides in
+`package.json` and dependency validation below are maintained for npm; pnpm and
+Yarn installs are not supported. In particular, pnpm 10 ignores npm's top-level
+`overrides`, which can reintroduce vulnerable transitive dependencies even while
+the npm lockfile regression test passes.
 
 ## Install & Run
 
@@ -53,6 +59,7 @@ The security overrides in `package.json` have specific purposes:
 - WalletConnect's `query-string` override uses 9.5.1 and its patched URI decoder while retaining the existing WalletConnect SDK. The parser is now ESM; Node.js 24 supports its use from the SDK's CommonJS entry point.
 - Zod 4.6.6 fixes oversized collection validation and supports the legacy record-schema API used by Coinbase. ABIType 1.2.3 supports Zod 4. Tests exercise Coinbase's ESM and CommonJS policy validators with these overrides.
 - The existing UUID and WebSocket overrides keep older transitive copies on patched releases.
+- RainbowKit's `@vanilla-extract/css` override uses 1.21.3, whose upstream release replaces vulnerable `deepmerge` with `deepmerge-ts` (GHSA-gcqx-w48m-w2h4). This removes the affected package rather than downgrading RainbowKit or suppressing the audit. Remove the override once RainbowKit requests a release that no longer depends on `deepmerge`, then repeat these checks.
 
 The lockfile also updates Coinbase CDP SDK to 1.60.0, removing the old Solana dependency chain containing `stream-json`. Keep the Zod and ABIType overrides until all consumers request compatible patched versions. Remove the URI-parser override when the supported wallet SDK no longer brings in a vulnerable decoder, then repeat these checks.
 
