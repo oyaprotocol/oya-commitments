@@ -26,6 +26,8 @@ The timestamp above is illustrative; use a future Unix timestamp in milliseconds
 ])
 ```
 
+Message text must be nonempty ASCII and at most 8,192 bytes under the default inbox limit. The bundled client's `prepare` command rejects unsupported text before writing a signed job file; it preserves whitespace and trailing newlines in accepted text.
+
 Use `signJob` in `src/inbox/protocol.mjs` or the bundled client to avoid encoding differences. The server rejects extra envelope/message fields. The stored payload fingerprint is independent of object key order. Exact re-submission under the same target/ID returns the existing job. Different contents under that ID return 409. An expired submission returns 400; use status to inspect an already accepted expired envelope. Anyone possessing the complete signed file can replay/read that same request until access is revoked; keep it private before intended publication.
 
 Public results contain request ID, state, attempts, timestamps, and available CID/transaction hash/result/error. They exclude leases, tokens, raw transaction bytes, and message content. States are `queued`, `processing`, `published`, `logged`, `failed`, and `expired`. `processing` may include `execution_retry` or `awaiting_reconciliation`. The attempt counter counts claims, including crash recovery.

@@ -20,6 +20,7 @@ export async function main(args = process.argv.slice(2)) {
         const [keyFile, target, textFile, jobFile] = rest;
         const wallet = new Wallet((await readFile(keyFile, 'utf8')).trim());
         const text = await readFile(textFile, 'utf8');
+        if (!text.length || !/^[\x00-\x7f]+$/.test(text)) throw new Error('Message must be nonempty ASCII text.');
         if (Buffer.byteLength(text) > 8192) throw new Error('Message too large.');
         const job = await signJob(wallet, target, text);
         await saveNew(jobFile, JSON.stringify(job, null, 2) + '\n');
