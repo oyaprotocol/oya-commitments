@@ -623,7 +623,9 @@ Put ASCII text in a file and store `OYA_AGENT_PRIVATE_KEY` in a separate private
 node --env-file=/absolute/path/to/agent.env -- node/production/scripts/send-message.mjs http://127.0.0.1:8787 /absolute/path/to/message.txt
 ```
 
-The script signs the complete file, including any final newline, and accepts successful results from either mode. A successful Ledger response looks like:
+The script signs the complete file, including any final newline, and accepts successful results from either mode. Its HTTP deadline is 210000 milliseconds, covering connection and response-body reading. Override it with `OYA_MESSAGE_TIMEOUT_MS` (integer 1–2147483647); allow at least `operationTimeoutMs + 30000` for the selected node, especially when increasing the node's operation limit. A timeout exits 1 without retrying. Publication may still complete after the sender disconnects: inspect the node's result before resubmitting, since a repeated direct Ledger request can spend gas again.
+
+A successful Ledger response looks like:
 
 ```json
 {
