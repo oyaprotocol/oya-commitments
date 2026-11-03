@@ -36,6 +36,8 @@ Public results contain request ID, state, attempts, timestamps, and available CI
 
 All `/v1/worker/*` endpoints require `Authorization: Bearer TOKEN` and return HTTP 200 on success. Claim takes `{target, execution}` matching the target's persisted identity and returns `{work, leaseMs}`, where `work` is null when unavailable. A work object includes the signed envelope, request ID, random lease UUID, deadline, and `{cid, transaction}` checkpoint. The worker verifies signatures/allowlist again. Ledger transaction checkpoints contain `rawTransaction` and `transactionHash`; raw bytes are visible only to the authenticated worker/database, not public job status.
 
+Worker request bodies must be JSON objects (not null, arrays, or scalars); claim also requires an `execution` object. Invalid shapes return HTTP 400 `invalid_worker_request`, after worker authentication and before store access. Object-shaped execution identities that differ from the configured identity still return 409 `execution_identity_mismatch`; unexpected store failures remain 503 `inbox_unavailable`.
+
 Renew takes `{requestId, lease}`. Checkpoint takes `{requestId, lease, checkpoint}` where checkpoint contains only `cid` or only `transaction`. Completion takes `{requestId, lease, result}`. Retry takes `{requestId, lease}` and lets the database decide whether to retry, fail after ten pre-transaction attempts, or keep a transaction awaiting reconciliation. Stale/expired leases return 409. Worker tokens are privileged: a holder can read queued messages and report execution results. This is operator-controlled infrastructure, not proof of work by an untrusted executor.
 
 ## Transaction safety

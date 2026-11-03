@@ -47,6 +47,8 @@ export function createInboxServer({ config, workerToken, store, log = () => {} }
                 if (++requests > 240) reject(429, 'request_limit');
             }
             const body = await readBody(request);
+            const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+            if (worker && !isObject(body)) reject(400, 'invalid_worker_request');
             let result;
             switch (request.url) {
                 case '/v1/jobs':
@@ -59,6 +61,7 @@ export function createInboxServer({ config, workerToken, store, log = () => {} }
                     await validateJob(body, { ...config, checkExpiry: false });
                     result = await store.status(body); break;
                 case '/v1/worker/claim':
+                    if (!isObject(body.execution)) reject(400, 'invalid_worker_request');
                     if (body.target !== config.target) reject(409, 'target_mismatch');
                     result = { work: await store.claim(body.execution), leaseMs: config.leaseMs }; break;
                 case '/v1/worker/renew': result = await store.renew(body.requestId, body.lease); break;
