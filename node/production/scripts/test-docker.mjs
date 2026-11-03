@@ -250,7 +250,9 @@ test(testing ? 'Optional testing profile signs and logs an hourly agent message'
             const path = join(directory, `${randomUUID()}.txt`);
             await writeFile(path, text, { mode: 0o600 });
             const output = await command(process.execPath, ['--dns-result-order=ipv4first', 'scripts/send-message.mjs', publicUrl ?? nodeUrl, path], {
-                env: { ...baseEnv, OYA_AGENT_PRIVATE_KEY: wallet.privateKey, ...(http ? { NODE_EXTRA_CA_CERTS: certificatePath } : {}) },
+                env: { ...baseEnv, OYA_AGENT_PRIVATE_KEY: wallet.privateKey,
+                    OYA_MESSAGE_TIMEOUT_MS: String(config.operationTimeoutMs + 30_000),
+                    ...(http ? { NODE_EXTRA_CA_CERTS: certificatePath } : {}) },
                 timeout: config.operationTimeoutMs + 60_000, code,
             });
             return JSON.parse(output.toString());
