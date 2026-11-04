@@ -10,7 +10,11 @@ import { targetName, executionIdentity, validId } from './protocol.mjs';
 import { createInboxClient, json } from './http.mjs';
 import { processWork } from './processor.mjs';
 
+// Synchronous log callbacks must not change job state or interrupt cleanup.
+const safeLogger = log => record => { try { log(record); } catch {} };
+
 export async function runOne({ api, config, target, allowedSigners, signer, fetch, signal, log = () => {}, state = {} }) {
+    log = safeLogger(log);
     const claimed = await api('/v1/worker/claim', { target, execution: executionIdentity(config, signer?.address) }, signal);
     state.lastPollAt = new Date().toISOString();
     const work = claimed.work;
@@ -61,7 +65,8 @@ export async function runOne({ api, config, target, allowedSigners, signer, fetc
 }
 
 export async function runWorker(options) {
-    const { signal, state = {}, log = () => {}, pollIntervalMs = 5000 } = options;
+    const { signal, state = {}, log: logger = () => {}, pollIntervalMs = 5000 } = options;
+    const log = safeLogger(logger);
     let lastIdleLog = 0;
     log({ event: 'worker_started', target: options.target, mode: options.config.mode });
     while (!signal?.aborted) {
