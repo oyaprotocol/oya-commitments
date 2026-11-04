@@ -24,6 +24,8 @@ test('status validates health state, HTTP status, and all identity fields', asyn
         ['inconsistent busy flag', 200, { ...ready, busy: true }, 1, 'FAIL Malformed'],
         ['missing identity', 200, { status: 'ready', busy: false }, 1, 'FAIL Malformed'],
         ['null body', 200, null, 1, 'FAIL Malformed'],
+        ['non-string Ledger', 200, { ...ready, ledgerContract: { toString: null } }, 1, 'FAIL Malformed'],
+        ['non-string node', 200, { ...ready, nodeAddress: { toString: null } }, 1, 'FAIL Malformed'],
         ['unknown state', 200, { ...ready, status: 'provider-secret-marker' }, 1, 'FAIL Malformed'],
     ];
     for (const [name, status, body, code, message] of cases) {
