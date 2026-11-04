@@ -89,13 +89,12 @@ export function createInboxClient(url, workerToken, transport = globalThis.fetch
             body: JSON.stringify(body), signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000) });
         let size = 0;
         const chunks = [];
-        for await (const chunk of response.body) {
+        for await (const chunk of response.body ?? []) {
             size += chunk.length;
             if (size > 131072) throw new Error('Inbox response exceeds limit.');
             chunks.push(chunk);
         }
-        const result = JSON.parse(Buffer.concat(chunks).toString('utf8'));
         if (!response.ok) throw new InboxError(response.status, 'inbox_request_failed');
-        return result;
+        return JSON.parse(Buffer.concat(chunks).toString('utf8'));
     };
 }

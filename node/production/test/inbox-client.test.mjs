@@ -6,9 +6,49 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { Wallet } from 'ethers';
-import { validateJob } from '../src/inbox/protocol.mjs';
+import { InboxError, validateJob } from '../src/inbox/protocol.mjs';
+import { createInboxClient } from '../src/inbox/http.mjs';
 
 const client = fileURLToPath(new URL('../src/inbox/client.mjs', import.meta.url));
+
+for (const [status, body] of [
+    [401, '{"error":"private upstream detail"}'], [502, '<html>private upstream detail</html>'],
+    [503, ''], [304, null],
+]) {
+    test(`inbox client preserves HTTP ${status} without exposing the response body`, async () => {
+        const api = createInboxClient('https://inbox.invalid', undefined, async () => new Response(body, { status }));
+        await assert.rejects(api('/v1/status', {}), error => {
+            assert.ok(error instanceof InboxError);
+            assert.equal(error.status, status);
+            assert.equal(error.code, 'inbox_request_failed');
+            assert.equal(error.message, 'inbox_request_failed');
+            return true;
+        });
+    });
+}
+
+test('inbox client retains successful JSON parsing and response limits', async () => {
+    const api = (body, status = 200) => createInboxClient('https://inbox.invalid', undefined,
+        async () => new Response(body, { status }))('/v1/status', {});
+    assert.deepEqual(await api('{"status":"queued"}'), { status: 'queued' });
+    await assert.rejects(api('<html>not JSON</html>'), SyntaxError);
+    await assert.rejects(api(null, 204), SyntaxError);
+    assert.equal((await api('"' + 'x'.repeat(131070) + '"')).length, 131070);
+    for (const status of [200, 503]) {
+        await assert.rejects(api('x'.repeat(131073), status), { message: 'Inbox response exceeds limit.' });
+    }
+});
+
+test('inbox client retains transport and incomplete-body failures', async () => {
+    const failure = new Error('fixture connection failure');
+    const transport = createInboxClient('https://inbox.invalid', undefined, async () => { throw failure; });
+    await assert.rejects(transport('/v1/status', {}), error => error === failure);
+    const streaming = createInboxClient('https://inbox.invalid', undefined, async () => ({
+        ok: false, status: 503,
+        body: (async function* () { yield Buffer.from('partial'); throw failure; })(),
+    }));
+    await assert.rejects(streaming('/v1/status', {}), error => error === failure);
+});
 
 test('inbox prepare rejects unsupported text before creating a signed job', async t => {
     const directory = await mkdtemp(join(tmpdir(), 'oya-inbox-client-'));
