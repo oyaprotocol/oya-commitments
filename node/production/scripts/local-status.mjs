@@ -35,9 +35,9 @@ export async function statusLocalNode({ config, nodeAddress }, {
         return running ? 0 : 1;
     }
     if (!Number.isSafeInteger(health.chainId) || health.chainId < 1
-        || !/^0x[0-9a-fA-F]{40}$/.test(health.ledgerContract ?? '')
-        || !/^0x[0-9a-fA-F]{40}$/.test(health.nodeAddress ?? '')
-        || typeof health.ledgerContract !== 'string' || typeof health.nodeAddress !== 'string') {
+        || typeof health.ledgerContract !== 'string' || typeof health.nodeAddress !== 'string'
+        || !/^0x[0-9a-fA-F]{40}$/.test(health.ledgerContract)
+        || !/^0x[0-9a-fA-F]{40}$/.test(health.nodeAddress)) {
         return fail('Malformed node health response. Check the service at the configured local port.');
     }
     if (health.chainId !== config.chainId || health.ledgerContract.toLowerCase() !== config.ledgerContract.toLowerCase()
