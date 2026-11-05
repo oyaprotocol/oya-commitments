@@ -30,7 +30,8 @@ export async function validateJob(job, { target, allowedSigners, maxTextBytes = 
             !Number.isSafeInteger(job.expiresAt) || job.expiresAt < 1 ||
             Object.keys(job).sort().join() !== 'expiresAt,message,requestId,requestSignature,target,version' ||
             Object.keys(job.message).sort().join() !== 'signature,signer,text' ||
-            typeof job.message.text !== 'string' || Buffer.byteLength(job.message.text) > maxTextBytes) throw new Error();
+            typeof job.message.text !== 'string' || job.message.text.includes('\0') ||
+            Buffer.byteLength(job.message.text) > maxTextBytes) throw new Error();
         const authorize = createSignedMessageAuthorizer(allowedSigners);
         if (!await authorize(job.message)) throw new Error();
         if (verifyMessage(jobText(job), job.requestSignature).toLowerCase() !== job.message.signer.toLowerCase()) throw new Error();
