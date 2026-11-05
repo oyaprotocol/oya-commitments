@@ -5,6 +5,29 @@ import { runOne, runWorker } from '../src/inbox/worker.mjs';
 import { signJob } from '../src/inbox/protocol.mjs';
 import { fixture, cid } from './runtime-fixture.mjs';
 
+for (const claimed of [null, false, 0, '', [], {}, { error: 'unexpected' }, { work: false }, { work: 0 }, { work: '' }]) {
+    test(`malformed claim ${JSON.stringify(claimed)} reports unavailable, not idle, and recovers`, async () => {
+        const controller = new AbortController();
+        const state = {};
+        const records = [];
+        let polls = 0;
+        await runWorker({ config: { mode: 'ipfs' }, target: 'test', state, signal: controller.signal, pollIntervalMs: 1,
+            api: async path => {
+                assert.equal(path, '/v1/worker/claim');
+                if (++polls === 1) return claimed;
+                controller.abort();
+                return { work: null, leaseMs: 3000 };
+            },
+            log: record => records.push([record.event, state.status]),
+        });
+        assert.equal(polls, 2);
+        assert.deepEqual(records, [
+            ['worker_started', undefined], ['inbox_unavailable', 'inbox_unavailable'],
+            ['worker_idle', 'idle'], ['worker_stopped', 'stopped'],
+        ]);
+    });
+}
+
 for (const event of ['job_claimed', 'ipfs_published', 'job_result', 'job_retry']) {
     test(`throwing ${event} logger cannot change job processing or leak renewal timers`, async t => {
         const f = await fixture(t);
