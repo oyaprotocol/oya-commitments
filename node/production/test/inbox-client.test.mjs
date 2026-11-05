@@ -39,6 +39,25 @@ test('inbox client retains successful JSON parsing and response limits', async (
     }
 });
 
+test('inbox client rejects malformed UTF-8 without rewriting successful responses', async () => {
+    const api = (bytes, status = 200) => createInboxClient('https://inbox.invalid', undefined,
+        async () => new Response(bytes, { status }))('/v1/status', {});
+    for (const invalid of [[0xff], [0xc0, 0xaf], [0xed, 0xa0, 0x80], [0xe2, 0x82]]) {
+        const bytes = Buffer.concat([Buffer.from('{"status":"published","cid":"'), Buffer.from(invalid), Buffer.from('"}')]);
+        await assert.rejects(api(bytes), TypeError);
+        await assert.rejects(api(bytes, 503), error => error instanceof InboxError && error.status === 503);
+    }
+    // Preserve JSON's existing rejection of a leading BOM rather than stripping it.
+    await assert.rejects(api(Buffer.from('\ufeff{"work":null}')), SyntaxError);
+    const expected = { value: 'café 😀 \ufffd' };
+    const bytes = Buffer.from(JSON.stringify(expected));
+    const streaming = createInboxClient('https://inbox.invalid', undefined, async () => ({
+        ok: true,
+        body: (async function* () { for (const byte of bytes) yield Uint8Array.of(byte); })(),
+    }));
+    assert.deepEqual(await streaming('/v1/status', {}), expected);
+});
+
 test('inbox client retains transport and incomplete-body failures', async () => {
     const failure = new Error('fixture connection failure');
     const transport = createInboxClient('https://inbox.invalid', undefined, async () => { throw failure; });
