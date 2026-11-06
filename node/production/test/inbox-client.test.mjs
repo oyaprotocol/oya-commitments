@@ -79,6 +79,7 @@ test('inbox prepare rejects unsupported text before creating a signed job', asyn
     await writeFile(key, wallet.privateKey + '\n', { mode: 0o600 });
     for (const [name, text] of [
         ['empty', ''], ['non-ASCII', 'café'], ['invalid UTF-8', Buffer.from([0xff])],
+        ['NUL', 'before\0after'],
         ['oversized', 'a'.repeat(8193)],
     ]) {
         await t.test(name, async () => {
