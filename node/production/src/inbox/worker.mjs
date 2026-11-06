@@ -17,9 +17,9 @@ export async function runOne({ api, config, target, allowedSigners, signer, fetc
     log = safeLogger(log);
     const claimed = await api('/v1/worker/claim', { target, execution: executionIdentity(config, signer?.address) }, signal);
     state.lastPollAt = new Date().toISOString();
-    const work = claimed.work;
-    if (!work) { state.status = 'idle'; return false; }
-    if (!validId(work.requestId) || work.requestId !== work.job?.requestId || !validId(work.lease) ||
+    const work = claimed?.work;
+    if (work === null) { state.status = 'idle'; return false; }
+    if (!work || !validId(work.requestId) || work.requestId !== work.job?.requestId || !validId(work.lease) ||
         !Number.isSafeInteger(claimed.leaseMs) || claimed.leaseMs < 3000 || claimed.leaseMs > 300000) throw new Error('Invalid claim.');
     const operation = new AbortController();
     const operationSignal = AbortSignal.any([operation.signal, AbortSignal.timeout(config.operationTimeoutMs), ...(signal ? [signal] : [])]);
