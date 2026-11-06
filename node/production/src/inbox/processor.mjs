@@ -45,6 +45,12 @@ export async function processWork({ work, config, target, allowedSigners, signer
         ({ receipt } = await ethWaitForTransactionReceipt({ ...receiptOptions,
             timeoutMs: config.receiptTimeoutMs, pollIntervalMs: config.pollIntervalMs }));
     }
+    // Even a reverted receipt must describe this direct node-to-Ledger call.
+    // An inconsistent RPC response cannot justify completing a durable job.
+    if (receipt.from.toLowerCase() !== identity.nodeAddress ||
+        receipt.to?.toLowerCase() !== identity.ledgerContract || receipt.contractAddress !== null) {
+        throw new Error('Ledger receipt identity mismatch.');
+    }
     if (receipt.status === 'reverted') return { status: 'failed', cid, transactionHash: transaction.transactionHash, error: 'transaction_reverted' };
     if (receipt.status !== 'success' || !receipt.logs.map(entry => decodeLedgerEvent(entry, config.ledgerContract)).some(event =>
         event && !event.removed && event.cid === cid && event.node.toLowerCase() === signer.address.toLowerCase())) {
