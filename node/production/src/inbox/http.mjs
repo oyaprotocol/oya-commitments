@@ -95,6 +95,6 @@ export function createInboxClient(url, workerToken, transport = globalThis.fetch
             chunks.push(chunk);
         }
         if (!response.ok) throw new InboxError(response.status, 'inbox_request_failed');
-        return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        return JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(Buffer.concat(chunks)));
     };
 }
