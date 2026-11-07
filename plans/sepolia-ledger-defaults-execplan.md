@@ -16,7 +16,7 @@ A newly configured production node should verify authorized signed messages, pub
 - [x] 2026-11-07: Rebuilt packaged inbox/worker integration passed across IPFS, explicit Anvil Ledger and default Sepolia identity using real HTTPS, PostgreSQL and Kubo with isolated local chains.
 - [x] 2026-11-07 00:55Z: Completed independent review; fixed its omitted-chain hourly-initializer finding with a failing-before/passing-after deployment regression. Final production suite: 272 passed.
 - [x] 2026-11-07 00:55Z: Both optional-hourly Ledger and IPFS-only Docker fixtures passed, including hourly-agent unit tests inside the runtime image.
-- [ ] Publish the branch and PR, and inspect its remote contents and checks.
+- [x] 2026-11-07 00:57Z: Published upstream PR #139 from `oyagardener:feature/sepolia-ledger-defaults` to `oyaprotocol:main`; verified the open, non-draft PR, description and exact remote Git blob hashes for all 31 changed files. GitHub CI started; its pending results are not claimed as passed.
 
 ## Surprises & Discoveries
 
@@ -40,7 +40,7 @@ Independent review found the standalone hourly test initializer still rejected a
 
 ## Outcomes & Retrospective
 
-Implementation and documentation are complete. Configuration, ordering/failure-path, PostgreSQL recovery, contract and packaged Docker integration tests all pass. Independent review is complete and its compatibility finding is resolved. All 272 production tests pass; the optional hourly agent was additionally verified in both Ledger and IPFS Docker profiles. PR publication and remote readback are the remaining handoff actions. The existing message pipeline required no behavior changes; the deliverable is consistent defaults, fail-closed overrides and operator documentation, not a new chain deployment.
+Implementation and documentation are complete. Configuration, ordering/failure-path, PostgreSQL recovery, contract and packaged Docker integration tests all pass. Independent review is complete and its compatibility finding is resolved. All 272 production tests pass; the optional hourly agent was additionally verified in both Ledger and IPFS Docker profiles. The completed change is published as [PR #139](https://github.com/oyaprotocol/oya-commitments/pull/139), with remote source hashes verified. GitHub CI and maintainer review remain external gates; this change has not been merged, released or deployed. The existing message pipeline required no behavior changes; the deliverable is consistent defaults, fail-closed overrides and operator documentation, not a new chain deployment.
 
 ## Context and Orientation
 
