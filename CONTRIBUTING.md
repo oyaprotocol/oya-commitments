@@ -45,6 +45,10 @@ What changed and why.
 Tests run.
 Any config or environment variable impacts.
 
+## Comments and Documentation
+
+Write concise comments and documentation about behavior, intent, and required actions. Omit wordy non-goals, lists of what is not happening or not verified, and reassurance about unrelated unchanged behavior. Keep security warnings, compatibility constraints, and validation limits when they guide a decision or prevent a misleading claim.
+
 ## Node Deployment Workflows
 
 For node deployment changes, keep `node/production/deploy-with-agent.md`, the local/inbox role guides, and `skills/deploy-node/SKILL.md` aligned. Include new operator assets in release packaging and run its focused tests. `npm --prefix node/production test` also requires Python 3 for the Keychain lifecycle tests; those tests mock macOS/Docker access and run on Linux or macOS. Keep real installation identities and credentials in private records outside the checkout.

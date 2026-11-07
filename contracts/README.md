@@ -6,6 +6,8 @@ Contract source, tests, and deployment tooling belong here. The offchain librari
 
 ## Ledger
 
+For normal node setup, use the existing **Ethereum Sepolia (`11155111`) Ledger at `0xe6DeB4B3c31E15DBeA0f932830e2f20Ba2EddAa3`**. The [canonical deployed-Sepolia reference](../node/production/README.md#deployed-sepolia-ledger) records the explorer link, source/runtime verification evidence, default RPC, configuration, and release compatibility.
+
 [`src/Ledger.sol`](src/Ledger.sol) exposes:
 
 ```solidity
@@ -26,7 +28,7 @@ The event has three topics: `keccak256("Log(address,bytes32,string)")`, the padd
 
 The chain's canonical block and log positions establish recording order; consumers choose a confirmation policy and handle reorganizations. Ledger keeps no onchain storage history or sequence counter.
 
-Node integration will compose the existing `publishSignedMessage(...)` IPFS publisher with transaction submission and receipt handling from `@oyaprotocol/ethereum`. Hosts supply deployment addresses and transaction signing.
+The production node composes signed-message IPFS publication with transaction submission and receipt handling from `@oyaprotocol/ethereum`. It verifies client signatures and authorization before publication. Its default Ledger target is the deployed Sepolia address above; operators supply the dedicated node signer and may explicitly configure other verified chain/contract/RPC targets. Explicit IPFS-only mode skips transactions.
 
 ## Build and Test
 
@@ -62,6 +64,8 @@ Tests run in Forge's local EVM without an RPC endpoint or private key. The first
 See [AGENTS.md](AGENTS.md) for local agent instructions and [CONTRIBUTING.md](../CONTRIBUTING.md) for the shared contributor workflow.
 
 ## Deploy Ledger
+
+For a new Ledger deployment, follow this advanced workflow. Obtain explicit deployment authorization and keep deployer, node, and client keys separate. See the [Sepolia deployment walkthrough](../node/production/README.md#deploy-ledger-on-sepolia) when a new deployment is actually required.
 
 [`script/DeployLedger.s.sol`](script/DeployLedger.s.sol) deploys Ledger and requires an explicit expected chain ID. Load `LEDGER_DEPLOYER_PK` securely into the environment, set `LEDGER_CHAIN_ID` to the target network ID, and set `LEDGER_RPC_URL` to its RPC endpoint. The deployer needs native currency for deployment gas. From the repository root, simulate first:
 

@@ -14,9 +14,9 @@ const configInput = {
     allowedSigners: [agent.address], rpcUrl: 'http://127.0.0.1:8545', ipfsUrl: 'http://127.0.0.1:5001',
 };
 
-test('config fails closed on missing allowlist, chain, and invalid endpoints', () => {
+test('config fails closed on missing allowlist, invalid chain, and invalid endpoints', () => {
     for (const change of [
-        { allowedSigners: [] }, { allowedSigners: undefined }, { chainId: undefined }, { chainId: 1.5 },
+        { allowedSigners: [] }, { allowedSigners: undefined }, { chainId: null }, { chainId: 1.5 },
         { ledgerContract: '0x' }, { rpcUrl: 'file:///tmp/rpc' }, { port: 65536 },
         { stateDir: './state' }, { operationTimeoutMs: 0 }, { operationTimeoutMs: 2_147_483_648 },
         { maxFeePerGasWei: '-1' }, { typo: true },
@@ -25,6 +25,16 @@ test('config fails closed on missing allowlist, chain, and invalid endpoints', (
     assert.equal(Object.hasOwn(config, 'stateDir'), false);
     assert.equal(config.operationTimeoutMs, 180_000);
     assert.equal(config.host, '127.0.0.1');
+});
+
+test('implicit public RPC never receives a configured authorization secret', () => {
+    const input = { allowedSigners: [agent.address], ipfsUrl: 'http://127.0.0.1:5001' };
+    const env = { OYA_RPC_AUTHORIZATION: 'Bearer test-provider-credential' };
+    assert.throws(() => parseConfig(input, { env }), { message: 'rpcUrl must be explicit when RPC authorization is configured.' });
+    const config = parseConfig({ ...input, rpcUrl: 'https://rpc.example.com' }, { env });
+    assert.equal(new URL(config.rpc.url).href, 'https://rpc.example.com/');
+    assert.equal(config.rpc.headers.authorization, env.OYA_RPC_AUTHORIZATION);
+    assert.equal(parseConfig({ ...input, mode: 'ipfs' }, { env }).rpc, undefined);
 });
 
 test('signer preserves EIP-1559 fields and does not disclose invalid secret values', async () => {

@@ -7,6 +7,7 @@
 src/**
 !src/bytecode.mjs
 !src/config.mjs
+!src/defaults.mjs
 !src/main.mjs
 !src/server.mjs
 !src/secrets.mjs

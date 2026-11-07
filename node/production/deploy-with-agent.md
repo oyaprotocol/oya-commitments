@@ -1,38 +1,50 @@
 # Deploy a local Oya node with an agent
 
-Start here to have a coding agent set up your first Oya node. The recommended mode is **IPFS-only**: Oya and Kubo (the IPFS service) run on your device, while an HTTPS inbox and PostgreSQL store incoming work on a host you choose. The worker polls the inbox; no tunnel or inbound message port is needed on your device. A sender must sign messages with an address approved by both the inbox and worker.
+Start here to have a coding agent set up your first Oya node. The default is **Sepolia Ledger mode**: Oya and Kubo (the IPFS service) run on your device, while an HTTPS inbox and PostgreSQL store incoming work on a host you choose. The worker polls the inbox, verifies authorized signatures, publishes to IPFS, then logs each CID to the [deployed Sepolia Ledger](README.md#deployed-sepolia-ledger). A sender must sign messages with an address approved by both the inbox and worker.
 
-This installs a publication node. It does not deploy a commitment's Safe/Optimistic Governor or start a commitment-serving agent. IPFS-only needs no blockchain account, gas, RPC service, or Foundry installation. For manual setup, use [Run locally](run-locally.md).
+The worker needs an approved RPC and a dedicated node signer funded with Sepolia ETH, separate from the message-signing client key. Explicit IPFS-only operation is also available. For manual setup, use [Run locally](run-locally.md).
 
 ## Quick start
 
 1. **Make Docker available on your local device.** The agent can check Docker, existing installations, and compatibility before changing anything. It needs permission to run local commands and administer the selected inbox host.
 2. **Choose hosting and a hostname, or give a budget and ask for options.** You can reuse a Linux server or authorize a new one. A free hostname or your own domain works. Account signup, billing verification, and MFA happen in your own trusted interfaces.
-3. **Open a current checkout of this repository in your coding agent and paste the task below.** Fill in what you know; mark missing inputs as undecided. The checkout supplies current instructions and helpers; the runtime uses a released Docker image.
+3. **Open a current checkout of this repository in your coding agent and paste the task below.** Fill in what you know; mark missing inputs as undecided. The checkout supplies current instructions and helpers; the published v0.3.1 runtime requires the Sepolia target fields to be set explicitly because it predates these defaults.
 4. **Provide access through secure credential references when needed.** Use [What you supply](#what-you-supply) and [Keychain and runtime secrets](#keychain-and-runtime-secrets-are-different). Share item names or protected file paths, never secret values in chat. The agent generates application credentials during setup.
-5. **Have the agent verify delivery and leave operating instructions.** Completion means an authorized message queues while the worker is stopped, publishes after it resumes, and can be retrieved by its content identifier (CID). The full [acceptance checks](#acceptance-before-handoff) also cover unauthorized senders, restarts, and backup restoration.
+5. **Have the agent verify delivery and leave operating instructions.** Within the authorized broadcast scope, completion means an authorized message queues while the worker is stopped, publishes after it resumes, logs its CID with a verified Ledger receipt, and can be retrieved by that CID. Explicit IPFS-only operation skips the Ledger check. The full [acceptance checks](#acceptance-before-handoff) also cover unauthorized senders, restarts, and backup restoration.
 
 ## Task to give your agent
 
 ```text
 Read the repository's skills/deploy-node/SKILL.md and deployment guides.
-Deploy an IPFS-only local Oya worker and a separately hosted PostgreSQL inbox.
+Deploy a Sepolia Ledger local Oya worker and a separately hosted PostgreSQL inbox.
+Use the existing deployed target documented in node/production/README.md:
+chainId 11155111, Ledger 0xe6DeB4B3c31E15DBeA0f932830e2f20Ba2EddAa3,
+RPC https://ethereum-sepolia-rpc.publicnode.com unless I approve another
+Sepolia endpoint. Do not deploy a new contract.
 Hosting: [existing SSH alias, or provider, region preference, and monthly budget;
 if undecided, propose options within my budget before creating resources].
-Provisioning authorization: [specific resources and spending limit, or plan only].
+Provisioning authorization: [resources and spending limit, or plan only].
+Sepolia broadcast authorization: [approved tests and gas budget, or no broadcast].
+Dedicated node signer: [secure local key reference, or permission to generate
+one; confirm its public address and Sepolia funding before publication].
 Inbox hostname: [registered hostname, or help me choose one].
 Credentials: [Keychain item references or protected file paths; if not ready,
 tell me which credentials and scopes I need and how to store them securely].
 Message senders: [approved public addresses, or generate a local sender key].
 Local worker credential: [Keychain on macOS, or protected runtime files].
-Inspect and preserve any existing installation. Use a matching released image
-and bundle. Verify HTTPS, unauthorized access rejection, offline queuing,
-publication, content retrieval, restart persistence, and backup restoration.
+Inspect and preserve any existing installation, keys, and saved target identity;
+do not convert an existing IPFS-only installation. Use a matching released image
+and bundle; configure the documented target explicitly with v0.3.1 assets,
+which predate the new defaults. Keep the node key local; configure only its
+real public address in the inbox and replace all client allowlist placeholders.
+Verify HTTPS, unauthorized access rejection, offline queuing, publication,
+the Ledger receipt/event, content retrieval, restart persistence, and backup
+restoration. If broadcast is not authorized, report that acceptance is incomplete.
 Leave private monitoring, restart, backup, recovery, and resource records.
 Continue within this scope; ask only for missing access or scope changes.
 ```
 
-The [repository skill](https://github.com/oyaprotocol/oya-commitments/blob/main/skills/deploy-node/SKILL.md) provides the agent workflow. Detailed configuration remains in [Run locally](run-locally.md) and [Host the inbox](host-inbox.md). This guide and the Keychain helper are included in the v0.3.1 deployment bundle. Use a current checkout for the repository skill, or follow the linked skill in the browser; the bundle supplies the runtime deployment assets.
+The [repository skill](https://github.com/oyaprotocol/oya-commitments/blob/main/skills/deploy-node/SKILL.md) provides the agent workflow. Detailed configuration remains in [Run locally](run-locally.md) and [Host the inbox](host-inbox.md). The v0.3.1 bundle includes the Keychain helper and an earlier version of this guide. Configure that runtime explicitly using current instructions, or use a matching release containing the changes once available. For explicit IPFS-only setup, replace the task's mode with `ipfs`, omit Ethereum settings in both roles, and skip node signer/funding/broadcast steps.
 
 After setup, use the private handoff record for commands to monitor, send messages, stop/start, and back up your installation. Docker must be running and the local device awake to process jobs. The inbox can accept work while it is offline, subject to queue limits and job deadlines; default client jobs expire after 24 hours. Keychain-backed workers require the startup helper after a reboot or failure and may prompt for approval. A local IPFS pin alone does not guarantee retrieval while the device sleeps.
 
@@ -40,15 +52,18 @@ The rest of this guide is reference material for the operator and agent: [inputs
 
 ## What you supply
 
-| Input | IPFS-only deployment |
+| Input | Default Sepolia Ledger deployment |
 | --- | --- |
 | Local device | Docker running, enough storage, permission to create private installation files |
 | Inbox hosting | Existing Linux host with SSH access, or explicit provider and spending authorization |
 | DNS | A registered hostname and permission to point it at the inbox host |
 | Access | Credential references, an existing SSH identity, or authenticated provider tooling |
 | Message senders | Existing public signer addresses, or permission to generate a local sender key |
+| Node signer | Separate dedicated local key reference or generation authorization, public address, and Sepolia ETH funding |
+| Ethereum access | Approve the [default Sepolia RPC and Ledger](README.md#deployed-sepolia-ledger), or supply another approved Sepolia RPC |
+| Broadcast scope | Explicit authorization for testnet transactions and the acceptance checks' gas expenditure |
 
-For full Ledger mode, also supply the chain ID, verified Ledger address, RPC access, and a dedicated funded node account. Keep the node key local. Deploying a contract or spending blockchain funds needs its own established scope. IPFS-only requires no funded account, RPC service, or Ledger deployment.
+Keep the node key local and put its public address into the matching inbox execution identity. Deploying a separate contract or spending blockchain funds needs its own established scope. For IPFS-only operation, configure a client signing key, allowlist, and Kubo.
 
 One inexpensive experimental example is a Linode Nanode with 1 GiB RAM, bundled PostgreSQL, and a free DuckDNS hostname. The provider's plan API and [pricing](https://www.akamai.com/cloud/pricing/cpu) listed a $5/month base price on 2026-10-25, before taxes and usage overages. Recheck price and capacity before purchase. Paid backups and managed databases are additional choices. Measure memory, swap, disk, and queue behavior on the actual host before treating this size as adequate for a workload. An existing server, another VM provider, FreeDNS, or your own domain can use the same deployment assets.
 
@@ -114,7 +129,7 @@ On other systems, use the operator's credential manager or protected files with 
 1. **Discover and record.** Read applicable repository instructions and maintain an ExecPlan for deployment across hosts. Inventory the selected Docker context, daemon architecture, relevant containers/volumes, ports, and installation directories. Read only necessary configuration fields; full environment and container dumps can expose secrets. Save private resource IDs, SSH identity, release, targets, paths, and completed steps so another session can resume.
 2. **Verify the release.** Download the same archive on both hosts, compare the published SHA-256 before extraction, and check the immutable image reference. Follow the [release guide](release-image.md). Use `tar -xzpf` under `umask 077` to retain readable public assets. Set the container UID/GID to match private-file ownership. The v0.3.1 Oya image requires Linux amd64; inspect the Docker daemon architecture and use the documented platform override on ARM. Kubo can use its native image.
 3. **Provision within scope.** Recheck provider price, region capacity, existing resource labels/IDs, and any paid add-ons before creation. After a timeout, query for an existing instance before retrying. Allow public TCP 80/443, restrict SSH to the operator's administration network, and leave PostgreSQL and health ports private. Verify the SSH host key through an authenticated provider channel; do not disable host-key verification. An authenticated cloud-init path can install a generated host key whose public half is pinned locally. Protect its private material and user data.
-4. **Configure both roles.** Follow the two role guides. Match the target, signer allowlist, and execution identity. Generate database credentials on the inbox host and transfer only the worker credential to the local device over authenticated SSH. The worker setting is `url`, containing the HTTPS origin. Use `databaseTls: false` only for the documented bundled private-network PostgreSQL service; a separate service needs verified TLS. Save separate private `compose.env` files for the two hosts.
+4. **Configure both roles.** Follow the two role guides. Match the target, signer allowlist, and execution identity, explicitly setting the Sepolia values with older images. Replace client allowlist samples and `REPLACE_WITH_PUBLIC_NODE_ADDRESS` with approved real public addresses. Keep the node key local. Generate database credentials on the inbox host and transfer only the worker credential to the local device over authenticated SSH. The worker setting is `url`, containing the HTTPS origin. Use `databaseTls: false` only for the documented bundled private-network PostgreSQL service; a separate service needs verified TLS. Save separate private `compose.env` files for the two hosts.
 5. **Preserve existing storage.** Back up an existing stopped Kubo volume before reuse. Reference it explicitly as an external volume if changing Compose projects. Never start two Kubo containers against the same repository. Preserve old keys, target identity, database volumes, and project names. Do not rerun initialization over existing secret files or use `down --volumes` to solve startup problems.
 6. **Start and verify.** Check Compose without printing it, start the inbox stack, confirm database health locally, validate public HTTPS, then perform the acceptance sequence below. Keep logs sanitized. An empty public `/` or `/healthz` response is expected: the proxy exposes only the API routes.
 
@@ -122,11 +137,11 @@ The [local guide](run-locally.md) has the worker configuration, client commands,
 
 ## Acceptance before handoff
 
-Use harmless test content: publication sends it to IPFS. Record the checks in the private installation record, without credentials.
+Use harmless test content: publication sends it to IPFS and default Ledger operation spends Sepolia gas. Establish broadcast authorization first. Record the checks in the private installation record, without credentials. If authorization or funding is missing, stop before submission and report acceptance as incomplete.
 
 - Verify HTTPS using normal certificate validation. The public health route should be unavailable, an unauthenticated worker request rejected, and a correctly signed request from an unlisted sender rejected.
 - With the local worker stopped, prepare and save an authorized envelope, submit it through the public hostname, and observe `queued`. Restart the inbox/database in a controlled way and verify that the same job remains.
-- Start the worker and wait for `published` in IPFS-only mode, or `logged` with a verified receipt in Ledger mode. Retrieve the CID through local Kubo and compare the exact signed message with the submitted message.
+- Start the worker and wait for `logged` with a verified Sepolia Ledger receipt and matching event, or `published` in explicitly selected IPFS-only mode. Follow the [receipt evidence checklist](testnet-ledger.md#controlled-live-acceptance). Retrieve the CID through local Kubo and compare the exact signed message and client signature with the submitted message.
 - Submit the same saved envelope again and verify its request identity and result remain unchanged. Do not prepare a fresh request to retry uncertain work.
 - Restart the selected worker and verify health and retained results. Check memory, swap, disk, container health/restarts, and logs under startup and message processing.
 - Create a protected PostgreSQL dump, copy it to another device, and restore into an isolated database. Compare job state there. Never test restoration by rolling back the live database.

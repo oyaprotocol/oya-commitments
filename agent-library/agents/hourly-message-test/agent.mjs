@@ -10,8 +10,9 @@ export const intervalMs = 60 * 60 * 1000;
 export async function initialize(keyPath, configPath) {
     const config = JSON.parse(await readFile(configPath, 'utf8'));
     const mode = config.mode === undefined ? 'ledger' : config.mode;
+    const chainId = config.chainId === undefined ? 11155111 : config.chainId;
     if (!['ledger', 'ipfs'].includes(mode) || !Array.isArray(config.allowedSigners)
-        || (mode === 'ledger' && ![11155111, 31337].includes(config.chainId))
+        || (mode === 'ledger' && ![11155111, 31337].includes(chainId))
         || (mode === 'ipfs' && ['chainId', 'ledgerContract', 'rpcUrl', 'receiptTimeoutMs', 'pollIntervalMs', 'gasLimit', 'maxFeePerGasWei']
             .some(key => Object.hasOwn(config, key)))) {
         throw new Error('Testing requires IPFS mode or Sepolia/Anvil Ledger mode and an existing signer allowlist.');

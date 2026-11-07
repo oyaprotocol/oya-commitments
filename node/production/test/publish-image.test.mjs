@@ -106,6 +106,15 @@ mkdir "$3"
         'compose.worker.yaml', 'compose.yaml', 'inbox.example.json', 'worker.example.json']);
     assert.deepEqual(readdirSync(join(bundle, 'scripts')).sort(), ['deploy-droplet-remote.sh', 'deploy-droplet.sh', 'keychain-worker.py']);
     assert.deepEqual(readdirSync(join(bundle, 'docker')).sort(), ['Caddyfile', 'compose.http.yaml', 'compose.testing.yaml', 'config.example.json', 'runtime.env.example']);
+    const nodeDefaults = JSON.parse(readFileSync(join(bundle, 'docker/config.example.json')));
+    const inboxDefaults = JSON.parse(readFileSync(join(bundle, 'inbox/inbox.example.json'))).execution;
+    for (const config of [nodeDefaults, inboxDefaults]) {
+        assert.equal(config.mode, 'ledger');
+        assert.equal(config.chainId, 11155111);
+        assert.equal(config.ledgerContract, '0xe6DeB4B3c31E15DBeA0f932830e2f20Ba2EddAa3');
+    }
+    assert.equal(nodeDefaults.rpcUrl, 'https://ethereum-sepolia-rpc.publicnode.com');
+    assert.equal(inboxDefaults.nodeAddress, 'REPLACE_WITH_PUBLIC_NODE_ADDRESS');
     const agent = 'agent-library/agents/hourly-message-test/agent.mjs';
     assert.equal(statSync(join(unpacked, agent)).mode & 0o777, 0o644, 'The container user must be able to read the mounted agent source.');
     assert.equal(readFileSync(join(unpacked, agent), 'utf8'), readFileSync(join(f.checkout, agent), 'utf8'));
