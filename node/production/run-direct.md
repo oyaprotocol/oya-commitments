@@ -11,7 +11,7 @@ Run the production node and Kubo locally with Docker Compose, persistent IPFS st
 
 Full mode uses an RPC provider; it does not synchronize an Ethereum full node. Both modes verify agent signatures and enforce the signer allowlist. The Ledger example below uses Ethereum Sepolia for a live test without spending mainnet ETH. Agents need signing keys but no gas funds; the Ledger node pays transaction gas.
 
-New node configurations use the [deployed Sepolia Ledger target](README.md#deployed-sepolia-ledger) by default. This guide's v0.2.0 image/bundle predate those defaults: set the explicit chain, contract, and RPC shown below. Existing installations retain their saved settings; do not replace them just to adopt the new defaults.
+New node configurations use the [deployed Sepolia Ledger target](README.md#deployed-sepolia-ledger) by default. This guide's v0.2.0 image/bundle predate those defaults: set the explicit chain, contract, and RPC shown below. Preserve saved settings when updating an installation.
 
 The API stays at `http://127.0.0.1:8787`, available to clients on your local computer. Kubo joins the public IPFS network. No domain, HTTPS proxy, cloud account, or LLM API key is required for this setup. The [Droplet installer](deploy-droplet.md) is for a remote Linux host and is not used here.
 
@@ -109,7 +109,7 @@ Run **one** of the following configuration paths: [Ledger mode](#full-mode-ipfs-
 
 ### IPFS-only mode
 
-Select this only when you explicitly want publication without onchain logging.
+Select this for IPFS-only publication.
 
 ```sh
 cat > "$OYA_CONFIG_FILE" <<'JSON'
@@ -130,7 +130,7 @@ The empty `node.env` is a required readable mount, not a missing credential. No 
 
 ### Full mode: IPFS plus Ledger
 
-Use the [already deployed Sepolia Ledger](README.md#deployed-sepolia-ledger). The public RPC below is replaceable with an operator-approved Sepolia endpoint and has no availability guarantee.
+Use the [already deployed Sepolia Ledger](README.md#deployed-sepolia-ledger). Use the public RPC below with operator approval, or supply another approved Sepolia endpoint.
 
 Create this explicit configuration for compatibility with the older runtime, then fill the allowlist using step 4 before starting:
 

@@ -159,7 +159,7 @@ test('packaged inbox and local worker publish offline-queued jobs through HTTPS 
     await ledger.waitForDeployment();
     const ledgerContract = await ledger.getAddress();
     const ledgerAbi = new Interface(artifact.abi);
-    // This is a second disposable local chain, not a public Sepolia connection.
+    // Exercise Sepolia defaults on a disposable local chain.
     const sepolia = new JsonRpcProvider(await endpoint('sepolia', 8545));
     t.after(() => sepolia.destroy());
     await until(async () => BigInt(await sepolia.send('eth_chainId', [])) === 11155111n);

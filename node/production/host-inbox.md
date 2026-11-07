@@ -69,11 +69,11 @@ Edit `inbox.json`. Set the target name and replace the sample public agent allow
 }
 ```
 
-Replace `REPLACE_WITH_PUBLIC_NODE_ADDRESS` with the dedicated funded Sepolia node signer's **public address**, not the client address or a private key. It is required and never inferred; the new source template deliberately fails validation until this placeholder is replaced. With the new defaults, omitted execution mode/chain/contract resolve to Ledger/Sepolia/the deployed address, but the explicit fields shown here are needed with older images. The inbox requires no RPC URL and must never receive the node key. See the [canonical target and verification evidence](README.md#deployed-sepolia-ledger).
+Replace `REPLACE_WITH_PUBLIC_NODE_ADDRESS` with the dedicated funded Sepolia node signer's **public address**. Keep its private key on the worker. Set the mode, chain, and contract explicitly as shown for compatibility with older images. See the [canonical target and verification evidence](README.md#deployed-sepolia-ledger).
 
-To opt out of onchain logging, use `execution: {"mode":"ipfs"}` instead and the matching IPFS-only worker configuration. Remove chain, contract, and node-address fields entirely; IPFS mode rejects Ethereum fields and needs no node account, RPC, or funds. The client allowlist is still required.
+To opt out of onchain logging, use `execution: {"mode":"ipfs"}` instead and the matching IPFS-only worker configuration. Remove chain, contract, and node-address fields entirely; IPFS mode rejects Ethereum fields. Configure the client allowlist in both roles.
 
-A target's execution identity is immutable in the database. Existing IPFS deployments keep that identity; do not apply new templates over saved settings. Reconcile pending jobs before deliberately changing identity and use a new target for the new configuration. The worker rejects mismatched execution identities, signatures, or local allowlists.
+A target's execution identity is immutable in the database. Preserve saved settings when updating an installation. Reconcile pending jobs before deliberately changing identity and use a new target for the new configuration. The worker rejects mismatched execution identities, signatures, or local allowlists.
 
 ## Choose PostgreSQL hosting
 

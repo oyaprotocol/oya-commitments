@@ -10,7 +10,7 @@ import { processWork } from '../src/inbox/processor.mjs';
 import { runOne } from '../src/inbox/worker.mjs';
 import { cid, fixture, gate, signedMessage } from './runtime-fixture.mjs';
 
-// These expectations deliberately do not import runtime default constants.
+// Literal expectations catch drift in runtime defaults.
 const sepoliaLedger = '0xe6DeB4B3c31E15DBeA0f932830e2f20Ba2EddAa3';
 const sepoliaRpc = 'https://ethereum-sepolia-rpc.publicnode.com';
 const otherLedger = '0x2222222222222222222222222222222222222222';
@@ -179,9 +179,7 @@ test('inbox rejects unknown execution fields and explicit IPFS remains exactly m
     }
 });
 
-// All cryptography and processing are real. Only transports and durable storage are
-// fakes; the public default URL is inspected, never fetched. The shared fixture keeps
-// explicit Anvil defaults for the existing suite while its receipts follow its config.
+// Exercise real signing and processing with mock transports and checkpoint storage.
 async function defaultWorker(t) {
     const f = await fixture(t, { chainId: 11155111, ledgerContract: sepoliaLedger, rpcUrl: sepoliaRpc });
     const parsed = parse({ allowedSigners: [f.agent.address], ipfsUrl: 'http://ipfs.example' });

@@ -4,7 +4,7 @@ This living ExecPlan follows `PLANS.md` and the repository instruction hierarchy
 
 ## Purpose / Big Picture
 
-A newly configured production node should verify authorized signed messages, publish them to IPFS, and then log their CIDs to the existing Ledger on Ethereum Sepolia. A CID is the content identifier returned by IPFS. The default network is chain ID `11155111`, and its verified Ledger is `0xe6DeB4B3c31E15DBeA0f932830e2f20Ba2EddAa3`. Operators should not have to deploy another contract or discover its address. Explicit IPFS-only operation remains supported. This change prepares a pull request; it does not upgrade any live installation or authorize public-chain transactions.
+A newly configured production node should verify authorized signed messages, publish them to IPFS, and then log their CIDs to the existing Ledger on Ethereum Sepolia. A CID is the content identifier returned by IPFS. The default network is chain ID `11155111`, and its verified Ledger is `0xe6DeB4B3c31E15DBeA0f932830e2f20Ba2EddAa3`. Operators can use the documented target or explicitly select IPFS-only operation.
 
 ## Progress
 
@@ -16,13 +16,15 @@ A newly configured production node should verify authorized signed messages, pub
 - [x] 2026-11-07: Rebuilt packaged inbox/worker integration passed across IPFS, explicit Anvil Ledger and default Sepolia identity using real HTTPS, PostgreSQL and Kubo with isolated local chains.
 - [x] 2026-11-07 00:55Z: Completed independent review; fixed its omitted-chain hourly-initializer finding with a failing-before/passing-after deployment regression. Final production suite: 272 passed.
 - [x] 2026-11-07 00:55Z: Both optional-hourly Ledger and IPFS-only Docker fixtures passed, including hourly-agent unit tests inside the runtime image.
-- [x] 2026-11-07 00:57Z: Published upstream PR #139 from `oyagardener:feature/sepolia-ledger-defaults` to `oyaprotocol:main`; verified the open, non-draft PR, description and exact remote Git blob hashes for all 31 changed files. GitHub CI started; its pending results are not claimed as passed.
+- [x] 2026-11-07 00:57Z: Published upstream PR #139 from `oyagardener:feature/sepolia-ledger-defaults` to `oyaprotocol:main`; verified the open, non-draft PR, description and exact remote Git blob hashes for all 31 changed files.
 
 - [x] 2026-11-07: Applied maintainer documentation review: removed repeated non-goal and unnecessary-prerequisite commentary across the onboarding guides. Release-bundle tests: 13 passed; 201 local documentation links and unchanged fenced examples/headings verified; `git diff --check` passed.
 
+- [x] 2026-11-07: Applied the second maintainer concision review across documentation and code comments; added matching agent/contributor guidance. Release-bundle tests: 13 passed; focused runtime/default tests: 33 passed. Checked 210 local documentation links, fenced examples, existing headings, executable-source equivalence, and `git diff --check`.
+
 ## Surprises & Discoveries
 
-The runtime already defaults an omitted `mode` to `ledger`; the contradictory first-install guides and inbox example instead recommend IPFS-only. The host template selects a placeholder on Anvil, while the Docker template selects a placeholder on Ethereum mainnet. Both need consistent Sepolia settings. The worker already validates signatures/allowlists, publishes the signed envelope to IPFS, saves its CID, prepares and checkpoints a transaction, broadcasts it, and verifies its receipt/event. No duplicate pipeline is needed.
+The runtime already defaults an omitted `mode` to `ledger`; the contradictory first-install guides and inbox example instead recommend IPFS-only. The host template selects a placeholder on Anvil, while the Docker template selects a placeholder on Ethereum mainnet. Both need consistent Sepolia settings. The worker already validates signatures/allowlists, publishes the signed envelope to IPFS, saves its CID, prepares and checkpoints a transaction, broadcasts it, and verifies its receipt/event.
 
 Regression tests exposed coercion of array-valued addresses/URLs and acceptance of incorrect mixed-case address checksums; the parser now rejects these rather than treating them as valid explicit overrides. A provider authorization header also cannot accompany an omitted RPC URL, avoiding implicit disclosure to the public default.
 
@@ -35,24 +37,24 @@ Independent review found the standalone hourly test initializer still rejected a
 ## Decision Log
 
 - 2026-11-07 / Oya Gardener: Reuse the independently verified existing contract rather than deploy a replacement. All 395 runtime bytes at Sepolia block 12080087 match `contracts/src/Ledger.sol` compiled from main commit `a8dee241c5a26e7124c6d99af7f1bc212f0dcd75` using Solidity 0.8.23, optimizer 200, EVM `paris`.
-- 2026-11-07 / Oya Gardener: Default only omitted settings. Explicit invalid/null values still fail validation. Selecting a non-Sepolia chain requires an explicit Ledger and RPC, so the Sepolia address is not silently applied to another network.
-- 2026-11-07 / Oya Gardener: Offer `https://ethereum-sepolia-rpc.publicnode.com` as the overrideable Sepolia RPC default. This public endpoint was checked for the expected chain ID; it provides no project-controlled availability guarantee. Tests inject transports or use an isolated local RPC instead.
-- 2026-11-07 / Oya Gardener: Require the inbox's real public `nodeAddress`; never infer a transaction-signing identity or ship a shared key. Existing explicit IPFS configurations and saved execution identities are not automatically migrated.
+- 2026-11-07 / Oya Gardener: Default only omitted settings. Explicit invalid/null values fail validation. Other chains require an explicit Ledger and RPC.
+- 2026-11-07 / Oya Gardener: Offer `https://ethereum-sepolia-rpc.publicnode.com` as the overrideable Sepolia RPC default. This public endpoint was checked for the expected chain ID. Operators approve their RPC; tests use mock transports or an isolated local RPC.
+- 2026-11-07 / Oya Gardener: Require the inbox's real public `nodeAddress` and preserve existing configurations and execution identities.
 - 2026-11-07 / Oya Gardener: Keep canonical deployment documentation in the already-packaged production README. Existing immutable releases retain their old defaults; source and older-release instructions must distinguish explicit configuration from a future matching release.
 
 ## Outcomes & Retrospective
 
-Implementation and documentation are complete. Configuration, ordering/failure-path, PostgreSQL recovery, contract and packaged Docker integration tests all pass. Independent review is complete and its compatibility finding is resolved. All 272 production tests pass; the optional hourly agent was additionally verified in both Ledger and IPFS Docker profiles. The completed change is published as [PR #139](https://github.com/oyaprotocol/oya-commitments/pull/139), with remote source hashes verified. GitHub CI and maintainer review remain external gates; this change has not been merged, released or deployed. The existing message pipeline required no behavior changes; the deliverable is consistent defaults, fail-closed overrides and operator documentation, not a new chain deployment.
+Implementation and documentation are complete. Configuration, ordering/failure-path, PostgreSQL recovery, contract and packaged Docker integration tests all pass. Independent review is complete and its compatibility finding is resolved. All 272 production tests pass; the optional hourly agent was additionally verified in both Ledger and IPFS Docker profiles. The completed change is published as [PR #139](https://github.com/oyaprotocol/oya-commitments/pull/139), with remote source hashes verified. The deliverable is consistent defaults, fail-closed overrides, and operator documentation for the existing message pipeline.
 
 ## Context and Orientation
 
-`node/production/src/config.mjs` parses worker and direct-runtime settings. `node/production/src/inbox/config.mjs` validates the inbox's expected public execution identity. `executionIdentity` in `src/inbox/protocol.mjs` must produce the same normalized identity on the worker. `src/inbox/processor.mjs` owns the durable IPFS-to-Ledger pipeline. Its existing signature checks, checkpoints, receipt validation and retry behavior must remain intact.
+`node/production/src/config.mjs` parses worker and direct-runtime settings. `node/production/src/inbox/config.mjs` validates the inbox's expected public execution identity. `executionIdentity` in `src/inbox/protocol.mjs` must produce the same normalized identity on the worker. `src/inbox/processor.mjs` owns the durable IPFS-to-Ledger pipeline. Preserve its signature checks, checkpoints, receipt validation, and retry behavior.
 
-Host setup copies `node/production/config.example.json`; Docker deployments copy `node/production/docker/config.example.json`; inbox hosting starts from `node/production/inbox/inbox.example.json`. Runtime secrets and real signer allowlists are operator inputs, not source defaults. An inbox is never given the node's private transaction key. Operator docs live in `node/production/`, with entry links in root/node/contract READMEs and repository deployment workflow documentation.
+Host setup copies `node/production/config.example.json`; Docker deployments copy `node/production/docker/config.example.json`; inbox hosting starts from `node/production/inbox/inbox.example.json`. Operators supply secrets and signer allowlists and keep the node's private transaction key on the worker. Operator docs live in `node/production/`, with entry links in root/node/contract READMEs and repository deployment workflow documentation.
 
 ## Plan of Work
 
-Introduce a small shared set of public Sepolia defaults. Resolve omitted mode/network/contract/RPC fields in the node parser while preserving strict IPFS-only rejection of Ethereum fields. Resolve omitted Ledger execution settings in the inbox without guessing its required node address or mutating caller inputs. Keep explicit overrides usable for Anvil and other operator-selected chains.
+Introduce a small shared set of public Sepolia defaults. Resolve omitted mode/network/contract/RPC fields in the node parser while preserving strict IPFS-only rejection of Ethereum fields. Resolve omitted Ledger execution settings in a copy of the inbox input, requiring the node address. Keep explicit overrides usable for Anvil and other operator-selected chains.
 
 Update the three templates and local setup output. Reorient current onboarding toward funded, dedicated Sepolia node signing, while retaining a clearly marked IPFS-only opt-out. Document the existing contract, reproducible verification, signer separation, gas requirements, existing-installation boundaries and older release behavior.
 
@@ -84,8 +86,8 @@ Work in an isolated worktree and preserve all pre-existing working directories. 
 
 ## Artifacts and Notes
 
-The public deployment verification used read-only RPC, Sourcify and Blockscout corroboration, and an independent local compiler comparison. Its exact runtime match is the evidence for the address, not merely nonempty code. The historical deployment receipt was unavailable from the queried RPC and is not claimed as independently verified. No secrets, private installation records, local-only paths or real signing material belong in this plan or PR.
+The public deployment verification used read-only RPC, Sourcify and Blockscout corroboration, and an independent local compiler comparison. The [canonical reference](../node/production/README.md#verification-evidence) records the exact runtime match at the observed block.
 
 ## Interfaces and Dependencies
 
-The node exposes `parseConfig(input, { env })`; the inbox exposes `parseInboxConfig(input)`. Both must use the same public Sepolia target defaults. `executionIdentity(config, nodeAddress)` continues its existing lowercase wire representation. The Ledger ABI remains `log(string)` and `Log(address indexed node, bytes32 indexed cidKeccak256Hash, string cid)`. No Solidity behavior, published kernel versions, dependency locks, public APIs, signing algorithms, checkpoint schemas or deployment credentials need to change.
+The node exposes `parseConfig(input, { env })`; the inbox exposes `parseInboxConfig(input)`. Both must use the same public Sepolia target defaults. `executionIdentity(config, nodeAddress)` continues its existing lowercase wire representation. The Ledger ABI is `log(string)` and `Log(address indexed node, bytes32 indexed cidKeccak256Hash, string cid)`.

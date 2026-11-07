@@ -42,7 +42,7 @@ export function parseConfig(input, { env = process.env } = {}) {
     if (mode === 'ledger') {
         chainId = integer(input.chainId === undefined ? SEPOLIA_DEFAULTS.chainId : input.chainId,
             'chainId', undefined, Number.MAX_SAFE_INTEGER);
-        // Never use a Sepolia address or RPC for an explicitly selected other chain.
+        // Scope target defaults to Sepolia.
         const defaults = chainId === SEPOLIA_DEFAULTS.chainId ? SEPOLIA_DEFAULTS : {};
         ledgerContract = input.ledgerContract === undefined ? defaults.ledgerContract : input.ledgerContract;
         rpcUrl = input.rpcUrl === undefined ? defaults.rpcUrl : input.rpcUrl;
@@ -52,7 +52,7 @@ export function parseConfig(input, { env = process.env } = {}) {
         try {
             if (typeof ledgerContract !== 'string' || ledgerContract.length !== 42 ||
                 !/^0x[0-9a-fA-F]{40}$/.test(ledgerContract) || /^0x0{40}$/i.test(ledgerContract)) throw new Error();
-            getAddress(ledgerContract); // Validate mixed-case checksums without rewriting the configured address.
+            getAddress(ledgerContract); // Validate mixed-case checksums.
         } catch {
             throw new Error('ledgerContract must be a nonzero Ethereum address with a valid checksum.');
         }

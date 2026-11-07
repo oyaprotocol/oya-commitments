@@ -76,7 +76,7 @@ Record the printed public agent address. The private key is written only to `age
 
 ## 2. Configure one execution mode
 
-For **default Sepolia Ledger mode**, create `$OYA_LOCAL_DIR/node.json` below. Replace `AGENT_ADDRESS` with the approved public message-signing address from step 1. The [existing Ledger and verification evidence](README.md#deployed-sepolia-ledger) are available for this target. The public RPC has no availability guarantee and can be replaced with an operator-approved Sepolia endpoint. These explicit target fields also work with the older image selected above.
+For **default Sepolia Ledger mode**, create `$OYA_LOCAL_DIR/node.json` below. Replace `AGENT_ADDRESS` with the approved public message-signing address from step 1. The [existing Ledger and verification evidence](README.md#deployed-sepolia-ledger) are available for this target. Use an operator-approved Sepolia RPC. These explicit target fields also work with the older image selected above.
 
 ```json
 {
@@ -109,9 +109,9 @@ For **explicit IPFS-only operation instead**, use this `node.json`, replacing th
 }
 ```
 
-Create an empty private environment file with `touch "$OYA_LOCAL_DIR/node.env"`. Do not include Ethereum settings (`chainId`, `ledgerContract`, `rpcUrl`, `receiptTimeoutMs`, `pollIntervalMs`, `gasLimit`, or `maxFeePerGasWei`); they are rejected, not ignored. A separate client signing key and allowlist remain required.
+Create an empty private environment file with `touch "$OYA_LOCAL_DIR/node.env"`. Remove Ethereum settings (`chainId`, `ledgerContract`, `rpcUrl`, `receiptTimeoutMs`, `pollIntervalMs`, `gasLimit`, and `maxFeePerGasWei`); IPFS mode rejects them. Configure the client signing key and allowlist.
 
-Use only one configuration path. Existing installations keep their private settings and saved execution identity. To select another chain in Ledger mode, supply that chain's contract and RPC explicitly rather than relying on Sepolia defaults.
+Use only one configuration path. Preserve existing private settings and saved execution identities. To select another chain in Ledger mode, supply that chain's contract and RPC explicitly rather than relying on Sepolia defaults.
 
 ```sh
 chmod 600 "$OYA_LOCAL_DIR/node.json" "$OYA_LOCAL_DIR/node.env"
@@ -119,7 +119,7 @@ chmod 600 "$OYA_LOCAL_DIR/node.json" "$OYA_LOCAL_DIR/node.env"
 
 ## 3. Host and connect the inbox
 
-Follow [Host the PostgreSQL inbox](host-inbox.md) in a separate terminal on your chosen host, then return to this local-worker terminal. Keep separate terminals even if both roles run on one device, because they select different Compose projects and private directories. The inbox supports bundled PostgreSQL or an existing managed/private database. It needs the same target, agent allowlist, and mode. For default Ledger mode, explicitly configure the same Sepolia chain and Ledger plus the dedicated node's real **public** address; `nodeAddress` is required and never inferred. Replace the new inbox template's `REPLACE_WITH_PUBLIC_NODE_ADDRESS` placeholder before starting. Never copy `node-key` or `node.env` to the inbox. The database binds the target to these execution settings.
+Follow [Host the PostgreSQL inbox](host-inbox.md) in a separate terminal on your chosen host, then return to this local-worker terminal. Keep separate terminals even if both roles run on one device, because they select different Compose projects and private directories. The inbox supports bundled PostgreSQL or an existing managed/private database. It needs the same target, agent allowlist, and mode. For default Ledger mode, explicitly configure the same Sepolia chain and Ledger plus the dedicated node's real **public** address. Replace the new inbox template's `REPLACE_WITH_PUBLIC_NODE_ADDRESS` placeholder before starting. Never copy `node-key` or `node.env` to the inbox. The database binds the target to these execution settings.
 
 Copy only the generated `worker-secrets.json` from that setup into `$OYA_LOCAL_DIR` over a trusted channel. This is a shared worker token; the local node does not need the database password. Create `$OYA_LOCAL_DIR/worker.json`:
 
@@ -165,7 +165,7 @@ oya_client status https://inbox.example.com /private/job.json
 
 `prepare` saves a signed request with a random ID and a 24-hour submission/start deadline. It refuses to overwrite an existing file. Retry **the same job file** after a failed submission or lost response. Preparing another ID authorizes another job, including another Ledger transaction. Status reads require the saved signed envelope, even after its deadline. Keep the file private until you intend to publish its contents.
 
-Default Ledger completion is `logged`, not merely `202`, a CID, or a transaction hash. Check the successful receipt and `Log` event from the configured Ledger for your node and exact CID, then retrieve the signed envelope with `docker compose exec -T ipfs ipfs cat /ipfs/REPLACE_WITH_RETURNED_CID` and verify its message and client signature. Use the [testnet acceptance checklist](testnet-ledger.md) for detailed receipt evidence. For explicit IPFS-only mode, expect `published` with no transaction. Local retrieval does not prove independent replication.
+Default Ledger completion requires `logged` status. Check the successful receipt and `Log` event from the configured Ledger for your node and exact CID, then retrieve the signed envelope with `docker compose exec -T ipfs ipfs cat /ipfs/REPLACE_WITH_RETURNED_CID` and verify its message and client signature. Use the [testnet acceptance checklist](testnet-ledger.md) for detailed receipt evidence. For IPFS-only mode, expect `published`. Check independent retrieval separately if replication is required.
 
 To verify offline delivery, run `docker compose stop node`, prepare a different job file, submit it, and observe `queued`. Run `docker compose start node`; that job becomes `published` or `logged`. Unstarted jobs become `expired` on a worker claim after their deadline. Started jobs continue recovery after the deadline. The old hourly agent uses the synchronous API; use it only with the [direct profile](run-direct.md). New senders use this client or the [inbox API](inbox-api.md).
 
