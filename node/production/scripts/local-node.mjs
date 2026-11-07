@@ -3,6 +3,7 @@ import { lstat, readFile, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs, promisify } from 'node:util';
+import { SEPOLIA_DEFAULTS } from '../src/defaults.mjs';
 
 const production = fileURLToPath(new URL('../', import.meta.url));
 const usage = 'Usage (from repository root):\n'
@@ -134,7 +135,9 @@ export async function main(args, {
             return fail(`Could not prepare ${template}. Check destination directories and file permissions.`);
         }
     }
-    log('Setup complete. Configure allowedSigners and ipfsUrl. Ledger mode also requires chainId, ledgerContract, rpcUrl, and OYA_NODE_PRIVATE_KEY. For IPFS-only operation, set mode to ipfs and remove Ethereum settings.');
+    log(`Setup complete. New configurations default to Ledger mode on Sepolia (${SEPOLIA_DEFAULTS.chainId}) at ${SEPOLIA_DEFAULTS.ledgerContract}. `
+        + 'Configure allowedSigners and ipfsUrl, review rpcUrl, and supply a dedicated OYA_NODE_PRIVATE_KEY funded with Sepolia ETH. '
+        + 'No deployment or funding was performed. Existing files were preserved. For IPFS-only operation, set mode to ipfs and remove Ethereum settings.');
     return 0;
 }
 

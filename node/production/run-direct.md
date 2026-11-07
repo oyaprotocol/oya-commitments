@@ -11,6 +11,8 @@ Run the production node and Kubo locally with Docker Compose, persistent IPFS st
 
 Full mode uses an RPC provider; it does not synchronize an Ethereum full node. Both modes verify agent signatures and enforce the signer allowlist. The Ledger example below uses Ethereum Sepolia for a live test without spending mainnet ETH. Agents need signing keys but no gas funds; the Ledger node pays transaction gas.
 
+New node configurations use the [deployed Sepolia Ledger target](README.md#deployed-sepolia-ledger) by default. This guide's v0.2.0 image/bundle predate those defaults: set the explicit chain, contract, and RPC shown below. Existing installations retain their saved settings; do not replace them just to adopt the new defaults. A new Ledger deployment is unnecessary.
+
 The API stays at `http://127.0.0.1:8787`, available to clients on your local computer. Kubo joins the public IPFS network. No domain, HTTPS proxy, cloud account, or LLM API key is required for this setup. The [Droplet installer](deploy-droplet.md) is for a remote Linux host and is not used here.
 
 ## Prerequisites and availability
@@ -103,9 +105,11 @@ The testing profile makes the helper service available. It will not run the hour
 
 ## 3. Choose one node mode
 
-Run **one** of the following configuration paths. The initially empty allowlist is filled by step 4 before starting the node; an empty allowlist is never accepted at normal startup.
+Run **one** of the following configuration paths: [Ledger mode](#full-mode-ipfs-plus-ledger) is the default setup; IPFS-only is an explicit opt-out. The initially empty allowlist is filled by step 4 before starting the node; an empty allowlist is never accepted at normal startup.
 
 ### IPFS-only mode
+
+Select this only when you explicitly want publication without onchain logging.
 
 ```sh
 cat > "$OYA_CONFIG_FILE" <<'JSON'
@@ -126,9 +130,9 @@ The empty `node.env` is a required readable mount, not a missing credential. No 
 
 ### Full mode: IPFS plus Ledger
 
-Obtain a Sepolia RPC endpoint and the address of a verified Oya Ledger contract on that chain. If you need to deploy one, follow [Deploy Ledger on Sepolia](README.md#deploy-ledger-on-sepolia) from a source checkout first; the release bundle has no contract source or deployment CLI. Keep that separate deployer key out of the running node.
+Use the [already deployed Sepolia Ledger](README.md#deployed-sepolia-ledger); no deployer account, deployment transaction, or Foundry is needed. The public RPC below is replaceable with an operator-approved Sepolia endpoint and has no availability guarantee. A separate contract deployment is an advanced, separately authorized option, not a setup prerequisite.
 
-Create the node configuration, then replace both placeholders in a trusted editor before starting:
+Create this explicit configuration for compatibility with the older runtime, then fill the allowlist using step 4 before starting:
 
 ```sh
 cat > "$OYA_CONFIG_FILE" <<'JSON'
@@ -137,9 +141,9 @@ cat > "$OYA_CONFIG_FILE" <<'JSON'
   "host": "0.0.0.0",
   "port": 8787,
   "chainId": 11155111,
-  "ledgerContract": "REPLACE_WITH_VERIFIED_LEDGER_ADDRESS",
+  "ledgerContract": "0xe6DeB4B3c31E15DBeA0f932830e2f20Ba2EddAa3",
   "allowedSigners": [],
-  "rpcUrl": "https://REPLACE_WITH_SEPOLIA_RPC_ENDPOINT",
+  "rpcUrl": "https://ethereum-sepolia-rpc.publicnode.com",
   "ipfsUrl": "http://ipfs:5001"
 }
 JSON
@@ -163,11 +167,11 @@ console.log('Fund this Sepolia node address: ' + wallet.address);
 NODE
 ```
 
-Fund the printed address with Sepolia ETH and confirm the balance before publishing. See the [Sepolia funding instructions](README.md#create-and-fund-a-dedicated-testnet-deployer), using the **node address printed above**, not a new deployer account. Each accepted publication spends the node's gas, including repeated messages. Do not use this signing account in another process or node.
+Fund the printed address with Sepolia ETH and confirm the balance before publishing. Use a faucet from [Ethereum's Sepolia faucet list](https://ethereum.org/en/developers/docs/networks/#sepolia), supplying only the **public node address printed above**, never a private key. Do not create a deployer account for this setup. Each accepted publication spends the node's gas, including repeated messages; obtain authorization before submitting. Keep this signer separate from the message client and any deployer, and do not use it in another process or node.
 
 If the RPC needs an authorization header, add a literal `OYA_RPC_AUTHORIZATION=...` line in `node.env` with a trusted editor. Keep URL tokens in private `node.json`. The secrets file accepts unquoted, literal values; do not source it as shell code. The only supported entries are `OYA_NODE_PRIVATE_KEY`, `OYA_RPC_AUTHORIZATION`, and `OYA_IPFS_AUTHORIZATION`.
 
-Full mode also supports other configured chains, but the bundled demo initializer accepts only Sepolia (`11155111`) and disposable Anvil (`31337`). For another chain, provide your own nonempty signer allowlist and client, skip the demo initializer/hourly sender, and use [Submit a message](README.md#submit-a-message) for that client's signed request. A Docker RPC URL must be reachable from the container: `127.0.0.1` there refers to the container, not the host computer. A host RPC on Docker Desktop can use `host.docker.internal` if the host service allows that connection.
+Full mode also supports other explicitly configured chain/contract/RPC combinations, but the bundled demo initializer accepts only Sepolia (`11155111`) and disposable Anvil (`31337`). For another chain, provide your own nonempty signer allowlist and client, skip the demo initializer/hourly sender, and use [Submit a message](README.md#submit-a-message) for that client's signed request. A Docker RPC URL must be reachable from the container: `127.0.0.1` there refers to the container, not the host computer. A host RPC on Docker Desktop can use `host.docker.internal` if the host service allows that connection.
 
 ## 4. Create and authorize the message agent
 

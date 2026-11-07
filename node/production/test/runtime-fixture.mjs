@@ -33,7 +33,7 @@ export async function fixture(t, overrides = {}) {
         rpc: { ...parsed.rpc, maxRetries: 0 }, ipfs: { ...parsed.ipfs, maxRetries: 0 } };
     const state = { signs: 0, uploads: 0, sends: 0, mined: 0, transactions: [], calls: [],
         ipfsFailure: false, preparationFailure: false, sendFailure: false, receiptMode: 'mined',
-        code: '0x6000', chainId: '0x7a69' };
+        code: '0x6000', chainId: `0x${BigInt(config.chainId).toString(16)}` };
     const logs = [];
     const signer = { address: wallet.address, async signTransaction(transaction, signal) {
         state.signs++;
@@ -75,11 +75,11 @@ export async function fixture(t, overrides = {}) {
                 const event = eventAbi.encodeEventLog(eventAbi.getEvent('Log'), [wallet.address, keccak256(toUtf8Bytes(cid)), cid]);
                 result = {
                     transactionHash, blockHash, blockNumber, transactionIndex: '0x0',
-                    from: wallet.address, to: ledgerContract, contractAddress: null,
+                    from: wallet.address, to: config.ledgerContract, contractAddress: null,
                     cumulativeGasUsed: '0x8000', gasUsed: '0x8000', logsBloom: `0x${'00'.repeat(256)}`,
                     status: state.receiptMode === 'reverted' ? '0x0' : '0x1',
                     logs: state.receiptMode !== 'mined' ? [] : [{
-                        ...event, address: ledgerContract, transactionHash, blockHash, blockNumber,
+                        ...event, address: config.ledgerContract, transactionHash, blockHash, blockNumber,
                         transactionIndex: '0x0', logIndex: '0x0', removed: false,
                     }],
                 };

@@ -6,7 +6,7 @@ To have an agent provision and verify this setup using secure credential referen
 
 The inbox stores signed message bodies, job status, and transaction checkpoints. Treat its database and worker token as trusted infrastructure. A database administrator can alter execution state; this is not an untrusted queue protocol. Keep node, deployer, and agent private keys off this host. PostgreSQL contains prepared signed Ledger transactions, which can be broadcast, but cannot authorize other transactions without the node key.
 
-This guide uses the published [node-v0.3.1 image and deployment bundle](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.1). Use the same release for the [local worker](run-locally.md). v0.2.0 images support only the direct API and cannot serve an inbox.
+This guide uses the published [node-v0.3.1 image and deployment bundle](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.1). Use the same release for the [local worker](run-locally.md). Its templates predate the [default deployed Sepolia Ledger](README.md#deployed-sepolia-ledger), so explicitly set the execution fields below instead of relying on the copied template. No new release or change to immutable assets is implied. v0.2.0 images support only the direct API and cannot serve an inbox.
 
 ## Prepare the host
 
@@ -58,18 +58,22 @@ YAML
 
 Use your actual hostname and a new private directory outside shared/cloud-synced folders. The override selects the Oya image's platform; PostgreSQL and Caddy use their native platforms. Keep the bundle location and project name stable because the project owns database and TLS volumes. If this is an existing installation, source its saved `compose.env` instead of repeating initialization or regenerating secrets. Save the selected settings in the start step below, after choosing the database option.
 
-Edit `inbox.json`. Set the target name and public agent allowlist from the [local guide](run-locally.md). Choose `execution: {"mode":"ipfs"}` for IPFS-only. For Ledger use:
+Edit `inbox.json`. Set the target name and replace the sample public agent allowlist with approved client addresses from the [local guide](run-locally.md). For **default Sepolia Ledger mode**, use this execution identity, matching the worker:
 
 ```json
 "execution": {
   "mode": "ledger",
   "chainId": 11155111,
-  "ledgerContract": "LEDGER_ADDRESS",
-  "nodeAddress": "PUBLIC_NODE_ADDRESS"
+  "ledgerContract": "0xe6DeB4B3c31E15DBeA0f932830e2f20Ba2EddAa3",
+  "nodeAddress": "REPLACE_WITH_PUBLIC_NODE_ADDRESS"
 }
 ```
 
-Replace placeholders with the worker's actual public settings. A target's execution identity is immutable in the database. Reconcile pending jobs before changing identity and use a new target for the new configuration. The worker rejects inbox jobs whose signatures or local allowlist do not match.
+Replace `REPLACE_WITH_PUBLIC_NODE_ADDRESS` with the dedicated funded Sepolia node signer's **public address**, not the client address or a private key. It is required and never inferred; the new source template deliberately fails validation until this placeholder is replaced. With the new defaults, omitted execution mode/chain/contract resolve to Ledger/Sepolia/the deployed address, but the explicit fields shown here are needed with older images. The inbox requires no RPC URL and must never receive the node key. See the [canonical target and verification evidence](README.md#deployed-sepolia-ledger).
+
+To opt out of onchain logging, use `execution: {"mode":"ipfs"}` instead and the matching IPFS-only worker configuration. Remove chain, contract, and node-address fields entirely; IPFS mode rejects Ethereum fields and needs no node account, RPC, or funds. The client allowlist is still required.
+
+A target's execution identity is immutable in the database. Existing IPFS deployments keep that identity; do not apply new templates over saved settings. Reconcile pending jobs before deliberately changing identity and use a new target for the new configuration. The worker rejects mismatched execution identities, signatures, or local allowlists.
 
 ## Choose PostgreSQL hosting
 

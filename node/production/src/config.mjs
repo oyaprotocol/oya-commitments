@@ -2,6 +2,8 @@ import { readFile } from 'node:fs/promises';
 import { createSignedMessageAuthorizer } from '@oyaprotocol/messages';
 import { createHttpConfig } from '@oyaprotocol/ethereum';
 import { createIpfsConfig } from '@oyaprotocol/ipfs';
+import { getAddress } from 'ethers';
+import { SEPOLIA_DEFAULTS } from './defaults.mjs';
 
 function integer(value, name, fallback, max = 2_147_483_647) {
     const selected = value ?? fallback;
@@ -13,6 +15,7 @@ function integer(value, name, fallback, max = 2_147_483_647) {
 
 function endpoint(value, name) {
     try {
+        if (typeof value !== 'string') throw new Error();
         const url = new URL(value);
         if (!['http:', 'https:'].includes(url.protocol)) throw new Error();
         return url.href;
@@ -35,8 +38,24 @@ export function parseConfig(input, { env = process.env } = {}) {
     if (mode === 'ipfs' && ledgerFields.some(key => Object.hasOwn(input, key))) {
         throw new Error('IPFS mode does not accept Ethereum or Ledger settings.');
     }
-    if (mode === 'ledger' && (!/^0x[0-9a-fA-F]{40}$/.test(input.ledgerContract ?? '') || /^0x0{40}$/i.test(input.ledgerContract))) {
-        throw new Error('ledgerContract must be a nonzero Ethereum address.');
+    let chainId, ledgerContract, rpcUrl;
+    if (mode === 'ledger') {
+        chainId = integer(input.chainId === undefined ? SEPOLIA_DEFAULTS.chainId : input.chainId,
+            'chainId', undefined, Number.MAX_SAFE_INTEGER);
+        // Never use a Sepolia address or RPC for an explicitly selected other chain.
+        const defaults = chainId === SEPOLIA_DEFAULTS.chainId ? SEPOLIA_DEFAULTS : {};
+        ledgerContract = input.ledgerContract === undefined ? defaults.ledgerContract : input.ledgerContract;
+        rpcUrl = input.rpcUrl === undefined ? defaults.rpcUrl : input.rpcUrl;
+        if (input.rpcUrl === undefined && env.OYA_RPC_AUTHORIZATION) {
+            throw new Error('rpcUrl must be explicit when RPC authorization is configured.');
+        }
+        try {
+            if (typeof ledgerContract !== 'string' || ledgerContract.length !== 42 ||
+                !/^0x[0-9a-fA-F]{40}$/.test(ledgerContract) || /^0x0{40}$/i.test(ledgerContract)) throw new Error();
+            getAddress(ledgerContract); // Validate mixed-case checksums without rewriting the configured address.
+        } catch {
+            throw new Error('ledgerContract must be a nonzero Ethereum address with a valid checksum.');
+        }
     }
     const authorize = createSignedMessageAuthorizer(input.allowedSigners);
     if (input.allowedSigners.length === 0) throw new Error('allowedSigners must not be empty.');
@@ -59,15 +78,14 @@ export function parseConfig(input, { env = process.env } = {}) {
         operationTimeoutMs: integer(input.operationTimeoutMs, 'operationTimeoutMs', 180_000),
         ipfs: createIpfsConfig(transport(endpoint(input.ipfsUrl, 'ipfsUrl'), env.OYA_IPFS_AUTHORIZATION)),
         ...(mode === 'ledger' ? {
-            chainId: integer(input.chainId, 'chainId', undefined, Number.MAX_SAFE_INTEGER),
-            ledgerContract: input.ledgerContract,
+            chainId, ledgerContract,
             receiptTimeoutMs: integer(input.receiptTimeoutMs, 'receiptTimeoutMs', 60_000),
             pollIntervalMs: integer(input.pollIntervalMs, 'pollIntervalMs', 1000),
             limits: {
                 gasLimit: BigInt(integer(input.gasLimit, 'gasLimit', 200_000)),
                 feePerGas: BigInt(input.maxFeePerGasWei ?? '30000000000'),
             },
-            rpc: createHttpConfig(transport(endpoint(input.rpcUrl, 'rpcUrl'), env.OYA_RPC_AUTHORIZATION)),
+            rpc: createHttpConfig(transport(endpoint(rpcUrl, 'rpcUrl'), env.OYA_RPC_AUTHORIZATION)),
         } : {}),
     });
 }

@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { createSignedMessageAuthorizer } from '@oyaprotocol/messages';
 import { getAddress } from 'ethers';
 import { targetName } from './protocol.mjs';
+import { SEPOLIA_DEFAULTS } from '../defaults.mjs';
 
 export const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 export function positive(value, fallback, max = 2147483647) {
@@ -26,12 +27,21 @@ export function parseInboxConfig(input) {
     if (Object.keys(input).some(key => !allowed.includes(key))) throw new Error('Unknown inbox configuration field.');
     createSignedMessageAuthorizer(input.allowedSigners);
     if (!input.allowedSigners.length) throw new Error('Inbox requires allowed signers.');
-    const execution = input.execution;
-    if (execution?.mode === 'ipfs') {
+    if (!input.execution || typeof input.execution !== 'object' || Array.isArray(input.execution)) {
+        throw new Error('Set execution settings with the dedicated public nodeAddress for Ledger mode.');
+    }
+    const execution = { ...input.execution, mode: input.execution.mode === undefined ? 'ledger' : input.execution.mode };
+    if (execution.mode === 'ipfs') {
         if (Object.keys(execution).join() !== 'mode') throw new Error('Unexpected IPFS execution setting.');
-    } else if (execution?.mode === 'ledger') {
-        if (Object.keys(execution).sort().join() !== 'chainId,ledgerContract,mode,nodeAddress') throw new Error('Invalid Ledger execution settings.');
-        positive(execution.chainId, undefined, Number.MAX_SAFE_INTEGER);
+    } else if (execution.mode === 'ledger') {
+        if (Object.keys(execution).some(key => !['mode', 'chainId', 'ledgerContract', 'nodeAddress'].includes(key))) {
+            throw new Error('Invalid Ledger execution settings.');
+        }
+        execution.chainId = positive(execution.chainId === undefined ? SEPOLIA_DEFAULTS.chainId : execution.chainId,
+            undefined, Number.MAX_SAFE_INTEGER);
+        if (execution.chainId === SEPOLIA_DEFAULTS.chainId && execution.ledgerContract === undefined) {
+            execution.ledgerContract = SEPOLIA_DEFAULTS.ledgerContract;
+        }
         for (const key of ['ledgerContract', 'nodeAddress']) {
             execution[key] = getAddress(execution[key]).toLowerCase();
             if (/^0x0{40}$/.test(execution[key])) throw new Error('Zero execution address.');
