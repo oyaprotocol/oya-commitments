@@ -26,7 +26,7 @@ export function createInboxServer({ config, workerToken, store, log = () => {} }
     const credential = Buffer.from(`Bearer ${workerToken}`);
     let active = 0;
     // Bound even rejected signature checks without storing attacker-controlled map keys.
-    let windowStart = 0;
+    let windowStart;
     let requests = 0;
     const server = createServer(async (request, response) => {
         if (active >= 32) { json(response, 503, { error: 'inbox_busy' }); request.resume(); return; }
@@ -43,7 +43,9 @@ export function createInboxServer({ config, workerToken, store, log = () => {} }
                 const supplied = Buffer.from(request.headers.authorization ?? '');
                 if (supplied.length !== credential.length || !timingSafeEqual(supplied, credential)) reject(401, 'worker_auth_required');
             } else {
-                if (Date.now() - windowStart >= 60000) { windowStart = Date.now(); requests = 0; }
+                // Wall-clock corrections must not extend or replenish the request budget.
+                const now = performance.now();
+                if (windowStart === undefined || now - windowStart >= 60000) { windowStart = now; requests = 0; }
                 if (++requests > 240) reject(429, 'request_limit');
             }
             const body = await readBody(request);
