@@ -4,7 +4,7 @@ Run Oya and Kubo on your own computer, mini PC, or other local device. Agents se
 
 For agent-managed setup, secure credential handoff, and optional macOS Keychain-backed worker startup, see [Deploy with an agent](deploy-with-agent.md). The commands below use persistent protected runtime files; the Keychain helper replaces the worker token's storage and startup lifecycle.
 
-Messages remain queued while the local device is asleep or offline. `202` means the inbox saved the job; check its status for publication. This guide uses the published [node-v0.3.1 image and deployment bundle](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.1), which support both modes below. Released v0.2.0 images do not contain the inbox or worker. For an existing v0.2.0 installation or local-only clients, use the [advanced direct HTTP guide](run-direct.md).
+Messages remain queued while the local device is asleep or offline. `202` means the inbox saved the job; check its status for publication. This guide targets the [node-v0.3.2 image and deployment bundle](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.2), which support both modes below. Released v0.2.0 images do not contain the inbox or worker. For an existing v0.2.0 installation or local-only clients, use the [advanced direct HTTP guide](run-direct.md).
 
 | Mode | Completed job | Local requirements |
 | --- | --- | --- |
@@ -12,6 +12,8 @@ Messages remain queued while the local device is asleep or offline. `202` means 
 | Full (`ledger`) | `logged`, with CID and transaction hash | Kubo, Ethereum RPC, deployed Ledger, funded dedicated node key |
 
 Both modes verify signatures and enforce allowlists at the inbox and again locally. Full mode uses an RPC provider; it does not synchronize an Ethereum full node. The inbox stores message content, signatures, progress, and prepared Ledger transaction bytes, but never needs the node private key. A local IPFS pin may be unavailable while the only device holding it is offline; arrange replication separately if continuous retrieval matters.
+
+Before using the download commands, confirm that node-v0.3.2 is published with all three matching release assets and an archive checksum. A source merge does not publish a release. If it is not yet available, use the complete node-v0.3.1 bundle and its embedded guides instead; do not mix versions.
 
 ## 1. Prepare the image and private local directory
 
@@ -22,19 +24,19 @@ These are first-install commands. Choose new bundle and private directories outs
 ```sh
 docker version
 docker compose version
-export OYA_BUNDLE_DIR="$HOME/oya-bundles/node-v0.3.1"
+export OYA_BUNDLE_DIR="$HOME/oya-bundles/node-v0.3.2"
 umask 077
 mkdir -p "$(dirname "$OYA_BUNDLE_DIR")"
 mkdir "$OYA_BUNDLE_DIR"
 curl -fL \
-  https://github.com/oyaprotocol/oya-commitments/releases/download/node-v0.3.1/oya-node-v0.3.1.tar.gz \
-  -o "$OYA_BUNDLE_DIR/oya-node-v0.3.1.tar.gz"
+  https://github.com/oyaprotocol/oya-commitments/releases/download/node-v0.3.2/oya-node-v0.3.2.tar.gz \
+  -o "$OYA_BUNDLE_DIR/oya-node-v0.3.2.tar.gz"
 ```
 
-Before extracting, run `shasum -a 256 "$OYA_BUNDLE_DIR/oya-node-v0.3.1.tar.gz"` on macOS or `sha256sum "$OYA_BUNDLE_DIR/oya-node-v0.3.1.tar.gz"` on Linux. Compare the result with the archive SHA-256 in the [node-v0.3.1 release notes](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.1). Continue only if it matches.
+Before extracting, run `shasum -a 256 "$OYA_BUNDLE_DIR/oya-node-v0.3.2.tar.gz"` on macOS or `sha256sum "$OYA_BUNDLE_DIR/oya-node-v0.3.2.tar.gz"` on Linux. Compare the result with the archive SHA-256 in the [node-v0.3.2 release notes](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.2). Continue only if it matches.
 
 ```sh
-tar -xzpf "$OYA_BUNDLE_DIR/oya-node-v0.3.1.tar.gz" -C "$OYA_BUNDLE_DIR"
+tar -xzpf "$OYA_BUNDLE_DIR/oya-node-v0.3.2.tar.gz" -C "$OYA_BUNDLE_DIR"
 export OYA_NODE_IMAGE="$(cat "$OYA_BUNDLE_DIR/node/production/image.txt")"
 export OYA_NODE_PLATFORM=linux/amd64
 docker pull --platform "$OYA_NODE_PLATFORM" "$OYA_NODE_IMAGE"
