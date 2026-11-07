@@ -134,8 +134,8 @@ test('validateSignedMessage rejects missing, non-string, and empty text', () => 
     );
 });
 
-test('validateSignedMessage allows ASCII bytes and rejects non-ASCII text', () => {
-    const asciiText = '\u0000\t\n\r ~\u007f';
+test('validateSignedMessage allows every ASCII byte except NUL and rejects non-ASCII text', () => {
+    const asciiText = Array.from({ length: 127 }, (_, i) => String.fromCharCode(i + 1)).join('');
     const message = validateSignedMessage({
         text: asciiText,
         signer: VALID_SIGNER,
@@ -144,7 +144,7 @@ test('validateSignedMessage allows ASCII bytes and rejects non-ASCII text', () =
 
     assert.equal(message.text, asciiText);
 
-    for (const text of ['Oya 🌱', 'café', '\u0080', '\ud800']) {
+    for (const text of ['\0', '\0before', 'before\0after', 'after\0', 'Oya 🌱', 'café', '\u0080', '\ud800']) {
         assertValidationError(
             () =>
                 validateSignedMessage({

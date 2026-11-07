@@ -6,9 +6,9 @@ To have an agent provision and verify this setup using secure credential referen
 
 The inbox stores signed message bodies, job status, and transaction checkpoints. Treat its database and worker token as trusted infrastructure. A database administrator can alter execution state; this is not an untrusted queue protocol. Keep node, deployer, and agent private keys off this host. PostgreSQL contains prepared signed Ledger transactions, which can be broadcast, but cannot authorize other transactions without the node key.
 
-This guide targets the [node-v0.3.2 image and deployment bundle](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.2). Use the same release for the [local worker](run-locally.md). v0.2.0 images support only the direct API and cannot serve an inbox.
+This guide targets the [node-v0.4.0 image and deployment bundle](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.4.0). Use the same release for the [local worker](run-locally.md). v0.2.0 images support only the direct API and cannot serve an inbox.
 
-Before using the download commands, confirm that node-v0.3.2 is published with all three matching release assets and an archive checksum. A source merge does not publish a release. If it is not yet available, use the complete node-v0.3.1 bundle and its embedded guides instead; do not mix versions.
+Before using the download commands, confirm that node-v0.4.0 is published with all three matching release assets and an archive checksum. A source merge does not publish a release. If it is not yet available, use the complete node-v0.3.1 bundle and its embedded guides instead; do not mix versions.
 
 ## Prepare the host
 
@@ -19,19 +19,19 @@ Use a separate terminal from the local worker, including when both roles share a
 ```sh
 docker version
 docker compose version
-export OYA_BUNDLE_DIR="$HOME/oya-bundles/node-v0.3.2"
+export OYA_BUNDLE_DIR="$HOME/oya-bundles/node-v0.4.0"
 umask 077
 mkdir -p "$(dirname "$OYA_BUNDLE_DIR")"
 mkdir "$OYA_BUNDLE_DIR"
 curl -fL \
-  https://github.com/oyaprotocol/oya-commitments/releases/download/node-v0.3.2/oya-node-v0.3.2.tar.gz \
-  -o "$OYA_BUNDLE_DIR/oya-node-v0.3.2.tar.gz"
+  https://github.com/oyaprotocol/oya-commitments/releases/download/node-v0.4.0/oya-node-v0.4.0.tar.gz \
+  -o "$OYA_BUNDLE_DIR/oya-node-v0.4.0.tar.gz"
 ```
 
-Before extracting, run `shasum -a 256 "$OYA_BUNDLE_DIR/oya-node-v0.3.2.tar.gz"` on macOS or `sha256sum "$OYA_BUNDLE_DIR/oya-node-v0.3.2.tar.gz"` on Linux. Compare the result with the archive SHA-256 in the [node-v0.3.2 release notes](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.2). Continue only if it matches.
+Before extracting, run `shasum -a 256 "$OYA_BUNDLE_DIR/oya-node-v0.4.0.tar.gz"` on macOS or `sha256sum "$OYA_BUNDLE_DIR/oya-node-v0.4.0.tar.gz"` on Linux. Compare the result with the archive SHA-256 in the [node-v0.4.0 release notes](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.4.0). Continue only if it matches.
 
 ```sh
-tar -xzpf "$OYA_BUNDLE_DIR/oya-node-v0.3.2.tar.gz" -C "$OYA_BUNDLE_DIR"
+tar -xzpf "$OYA_BUNDLE_DIR/oya-node-v0.4.0.tar.gz" -C "$OYA_BUNDLE_DIR"
 export OYA_NODE_IMAGE="$(cat "$OYA_BUNDLE_DIR/node/production/image.txt")"
 export OYA_NODE_PLATFORM=linux/amd64
 docker pull --platform "$OYA_NODE_PLATFORM" "$OYA_NODE_IMAGE"
@@ -60,18 +60,22 @@ YAML
 
 Use your actual hostname and a new private directory outside shared/cloud-synced folders. The override selects the Oya image's platform; PostgreSQL and Caddy use their native platforms. Keep the bundle location and project name stable because the project owns database and TLS volumes. If this is an existing installation, source its saved `compose.env` instead of repeating initialization or regenerating secrets. Save the selected settings in the start step below, after choosing the database option.
 
-Edit `inbox.json`. Set the target name and public agent allowlist from the [local guide](run-locally.md). Choose `execution: {"mode":"ipfs"}` for IPFS-only. For Ledger use:
+Edit `inbox.json`. Set the target name and replace the sample public agent allowlist with approved client addresses from the [local guide](run-locally.md). For **default Sepolia Ledger mode**, use this execution identity, matching the worker:
 
 ```json
 "execution": {
   "mode": "ledger",
   "chainId": 11155111,
-  "ledgerContract": "LEDGER_ADDRESS",
-  "nodeAddress": "PUBLIC_NODE_ADDRESS"
+  "ledgerContract": "0xe6DeB4B3c31E15DBeA0f932830e2f20Ba2EddAa3",
+  "nodeAddress": "REPLACE_WITH_PUBLIC_NODE_ADDRESS"
 }
 ```
 
-Replace placeholders with the worker's actual public settings. A target's execution identity is immutable in the database. Reconcile pending jobs before changing identity and use a new target for the new configuration. The worker rejects inbox jobs whose signatures or local allowlist do not match.
+Replace `REPLACE_WITH_PUBLIC_NODE_ADDRESS` with the dedicated funded Sepolia node signer's **public address**. Keep its private key on the worker. Set the mode, chain, and contract explicitly as shown for compatibility with older images. See the [canonical target and verification evidence](README.md#deployed-sepolia-ledger).
+
+To opt out of onchain logging, use `execution: {"mode":"ipfs"}` instead and the matching IPFS-only worker configuration. Remove chain, contract, and node-address fields entirely; IPFS mode rejects Ethereum fields. Configure the client allowlist in both roles.
+
+A target's execution identity is immutable in the database. Preserve saved settings when updating an installation. Reconcile pending jobs before deliberately changing identity and use a new target for the new configuration. The worker rejects mismatched execution identities, signatures, or local allowlists.
 
 ## Choose PostgreSQL hosting
 

@@ -54,6 +54,11 @@
 - Use descriptive variable names (avoid single letters outside of loop counters or hashes).
 - For Node.js code in `agent/` and `agent-library/`, keep modules small and isolate side effects at the edges.
 
+## Comments and Documentation
+- State what the code does or what the reader should do, concisely and positively.
+- Omit wordy non-goals, lists of what is not happening or not verified, and reassurance that unrelated behavior remains unchanged.
+- Keep security warnings, compatibility constraints, and validation limits that affect a decision or prevent a misleading claim; state each where it is actionable.
+
 ## Agent Locality Rule
 - New functionality for a specific agent must be implemented in that agent's own files under `agent-library/agents/<agent-name>/`.
 - Do not add agent-specific behavior to shared generalized files in `agent/src/lib/` or `agent/src/index.js`.

@@ -40,6 +40,32 @@ test('initialization persists a private key and enrolls it once without replacin
     assert.equal((await stat(f.keyPath)).mode & 0o777, 0o600);
 });
 
+test('initialization accepts omitted Sepolia defaults without inserting explicit settings', async (t) => {
+    for (const mode of [undefined, 'ledger']) {
+        await t.test(mode === undefined ? 'omitted mode' : 'explicit Ledger', async (t) => {
+            const f = await fixture(t);
+            const config = { ...(mode === undefined ? {} : { mode }), allowedSigners: [f.existing] };
+            await writeFile(f.configPath, JSON.stringify(config));
+            const address = await initialize(f.keyPath, f.configPath);
+            assert.equal(await initialize(f.keyPath, f.configPath), address);
+            assert.deepEqual(JSON.parse(await readFile(f.configPath, 'utf8')), {
+                ...config, allowedSigners: [f.existing, address],
+            });
+        });
+    }
+});
+
+test('explicit invalid chains are never defaulted and leave keys and settings untouched', async (t) => {
+    const f = await fixture(t);
+    for (const chainId of [null, 0, 1, '11155111', [11155111], {}, 11155111.5]) {
+        const original = JSON.stringify({ ...f.config, chainId });
+        await writeFile(f.configPath, original);
+        await assert.rejects(initialize(f.keyPath, f.configPath));
+        await assert.rejects(readFile(f.keyPath), { code: 'ENOENT' });
+        assert.equal(await readFile(f.configPath, 'utf8'), original);
+    }
+});
+
 test('IPFS initialization needs only an allowlist and preserves a generated key across runs', async (t) => {
     const f = await fixture(t);
     await writeFile(f.configPath, JSON.stringify({ mode: 'ipfs', allowedSigners: [] }));

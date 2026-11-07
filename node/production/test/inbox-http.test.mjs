@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
+import { Wallet } from 'ethers';
+import { signJob } from '../src/inbox/protocol.mjs';
 import { createInboxServer } from '../src/inbox/http.mjs';
 import { InboxStore } from '../src/inbox/store.mjs';
 
@@ -27,6 +29,27 @@ async function fixture(t) {
         },
     };
 }
+
+test('signed NUL text is rejected before storage while other ASCII remains unchanged', async t => {
+    const f = await fixture(t);
+    const wallet = Wallet.createRandom();
+    f.store.config.allowedSigners = [wallet.address];
+    const received = [];
+    f.store.enqueue = f.store.status = async job => { received.push(job); return { status: 'queued' }; };
+    for (const route of ['jobs', 'status']) {
+        for (const text of ['\0', 'before\0after', 'after\0']) {
+            const job = await signJob(wallet, 'test', text);
+            assert.deepEqual(await f.post(route, job, false),
+                { status: 403, body: { error: 'invalid_signed_job' } });
+        }
+    }
+    assert.equal(received.length, 0);
+    const text = '\x01\t\r\n\x7f literal \\u0000';
+    const job = await signJob(wallet, 'test', text);
+    assert.deepEqual(await f.post('jobs', job, false), { status: 202, body: { status: 'queued' } });
+    assert.deepEqual(await f.post('status', job, false), { status: 200, body: { status: 'queued' } });
+    assert.deepEqual(received, [job, job]);
+});
 
 for (const route of ['claim', 'renew', 'checkpoint', 'complete', 'retry']) {
     test(`worker ${route} rejects non-object bodies before accessing the store`, async t => {
@@ -67,6 +90,33 @@ test('worker authentication and public signed-job validation keep their preceden
     }
     assert.equal(f.calls(), 0);
 });
+
+for (const clockShift of [-3600000, 3600000]) {
+    test(`public request budget ignores wall-clock shift ${clockShift}`, async t => {
+        let elapsed = 1000;
+        let wallTime = 1700000000000;
+        t.mock.method(performance, 'now', () => elapsed);
+        t.mock.method(Date, 'now', () => wallTime);
+        const f = await fixture(t);
+        const invalid = { status: 403, body: { error: 'invalid_signed_job' } };
+        const limited = { status: 429, body: { error: 'request_limit' } };
+        for (let i = 0; i < 240; i++) {
+            assert.deepEqual(await f.post(i % 2 ? 'status' : 'jobs', null, false), invalid);
+        }
+        assert.deepEqual(await f.post('jobs', null, false), limited);
+        wallTime += clockShift;
+        elapsed += 59999;
+        assert.deepEqual(await f.post('status', null, false), limited);
+        assert.deepEqual(await f.post('worker/claim', { target: 'test', execution: { mode: 'ipfs' } }),
+            { status: 200, body: { work: null, leaseMs: 30000 } });
+        elapsed++;
+        for (let i = 0; i < 240; i++) {
+            assert.deepEqual(await f.post('jobs', null, false), invalid);
+        }
+        assert.deepEqual(await f.post('status', null, false), limited);
+        assert.equal(f.calls(), 1);
+    });
+}
 
 test('valid worker mutation bodies are forwarded unchanged', async t => {
     const f = await fixture(t);

@@ -10,6 +10,20 @@ async function saveNew(path, content) {
     const file = await open(path, 'wx', 0o600);
     try { await file.writeFile(content); await file.sync(); } finally { await file.close(); }
 }
+async function readMessage(path) {
+    const file = await open(path, 'r');
+    try {
+        // One extra byte detects oversized input without loading the whole file.
+        const buffer = Buffer.alloc(8193);
+        let size = 0;
+        while (size < buffer.length) {
+            const { bytesRead } = await file.read(buffer, size, buffer.length - size, null);
+            if (!bytesRead) return buffer.subarray(0, size).toString('utf8');
+            size += bytesRead;
+        }
+        throw new Error('Message too large.');
+    } finally { await file.close(); }
+}
 export async function main(args = process.argv.slice(2)) {
     const [command, ...rest] = args;
     if (command === 'keygen' && rest.length === 1) {
@@ -19,8 +33,8 @@ export async function main(args = process.argv.slice(2)) {
     } else if (command === 'prepare' && rest.length === 4) {
         const [keyFile, target, textFile, jobFile] = rest;
         const wallet = new Wallet((await readFile(keyFile, 'utf8')).trim());
-        const text = await readFile(textFile, 'utf8');
-        if (!text.length || !/^[\x00-\x7f]+$/.test(text)) throw new Error('Message must be nonempty ASCII text.');
+        const text = await readMessage(textFile);
+        if (!text.length || !/^[\x01-\x7f]+$/.test(text)) throw new Error('Message must be nonempty ASCII text without NUL.');
         if (Buffer.byteLength(text) > 8192) throw new Error('Message too large.');
         const job = await signJob(wallet, target, text);
         await saveNew(jobFile, JSON.stringify(job, null, 2) + '\n');

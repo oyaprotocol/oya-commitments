@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, open, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { main } from '../src/inbox/client.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -69,6 +70,45 @@ test('inbox client retains transport and incomplete-body failures', async () => 
     await assert.rejects(streaming('/v1/status', {}), error => error === failure);
 });
 
+test('inbox prepare bounds message reads even with short filesystem reads', async t => {
+    const directory = await mkdtemp(join(tmpdir(), 'oya-inbox-bounded-'));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const key = join(directory, 'key');
+    const textFile = join(directory, 'message');
+    const jobFile = join(directory, 'job.json');
+    const wallet = Wallet.createRandom();
+    await writeFile(key, wallet.privateKey, { mode: 0o600 });
+    await writeFile(textFile, 'a'.repeat(65536));
+    const probe = await open(textFile, 'r');
+    const prototype = Object.getPrototypeOf(probe);
+    const read = prototype.read;
+    await probe.close();
+    let total = 0;
+    const handles = new Set();
+    t.mock.method(prototype, 'read', async function(buffer, offset, length, position) {
+        assert.ok(buffer.length <= 8193, 'message buffer must be bounded');
+        const result = await read.call(this, buffer, offset, Math.min(length, 127), position);
+        total += result.bytesRead;
+        handles.add(this);
+        return result;
+    });
+    await assert.rejects(main(['prepare', key, 'test', textFile, jobFile]), { message: 'Message too large.' });
+    assert.equal(total, 8193, 'read only the limit plus one overflow byte');
+    await assert.rejects(stat(jobFile), { code: 'ENOENT' });
+    for (const handle of handles) assert.equal(handle.fd, -1, 'close rejected input');
+    total = 0;
+    handles.clear();
+    const text = 'a'.repeat(8189) + '\r\n\t';
+    await writeFile(textFile, text);
+    t.mock.method(console, 'log', () => {});
+    await main(['prepare', key, 'test', textFile, jobFile]);
+    assert.equal(total, 8192);
+    const job = JSON.parse(await readFile(jobFile, 'utf8'));
+    assert.equal(job.message.text, text);
+    await validateJob(job, { target: 'test', allowedSigners: [wallet.address] });
+    for (const handle of handles) assert.equal(handle.fd, -1, 'close accepted input');
+});
+
 test('inbox prepare rejects unsupported text before creating a signed job', async t => {
     const directory = await mkdtemp(join(tmpdir(), 'oya-inbox-client-'));
     t.after(() => rm(directory, { recursive: true, force: true }));
@@ -79,6 +119,7 @@ test('inbox prepare rejects unsupported text before creating a signed job', asyn
     await writeFile(key, wallet.privateKey + '\n', { mode: 0o600 });
     for (const [name, text] of [
         ['empty', ''], ['non-ASCII', 'café'], ['invalid UTF-8', Buffer.from([0xff])],
+        ['NUL', 'before\0after'],
         ['oversized', 'a'.repeat(8193)],
     ]) {
         await t.test(name, async () => {
