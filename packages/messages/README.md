@@ -35,7 +35,7 @@ The v1 signed text message body is:
 
 `validateSignedMessage(input)` validates that the body is a JSON-style object with exactly `text`, `signer`, and `signature`.
 
-- `text` must be a non-empty ASCII string and is preserved exactly as submitted.
+- `text` must be a non-empty basic ASCII string except NUL (`U+0000`): allowed characters are `U+0001`–`U+007F`, including tabs, newlines, and other ASCII controls. Accepted text is preserved exactly as submitted; NUL is rejected, never stripped or replaced.
 - `signer` must be a 20-byte `0x`-prefixed Ethereum address and is preserved as submitted.
 - `signature` must be a 65-byte `0x`-prefixed Ethereum signature string and is preserved as submitted.
 - Unknown top-level fields are rejected.

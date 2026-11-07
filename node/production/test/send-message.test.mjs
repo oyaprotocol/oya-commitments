@@ -28,7 +28,7 @@ async function fixture(t, handler) {
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
     return {
-        wallet, requests: () => requests,
+        wallet, textFile, requests: () => requests,
         send(timeout) {
             const env = { ...process.env, OYA_AGENT_PRIVATE_KEY: wallet.privateKey };
             delete env.OYA_MESSAGE_TIMEOUT_MS;
@@ -82,6 +82,13 @@ test('sender rejects invalid deadline settings before making requests', async t 
             return true;
         });
     }
+    assert.equal(f.requests(), 0);
+});
+
+test('sender rejects NUL text before making requests', async t => {
+    const f = await fixture(t, response => response.end('{}'));
+    await writeFile(f.textFile, 'before\0after');
+    await assert.rejects(f.send(), error => error.code === 1);
     assert.equal(f.requests(), 0);
 });
 

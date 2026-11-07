@@ -77,6 +77,9 @@ test('HTTP rejects unauthenticated and oversized requests before publication', a
     assert.equal((await post(null)).status, 400);
     assert.equal((await post(message, { body: '{bad json' })).status, 400);
     assert.equal((await post({ ...message, text: 'tampered' })).status, 401);
+    const nulResponse = await post(await signedMessage(setup.agent, 'before\0after'));
+    assert.equal(nulResponse.status, 400);
+    assert.equal((await nulResponse.json()).code, 'invalid_text');
     assert.equal((await post(await signedMessage(Wallet.createRandom()))).status, 403);
     assert.equal((await post({ ...message, text: 'x'.repeat(101) })).status, 413);
     assert.equal((await post({ text: 'x'.repeat(2000) })).status, 413);

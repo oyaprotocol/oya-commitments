@@ -107,6 +107,8 @@ export function createNodeServer({ config, transactionPreparer, nodeAddress, fet
             const result = await handleSignedMessage({ method: request.method, contentType: request.headers['content-type'], body }, {
                 authorize: config.authorize, maxBodyBytes: config.maxBodyBytes, maxTextBytes: config.maxTextBytes,
                 onAcceptedMessage: async (message) => {
+                    // Enforce the character contract even with the pinned, pre-NUL-restriction kernel.
+                    if (message.text.includes('\0')) throw new HttpFailure(400, { code: 'invalid_text' });
                     // Only verified, allowlisted messages consume the shared budget. No work is queued.
                     const elapsedMs = performance.now() - messageWindowsStartedAt;
                     const window = Math.floor(elapsedMs / 60_000);
