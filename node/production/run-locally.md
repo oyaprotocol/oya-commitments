@@ -4,12 +4,12 @@ Run Oya and Kubo on your own computer, mini PC, or other local device. Agents se
 
 For agent-managed setup, secure credential handoff, and optional macOS Keychain-backed worker startup, see [Deploy with an agent](deploy-with-agent.md). The commands below use persistent protected runtime files; the Keychain helper replaces the worker token's storage and startup lifecycle.
 
-Messages remain queued while the local device is asleep or offline. `202` means the inbox saved the job; check its status for publication. This guide uses the published [node-v0.3.1 image and deployment bundle](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.1), which support both modes below. Released v0.2.0 images do not contain the inbox or worker. For an existing v0.2.0 installation or local-only clients, use the [advanced direct HTTP guide](run-direct.md).
+Messages remain queued while the local device is asleep or offline. `202` means the inbox saved the job; check its status for publication. New nodes default to verifying signed messages, publishing to IPFS, then logging CIDs to the [deployed Sepolia Ledger](README.md#deployed-sepolia-ledger). This guide uses the published [node-v0.3.1 image and deployment bundle](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.1), which support both modes below but **predate the new defaults and templates**. Set the explicit values in this guide when using those assets. Released v0.2.0 images do not contain the inbox or worker. For an existing v0.2.0 installation or local-only clients, use the [advanced direct HTTP guide](run-direct.md).
 
 | Mode | Completed job | Local requirements |
 | --- | --- | --- |
-| IPFS-only (`ipfs`) | `published`, with CID | Kubo; no Ethereum RPC, node transaction key, or gas |
-| Full (`ledger`) | `logged`, with CID and transaction hash | Kubo, Ethereum RPC, deployed Ledger, funded dedicated node key |
+| Default Ledger (`ledger`) | `logged`, with CID and transaction hash | Kubo, approved Sepolia RPC, separate dedicated node key funded with Sepolia ETH; Ledger is already deployed |
+| Explicit IPFS-only (`ipfs`) | `published`, with CID | Kubo; no Ethereum RPC, node transaction key, or gas |
 
 Both modes verify signatures and enforce allowlists at the inbox and again locally. Full mode uses an RPC provider; it does not synchronize an Ethereum full node. The inbox stores message content, signatures, progress, and prepared Ledger transaction bytes, but never needs the node private key. A local IPFS pin may be unavailable while the only device holding it is offline; arrange replication separately if continuous retrieval matters.
 
@@ -76,7 +76,28 @@ Record the printed public agent address. The private key is written only to `age
 
 ## 2. Configure one execution mode
 
-For **IPFS-only**, create `$OYA_LOCAL_DIR/node.json`, replacing the agent placeholder:
+For **default Sepolia Ledger mode**, create `$OYA_LOCAL_DIR/node.json` below. Replace `AGENT_ADDRESS` with the approved public message-signing address from step 1. The [existing Ledger and verification evidence](README.md#deployed-sepolia-ledger) are available for this target. The public RPC has no availability guarantee and can be replaced with an operator-approved Sepolia endpoint. These explicit target fields also work with the older image selected above.
+
+```json
+{
+  "mode": "ledger",
+  "host": "0.0.0.0",
+  "port": 8787,
+  "allowedSigners": ["AGENT_ADDRESS"],
+  "ipfsUrl": "http://ipfs:5001",
+  "chainId": 11155111,
+  "rpcUrl": "https://ethereum-sepolia-rpc.publicnode.com",
+  "ledgerContract": "0xe6DeB4B3c31E15DBeA0f932830e2f20Ba2EddAa3",
+  "receiptTimeoutMs": 60000,
+  "operationTimeoutMs": 180000,
+  "gasLimit": 200000,
+  "maxFeePerGasWei": "30000000000"
+}
+```
+
+Generate a separate node account with `oya_client keygen /private/node-key`, record its public address, and fund that address with Sepolia ETH. In a trusted local editor, create `node.env` containing `OYA_NODE_PRIVATE_KEY=` followed by the contents of `node-key`. Use literal, unquoted `KEY=value` lines. Optional complete headers are `OYA_RPC_AUTHORIZATION` and `OYA_IPFS_AUTHORIZATION`. Never use the worker's node account in another transaction-sending process or send its key to the hosted inbox. Keep client and any deployer keys separate. Obtain authorization for testnet gas expenditure before submitting jobs.
+
+For **explicit IPFS-only operation instead**, use this `node.json`, replacing the same client-address placeholder:
 
 ```json
 {
@@ -88,32 +109,9 @@ For **IPFS-only**, create `$OYA_LOCAL_DIR/node.json`, replacing the agent placeh
 }
 ```
 
-Create an empty private environment file. No node account, RPC, contract, or funding is needed:
+Create an empty private environment file with `touch "$OYA_LOCAL_DIR/node.env"`. Do not include Ethereum settings (`chainId`, `ledgerContract`, `rpcUrl`, `receiptTimeoutMs`, `pollIntervalMs`, `gasLimit`, or `maxFeePerGasWei`); they are rejected, not ignored. A separate client signing key and allowlist remain required.
 
-```sh
-touch "$OYA_LOCAL_DIR/node.env"
-```
-
-For **full Ledger mode**, use this `node.json` instead. Replace all placeholders and verify the contract on your selected chain. Sepolia is useful for testing without mainnet funds; [deploy or verify Ledger](README.md#deploy-ledger-on-sepolia) separately if needed.
-
-```json
-{
-  "mode": "ledger",
-  "host": "0.0.0.0",
-  "port": 8787,
-  "allowedSigners": ["AGENT_ADDRESS"],
-  "ipfsUrl": "http://ipfs:5001",
-  "chainId": 11155111,
-  "rpcUrl": "https://YOUR_RPC_ENDPOINT",
-  "ledgerContract": "LEDGER_ADDRESS",
-  "receiptTimeoutMs": 60000,
-  "operationTimeoutMs": 180000,
-  "gasLimit": 200000,
-  "maxFeePerGasWei": "30000000000"
-}
-```
-
-Generate a separate node account with `oya_client keygen /private/node-key` and record/fund its public address. In a trusted local editor, create `node.env` containing `OYA_NODE_PRIVATE_KEY=` followed by the contents of `node-key`. Use literal, unquoted `KEY=value` lines. Optional complete headers are `OYA_RPC_AUTHORIZATION` and `OYA_IPFS_AUTHORIZATION`. Never use the worker's node account in another transaction-sending process. Keep agent and deployer keys separate.
+Use only one configuration path. Existing installations keep their private settings and saved execution identity. To select another chain in Ledger mode, supply that chain's contract and RPC explicitly rather than relying on Sepolia defaults.
 
 ```sh
 chmod 600 "$OYA_LOCAL_DIR/node.json" "$OYA_LOCAL_DIR/node.env"
@@ -121,7 +119,7 @@ chmod 600 "$OYA_LOCAL_DIR/node.json" "$OYA_LOCAL_DIR/node.env"
 
 ## 3. Host and connect the inbox
 
-Follow [Host the PostgreSQL inbox](host-inbox.md) in a separate terminal on your chosen host, then return to this local-worker terminal. Keep separate terminals even if both roles run on one device, because they select different Compose projects and private directories. The inbox supports bundled PostgreSQL or an existing managed/private database. It needs the same target, agent allowlist, and mode. Full mode also requires the public node address, chain ID, and Ledger address. The database binds the target to these execution settings.
+Follow [Host the PostgreSQL inbox](host-inbox.md) in a separate terminal on your chosen host, then return to this local-worker terminal. Keep separate terminals even if both roles run on one device, because they select different Compose projects and private directories. The inbox supports bundled PostgreSQL or an existing managed/private database. It needs the same target, agent allowlist, and mode. For default Ledger mode, explicitly configure the same Sepolia chain and Ledger plus the dedicated node's real **public** address; `nodeAddress` is required and never inferred. Replace the new inbox template's `REPLACE_WITH_PUBLIC_NODE_ADDRESS` placeholder before starting. Never copy `node-key` or `node.env` to the inbox. The database binds the target to these execution settings.
 
 Copy only the generated `worker-secrets.json` from that setup into `$OYA_LOCAL_DIR` over a trusted channel. This is a shared worker token; the local node does not need the database password. Create `$OYA_LOCAL_DIR/worker.json`:
 
@@ -156,7 +154,7 @@ The container UID/GID must read the mode-0600 mounts. Copied secrets must belong
 
 ## 4. Submit and track a message
 
-On the agent's device, with the helper above:
+On the agent's device, with the helper above and authorization to publish public content and spend Sepolia gas in Ledger mode:
 
 ```sh
 printf '%s\n' 'Hello from my locally hosted Oya node.' > "$OYA_LOCAL_DIR/message.txt"
@@ -166,6 +164,8 @@ oya_client status https://inbox.example.com /private/job.json
 ```
 
 `prepare` saves a signed request with a random ID and a 24-hour submission/start deadline. It refuses to overwrite an existing file. Retry **the same job file** after a failed submission or lost response. Preparing another ID authorizes another job, including another Ledger transaction. Status reads require the saved signed envelope, even after its deadline. Keep the file private until you intend to publish its contents.
+
+Default Ledger completion is `logged`, not merely `202`, a CID, or a transaction hash. Check the successful receipt and `Log` event from the configured Ledger for your node and exact CID, then retrieve the signed envelope with `docker compose exec -T ipfs ipfs cat /ipfs/REPLACE_WITH_RETURNED_CID` and verify its message and client signature. Use the [testnet acceptance checklist](testnet-ledger.md) for detailed receipt evidence. For explicit IPFS-only mode, expect `published` with no transaction. Local retrieval does not prove independent replication.
 
 To verify offline delivery, run `docker compose stop node`, prepare a different job file, submit it, and observe `queued`. Run `docker compose start node`; that job becomes `published` or `logged`. Unstarted jobs become `expired` on a worker claim after their deadline. Started jobs continue recovery after the deadline. The old hourly agent uses the synchronous API; use it only with the [direct profile](run-direct.md). New senders use this client or the [inbox API](inbox-api.md).
 

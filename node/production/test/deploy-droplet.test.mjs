@@ -158,6 +158,22 @@ test('optional testing profile generates its own secret, enrolls its address, an
     assert.equal(f.commands().filter(args => args[1] === 'up').length, 1);
 });
 
+test('optional testing profile accepts omitted Sepolia execution defaults without rewriting them', (t) => {
+    const f = fixture(t);
+    for (const key of ['mode', 'chainId', 'ledgerContract', 'rpcUrl']) delete f.config[key];
+    writeFileSync(f.configFile, JSON.stringify(f.config));
+    const result = f.run(['--with-test-agent', 'oya@example.com', 'node.example.com', f.configFile, f.envFile, image]);
+    assert.equal(result.status, 0, result.stderr);
+    const deployment = join(f.remote, 'oya');
+    const key = readFileSync(join(deployment, 'test-agent-private/key'), 'utf8').trim();
+    assert.deepEqual(JSON.parse(readFileSync(join(deployment, 'node.json'))), {
+        ...f.config, allowedSigners: [...f.config.allowedSigners, new Wallet(key).address],
+    });
+    assert.deepEqual(JSON.parse(readFileSync(f.configFile)), f.config);
+    assert.equal(f.commands().filter(args => args[1] === 'up').length, 1);
+    assert.equal((result.stdout + result.stderr).includes(key), false);
+});
+
 test('IPFS deployment validates an empty secrets file and enrolls an optional agent without Ethereum settings', async (t) => {
     for (const testing of [false, true]) {
         await t.test(testing ? 'hourly agent' : 'node only', (t) => {
@@ -186,6 +202,8 @@ test('IPFS deployment validates an empty secrets file and enrolls an optional ag
 
 test('testing on an unsupported chain stops before any services start', (t) => {
     const f = fixture(t);
+    f.config.chainId = 1;
+    writeFileSync(f.configFile, JSON.stringify(f.config));
     const result = f.run(['--with-test-agent', 'oya@example.com', 'node.example.com', f.configFile, f.envFile, image]);
     assert.notEqual(result.status, 0);
     assert.equal(f.commands().some(args => args[1] === 'up'), false);

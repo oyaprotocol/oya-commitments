@@ -9,7 +9,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import test from 'node:test';
-import { ContractFactory, JsonRpcProvider, Wallet } from 'ethers';
+import { ContractFactory, Interface, JsonRpcProvider, Wallet, keccak256, toUtf8Bytes } from 'ethers';
+import { SEPOLIA_DEFAULTS } from '../src/defaults.mjs';
 import { createInboxClient } from '../src/inbox/http.mjs';
 import { signJob } from '../src/inbox/protocol.mjs';
 import { createFixtureRedactor } from './inbox-docker-diagnostics.mjs';
@@ -17,7 +18,7 @@ import { createFixtureRedactor } from './inbox-docker-diagnostics.mjs';
 const execute = promisify(execFile);
 const production = fileURLToPath(new URL('../', import.meta.url));
 
-test('packaged inbox and local worker publish offline-queued jobs through HTTPS in both modes', { timeout: 600000 }, async t => {
+test('packaged inbox and local worker publish offline-queued jobs through HTTPS in both modes and with Sepolia defaults', { timeout: 600000 }, async t => {
     const directory = await mkdtemp(join(tmpdir(), 'oya-inbox-docker-'));
     if (process.getuid?.() === 0) await chown(directory, 1000, 1000);
     const project = `oya-inbox-${randomUUID()}`;
@@ -113,11 +114,14 @@ test('packaged inbox and local worker publish offline-queued jobs through HTTPS 
         source: \${OYA_INBOX_DIR}/Caddyfile
         target: /etc/caddy/Caddyfile
         read_only: true
-  anvil:
+  anvil: &anvil
     image: ghcr.io/foundry-rs/foundry:v1.5.1@sha256:3a70bfa9bd2c732a767bb60d12c8770b40e8f9b6cca28efc4b12b1be81c7f28e
     entrypoint: [anvil]
     command: [--host, "0.0.0.0", --chain-id, "31337", --accounts, "0", --silent]
     ports: ["127.0.0.1::8545"]
+  sepolia:
+    <<: *anvil
+    command: [--host, "0.0.0.0", --chain-id, "11155111", --accounts, "0", --silent]
 `);
     configured = true;
     progress('verify proxy configuration with Linux file ownership');
@@ -142,7 +146,7 @@ test('packaged inbox and local worker publish offline-queued jobs through HTTPS 
     const preparedJob = JSON.parse(await readFile(join(directory, 'client-job.json'), 'utf8'));
     assert.equal(preparedJob.message.signer, generated.address);
     await assert.rejects(client(['prepare', '/private/client-key', 'test-ipfs', '/private/client-text', '/private/client-job.json']));
-    await compose(['up', '-d', '--wait', 'postgres', 'ipfs', 'anvil']);
+    await compose(['up', '-d', '--wait', 'postgres', 'ipfs', 'anvil', 'sepolia']);
     const provider = new JsonRpcProvider(await endpoint('anvil', 8545));
     t.after(() => provider.destroy());
     await until(() => provider.send('eth_chainId', []));
@@ -154,19 +158,32 @@ test('packaged inbox and local worker publish offline-queued jobs through HTTPS 
     const ledger = await new ContractFactory(artifact.abi, artifact.bytecode.object, deployer).deploy();
     await ledger.waitForDeployment();
     const ledgerContract = await ledger.getAddress();
+    const ledgerAbi = new Interface(artifact.abi);
+    // This is a second disposable local chain, not a public Sepolia connection.
+    const sepolia = new JsonRpcProvider(await endpoint('sepolia', 8545));
+    t.after(() => sepolia.destroy());
+    await until(async () => BigInt(await sepolia.send('eth_chainId', [])) === 11155111n);
+    await sepolia.send('anvil_setBalance', [nodeWallet.address, '0x56bc75e2d63100000']);
+    await sepolia.send('anvil_setCode', [SEPOLIA_DEFAULTS.ledgerContract, await provider.getCode(ledgerContract)]);
     const ipfsUrl = await endpoint('ipfs', 5001);
 
-    for (const mode of ['ipfs', 'ledger']) {
-        progress(`${mode}: configure and start inbox with worker offline`);
-        const target = `test-${mode}`;
-        const execution = mode === 'ipfs' ? { mode } : { mode, chainId: 31337, ledgerContract, nodeAddress: nodeWallet.address };
+    for (const scenario of ['ipfs', 'ledger', 'sepolia-defaults']) {
+        const defaults = scenario === 'sepolia-defaults';
+        const mode = scenario === 'ipfs' ? 'ipfs' : 'ledger';
+        const chain = defaults ? sepolia : provider;
+        const expectedLedger = defaults ? SEPOLIA_DEFAULTS.ledgerContract : ledgerContract;
+        progress(`${scenario}: configure and start inbox with worker offline`);
+        const target = `test-${scenario}`;
+        const execution = defaults ? { nodeAddress: nodeWallet.address } : mode === 'ipfs' ? { mode }
+            : { mode, chainId: 31337, ledgerContract, nodeAddress: nodeWallet.address };
         await write('inbox.json', JSON.stringify({ target, host: '0.0.0.0', allowedSigners: [agent.address], execution, databaseTls: false }));
-        await write('node.json', JSON.stringify({ mode, host: '0.0.0.0', allowedSigners: [agent.address], ipfsUrl: 'http://ipfs:5001',
-            ...(mode === 'ledger' ? { chainId: 31337, ledgerContract, rpcUrl: 'http://anvil:8545' } : {}) }));
+        await write('node.json', JSON.stringify({ host: '0.0.0.0', allowedSigners: [agent.address], ipfsUrl: 'http://ipfs:5001',
+            ...(defaults ? { rpcUrl: 'http://sepolia:8545' } : { mode,
+                ...(mode === 'ledger' ? { chainId: 31337, ledgerContract, rpcUrl: 'http://anvil:8545' } : {}) }) }));
         await write('node.env', mode === 'ledger' ? `OYA_NODE_PRIVATE_KEY=${nodeWallet.privateKey}\n` : '');
         await write('worker.json', JSON.stringify({ target, url: 'https://proxy', pollIntervalMs: 1000 }));
         await compose(['up', '-d', '--force-recreate', '--wait', 'inbox', 'proxy']);
-        progress(`${mode}: wait for proxy CA certificate`);
+        progress(`${scenario}: wait for proxy CA certificate`);
         const ca = await until(() => compose(['exec', '-T', 'proxy', 'cat', '/data/caddy/pki/authorities/local/root.crt'], 10000),
             { timeoutMs: 120000 });
         await write('root.crt', ca);
@@ -183,13 +200,13 @@ test('packaged inbox and local worker publish offline-queued jobs through HTTPS 
             request.end(options.body);
         });
         const api = createInboxClient('https://proxy', undefined, transport);
-        progress(`${mode}: verify HTTPS inbox and queue offline job`);
+        progress(`${scenario}: verify HTTPS inbox and queue offline job`);
         await until(async () => (await transport('https://proxy/healthz', { method: 'GET', signal: AbortSignal.timeout(5000) })).status === 404);
-        const job = await signJob(agent, target, `Real ${mode} inbox publication`);
+        const job = await signJob(agent, target, `Real ${scenario} inbox publication`);
         assert.equal((await api('/v1/jobs', job)).status, 'queued');
         await compose(['restart', 'inbox']);
         assert.equal((await until(() => api('/v1/status', job))).status, 'queued');
-        progress(`${mode}: start local worker and verify publication`);
+        progress(`${scenario}: start local worker and verify publication`);
         await compose(['up', '-d', '--force-recreate', '--wait', '--wait-timeout', '90', 'node']);
         const completed = await until(async () => {
             const status = await api('/v1/status', job);
@@ -198,8 +215,19 @@ test('packaged inbox and local worker publish offline-queued jobs through HTTPS 
         const content = await (await fetch(`${ipfsUrl}/api/v0/cat?arg=${completed.cid}`, { method: 'POST' })).json();
         assert.deepEqual(content, job.message);
         if (mode === 'ledger') {
-            assert.equal(await provider.getTransactionCount(nodeWallet.address, 'latest'), 1);
-            assert.equal((await provider.getTransactionReceipt(completed.transactionHash)).status, 1);
+            assert.equal(await chain.getTransactionCount(nodeWallet.address, 'latest'), 1);
+            const receipt = await chain.getTransactionReceipt(completed.transactionHash);
+            assert.equal(receipt.status, 1);
+            assert.equal(receipt.to.toLowerCase(), expectedLedger.toLowerCase());
+            assert.equal(receipt.from, nodeWallet.address);
+            assert.equal(receipt.logs.length, 1);
+            assert.equal(receipt.logs[0].address.toLowerCase(), expectedLedger.toLowerCase());
+            const event = ledgerAbi.parseLog(receipt.logs[0]);
+            assert.equal(event.name, 'Log');
+            assert.equal(event.args.node, nodeWallet.address);
+            assert.equal(event.args.cid, completed.cid);
+            assert.equal(event.args.cidKeccak256Hash, keccak256(toUtf8Bytes(completed.cid)));
+            assert.equal((await chain.getTransaction(completed.transactionHash)).chainId, defaults ? 11155111n : 31337n);
         }
         assert.equal((await api('/v1/jobs', job)).requestId, job.requestId);
         await compose(['restart', 'node']);
@@ -210,5 +238,5 @@ test('packaged inbox and local worker publish offline-queued jobs through HTTPS 
         await compose(['stop', 'node', 'inbox', 'proxy']);
     }
     succeeded = true;
-    progress('both modes passed with real PostgreSQL, HTTPS, Kubo and Anvil');
+    progress('both modes and default Sepolia identity passed with real PostgreSQL, HTTPS, Kubo and isolated Anvil chains');
 });
