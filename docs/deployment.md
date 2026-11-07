@@ -1,6 +1,6 @@
 # Deploy a commitment: Safe and Optimistic Governor
 
-For an Oya publication node, follow [Run a live node locally](../node/production/run-locally.md) and [Host the PostgreSQL inbox](../node/production/host-inbox.md). Those guides use the published v0.3.1 Docker image and matching bundle for IPFS-only or full Ledger operation. The sections below cover commitment contracts and related deployment tools.
+For an Oya publication node, follow [Run a live node locally](../node/production/run-locally.md) and [Host the PostgreSQL inbox](../node/production/host-inbox.md). Those guides target the [node-v0.3.2 Docker image and matching bundle](../node/production/release-image.md#published-deployment-release) for IPFS-only or full Ledger operation. Use the download commands only after the release and all matching assets are published; until then, use the complete node-v0.3.1 release and its embedded guides. The sections below cover commitment contracts and related deployment tools.
 
 ## Before you start
 

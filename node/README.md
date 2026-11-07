@@ -11,7 +11,7 @@ Start with **IPFS-only** for a first deployment. Choose one setup path:
 - **[Deploy with an agent](production/deploy-with-agent.md):** supply hosting preferences and secure credential references, then have the agent configure and verify both roles.
 - **[Run locally yourself](production/run-locally.md):** follow the local worker walkthrough, then its linked inbox-hosting steps. Both IPFS-only and full Ledger modes are covered.
 
-The guides use the published [node-v0.3.1 image and deployment bundle](production/release-image.md#published-deployment-release); no source build is required. v0.2.0 supports the older direct API. See the [production reference](production/README.md) for APIs, advanced direct deployments, and development checks.
+The guides target the [node-v0.3.2 image and deployment bundle](production/release-image.md#published-deployment-release). Use the download commands only after the release and all matching assets are published; until then, use the complete node-v0.3.1 release and its embedded guides. v0.2.0 supports the older direct API. See the [production reference](production/README.md) for APIs, advanced direct deployments, and development checks.
 
 ## Develop the production runtime
 
