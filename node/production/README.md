@@ -618,7 +618,9 @@ Gas and fee values are ceilings; requests above them stop before signing. Transp
 
 The signature must be EIP-191 over exactly `text`; the signer must be in `allowedSigners`. The node caps bytes while reading the HTTP stream, and the kernel validates JSON, message size, schema, signature, and authorization before publication. The signed text should contain any context that its readers need; this first runtime does not interpret commitment-specific fields.
 
-Put ASCII text in a file and store `OYA_AGENT_PRIVATE_KEY` in a separate private agent environment file outside version control. The sender needs its own key; keep the node and deployment keys in their respective environments. From the repository root, with the node already running:
+Message text must be nonempty basic ASCII except NUL (`U+0000`); `U+0001`–`U+007F`, including tabs and newlines, are supported and preserved exactly. The direct API rejects NUL with HTTP 400 `invalid_text` before publication. This matches the message kernel and inbox character contract; the inbox retains its `jsonb` payload storage and rejects unsupported signed jobs with HTTP 403 `invalid_signed_job`.
+
+Put supported text in a file and store `OYA_AGENT_PRIVATE_KEY` in a separate private agent environment file outside version control. The sender rejects unsupported text before signing or sending. It needs its own key; keep the node and deployment keys in their respective environments. From the repository root, with the node already running:
 
 ```sh
 node --env-file=/absolute/path/to/agent.env -- node/production/scripts/send-message.mjs http://127.0.0.1:8787 /absolute/path/to/message.txt

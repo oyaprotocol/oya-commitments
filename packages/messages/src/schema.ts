@@ -99,6 +99,12 @@ function validateText(value: unknown): string {
             message: 'text must contain only ASCII characters.',
         });
     }
+    if (value.includes('\0')) {
+        throw createValidationError({
+            code: 'invalid_text',
+            message: 'text must contain only ASCII characters except NUL (U+0000).',
+        });
+    }
 
     return value;
 }

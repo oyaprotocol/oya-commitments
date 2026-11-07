@@ -9,7 +9,7 @@ try {
     if (!nodeUrl || !textPath || process.argv.length !== 4) throw new Error();
     const wallet = new Wallet(process.env.OYA_AGENT_PRIVATE_KEY);
     const text = await readFile(textPath, 'utf8');
-    if (!text.length || !/^[\x00-\x7f]+$/.test(text)) throw new Error();
+    if (!text.length || !/^[\x01-\x7f]+$/.test(text)) throw new Error();
     const body = JSON.stringify({ text, signer: wallet.address, signature: await wallet.signMessage(text) });
     signal = AbortSignal.timeout(timeoutMs);
     const response = await fetch(`${nodeUrl.replace(/\/$/, '')}/v1/messages`, {
@@ -20,6 +20,6 @@ try {
 } catch {
     console.error(signal?.aborted
         ? 'Message request timed out. Publication may still complete; inspect the node outcome before retrying.'
-        : 'Could not submit message. Check OYA_AGENT_PRIVATE_KEY, node URL, nonempty ASCII text file, and OYA_MESSAGE_TIMEOUT_MS (integer 1–2147483647).');
+        : 'Could not submit message. Check OYA_AGENT_PRIVATE_KEY, node URL, nonempty ASCII text file without NUL, and OYA_MESSAGE_TIMEOUT_MS (integer 1–2147483647).');
     process.exitCode = 1;
 }
