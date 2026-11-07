@@ -91,6 +91,33 @@ test('worker authentication and public signed-job validation keep their preceden
     assert.equal(f.calls(), 0);
 });
 
+for (const clockShift of [-3600000, 3600000]) {
+    test(`public request budget ignores wall-clock shift ${clockShift}`, async t => {
+        let elapsed = 1000;
+        let wallTime = 1700000000000;
+        t.mock.method(performance, 'now', () => elapsed);
+        t.mock.method(Date, 'now', () => wallTime);
+        const f = await fixture(t);
+        const invalid = { status: 403, body: { error: 'invalid_signed_job' } };
+        const limited = { status: 429, body: { error: 'request_limit' } };
+        for (let i = 0; i < 240; i++) {
+            assert.deepEqual(await f.post(i % 2 ? 'status' : 'jobs', null, false), invalid);
+        }
+        assert.deepEqual(await f.post('jobs', null, false), limited);
+        wallTime += clockShift;
+        elapsed += 59999;
+        assert.deepEqual(await f.post('status', null, false), limited);
+        assert.deepEqual(await f.post('worker/claim', { target: 'test', execution: { mode: 'ipfs' } }),
+            { status: 200, body: { work: null, leaseMs: 30000 } });
+        elapsed++;
+        for (let i = 0; i < 240; i++) {
+            assert.deepEqual(await f.post('jobs', null, false), invalid);
+        }
+        assert.deepEqual(await f.post('status', null, false), limited);
+        assert.equal(f.calls(), 1);
+    });
+}
+
 test('valid worker mutation bodies are forwarded unchanged', async t => {
     const f = await fixture(t);
     const requestId = randomUUID();
