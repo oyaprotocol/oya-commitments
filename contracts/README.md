@@ -6,7 +6,7 @@ Contract source, tests, and deployment tooling belong here. The offchain librari
 
 ## Ledger
 
-For normal node setup, use the existing **Ethereum Sepolia (`11155111`) Ledger at `0xe6DeB4B3c31E15DBeA0f932830e2f20Ba2EddAa3`**. The [canonical deployed-Sepolia reference](../node/production/README.md#deployed-sepolia-ledger) records the explorer link, source/runtime verification evidence, default RPC, configuration, and release compatibility. A new deployment is not required. Node operators still need a dedicated funded Sepolia signer, separate client signing key and allowlist, Kubo, and a matching inbox execution identity; the inbox never receives the node key.
+For normal node setup, use the existing **Ethereum Sepolia (`11155111`) Ledger at `0xe6DeB4B3c31E15DBeA0f932830e2f20Ba2EddAa3`**. The [canonical deployed-Sepolia reference](../node/production/README.md#deployed-sepolia-ledger) records the explorer link, source/runtime verification evidence, default RPC, configuration, and release compatibility.
 
 [`src/Ledger.sol`](src/Ledger.sol) exposes:
 
@@ -65,7 +65,7 @@ See [AGENTS.md](AGENTS.md) for local agent instructions and [CONTRIBUTING.md](..
 
 ## Deploy Ledger
 
-This is an advanced option for a new/separate deployment, not a prerequisite for using the existing Sepolia Ledger. Obtain explicit deployment authorization and keep deployer, node, and client keys separate. See the [Sepolia deployment walkthrough](../node/production/README.md#deploy-ledger-on-sepolia) when a new deployment is actually required.
+For a new Ledger deployment, follow this advanced workflow. Obtain explicit deployment authorization and keep deployer, node, and client keys separate. See the [Sepolia deployment walkthrough](../node/production/README.md#deploy-ledger-on-sepolia) when a new deployment is actually required.
 
 [`script/DeployLedger.s.sol`](script/DeployLedger.s.sol) deploys Ledger and requires an explicit expected chain ID. Load `LEDGER_DEPLOYER_PK` securely into the environment, set `LEDGER_CHAIN_ID` to the target network ID, and set `LEDGER_RPC_URL` to its RPC endpoint. The deployer needs native currency for deployment gas. From the repository root, simulate first:
 

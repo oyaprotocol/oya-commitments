@@ -1,8 +1,8 @@
 # Deploy a local Oya node with an agent
 
-Start here to have a coding agent set up your first Oya node. The default is **Sepolia Ledger mode**: Oya and Kubo (the IPFS service) run on your device, while an HTTPS inbox and PostgreSQL store incoming work on a host you choose. The worker polls the inbox, verifies authorized signatures, publishes to IPFS, then logs each CID to the [deployed Sepolia Ledger](README.md#deployed-sepolia-ledger). No tunnel or inbound message port is needed on your device. A sender must sign messages with an address approved by both the inbox and worker.
+Start here to have a coding agent set up your first Oya node. The default is **Sepolia Ledger mode**: Oya and Kubo (the IPFS service) run on your device, while an HTTPS inbox and PostgreSQL store incoming work on a host you choose. The worker polls the inbox, verifies authorized signatures, publishes to IPFS, then logs each CID to the [deployed Sepolia Ledger](README.md#deployed-sepolia-ledger). A sender must sign messages with an address approved by both the inbox and worker.
 
-This installs a publication node. It does not deploy a commitment's Safe/Optimistic Governor or start a commitment-serving agent. The existing Sepolia Ledger needs no new deployment or Foundry installation, but the worker needs an approved RPC and a dedicated node signer funded with Sepolia ETH, separate from the message-signing client key. Explicit IPFS-only operation remains available without a node transaction key, RPC, or gas. For manual setup, use [Run locally](run-locally.md).
+The worker needs an approved RPC and a dedicated node signer funded with Sepolia ETH, separate from the message-signing client key. Explicit IPFS-only operation is also available. For manual setup, use [Run locally](run-locally.md).
 
 ## Quick start
 
@@ -63,7 +63,7 @@ The rest of this guide is reference material for the operator and agent: [inputs
 | Ethereum access | Approve the [default Sepolia RPC and Ledger](README.md#deployed-sepolia-ledger), or supply another approved Sepolia RPC |
 | Broadcast scope | Explicit authorization for testnet transactions and the acceptance checks' gas expenditure |
 
-The chain and Ledger are already documented; no new contract deployment is required. The default public RPC has no availability guarantee. Keep the node key local and put only its required public address into the matching inbox execution identity; never infer that address from the client allowlist. Deploying a separate contract or spending blockchain funds needs its own established scope. Explicit IPFS-only requires no funded node account, RPC service, or Ledger deployment, but still requires a client signing key, allowlist, and Kubo.
+The default public RPC has no availability guarantee. Keep the node key local and put only its required public address into the matching inbox execution identity; never infer that address from the client allowlist. Deploying a separate contract or spending blockchain funds needs its own established scope. Explicit IPFS-only requires no funded node account, RPC service, or Ledger deployment, but still requires a client signing key, allowlist, and Kubo.
 
 One inexpensive experimental example is a Linode Nanode with 1 GiB RAM, bundled PostgreSQL, and a free DuckDNS hostname. The provider's plan API and [pricing](https://www.akamai.com/cloud/pricing/cpu) listed a $5/month base price on 2026-10-25, before taxes and usage overages. Recheck price and capacity before purchase. Paid backups and managed databases are additional choices. Measure memory, swap, disk, and queue behavior on the actual host before treating this size as adequate for a workload. An existing server, another VM provider, FreeDNS, or your own domain can use the same deployment assets.
 

@@ -4,7 +4,7 @@ Run Oya and Kubo on your own computer, mini PC, or other local device. Agents se
 
 For agent-managed setup, secure credential handoff, and optional macOS Keychain-backed worker startup, see [Deploy with an agent](deploy-with-agent.md). The commands below use persistent protected runtime files; the Keychain helper replaces the worker token's storage and startup lifecycle.
 
-Messages remain queued while the local device is asleep or offline. `202` means the inbox saved the job; check its status for publication. New nodes default to verifying signed messages, publishing to IPFS, then logging CIDs to the [deployed Sepolia Ledger](README.md#deployed-sepolia-ledger). This guide uses the published [node-v0.3.1 image and deployment bundle](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.1), which support both modes below but **predate the new defaults and templates**. Set the explicit values in this guide when using those assets; no new release is implied. Released v0.2.0 images do not contain the inbox or worker. For an existing v0.2.0 installation or local-only clients, use the [advanced direct HTTP guide](run-direct.md).
+Messages remain queued while the local device is asleep or offline. `202` means the inbox saved the job; check its status for publication. New nodes default to verifying signed messages, publishing to IPFS, then logging CIDs to the [deployed Sepolia Ledger](README.md#deployed-sepolia-ledger). This guide uses the published [node-v0.3.1 image and deployment bundle](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.1), which support both modes below but **predate the new defaults and templates**. Set the explicit values in this guide when using those assets. Released v0.2.0 images do not contain the inbox or worker. For an existing v0.2.0 installation or local-only clients, use the [advanced direct HTTP guide](run-direct.md).
 
 | Mode | Completed job | Local requirements |
 | --- | --- | --- |
@@ -76,7 +76,7 @@ Record the printed public agent address. The private key is written only to `age
 
 ## 2. Configure one execution mode
 
-For **default Sepolia Ledger mode**, create `$OYA_LOCAL_DIR/node.json` below. Replace `AGENT_ADDRESS` with the approved public message-signing address from step 1. The [existing Ledger and verification evidence](README.md#deployed-sepolia-ledger) are already available; do not create a deployer or deploy a new contract. The public RPC has no availability guarantee and can be replaced with an operator-approved Sepolia endpoint. These explicit target fields also work with the older image selected above.
+For **default Sepolia Ledger mode**, create `$OYA_LOCAL_DIR/node.json` below. Replace `AGENT_ADDRESS` with the approved public message-signing address from step 1. The [existing Ledger and verification evidence](README.md#deployed-sepolia-ledger) are available for this target. The public RPC has no availability guarantee and can be replaced with an operator-approved Sepolia endpoint. These explicit target fields also work with the older image selected above.
 
 ```json
 {
@@ -109,9 +109,9 @@ For **explicit IPFS-only operation instead**, use this `node.json`, replacing th
 }
 ```
 
-Create an empty private environment file with `touch "$OYA_LOCAL_DIR/node.env"`. No node account, RPC, contract, or funding is needed in this mode. Do not include Ethereum settings (`chainId`, `ledgerContract`, `rpcUrl`, `receiptTimeoutMs`, `pollIntervalMs`, `gasLimit`, or `maxFeePerGasWei`); they are rejected, not ignored. A separate client signing key and allowlist remain required.
+Create an empty private environment file with `touch "$OYA_LOCAL_DIR/node.env"`. Do not include Ethereum settings (`chainId`, `ledgerContract`, `rpcUrl`, `receiptTimeoutMs`, `pollIntervalMs`, `gasLimit`, or `maxFeePerGasWei`); they are rejected, not ignored. A separate client signing key and allowlist remain required.
 
-Use only one configuration path. Existing installations keep their private settings and saved execution identity; this is not an instruction to switch an existing IPFS target to Ledger. To select another chain in Ledger mode, supply that chain's contract and RPC explicitly rather than relying on Sepolia defaults.
+Use only one configuration path. Existing installations keep their private settings and saved execution identity. To select another chain in Ledger mode, supply that chain's contract and RPC explicitly rather than relying on Sepolia defaults.
 
 ```sh
 chmod 600 "$OYA_LOCAL_DIR/node.json" "$OYA_LOCAL_DIR/node.env"

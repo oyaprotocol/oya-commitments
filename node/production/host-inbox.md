@@ -6,7 +6,7 @@ To have an agent provision and verify this setup using secure credential referen
 
 The inbox stores signed message bodies, job status, and transaction checkpoints. Treat its database and worker token as trusted infrastructure. A database administrator can alter execution state; this is not an untrusted queue protocol. Keep node, deployer, and agent private keys off this host. PostgreSQL contains prepared signed Ledger transactions, which can be broadcast, but cannot authorize other transactions without the node key.
 
-This guide uses the published [node-v0.3.1 image and deployment bundle](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.1). Use the same release for the [local worker](run-locally.md). Its templates predate the [default deployed Sepolia Ledger](README.md#deployed-sepolia-ledger), so explicitly set the execution fields below instead of relying on the copied template. No new release or change to immutable assets is implied. v0.2.0 images support only the direct API and cannot serve an inbox.
+This guide uses the published [node-v0.3.1 image and deployment bundle](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.1). Use the same release for the [local worker](run-locally.md). Its templates predate the [default deployed Sepolia Ledger](README.md#deployed-sepolia-ledger), so explicitly set the execution fields below instead of relying on the copied template. v0.2.0 images support only the direct API and cannot serve an inbox.
 
 ## Prepare the host
 

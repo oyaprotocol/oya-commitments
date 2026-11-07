@@ -18,6 +18,8 @@ A newly configured production node should verify authorized signed messages, pub
 - [x] 2026-11-07 00:55Z: Both optional-hourly Ledger and IPFS-only Docker fixtures passed, including hourly-agent unit tests inside the runtime image.
 - [x] 2026-11-07 00:57Z: Published upstream PR #139 from `oyagardener:feature/sepolia-ledger-defaults` to `oyaprotocol:main`; verified the open, non-draft PR, description and exact remote Git blob hashes for all 31 changed files. GitHub CI started; its pending results are not claimed as passed.
 
+- [x] 2026-11-07: Applied maintainer documentation review: removed repeated non-goal and unnecessary-prerequisite commentary across the onboarding guides. Release-bundle tests: 13 passed; 201 local documentation links and unchanged fenced examples/headings verified; `git diff --check` passed.
+
 ## Surprises & Discoveries
 
 The runtime already defaults an omitted `mode` to `ledger`; the contradictory first-install guides and inbox example instead recommend IPFS-only. The host template selects a placeholder on Anvil, while the Docker template selects a placeholder on Ethereum mainnet. Both need consistent Sepolia settings. The worker already validates signatures/allowlists, publishes the signed envelope to IPFS, saves its CID, prepares and checkpoints a transaction, broadcasts it, and verifies its receipt/event. No duplicate pipeline is needed.

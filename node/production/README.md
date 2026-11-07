@@ -17,11 +17,11 @@ The default deployment runs Oya and Kubo on your local device, with a portable P
 | Develop or validate the runtime | [Install and validate](#install-and-validate). |
 | Publish an image and bundle | [Maintainer release guide](release-image.md). |
 
-The setup guides use the published [node-v0.3.1 image and matching bundle](release-image.md#published-deployment-release) and cover Ledger and explicit IPFS-only modes. That release predates the new Sepolia defaults: configure the values below explicitly when using it. No source build is required for that configuration; native source builds remain an option. v0.2.0 images support only the direct API.
+The setup guides use the published [node-v0.3.1 image and matching bundle](release-image.md#published-deployment-release) and cover Ledger and explicit IPFS-only modes. That release predates the new Sepolia defaults: configure the values below explicitly when using it. v0.2.0 images support only the direct API.
 
 ## Deployed Sepolia Ledger
 
-New node configurations default to verifying incoming signed messages against the client allowlist, publishing their signed envelopes to IPFS, then logging the resulting CIDs to this existing Ledger. **No new contract deployment is required for normal Sepolia setup.**
+New node configurations default to verifying incoming signed messages against the client allowlist, publishing their signed envelopes to IPFS, then logging the resulting CIDs to this existing Ledger.
 
 | Setting | Default target |
 | --- | --- |
@@ -40,16 +40,16 @@ This is source/runtime identity evidence, not a security audit or a live publica
 
 ### Operator requirements and inbox identity
 
-- Keep a **separate message-signing client key** and replace all sample `allowedSigners` entries with approved public client addresses in both roles. A client needs no gas to sign messages.
+- Keep a **separate message-signing client key** and replace all sample `allowedSigners` entries with approved public client addresses in both roles.
 - Configure a **dedicated node signer**, fund its public address with Sepolia ETH, and authorize the intended testnet broadcasts. Only one worker/direct runtime may use that account. Put its key in the protected local `OYA_NODE_PRIVATE_KEY` secret, never on the hosted inbox.
 - Run Kubo with an accessible writable API and retain its storage. Published message content is public; local pinning alone does not guarantee independent retrieval.
-- Match the inbox target, allowlist, and execution identity to the worker. Inbox execution defaults resolve to Ledger/Sepolia/this contract, but **`nodeAddress` is always required and never inferred**. The new `inbox.example.json` deliberately contains `REPLACE_WITH_PUBLIC_NODE_ADDRESS`, which fails validation until replaced with the dedicated node's actual public address. The inbox needs neither a node key nor an RPC URL.
+- Match the inbox target, allowlist, and execution identity to the worker. Inbox execution defaults resolve to Ledger/Sepolia/this contract, but **`nodeAddress` is always required and never inferred**. The new `inbox.example.json` deliberately contains `REPLACE_WITH_PUBLIC_NODE_ADDRESS`, which fails validation until replaced with the dedicated node's actual public address.
 
 For no onchain transactions, deliberately select [IPFS-only configuration](#ipfs-only-configuration) and `execution: {"mode":"ipfs"}` in the inbox. Remove Ethereum fields rather than leaving empty values; that mode needs no node key, RPC, or funds. Signature verification, a client allowlist, and Kubo are still required.
 
 ### Release compatibility and existing installations
 
-These defaults and updated templates belong to the source revision containing this change; **the published `node-v0.3.1` image and immutable bundle predate them**. No new release is implied. With older compatible images/bundles, explicitly set `mode`, `chainId`, `ledgerContract`, and `rpcUrl` in private node settings, and `mode`, `chainId`, `ledgerContract`, and the real public `nodeAddress` in inbox execution settings, as shown in [Run locally](run-locally.md) and [Host the inbox](host-inbox.md). Do not rely on the old templates or missing-field defaults. Alternatively use a matching image/bundle release containing this change once available, or a reviewed source build.
+These defaults and updated templates belong to the source revision containing this change; **the published `node-v0.3.1` image and immutable bundle predate them**. With older compatible images/bundles, explicitly set `mode`, `chainId`, `ledgerContract`, and `rpcUrl` in private node settings, and `mode`, `chainId`, `ledgerContract`, and the real public `nodeAddress` in inbox execution settings, as shown in [Run locally](run-locally.md) and [Host the inbox](host-inbox.md). Do not rely on the old templates or missing-field defaults. Alternatively use a matching image/bundle release containing this change once available, or a reviewed source build.
 
 Do not overwrite existing private configuration with new examples or silently switch an IPFS-only deployment to Ledger. Preserve saved execution identities, keys, volumes, and targets. A deliberate mode/chain/contract/node-account change requires reconciling pending work and creating a new inbox target. New/separate contract deployment remains an [advanced optional workflow](#deploy-ledger-on-sepolia), with separate authorization and deployer credentials.
 
@@ -112,7 +112,7 @@ This mode is available in `node-v0.2.0`; `node-v0.1.0` does not support it. Use 
 
 The default [local worker walkthrough](run-locally.md) uses `inbox/compose.worker.yaml`. The manual workflow below uses the synchronous `compose.yaml` for local-only clients or advanced direct deployments. Its optional hourly testing profile is documented in the [direct setup guide](run-direct.md). Maintainers use the [image release guide](release-image.md) to publish tagged revisions and matching bundles.
 
-[compose.yaml](compose.yaml) runs the node and Kubo with persistent IPFS storage. Use a Linux Docker host or Docker Desktop with Linux containers, and Compose 2.30 or newer. Run the commands below from the repository root. In default Ledger mode, use the [deployed Sepolia target](#deployed-sepolia-ledger), approve RPC access, and fund a dedicated node account before starting the node; no deployment is needed. In explicit IPFS mode, use the configuration above and skip node funding.
+[compose.yaml](compose.yaml) runs the node and Kubo with persistent IPFS storage. Use a Linux Docker host or Docker Desktop with Linux containers, and Compose 2.30 or newer. Run the commands below from the repository root. In default Ledger mode, use the [deployed Sepolia target](#deployed-sepolia-ledger), approve RPC access, and fund a dedicated node account before starting the node. In explicit IPFS mode, use the configuration above and skip node funding.
 
 ### Prepare private settings
 
@@ -405,7 +405,7 @@ Prepare dependencies and private configuration templates from the repository roo
 npm --prefix node/production run local -- setup
 ```
 
-Setup installs the host and published kernels from `node/production/package-lock.json` and creates missing `config.local.json` and `.env` files with mode `0600`. No kernel source build or TypeScript installation is needed. Repeating it preserves existing files and their permissions. It uses Node.js built-ins and needs Node 22 or newer and npm; it does not deploy Ledger or start services. The client allowlist placeholder and empty node key must be filled before use; the Sepolia Ledger target is already set. For different file locations, add `--config /absolute/path/to/node.json --env-file /absolute/path/to/node.env`; parent directories must already exist. Relative paths resolve from the directory where you invoked the command. Keep custom files outside the checkout or ignore them in Git.
+Setup installs the host and published kernels from `node/production/package-lock.json` and creates missing `config.local.json` and `.env` files with mode `0600`. Repeating it preserves existing files and their permissions. It uses Node.js built-ins and needs Node 22 or newer and npm; it does not deploy Ledger or start services. The client allowlist placeholder and empty node key must be filled before use; the Sepolia Ledger target is already set. For different file locations, add `--config /absolute/path/to/node.json --env-file /absolute/path/to/node.env`; parent directories must already exist. Relative paths resolve from the directory where you invoked the command. Keep custom files outside the checkout or ignore them in Git.
 
 Edit the ignored `config.local.json` (or copy `config.example.json` there when configuring manually). For default Ledger mode, keep the [deployed Sepolia target](#deployed-sepolia-ledger) or choose an approved Sepolia RPC, replace the sample allowlist with actual client addresses, and set the host-reachable `ipfsUrl`. Older templates require the target values explicitly. For IPFS mode, replace the config with the [IPFS-only configuration](#ipfs-only-configuration), using a loopback host and host-reachable IPFS endpoint. In both modes, `ipfsUrl` must be a Kubo-compatible API, with `/api/v0/add` support; a read-only gateway or unrelated pinning API is insufficient.
 
@@ -413,7 +413,7 @@ In Ledger mode, the node account must have gas funds and be dedicated to one run
 
 ### Deploy or reuse Ledger
 
-This is optional contract tooling, not a prerequisite for the [existing Sepolia deployment](#deployed-sepolia-ledger). Do not deploy a replacement because an RPC is unavailable or a check fails; reconcile the configured target first.
+Use this tooling for a separately authorized contract deployment. Do not deploy a replacement because an RPC is unavailable or a check fails; reconcile the configured target first.
 
 From the repository root, optionally preview deployment using the configured Ethereum connection:
 
@@ -441,7 +441,7 @@ The [local integration test](#install-and-validate) checks deployment-key preced
 
 ### Deploy Ledger on Sepolia
 
-**Advanced: a new/separate deployment only.** Ordinary nodes use the [already deployed Sepolia Ledger](#deployed-sepolia-ledger) and skip this procedure, including deployer creation and explorer API-key setup. The placeholder contract below is intentional for deployment tooling, not a recommended runtime target. Obtain separate authorization before broadcasting a new deployment.
+**Advanced: deploy a new Ledger.** Obtain deployment authorization, then replace the configuration placeholders below for your chosen target.
 
 Use this procedure on your local computer with a reviewed source checkout, Node.js 24, npm, and [Foundry](https://getfoundry.sh/getting-started/installation). The deployment bundle does not include the contract source or local CLI. Run the commands from the repository root in Bash or zsh, stopping if any command fails. This targets **Ethereum Sepolia, chain ID `11155111`**, as listed in the [Sepolia network configuration](https://github.com/eth-clients/sepolia#metadata).
 

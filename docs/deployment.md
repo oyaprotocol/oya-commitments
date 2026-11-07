@@ -1,6 +1,6 @@
 # Deploy a commitment: Safe and Optimistic Governor
 
-For an Oya publication node, follow [Run a live node locally](../node/production/run-locally.md) and [Host the PostgreSQL inbox](../node/production/host-inbox.md). New nodes default to the [already deployed Sepolia Ledger](../node/production/README.md#deployed-sepolia-ledger); no new Ledger deployment is needed. Those guides explicitly configure the target with the published v0.3.1 image/bundle, which predate the new defaults, and preserve explicit IPFS-only operation. The sections below cover commitment contracts and related deployment tools.
+For an Oya publication node, follow [Run a live node locally](../node/production/run-locally.md) and [Host the PostgreSQL inbox](../node/production/host-inbox.md). New nodes default to the [already deployed Sepolia Ledger](../node/production/README.md#deployed-sepolia-ledger). Those guides explicitly configure the target with the published v0.3.1 image/bundle, which predate the new defaults, and preserve explicit IPFS-only operation. The sections below cover commitment contracts and related deployment tools.
 
 ## Before you start
 

@@ -17,13 +17,13 @@ Oya combines commitments governed by written rules, agents that act on those rul
 
 - A **commitment** is a Safe account connected to an Optimistic Governor module. Written rules describe permitted actions; users or agents propose transactions and post a bond. Undisputed proposals can execute after the challenge window.
 - A **commitment-serving agent** monitors a commitment and runs module-specific decision logic. The shared runner lives in `agent/`; individual implementations live in `agent-library/`.
-- A **publication node** verifies authorized senders' signed messages, stores them in IPFS, and by default records the content identifier (CID) in the deployed Sepolia Ledger. Explicit IPFS-only mode skips onchain logging. The node's Ledger contract is separate from a commitment's Safe and Optimistic Governor.
+- A **publication node** verifies authorized senders' signed messages, stores them in IPFS, and by default records the content identifier (CID) in the deployed Sepolia Ledger. Explicit IPFS-only mode skips onchain logging.
 
-You can run a publication node independently of any commitment or commitment-serving agent. A coding agent helping you install the software is also separate from the agents that submit messages or serve commitments.
+You can run a publication node independently of any commitment or commitment-serving agent.
 
 ## Run a node
 
-The default first setup is **Sepolia Ledger mode**, with Oya and Kubo (the IPFS service) on your local device, plus a separately hosted HTTPS inbox backed by PostgreSQL. The inbox accepts signed messages from approved addresses and queues them while your device is offline. Your local worker polls over outbound HTTPS, verifies signatures and authorization again, publishes accepted messages to IPFS, then logs their CIDs to the [deployed Sepolia Ledger](node/production/README.md#deployed-sepolia-ledger). No new Ledger deployment is needed. The worker needs no inbound message port, router forwarding, or tunnel.
+The default first setup is **Sepolia Ledger mode**, with Oya and Kubo (the IPFS service) on your local device, plus a separately hosted HTTPS inbox backed by PostgreSQL. The inbox accepts signed messages from approved addresses and queues them while your device is offline. Your local worker polls over outbound HTTPS, verifies signatures and authorization again, publishes accepted messages to IPFS, then logs their CIDs to the [deployed Sepolia Ledger](node/production/README.md#deployed-sepolia-ledger).
 
 - **For agent-assisted setup, open [Deploy with an agent](node/production/deploy-with-agent.md).** It has a task prompt, the inputs you supply, secure credential instructions, and the checks the agent must complete. If you have no hosting or hostname yet, the prompt lets you ask for options within a budget.
 - **For manual setup, start with [Run locally](node/production/run-locally.md).** It walks through local configuration and sends you to [Host the inbox](node/production/host-inbox.md) when the remote role is needed.
@@ -32,10 +32,10 @@ Either path finishes by submitting a signed message, retrieving its CID, and ver
 
 | Node mode | Result | Additional requirements |
 | --- | --- | --- |
-| **Ledger (default)** | IPFS publication plus a verified Sepolia Ledger transaction | Sepolia RPC access and a dedicated node account funded with Sepolia ETH; the Ledger is already deployed. This does not run an Ethereum full node. |
-| **IPFS-only (explicit opt-out)** | Signed message published and pinned in local IPFS | No Ethereum RPC, node transaction key, funded node account, or gas; a client signing key and allowlist are still required. |
+| **Ledger (default)** | IPFS publication plus a verified Sepolia Ledger transaction | Sepolia RPC access and a dedicated node account funded with Sepolia ETH; the Ledger is already deployed. |
+| **IPFS-only (explicit opt-out)** | Signed message published and pinned in local IPFS | Client signing key, allowlist, and Kubo. |
 
-The [released image and deployment bundle](node/production/release-image.md#published-deployment-release) provide the runtime and deployment assets. Published `node-v0.3.1` assets predate these defaults: explicitly configure the [documented Sepolia values](node/production/README.md#deployed-sepolia-ledger) with those assets, or use a matching release containing the change once available. The manual release path needs no source build, host Node.js, or Foundry. The optional macOS Keychain startup helper needs Python 3. Existing IPFS-only installations and saved execution identities remain unchanged; do not overwrite private settings to adopt new defaults.
+The [released image and deployment bundle](node/production/release-image.md#published-deployment-release) provide the runtime and deployment assets. Published `node-v0.3.1` assets predate these defaults: explicitly configure the [documented Sepolia values](node/production/README.md#deployed-sepolia-ledger) with those assets, or use a matching release containing the change once available. The optional macOS Keychain startup helper needs Python 3. Existing IPFS-only installations and saved execution identities remain unchanged; do not overwrite private settings to adopt new defaults.
 
 Default client jobs have a 24-hour deadline; queued work does not wait indefinitely. If your local device holds the only IPFS copy, continuous content retrieval also requires replication elsewhere. Advanced options include the [direct HTTP API without an inbox](node/production/run-direct.md). The [node directory guide](node/README.md) distinguishes the production runtime from experimental daemons.
 
