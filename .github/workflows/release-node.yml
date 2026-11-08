@@ -1,0 +1,103 @@
+name: Release node
+run-name: Node ${{ inputs.version }}${{ inputs.dry_run && ' (preview)' || '' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Unused stable version, for example 0.4.1'
+        required: true
+        type: string
+      dry_run:
+        description: 'Build and verify locally without publishing'
+        type: boolean
+        default: false
+      notes:
+        description: 'Optional release highlights and required upgrade instructions'
+        type: string
+        default: ''
+
+permissions: {}
+
+# Serialize different versions too, so latest-release selection cannot race.
+concurrency:
+  group: node-release
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    if: github.repository == 'oyaprotocol/oya-commitments'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      ci_passed: ${{ steps.check.outputs.ci_passed }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Validate source and unused version
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_DRY_RUN: ${{ inputs.dry_run }}
+        run: node node/production/scripts/release-node.mjs check "$RELEASE_VERSION"
+
+  tests:
+    needs: preflight
+    if: needs.preflight.outputs.ci_passed != 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/test.yml
+
+  publish:
+    needs: [preflight, tests]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && (needs.tests.result == 'success' || needs.preflight.outputs.ci_passed == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: docker/setup-buildx-action@v4
+      - name: Authenticate publication
+        if: ${{ !inputs.dry_run }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Publish or preview the tested source
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_DRY_RUN: ${{ inputs.dry_run }}
+          RELEASE_NOTES: ${{ inputs.notes }}
+        run: |
+          command=release
+          if [ "$RELEASE_DRY_RUN" = true ]; then command=preview; fi
+          node node/production/scripts/release-node.mjs "$command" "$RELEASE_VERSION" "$RUNNER_TEMP/node-release"
+      - name: Retain release output for verification or recovery
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/node-release/
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Clear registry credentials
+        if: ${{ always() && !inputs.dry_run }}
+        run: docker logout ghcr.io

@@ -1,69 +1,86 @@
-# Publish a production node image
+# Publish a production node release
 
-Maintainers use `scripts/publish-image.sh` to publish a Linux amd64 image to GitHub Container Registry (GHCR). The same image contains the local worker, PostgreSQL inbox service, sender client, and advanced direct runtime. Operators use the matching bundle to [run locally](run-locally.md) and [host the inbox](host-inbox.md) wherever they choose. Docker/Compose runs on each selected host. Publication is an explicit release command, not an automatic push on every commit. v0.3.0 is the first published inbox-capable release; v0.2.0 supports only the direct API.
+Use the **Release node** GitHub Actions workflow to publish a Linux amd64 image, matching deployment bundle, release notes, and archive checksum. The workflow reuses the full CI suite and verifies anonymous image and asset downloads. Publishing a release leaves installed nodes on their recorded image digest until an operator upgrades them.
 
 ## Published deployment release
 
-The deployment guides target [node-v0.4.0](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.4.0). Its Linux amd64 image is `ghcr.io/oyaprotocol/oya-node:v0.4.0`; deployments use the immutable digest recorded in the release's `image.txt` and the bundle's `node/production/image.txt`.
+Download the image pin and versioned `oya-node-vVERSION.tar.gz` archive from the [current release](https://github.com/oyaprotocol/oya-commitments/releases/latest). `release.txt` identifies the Git tag, full source commit, and immutable image reference. The bundle repeats that pin in `node/production/image.txt` and its guides select their own release version.
 
-Download `oya-node-v0.4.0.tar.gz` from that release. Before extraction, compute its SHA-256 with `sha256sum` on Linux or `shasum -a 256` on macOS and compare it with the **archive SHA-256 in the release notes**. The checksum is recorded after packaging, so it is not embedded in the archive itself. `release.txt` records the Git tag, full source commit, and pinned image reference. Keep these public records with the archive.
+Before extraction, compute the archive SHA-256 with `sha256sum` on Linux or `shasum -a 256` on macOS and compare it with the checksum in that release's notes. Extract into a new directory with `tar -xzpf ARCHIVE -C BUNDLE_DIRECTORY` to preserve public read/traversal permissions under `umask 077`. Keep private settings separate from the bundle.
 
-The bundle includes the release-time [local-worker](run-locally.md), [inbox-host](host-inbox.md), and [agent-assisted](deploy-with-agent.md) guides, the [Ledger acceptance checklist](testnet-ledger.md), and the Keychain worker startup helper with its Compose overlay. Both IPFS-only and full Ledger modes are supported. v0.4.0 adds Sepolia defaults, stronger durable Ledger receipt verification, and inbox/worker reliability fixes.
+The bundle includes the [local-worker](run-locally.md), [inbox-host](host-inbox.md), and [agent-assisted](deploy-with-agent.md) guides; the [Ledger acceptance checklist](testnet-ledger.md); Compose/configuration examples; the Keychain worker helper; and the optional hourly test agent. Both explicit IPFS-only and Ledger modes are supported.
 
-**Upgrade from v0.3.x:** no database schema migration is required. Preserve private settings, saved execution identities, keys, volumes, and targets; follow the [worker upgrade](run-locally.md#monitor-stop-and-resume) and [database recovery](host-inbox.md#retention-recovery-and-migration) procedures. New templates default to the [deployed Sepolia Ledger](README.md#deployed-sepolia-ledger); replace the inbox public-node placeholder and client allowlists. Existing IPFS-only installations must retain explicit `ipfs` mode. When RPC authorization is configured, set `rpcUrl` explicitly. Mixed-case Ethereum addresses must have valid checksums. Messages must be nonempty ASCII without NUL. The direct sender now bounds HTTP waits with `OYA_MESSAGE_TIMEOUT_MS` (default 210,000 ms); a timeout requires checking the publication outcome before retrying.
+### Compatibility
 
-Older [node-v0.3.1 assets](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.1) remain available. They include the Keychain helper but require explicit Sepolia target settings and predate the v0.4.0 runtime fixes.
+v0.4.0 introduced Sepolia defaults, stronger durable Ledger receipt verification, and inbox/worker reliability fixes. Upgrading from v0.3.x to v0.4.0 requires no database schema migration. Preserve existing private settings, execution identities, keys, volumes, and targets. Keep explicit `ipfs` mode on existing IPFS-only installations. New Ledger templates require the actual public node address and approved client allowlists. Set `rpcUrl` explicitly when RPC authorization is configured. Mixed-case Ethereum addresses must have valid checksums, and messages must be nonempty ASCII without NUL. The direct sender's `OYA_MESSAGE_TIMEOUT_MS` defaults to 210,000 ms; check publication outcomes before retrying a timeout.
 
-Older [node-v0.3.0 assets](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.0) remain available with their original image pin and checksum. That archive predates the Keychain helper and its embedded guides describe the earlier source-build workflow. Do not overwrite an existing bundle or replace its `image.txt` with another version's pin.
+Older [v0.3.1 assets](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.1) include the Keychain helper but require explicit Sepolia settings and predate the v0.4.0 fixes. [v0.3.0 assets](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.0) also lack the helper. v0.2.0 supports only the direct API; follow its [extraction and migration guidance](run-direct.md). Keep old images and bundles for rollback, and review each newer release's migration notes.
 
-## Version control and release preparation
+## Release with one workflow
 
-Review and merge the runtime, Dockerfile, dependency lockfile, deployment scripts, and documentation before releasing. Inspect the complete release contents for sensitive information. Run the production tests and Docker integration checks documented in the [runtime guide](README.md#validate-the-docker-flow), including the amd64 HTTPS check and `npm --prefix node/production run test:ipfs -- --platform linux/amd64` for IPFS-only operation. Also run `test:inbox` for database/recovery tests and `test:inbox:docker` for both packaged worker modes against PostgreSQL, HTTPS, Kubo, and Anvil. Build the contracts first with `forge build --root contracts`. CI runs these checks without publishing images.
+Merge the intended code and operator/migration documentation first. Open **Actions → Release node → Run workflow**, select `main`, and enter an unused version such as `0.4.1`. Add release highlights and required upgrade instructions in the optional `notes` input; the workflow generates the commit summary, source/image identities, and archive checksum automatically.
 
-Use a Git tag such as `node-v0.1.0` for the reviewed commit. The script publishes the corresponding image tag `v0.1.0` and labels it with the full Git commit ID. This version identifies the complete Docker deployment release, independently of the private runtime's npm package version and published kernel versions. Use patch versions for compatible fixes and dependency refreshes, minor versions for compatible features, and major versions for breaking operator/configuration changes; document migrations explicitly, including during `0.x` development.
-
-From a clean checkout of the reviewed commit, after validation:
+The equivalent CLI command, from a checkout with authenticated GitHub CLI access, is:
 
 ```sh
-git tag -a node-v0.1.0 -m "Production node v0.1.0"
-git push origin node-v0.1.0
+gh workflow run release-node.yml --ref main -f version=0.4.1
 ```
 
-Replace the example version for each release. Commit and push the reviewed source first. Never move a published Git tag or reuse an image version for different contents. Serialize publications of a version: image tags are mutable registry names, not a lock against concurrent publishers. Protect `node-v*` tags against updates/deletion with repository rules where available.
+Replace the example with the version you intend to publish. The version identifies the complete Docker deployment independently of private npm package and kernel versions. Use patch versions for compatible fixes, minor versions for compatible features, and major versions for breaking operator/configuration changes; document migrations during `0.x` development too.
 
-## Publish and distribute
+The workflow:
 
-The maintainer needs Bash, Git, tar, Node.js 24, Docker with Buildx and Linux amd64 build support, and permission to publish packages in the selected GHCR namespace. The script requires the release tag to point at a clean HEAD, including no untracked files, and builds a Git archive of that commit. Ignored local settings never enter the archive; the Dockerfile and `.dockerignore` further limit image contents. Keep credentials out of tracked source and build arguments.
+1. Checks the version, source, existing Git tags, GitHub releases, and GHCR image tags. Only an explicit HTTP 404 counts as absent state.
+2. Reuses a successful push CI run for the exact source commit, or runs the existing CI jobs: production tests, both Foundry projects, kernel builds, frontend checks, PostgreSQL recovery, packaged worker modes, amd64 direct/HTTPS/hourly/IPFS publication, and an arm64 cross-build.
+3. Rechecks that the version is unused and main still matches the tested commit, then creates the annotated tag and builds/pushes the amd64 image from clean tagged source.
+4. Packages guides pinned to that release and verifies the bundle pin, image labels/platform, and anonymous image pull.
+5. Creates a draft GitHub Release, uploads and checks all three assets, publishes it as latest, and compares anonymous downloads with the generated bytes.
 
-Authenticate interactively with a GitHub personal access token (classic) with `write:packages`, authorizing organization SSO if required. Paste it at Docker's password prompt, not into a command or committed file. Public image downloads need no authentication. See [GitHub's GHCR instructions](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
+The workflow summary contains the release URL, source identity, and checksum. The GitHub Release contains `image.txt`, `release.txt`, and the versioned archive. Workflow artifacts retain those files plus build metadata and generated notes for 30 days. The repository guides resolve the current release once; generated bundle guides use their exact tag, so routine releases need no version-only documentation PR.
+
+### One-time permissions
+
+The workflow uses GitHub's built-in repository token with `contents: write` and `packages: write` only in the publication job. Ensure `oyaprotocol/oya-commitments` has write access under the existing GHCR package's **Manage Actions access** settings. The package must be public for anonymous verification. No personal registry token is required. See [GitHub's package workflow permissions](https://docs.github.com/en/packages/managing-github-packages-using-github-actions-workflows/publishing-and-installing-a-package-with-github-actions).
+
+Repository or organization policies must permit Actions to create `node-v*` tags and releases. Protect those tags against later updates/deletion without blocking the initial creation. The workflow serializes releases and never force-updates a tag or reuses an image version.
+
+## Preview without publishing
+
+Select `dry_run` in the workflow UI, or run:
 
 ```sh
-docker login ghcr.io --username YOUR_GITHUB_USERNAME
-mkdir -p "$HOME/oya-releases"
+gh workflow run release-node.yml --ref main -f version=0.4.1 -f dry_run=true
+```
+
+Use an unused version newer than the latest release. A preview checks CI for the selected commit, creates only a local tag, builds/loads the image locally, generates the same bundle and notes, and checks labels and pins. It uploads the preview files as a workflow artifact. It creates no remote tag, registry image, or GitHub Release. Preview notes are marked accordingly. A branch may be selected for a preview; actual publication requires `main`.
+
+## Failure and recovery
+
+A failed run can leave a tag, image, or draft release. Inspect its logs and retained `node-release-RUN_ID-RUN_ATTEMPT` artifact before retrying. The workflow refuses existing version state, including its own partial attempts, to prevent replacing an image that was already pushed. Do not delete the tag or rebuild that version to clear a failure.
+
+Retain `build.json`, `image.txt`, `release.txt`, the archive, and notes. If an image push succeeded before packaging completed, recover its digest from the original build metadata. If GitHub upload or final verification failed, complete the draft using those exact original assets; compare uploaded asset digests and publish only after all three match. If original artifacts cannot be recovered, leave the version reserved and use a new version.
+
+Public verification can be repeated from a clean checkout of the release source with the retained output directory:
+
+```sh
+GITHUB_REPOSITORY=oyaprotocol/oya-commitments \
+GITHUB_SHA="$(git rev-parse HEAD)" \
+  node node/production/scripts/release-node.mjs verify 0.4.1 /path/to/release-output
+```
+
+Replace the version and path. This reads the registry/release and checks local artifacts; it does not publish. The anonymous pull uses the default Linux Docker socket, matching the hosted workflow runner.
+
+## Local publisher
+
+For exceptional manual maintenance, `scripts/publish-image.sh` remains available. From a clean checkout of a reviewed `node-vMAJOR.MINOR.PATCH` tag, use an authenticated Docker session and a new external output directory whose parent exists:
+
+```sh
 bash node/production/scripts/publish-image.sh \
-  ghcr.io/oyaprotocol/oya-node node-v0.1.0 "$HOME/oya-releases/node-v0.1.0"
+  ghcr.io/oyaprotocol/oya-node node-v0.4.1 "$HOME/oya-releases/node-v0.4.1"
 ```
 
-Use a new output directory outside the checkout; its parent must exist. The registry repository is configurable for forks. The source label identifies this GitHub repository; forks should update that label in the publisher. The script pushes the image and creates three public release assets:
+Add `--dry-run` to build/load locally without pushing. The script requires Git, Bash, Node.js 24, tar, and Docker Buildx. It records the digest from this build's metadata and packages only committed public assets. `build.json` is retained for recovery and is not a GitHub Release asset. The coordinating workflow handles tag creation, checks, notes, and GitHub publication.
 
-- `image.txt`: the exact `ghcr.io/OWNER/IMAGE@sha256:...` reference returned by this build.
-- `release.txt`: the Git tag, full commit ID, and pinned image reference.
-- `oya-node-v0.1.0.tar.gz`: matching Compose/Caddy files, inbox/worker configuration examples, local hosting, PostgreSQL, and agent-assisted guides, the Keychain worker helper and overlay, API and release documentation, compatibility guides/helpers for older direct nodes, and `node/production/image.txt`. It contains no operator settings, signing keys, database passwords, source checkout, or build tools.
+## Upgrade installed nodes
 
-The bundle also carries the `testing` Compose overlay and `agent-library/agents/hourly-message-test/agent.mjs` from the same Git tag. The test agent uses the node image's existing Node.js/ethers installation with its source mounted read-only. Generated agent keys are private operator state and never belong in a release. Validate this optional service with `npm --prefix node/production run test:testing -- --platform linux/amd64` before release.
-
-Operators should extract a trusted release bundle into a new directory with `tar -xzpf ARCHIVE -C BUNDLE_DIRECTORY`, replacing the placeholders with their paths. The `-p` flag preserves the archived public read/traversal permissions under `umask 077`, so bind-mounted Caddy configuration and agent source remain readable by container users. Keep private operator settings in a separate directory with owner-only permissions. Older v0.2.0 bundles also need the scoped permission repair in the [direct-node extraction instructions](run-direct.md#1-download-the-matching-release-files).
-
-The digest comes from [Buildx build metadata](https://docs.docker.com/reference/cli/docker/buildx/build/#write-build-result-metadata-to-a-file---metadata-file), rather than looking up the version tag later. Deployments use that immutable digest. Building the same source again can yield a different digest; retain the original assets and record a new version for a new publication.
-
-On the first publication, change the GHCR package visibility to **public** in its package settings; a public source repository does not automatically make a newly published package public. Verify that a host without GHCR credentials can pull the exact reference from `image.txt`. GitHub documents [package visibility settings](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility). An authenticated maintainer pull alone does not test anonymous access.
-
-Create a GitHub Release attached to the same Git tag, attach all three assets, and include the contents of `release.txt` plus the archive SHA-256, changes, checks performed, and any upgrade instructions in the release notes. Compute the archive checksum with `shasum -a 256` on macOS or `sha256sum` on Linux after packaging. Inspect the assets before uploading. The generated archive and digest records are release assets, not additional source commits; the digest is only known after building the tagged commit. No registry credentials, `node.json`, or `node.env` belong in Git or these assets.
-
-If publishing fails, inspect the output directory and registry before another attempt: a push can succeed before bundle creation fails. The script refuses an existing output directory and does not undo a public push. Keep completed assets; do not delete an image used by existing deployments. This script does not create Git tags, push Git changes, change package visibility, or create GitHub Releases for you.
-
-## Publish an update
-
-Make and review the source/dependency/Dockerfile changes, run validation, merge, and create the next `node-vMAJOR.MINOR.PATCH` tag. Repeat publication into a new output directory and attach its assets to a new GitHub Release. A base-image or dependency security fix also needs a new build and release; the Dockerfile's digest and lockfile do not update themselves.
-
-Existing nodes keep their recorded digest until an operator deliberately updates them. Keep old images and release assets for rollback. Follow [local worker recovery and upgrades](run-locally.md#monitor-stop-and-resume) and the [database backup/migration procedure](host-inbox.md#retention-recovery-and-migration). Release notes must call out changed Compose files, private configuration, timeouts, or storage compatibility; an old image cannot reverse incompatible database state. Existing direct deployments must drain and reconcile before migration, and their hourly sender requires adaptation to the inbox protocol. Never point an old direct image at the new worker configuration.
+Follow [worker recovery and upgrades](run-locally.md#monitor-stop-and-resume) and [database backup/migration](host-inbox.md#retention-recovery-and-migration). Review changed Compose files, private settings, timeouts, and storage compatibility. An old image cannot reverse incompatible database state. Drain and reconcile direct deployments before migrating them to the inbox protocol, and adapt their hourly sender. Preserve old images and release assets for rollback.

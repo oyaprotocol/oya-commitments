@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-usage() { echo 'Usage: bash publish-image.sh ghcr.io/OWNER/IMAGE node-vMAJOR.MINOR.PATCH OUTPUT_DIRECTORY'; }
+usage() { echo 'Usage: bash publish-image.sh ghcr.io/OWNER/IMAGE node-vMAJOR.MINOR.PATCH OUTPUT_DIRECTORY [--dry-run]'; }
 fail() { echo "$1" >&2; exit 1; }
 if [[ ${1:-} == --help && $# == 1 ]]; then usage; exit 0; fi
-if [[ $# != 3 ]]; then usage >&2; exit 1; fi
+if [[ $# != 3 && $# != 4 ]]; then usage >&2; exit 1; fi
+[[ $# == 3 || $4 == --dry-run ]] || fail 'The only optional argument is --dry-run.'
+build_mode=--push
+if [[ ${4:-} == --dry-run ]]; then build_mode=--load; fi
 repository=$1
 release=$2
 [[ $repository =~ ^ghcr\.io/[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9._-]*$ ]] || fail 'Use a lowercase GHCR owner/image repository, without a tag.'
@@ -27,17 +30,19 @@ mkdir "$staging/source"
 # Preserve public source modes inside private staging: the image runs as non-root.
 git -C "$root" -c tar.umask=0022 archive "$revision:node/production" | tar -xpf - -C "$staging/source"
 version=${release#node-}
-echo "Publishing $repository:$version from $revision for Linux amd64."
-docker buildx build --platform linux/amd64 --push --tag "$repository:$version" \
+echo "Building $repository:$version from $revision for Linux amd64 ($build_mode)."
+docker buildx build --platform linux/amd64 "$build_mode" --tag "$repository:$version" \
     --label "org.opencontainers.image.source=https://github.com/oyaprotocol/oya-commitments" \
     --label "org.opencontainers.image.revision=$revision" --label "org.opencontainers.image.version=$version" \
-    --metadata-file "$staging/build.json" "$staging/source"
+    --metadata-file "$output/build.json" "$staging/source"
 # Use this build's digest, never a later lookup of the mutable version tag.
 digest=$(node --input-type=module -e '
 import { readFileSync } from "node:fs";
 console.log(JSON.parse(readFileSync(process.argv[1], "utf8"))["containerimage.digest"]);
-' "$staging/build.json")
+' "$output/build.json")
 [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || fail 'Build did not return a valid image digest; inspect the registry before retrying.'
+printf '%s@%s\n' "$repository" "$digest" > "$output/image.txt"
+printf 'Git tag: %s\nGit commit: %s\nImage: %s@%s\n' "$release" "$revision" "$repository" "$digest" > "$output/release.txt"
 bundle="$staging/bundle/node/production"
 mkdir -p "$bundle/docker" "$bundle/scripts" "$bundle/inbox"
 cp "$staging/source/compose.yaml" "$staging/source/README.md" \
@@ -55,11 +60,27 @@ git -C "$root" show "$revision:agent-library/agents/hourly-message-test/agent.mj
     > "$staging/bundle/agent-library/agents/hourly-message-test/agent.mjs"
 cp "$staging/source/scripts/deploy-droplet.sh" "$staging/source/scripts/deploy-droplet-remote.sh" "$bundle/scripts/"
 cp "$staging/source/scripts/keychain-worker.py" "$bundle/scripts/"
-printf '%s@%s\n' "$repository" "$digest" > "$bundle/image.txt"
-cp "$bundle/image.txt" "$output/image.txt"
-printf 'Git tag: %s\nGit commit: %s\nImage: %s@%s\n' "$release" "$revision" "$repository" "$digest" > "$output/release.txt"
+cp "$output/image.txt" "$bundle/image.txt"
+# Source guides resolve the latest release; immutable bundles select their own tag.
+node --input-type=module - "$bundle" "$release" <<'NODE'
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+const [directory, tag] = process.argv.slice(2);
+const releases = 'https://github.com/oyaprotocol/oya-commitments/releases';
+for (const name of readdirSync(directory).filter(name => name.endsWith('.md'))) {
+    const path = join(directory, name);
+    const text = readFileSync(path, 'utf8')
+        .replaceAll(`${releases}/latest)`, `${releases}/tag/${tag})`)
+        .replace(/^export OYA_NODE_RELEASE=.*$/gm, `export OYA_NODE_RELEASE="${tag}"`);
+    writeFileSync(path, text);
+}
+NODE
 # Public bundle files must be readable by hardened containers after extraction.
 # Keep the surrounding staging/output directories private, not the archived files.
 chmod -R a+rX "$staging/bundle"
 tar -C "$staging/bundle" -czf "$output/oya-node-$version.tar.gz" .
-echo "Release files written to $output. Make the GHCR package public and verify anonymous access before sharing."
+if [[ $build_mode == --load ]]; then
+    echo "Preview files written to $output; no image was pushed."
+else
+    echo "Release files written to $output. Verify anonymous access before sharing."
+fi
