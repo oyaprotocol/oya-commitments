@@ -28,7 +28,7 @@ python3 node/production/scripts/upgrade-node.py preview \
   --release node-v0.4.0
 ```
 
-Preview fetches the selected release metadata and three public assets into an automatically cleaned temporary directory. It checks GitHub asset SHA-256 digests, the archive checksum and manifest in the release notes, matching archive/image identities, safe archive paths and file types, and the image's source/revision/version labels directly from GHCR. It compares the rendered old/new Compose configuration with the actual local containers and storage. The image must have a manifest for the selected platform; retain your existing amd64 override on ARM hosts.
+Preview fetches the selected release metadata and three public assets into an automatically cleaned temporary directory. It checks GitHub asset SHA-256 digests, the archive checksum and manifest in the release notes, the selected Git tag's resolved commit against the manifest revision (including annotated tags), matching archive/image identities, safe archive paths and file types, and the image's source/revision/version labels directly from GHCR. It compares the rendered old/new Compose configuration with the actual local containers and storage. The image must have a manifest for the selected platform; retain your existing amd64 override on ARM hosts.
 
 Preview **does not pull an image, stop/start services, change saved settings, read Keychain, or create installation recovery records**. It is not offline: GitHub/GHCR and Docker inspection must be available. The normal command requires an explicit action; there is no implicit apply or `latest` selection.
 

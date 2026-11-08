@@ -693,11 +693,33 @@ class Fixture(unittest.TestCase):
         with self.assertRaisesRegex(upgrade.UpgradeError, 'mode explicitly'):
             self.run_upgrade()
 
+    @contextlib.contextmanager
+    def macos_keychain_user(self, uid=501):
+        selection = upgrade.keychain_selection
+        def select(*args):
+            # Mock only the platform gate; filesystem ownership uses the real UID.
+            with patch.object(upgrade.os, 'getuid', return_value=uid):
+                return selection(*args)
+        with patch.object(upgrade.sys, 'platform', 'darwin'), \
+                patch.object(upgrade, 'keychain_selection', side_effect=select):
+            yield
+
+    def test_keychain_root_user_is_rejected_before_mutation(self):
+        self.configure('worker', keychain=True)
+        with self.macos_keychain_user(uid=0), self.assertRaisesRegex(upgrade.UpgradeError, 'non-root'):
+            self.run_upgrade(keychain_account='fixture', keychain_service='fixture.worker')
+        self.assertEqual(self.mutations(), [])
+
+    def test_private_files_reject_another_owner(self):
+        with patch.object(upgrade.os, 'getuid', return_value=os.getuid() + 1):
+            with self.assertRaisesRegex(upgrade.UpgradeError, 'owned, private'):
+                upgrade.private(self.env_file)
+
     def test_keychain_detected_without_arguments_and_preview_never_reads_keychain(self):
         self.configure('worker', keychain=True)
         with self.assertRaisesRegex(upgrade.UpgradeError, 'Keychain-managed'):
             self.run_upgrade()
-        with patch.object(upgrade.sys, 'platform', 'darwin'), patch.object(upgrade.os, 'getuid', return_value=self.private.stat().st_uid):
+        with self.macos_keychain_user():
             self.run_upgrade(keychain_account='fixture', keychain_service='fixture.worker')
         self.assertEqual(self.mutations(), [])
         self.assertFalse((self.private / '.keychain-runtime/worker.json').exists())
@@ -711,7 +733,7 @@ class Fixture(unittest.TestCase):
                 security_calls.append(args)
                 return (('x' * 43) + '\n').encode()
             return original_command(args, env, **kwargs)
-        with patch.object(upgrade.sys, 'platform', 'darwin'), patch.object(upgrade, 'command', side_effect=execute):
+        with self.macos_keychain_user(), patch.object(upgrade, 'command', side_effect=execute):
             self.run_upgrade('apply', inbox_ready=RELEASE, keychain_account='fixture', keychain_service='fixture.worker')
         self.assertEqual(len(security_calls), 1)
         self.assertNotIn('x' * 43, str(security_calls) + self.output.getvalue())
@@ -729,7 +751,7 @@ class Fixture(unittest.TestCase):
             if args[0] == '/usr/bin/security':
                 return (('x' * 43) + '\n').encode()
             return original_command(args, env, **kwargs)
-        with patch.object(upgrade.sys, 'platform', 'darwin'), patch.object(upgrade, 'command', side_effect=execute):
+        with self.macos_keychain_user(), patch.object(upgrade, 'command', side_effect=execute):
             with self.assertRaises(upgrade.UpgradeError):
                 self.run_upgrade('apply', inbox_ready=RELEASE, keychain_account='fixture', keychain_service='fixture.worker')
         self.assertNotIn('node', self.read_state()['containers'])
@@ -852,7 +874,7 @@ class PureTests(unittest.TestCase):
             self.assertEqual(stat.S_IMODE((Path(directory) / 'node/production/image.txt').stat().st_mode), 0o644)
             self.assertEqual(stat.S_IMODE((Path(directory) / 'node/production').stat().st_mode), 0o755)
 
-    def release_fixture(self):
+    def release_fixture(self, reference=None, tag_objects=None):
         data = {'image.txt': (NEW + '\n').encode(),
                 'release.txt': f'Git tag: {RELEASE}\nGit commit: {COMMIT}\nImage: {NEW}\n'.encode(),
                 'oya-node-v0.4.0.tar.gz': archive()}
@@ -860,9 +882,85 @@ class PureTests(unittest.TestCase):
                     'body': data['release.txt'].decode().strip() + '\nArchive SHA-256: ' + upgrade.sha(data['oya-node-v0.4.0.tar.gz']),
                     'assets': [{'name': name, 'browser_download_url': upgrade.SOURCE + '/releases/download/' + RELEASE + '/' + name,
                                 'digest': 'sha256:' + upgrade.sha(value), 'size': len(value)} for name, value in data.items()]}
+        if reference is None:
+            reference = {'ref': 'refs/tags/' + RELEASE, 'object': {'type': 'commit', 'sha': COMMIT}}
         def fetch(url, limit, headers=None):
+            api = 'https://api.github.com/repos/' + upgrade.REPOSITORY
+            if url == api + '/git/ref/tags/' + RELEASE:
+                return json.dumps(reference).encode()
+            if url.startswith(api + '/git/tags/'):
+                return json.dumps((tag_objects or {})[url.rsplit('/', 1)[1]]).encode()
             return json.dumps(metadata).encode() if '/releases/tags/' in url else data[url.rsplit('/', 1)[1]]
         return data, metadata, fetch
+
+    def test_release_tag_commit_must_match_manifest_before_extraction(self):
+        for annotated in [False, True]:
+            tag_sha = 'a' * 40
+            target = {'type': 'commit', 'sha': '9' * 40}
+            reference = {'ref': 'refs/tags/' + RELEASE,
+                         'object': {'type': 'tag', 'sha': tag_sha} if annotated else target}
+            _, _, fetch = self.release_fixture(reference, {tag_sha: {'sha': tag_sha, 'object': target}})
+            with self.subTest(annotated=annotated), patch.object(upgrade, 'fetch', side_effect=fetch), \
+                    patch.object(upgrade, 'safe_extract', wraps=upgrade.safe_extract) as extract, tempfile.TemporaryDirectory() as directory:
+                with self.assertRaisesRegex(upgrade.UpgradeError, 'tag.*commit'):
+                    upgrade.release_assets(RELEASE, Path(directory))
+                extract.assert_not_called()
+                self.assertEqual(list(Path(directory).iterdir()), [])
+
+    def test_release_peels_annotated_and_nested_tags(self):
+        for depth in [1, 2]:
+            hashes = ['a' * 40, 'b' * 40]
+            objects = {hashes[i]: {'sha': hashes[i], 'object':
+                       {'type': 'tag', 'sha': hashes[i + 1]} if i + 1 < depth else
+                       {'type': 'commit', 'sha': COMMIT}} for i in range(depth)}
+            reference = {'ref': 'refs/tags/' + RELEASE, 'object': {'type': 'tag', 'sha': hashes[0]}}
+            _, _, fetch = self.release_fixture(reference, objects)
+            with self.subTest(depth=depth), patch.object(upgrade, 'fetch', side_effect=fetch) as request, \
+                    tempfile.TemporaryDirectory() as directory:
+                self.assertEqual(upgrade.release_assets(RELEASE, Path(directory))['commit'], COMMIT)
+                self.assertEqual(sum('/git/tags/' in call.args[0] for call in request.call_args_list), depth)
+
+    def test_release_rejects_unverifiable_tag_references(self):
+        tag_sha = 'a' * 40
+        valid = {'ref': 'refs/tags/' + RELEASE, 'object': {'type': 'commit', 'sha': COMMIT}}
+        cases = [None, [], {}, dict(valid, ref='refs/tags/other'),
+                 dict(valid, object=None), dict(valid, object={'type': 'tree', 'sha': COMMIT}),
+                 dict(valid, object={'type': 'commit', 'sha': 'not-a-sha'}),
+                 dict(valid, object={'type': 'tag', 'sha': tag_sha})]
+        for reference in cases:
+            # The annotated case cycles; it must not loop or accept a tag as a commit.
+            _, _, fetch = self.release_fixture()
+            def response(url, limit, headers=None):
+                if '/git/ref/' in url:
+                    return json.dumps(reference).encode()
+                if '/git/tags/' in url:
+                    return json.dumps({'sha': tag_sha, 'object': {'type': 'tag', 'sha': tag_sha}}).encode()
+                return fetch(url, limit, headers)
+            with self.subTest(reference=reference), patch.object(upgrade, 'fetch', side_effect=response), \
+                    tempfile.TemporaryDirectory() as directory:
+                with self.assertRaises(upgrade.UpgradeError):
+                    upgrade.release_assets(RELEASE, Path(directory))
+
+    def test_tag_lookup_errors_and_excessive_depth_fail_closed(self):
+        for response in [b'not-json', b'[]', upgrade.UpgradeError('Release retrieval failed.')]:
+            with self.subTest(response=response), patch.object(upgrade, 'fetch',
+                    side_effect=response if isinstance(response, Exception) else None, return_value=response):
+                with self.assertRaises(upgrade.UpgradeError):
+                    upgrade.release_tag_commit(RELEASE)
+        hashes = [f'{index:040x}' for index in range(18)]
+        reference = {'ref': 'refs/tags/' + RELEASE, 'object': {'type': 'tag', 'sha': hashes[0]}}
+        for fault in ['identity', 'depth', 'missing-target']:
+            objects = {hashes[i]: {'sha': hashes[i], 'object': {'type': 'tag', 'sha': hashes[i + 1]}}
+                       for i in range(17)}
+            if fault == 'identity':
+                objects[hashes[0]]['sha'] = hashes[1]
+            elif fault == 'missing-target':
+                objects[hashes[0]].pop('object')
+            _, _, fetch = self.release_fixture(reference, objects)
+            with self.subTest(fault=fault), patch.object(upgrade, 'fetch', side_effect=fetch) as request:
+                with self.assertRaises(upgrade.UpgradeError):
+                    upgrade.release_tag_commit(RELEASE)
+                self.assertLessEqual(request.call_count, 17)
 
     def test_release_asset_checksums_manifest_and_embedded_image_match(self):
         data, metadata, fetch = self.release_fixture()

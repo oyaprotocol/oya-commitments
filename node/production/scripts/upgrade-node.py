@@ -324,6 +324,35 @@ def safe_extract(archive, destination):
         raise UpgradeError('Cannot safely read the release archive.') from None
 
 
+def release_tag_commit(tag):
+    """Resolve the exact Git ref and peel bounded annotated tags to a commit."""
+    base = 'https://api.github.com/repos/' + REPOSITORY + '/git/'
+    def document(path):
+        try:
+            value = json.loads(fetch(base + path, MAX_FILE))
+        except (ValueError, UnicodeError):
+            raise UpgradeError('Invalid Git tag verification response.') from None
+        require(isinstance(value, dict), 'Invalid Git tag verification response.')
+        return value
+    reference = document('ref/tags/' + tag)
+    require(reference.get('ref') == 'refs/tags/' + tag, 'Git tag reference mismatch.')
+    target = reference.get('object')
+    seen = set()
+    while True:
+        require(isinstance(target, dict), 'Invalid Git tag target.')
+        kind, revision = target.get('type'), target.get('sha')
+        require(isinstance(revision, str) and re.fullmatch(r'[0-9a-f]{40}', revision) is not None,
+                'Invalid Git tag object revision.')
+        if kind == 'commit':
+            return revision
+        require(kind == 'tag' and revision not in seen and len(seen) < 16,
+                'Git tag must resolve to a commit within 16 annotated tags, without cycles.')
+        seen.add(revision)
+        annotated = document('tags/' + revision)
+        require(annotated.get('sha') == revision, 'Git tag object identity mismatch.')
+        target = annotated.get('object')
+
+
 def release_assets(tag, destination):
     metadata = json.loads(fetch('https://api.github.com/repos/' + REPOSITORY + '/releases/tags/' + tag, MAX_FILE))
     require(metadata.get('tag_name') == tag and not metadata.get('draft') and not metadata.get('prerelease'),
@@ -352,6 +381,8 @@ def release_assets(tag, destination):
     fields = dict(line.split(': ', 1) for line in manifest.strip().splitlines())
     require(fields['Git tag'] == tag and fields['Image'] == image and manifest.strip() in body,
             'Release manifest identity does not match the selected tag, image, or published notes.')
+    require(release_tag_commit(tag) == fields['Git commit'],
+            'Git tag commit does not match the release manifest commit.')
     bundle = destination / 'bundle'
     bundle.mkdir(mode=0o755)
     safe_extract(data[archive_name], bundle)

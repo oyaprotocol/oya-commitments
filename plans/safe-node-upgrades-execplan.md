@@ -21,9 +21,12 @@ The deliverable is a Python 3 standard-library command, operator instructions, r
 - [x] 2026-11-08: The final ordinary-worker real-Docker run also passed dump restoration, exact row/checkpoint preservation, injected uncertain startup and reconciled retry.
 - [x] 2026-11-08: Follow-up review cleared the previous findings and identified an ancestor-directory durability gap. Three focused regressions failed before the fix; the recovery root is now synced through its installation directory before stopping services or replacing selectors. All 50 Python tests, 280 production tests and 9 PostgreSQL integration tests passed afterward.
 - [x] 2026-11-08: Final-source real-Docker confirmation passed after the parent-directory sync fix, including both role upgrades, isolated dump restoration, Keychain cleanup and uncertain-startup recovery. Implementation and validation are complete and ready for review.
+- [x] 2026-11-08: Reproduced PR #146 review findings: inconsistent Git tag/manifest revisions were accepted, and the original suite failed three Keychain cases under UID 0. Added exact tag-ref resolution with bounded annotated-tag peeling and scoped test-only UID simulation. All 56 Python tests pass on macOS and in a disposable root Linux container; all 280 production tests pass on Node.js 24. Syntax checks and read-only verification of the official v0.4.0 Git tag also pass.
 - [ ] Human review and merge.
 
 ## Surprises & Discoveries
+
+Release metadata, uploaded manifests and OCI labels can agree while the Git tag points elsewhere. The upgrader now independently resolves the official tag ref before extracting assets. Root-container testing also showed that a blanket nonzero UID mock would conflict with real file ownership; only the Keychain selection call simulates a non-root macOS user. Production ownership and root rejection checks remain exercised.
 
 The existing deployment uses explicitly selected IPFS-only mode. Version 0.4.0 changes new-installation defaults to Sepolia, not existing execution identities. Copying new example configuration during upgrade would be unsafe. The selected release has no database migration, and its bundled Kubo/PostgreSQL/proxy definitions match the previous release. Upgrading only the application services avoids unnecessarily recreating these dependencies.
 
@@ -35,6 +38,8 @@ The existing Keychain helper removes the temporary host token after startup and 
 
 ## Decision Log
 
+- 2026-11-08 / Oya Gardener: Resolve the exact official Git ref, follow at most 16 annotated tags, and require a terminal commit equal to the release manifest. Reject malformed, cyclic, non-commit or unavailable references rather than trusting `target_commitish` or asset agreement. Keep UID simulation in tests scoped to Keychain selection so real filesystem ownership checks remain intact.
+
 - 2026-11-08 / Oya Gardener: Keep the runtime/database protocol unchanged. Upgrade orchestration must preserve the existing transaction recovery mechanism, not introduce a replacement queue or retry scheme.
 - 2026-11-08 / Oya Gardener: Require explicit apply or quiesce for mutation and provide a read-only preview. Downloading verified public artifacts may use temporary storage, but preview must not pull images, stop containers, read Keychain, or alter installation settings.
 - 2026-11-08 / Oya Gardener: Retain exact project, Docker context, private directories, user, overrides and volume identities. Only replace the application image and corresponding bundle references. Refuse incompatible storage/topology changes rather than guessing a migration.
@@ -42,6 +47,8 @@ The existing Keychain helper removes the temporary host token after startup and 
 - 2026-11-08 / Oya Gardener: Never automatically restore PostgreSQL or roll back an image after potentially applying a migration. Retain private recovery information and stop unverified execution. Unknown transactions retain their original signed bytes/hash and must be reconciled rather than replaced.
 
 ## Outcomes & Retrospective
+
+PR #146's tag-binding and root-CI findings are fixed with failing-before/passing-after coverage. The follow-up reran the Python suite on both host and root-container environments and the production suite on Node.js 24. It did not repeat operational upgrades or PostgreSQL restoration; the earlier evidence below covers those unchanged paths. Independent review and publication of the follow-up remain pending.
 
 The authorized installation upgrade and the independent real-Docker CLI upgrade both passed. New release defaults did not change existing IPFS-only identities. Recovery backups were restored successfully in isolated fixtures for the live operation. The CLI makes and catalogs an inbox dump but deliberately leaves full restore testing, off-device backups and public delivery verification to the operator. The Keychain fixture also restored the CLI-generated dump and preserved a signed-transaction canary across failure/retry; actual Keychain credential lookup was stubbed. Initial review findings are fixed, with both real-Docker variants passing. Follow-up review identified one remaining parent-directory sync gap; the fix has red/green ordering regressions and all offline/database suites pass. Final-source real-Docker confirmation also passed. Implementation and validation are complete; human review and merge remain.
 
