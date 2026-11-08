@@ -1,10 +1,10 @@
 # Testnet Ledger acceptance
 
-Use this checklist after review to demonstrate the inbox → IPFS → Ledger workflow. Obtain broadcast authorization and select a reviewed image/revision containing the receipt-identity hardening tested below.
+Use this checklist after review to demonstrate the inbox → IPFS → Ledger workflow. Obtain broadcast authorization and use [node-v0.4.0](release-image.md#published-deployment-release) or a reviewed later image/revision containing the receipt-identity hardening tested below.
 
 ## Establish inputs before starting
 
-Use **Sepolia chain `11155111`, Ledger `0xe6DeB4B3c31E15DBeA0f932830e2f20Ba2EddAa3`**. The [canonical reference](README.md#deployed-sepolia-ledger) records source/runtime verification and the default RPC `https://ethereum-sepolia-rpc.publicnode.com`. Obtain operator approval for the RPC or supply another approved Sepolia endpoint. Set the target fields explicitly with v0.3.1 assets, which predate these defaults.
+Use **Sepolia chain `11155111`, Ledger `0xe6DeB4B3c31E15DBeA0f932830e2f20Ba2EddAa3`**. The [canonical reference](README.md#deployed-sepolia-ledger) records source/runtime verification and the default RPC `https://ethereum-sepolia-rpc.publicnode.com`. Obtain operator approval for the RPC or supply another approved Sepolia endpoint. These defaults are included in v0.4.0.
 
 Record, privately, explicit operator authorization to broadcast on the selected Ethereum testnet, its expected chain ID and approved RPC, the Ledger address and evidence that it is the intended deployment, the dedicated node's public address, and the reviewed image digest/commit. Supply its signing key through the existing protected local secret file, not chat, command-line arguments or Git. Use testnet-only funds and separate agent/deployer accounts. Never share the node signing account with another worker or direct runtime.
 
