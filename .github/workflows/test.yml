@@ -19,11 +19,11 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: npm
@@ -47,13 +47,13 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           submodules: recursive
 
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+        uses: foundry-rs/foundry-toolchain@dba66c27052e63476d886f22216e119ba7e615bf # v1.9.2
 
       - name: Show Forge version
         run: forge --version
@@ -76,13 +76,13 @@ jobs:
       run:
         working-directory: contracts
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           submodules: recursive
 
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+        uses: foundry-rs/foundry-toolchain@dba66c27052e63476d886f22216e119ba7e615bf # v1.9.2
 
       - name: Run Forge fmt
         run: forge fmt --check
@@ -99,12 +99,12 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: npm
@@ -127,12 +127,12 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: npm
@@ -151,16 +151,16 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           submodules: recursive
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: node/production/package-lock.json
-      - uses: foundry-rs/foundry-toolchain@v1
+      - uses: foundry-rs/foundry-toolchain@dba66c27052e63476d886f22216e119ba7e615bf # v1.9.2
         with:
           version: v1.5.1
       - name: Prepare node dependencies and Ledger fixture
@@ -179,18 +179,18 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           submodules: recursive
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: node/production/package-lock.json
 
-      - uses: foundry-rs/foundry-toolchain@v1
+      - uses: foundry-rs/foundry-toolchain@dba66c27052e63476d886f22216e119ba7e615bf # v1.9.2
         with:
           version: v1.5.1
 
@@ -211,11 +211,11 @@ jobs:
       - name: Test Linux amd64 IPFS-only publication and hourly agent
         run: npm --prefix node/production run test:ipfs -- --verbose --platform linux/amd64
 
-      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         with:
           platforms: arm64
 
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Build Linux arm64 image without publishing
         run: docker buildx build --platform linux/arm64 --output "type=oci,dest=$RUNNER_TEMP/oya-node-arm64.tar" node/production
