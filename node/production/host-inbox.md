@@ -6,7 +6,7 @@ To have an agent provision and verify this setup using secure credential referen
 
 The inbox stores signed message bodies, job status, and transaction checkpoints. Treat its database and worker token as trusted infrastructure. A database administrator can alter execution state; this is not an untrusted queue protocol. Keep node, deployer, and agent private keys off this host. PostgreSQL contains prepared signed Ledger transactions, which can be broadcast, but cannot authorize other transactions without the node key.
 
-This guide uses the published [node-v0.3.1 image and deployment bundle](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.1). Use the same release for the [local worker](run-locally.md). Its templates predate the [default deployed Sepolia Ledger](README.md#deployed-sepolia-ledger), so explicitly set the execution fields below instead of relying on the copied template. v0.2.0 images support only the direct API and cannot serve an inbox.
+This guide uses the published [node-v0.4.0 image and deployment bundle](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.4.0). Use the same release for the [local worker](run-locally.md). Its templates include the [default deployed Sepolia Ledger](README.md#deployed-sepolia-ledger); replace the public-node placeholder and client allowlist as described below. v0.2.0 images support only the direct API and cannot serve an inbox.
 
 ## Prepare the host
 
@@ -17,19 +17,19 @@ Use a separate terminal from the local worker, including when both roles share a
 ```sh
 docker version
 docker compose version
-export OYA_BUNDLE_DIR="$HOME/oya-bundles/node-v0.3.1"
+export OYA_BUNDLE_DIR="$HOME/oya-bundles/node-v0.4.0"
 umask 077
 mkdir -p "$(dirname "$OYA_BUNDLE_DIR")"
 mkdir "$OYA_BUNDLE_DIR"
 curl -fL \
-  https://github.com/oyaprotocol/oya-commitments/releases/download/node-v0.3.1/oya-node-v0.3.1.tar.gz \
-  -o "$OYA_BUNDLE_DIR/oya-node-v0.3.1.tar.gz"
+  https://github.com/oyaprotocol/oya-commitments/releases/download/node-v0.4.0/oya-node-v0.4.0.tar.gz \
+  -o "$OYA_BUNDLE_DIR/oya-node-v0.4.0.tar.gz"
 ```
 
-Before extracting, run `shasum -a 256 "$OYA_BUNDLE_DIR/oya-node-v0.3.1.tar.gz"` on macOS or `sha256sum "$OYA_BUNDLE_DIR/oya-node-v0.3.1.tar.gz"` on Linux. Compare the result with the archive SHA-256 in the [node-v0.3.1 release notes](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.3.1). Continue only if it matches.
+Before extracting, run `shasum -a 256 "$OYA_BUNDLE_DIR/oya-node-v0.4.0.tar.gz"` on macOS or `sha256sum "$OYA_BUNDLE_DIR/oya-node-v0.4.0.tar.gz"` on Linux. Compare the result with the archive SHA-256 in the [node-v0.4.0 release notes](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.4.0). Continue only if it matches.
 
 ```sh
-tar -xzpf "$OYA_BUNDLE_DIR/oya-node-v0.3.1.tar.gz" -C "$OYA_BUNDLE_DIR"
+tar -xzpf "$OYA_BUNDLE_DIR/oya-node-v0.4.0.tar.gz" -C "$OYA_BUNDLE_DIR"
 export OYA_NODE_IMAGE="$(cat "$OYA_BUNDLE_DIR/node/production/image.txt")"
 export OYA_NODE_PLATFORM=linux/amd64
 docker pull --platform "$OYA_NODE_PLATFORM" "$OYA_NODE_IMAGE"
