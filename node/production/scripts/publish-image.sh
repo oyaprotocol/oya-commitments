@@ -80,7 +80,8 @@ NODE
 # Public bundle files must be readable by hardened containers after extraction.
 # Keep the surrounding staging/output directories private, not the archived files.
 chmod -R a+rX "$staging/bundle"
-tar -C "$staging/bundle" -czf "$output/oya-node-$version.tar.gz" .
+# The upgrader accepts only public files with portable, metadata-free headers.
+COPYFILE_DISABLE=1 tar --format=ustar -C "$staging/bundle" -czf "$output/oya-node-$version.tar.gz" .
 if [[ $build_mode == --load ]]; then
     echo "Preview files written to $output; no image was pushed."
 else
