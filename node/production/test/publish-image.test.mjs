@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { imageRepository, readAssets, releaseNotes, releaseVersion } from '../scripts/release-node.mjs';
 
 const runtime = fileURLToPath(new URL('../', import.meta.url));
 const digest = `sha256:${'b'.repeat(64)}`;
@@ -20,10 +21,10 @@ function fixture(t) {
     mkdirSync(join(source, 'scripts'), { recursive: true });
     mkdirSync(bin);
     for (const name of ['src', 'docker', 'inbox', 'Dockerfile', '.dockerignore', 'package.json', 'package-lock.json',
-        'compose.yaml', 'README.md', 'deploy-droplet.md', 'deploy-with-agent.md', 'run-locally.md', 'run-direct.md', 'host-inbox.md', 'inbox-api.md', 'release-image.md', 'testnet-ledger.md']) {
+        'compose.yaml', 'README.md', 'deploy-droplet.md', 'deploy-with-agent.md', 'run-locally.md', 'run-direct.md', 'host-inbox.md', 'inbox-api.md', 'release-image.md', 'testnet-ledger.md', 'upgrade-node.md']) {
         cpSync(join(runtime, name), join(source, name), { recursive: true });
     }
-    for (const name of ['publish-image.sh', 'deploy-droplet.sh', 'deploy-droplet-remote.sh', 'keychain-worker.py']) {
+    for (const name of ['publish-image.sh', 'deploy-droplet.sh', 'deploy-droplet-remote.sh', 'keychain-worker.py', 'upgrade-node.py']) {
         cpSync(join(runtime, 'scripts', name), join(source, 'scripts', name));
     }
     const agent = 'agent-library/agents/hourly-message-test/agent.mjs';
@@ -65,6 +66,22 @@ writeFileSync(args[args.indexOf('--metadata-file') + 1], JSON.stringify(metadata
     return { directory, checkout, source, output, git, run };
 }
 
+test('stages the source archive before extraction instead of piping git into an early-closing tar', (t) => {
+    const f = fixture(t);
+    const git = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+    writeFileSync(join(f.directory, 'bin/git'), `#!${process.execPath}
+import { spawnSync } from 'node:child_process';
+const args = process.argv.slice(2);
+// Reproduce the producer failure when a tar reader closes before git drains.
+if (args.includes('archive') && !args.some(arg => arg.startsWith('--output='))) process.exit(141);
+const child = spawnSync(${JSON.stringify(git)}, args, { stdio: 'inherit' });
+process.exit(child.status ?? 1);
+`, { mode: 0o755 });
+    const result = f.run();
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(existsSync(join(f.output, 'oya-node-v0.1.0.tar.gz')));
+});
+
 test('publishes committed source and bundles matching scripts with this build’s digest', (t) => {
     const f = fixture(t);
     const result = f.run();
@@ -101,10 +118,10 @@ mkdir "$3"
     assert.equal(statSync(privateDirectory).mode & 0o777, 0o700, 'Subsequent private directories retain the operator umask.');
     assert.equal(statSync(join(privateDirectory, 'node.env')).mode & 0o777, 0o600, 'Subsequent private files retain the operator umask.');
     assert.deepEqual(readdirSync(bundle).sort(), ['README.md', 'compose.yaml', 'deploy-droplet.md', 'deploy-with-agent.md', 'docker', 'host-inbox.md', 'image.txt',
-        'inbox', 'inbox-api.md', 'release-image.md', 'run-direct.md', 'run-locally.md', 'scripts', 'testnet-ledger.md']);
+        'inbox', 'inbox-api.md', 'release-image.md', 'run-direct.md', 'run-locally.md', 'scripts', 'testnet-ledger.md', 'upgrade-node.md']);
     assert.deepEqual(readdirSync(join(bundle, 'inbox')).sort(), ['Caddyfile', 'compose.https.yaml', 'compose.keychain-worker.yaml', 'compose.postgres.yaml',
         'compose.worker.yaml', 'compose.yaml', 'inbox.example.json', 'worker.example.json']);
-    assert.deepEqual(readdirSync(join(bundle, 'scripts')).sort(), ['deploy-droplet-remote.sh', 'deploy-droplet.sh', 'keychain-worker.py']);
+    assert.deepEqual(readdirSync(join(bundle, 'scripts')).sort(), ['deploy-droplet-remote.sh', 'deploy-droplet.sh', 'keychain-worker.py', 'upgrade-node.py']);
     assert.deepEqual(readdirSync(join(bundle, 'docker')).sort(), ['Caddyfile', 'compose.http.yaml', 'compose.testing.yaml', 'config.example.json', 'runtime.env.example']);
     const nodeDefaults = JSON.parse(readFileSync(join(bundle, 'docker/config.example.json')));
     const inboxDefaults = JSON.parse(readFileSync(join(bundle, 'inbox/inbox.example.json'))).execution;
@@ -126,7 +143,7 @@ mkdir "$3"
     assert.equal(statSync(join(unpacked, agent)).mode & 0o777, 0o644, 'The container user must be able to read the mounted agent source.');
     assert.equal(readFileSync(join(unpacked, agent), 'utf8'), readFileSync(join(f.checkout, agent), 'utf8'));
     assert.equal(readFileSync(join(bundle, 'image.txt'), 'utf8'), `${repository}@${digest}\n`);
-    for (const name of ['deploy-droplet.sh', 'deploy-droplet-remote.sh', 'keychain-worker.py']) {
+    for (const name of ['deploy-droplet.sh', 'deploy-droplet-remote.sh', 'keychain-worker.py', 'upgrade-node.py']) {
         assert.equal(readFileSync(join(bundle, 'scripts', name), 'utf8'), readFileSync(join(f.source, 'scripts', name), 'utf8'));
     }
     assert.equal((result.stdout + result.stderr).includes('private-fixture-marker'), false);
@@ -142,6 +159,82 @@ test('dry run loads the image locally, preserves build metadata, and never pushe
     assert.ok(!args.includes('--push'));
     assert.equal(JSON.parse(readFileSync(join(f.output, 'build.json')))['containerimage.digest'], digest);
     assert.ok(result.stdout.includes('no image was pushed'));
+});
+
+test('published and dry-run bundles pass the strict upgrade release verifier', async (t) => {
+    for (const dryRun of [false, true]) {
+        await t.test(dryRun ? 'dry run' : 'publish', (t) => {
+            const f = fixture(t);
+            const tar = execFileSync('sh', ['-c', 'command -v tar'], { encoding: 'utf8' }).trim();
+            writeFileSync(join(f.directory, 'bin/tar'), `#!${process.execPath}
+import { execFileSync, spawnSync } from 'node:child_process';
+import { join } from 'node:path';
+const args = process.argv.slice(2);
+// Force macOS metadata on a staged public file, without touching the checkout.
+if (process.platform === 'darwin' && args.includes('-czf')) {
+    execFileSync('xattr', ['-w', 'com.oya.release-test', 'metadata must stay local',
+        join(args[args.indexOf('-C') + 1], 'node/production/README.md')]);
+}
+const child = spawnSync(${JSON.stringify(tar)}, args, { stdio: 'inherit' });
+process.exit(child.status ?? 1);
+`, { mode: 0o755 });
+            const result = f.run('', [imageRepository, 'node-v0.1.0', f.output, ...(dryRun ? ['--dry-run'] : [])]);
+            assert.equal(result.status, 0, result.stderr);
+            const release = { ...releaseVersion('0.1.0'), sha: f.git('rev-parse', 'HEAD') };
+            const records = readAssets(f.output, release);
+            const metadata = {
+                tag_name: release.tag, draft: false, prerelease: false,
+                body: releaseNotes(release, records, 'Fixture changes.', '', dryRun),
+                assets: records.assets.map(asset => ({
+                    name: asset.name, size: asset.bytes.length, digest: asset.digest,
+                    browser_download_url: `https://github.com/oyaprotocol/oya-commitments/releases/download/${release.tag}/${asset.name}`,
+                })),
+            };
+            const responseFile = join(f.directory, 'release-responses.json');
+            writeFileSync(responseFile, JSON.stringify({
+                metadata, commit: release.sha, tagObject: f.git('rev-parse', `refs/tags/${release.tag}`),
+            }));
+            // Only network responses are substituted; verify actual publisher bytes,
+            // generated notes, annotated-tag binding, extraction and packaged assets.
+            const checked = spawnSync('python3', ['-B', '-c', `
+import importlib.util, json, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location('upgrade', sys.argv[1])
+upgrade = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(upgrade)
+output, response_file, destination = map(Path, sys.argv[2:])
+fixture = json.loads(response_file.read_text())
+metadata = fixture['metadata']
+tag = metadata['tag_name']
+api = 'https://api.github.com/repos/' + upgrade.REPOSITORY
+responses = {
+    api + '/releases/tags/' + tag: json.dumps(metadata).encode(),
+    api + '/git/ref/tags/' + tag: json.dumps({'ref': 'refs/tags/' + tag,
+        'object': {'type': 'tag', 'sha': fixture['tagObject']}}).encode(),
+    api + '/git/tags/' + fixture['tagObject']: json.dumps({'sha': fixture['tagObject'],
+        'object': {'type': 'commit', 'sha': fixture['commit']}}).encode(),
+}
+responses.update({asset['browser_download_url']: (output / asset['name']).read_bytes()
+                  for asset in metadata['assets']})
+def fetch(url, limit, headers=None):
+    data = responses[url]
+    assert len(data) <= limit
+    return data
+upgrade.fetch = fetch
+destination.mkdir()
+release = upgrade.release_assets(tag, destination)
+assert release['tag'] == tag and release['commit'] == fixture['commit']
+assert release['image'] == (output / 'image.txt').read_text().strip()
+bundle = Path(release['bundle'])
+files = {p.relative_to(bundle).as_posix() for p in bundle.rglob('*') if p.is_file()}
+assert files == set(upgrade.PUBLIC_FILES), files
+assert (bundle / 'node/production/scripts/upgrade-node.py').read_bytes() == Path(sys.argv[1]).read_bytes()
+`, join(f.source, 'scripts/upgrade-node.py'), f.output, responseFile, join(f.directory, 'verified')], {
+                encoding: 'utf8', timeout: 20_000,
+            });
+            assert.equal(checked.status, 0, checked.stderr);
+        });
+    }
 });
 
 test('rejects dirty source, mismatched or missing tags, and unsafe publication arguments before Docker', async (t) => {

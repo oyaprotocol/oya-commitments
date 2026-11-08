@@ -45,6 +45,8 @@ Continue within this scope; ask only for missing access or scope changes.
 
 The [repository skill](https://github.com/oyaprotocol/oya-commitments/blob/main/skills/deploy-node/SKILL.md) provides the agent workflow. Detailed configuration remains in [Run locally](run-locally.md) and [Host the inbox](host-inbox.md). The current bundle includes the Keychain helper, Sepolia templates, and this guide. For explicit IPFS-only setup, replace the task's mode with `ipfs`, omit Ethereum settings in both roles, and skip node signer/funding/broadcast steps.
 
+For an existing installation, use [Verified release upgrades](upgrade-node.md) instead of repeating first-install setup. Preview both roles, preserve explicit execution settings, stop every worker before inbox replacement, and use Keychain lifecycle support when configured. Retain recovery records and reconcile transaction checkpoints before any rollback.
+
 After setup, use the private handoff record for commands to monitor, send messages, stop/start, and back up your installation. Docker must be running and the local device awake to process jobs. The inbox can accept work while it is offline, subject to queue limits and job deadlines; default client jobs expire after 24 hours. Keychain-backed workers require the startup helper after a reboot or failure and may prompt for approval. A local IPFS pin alone does not guarantee retrieval while the device sleeps.
 
 The rest of this guide is reference material for the operator and agent: [inputs](#what-you-supply), [credential storage](#keychain-and-runtime-secrets-are-different), [deployment work](#work-the-agent-performs), [acceptance](#acceptance-before-handoff), and [daily operation](#private-handoff-and-daily-operation).
