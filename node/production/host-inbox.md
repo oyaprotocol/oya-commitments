@@ -6,9 +6,11 @@ To have an agent provision and verify this setup using secure credential referen
 
 The inbox stores signed message bodies, job status, and transaction checkpoints. Treat its database and worker token as trusted infrastructure. A database administrator can alter execution state; this is not an untrusted queue protocol. Keep node, deployer, and agent private keys off this host. PostgreSQL contains prepared signed Ledger transactions, which can be broadcast, but cannot authorize other transactions without the node key.
 
-This guide uses the published [node-v0.4.0 image and deployment bundle](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.4.0). Use the same release for the [local worker](run-locally.md). Its templates include the [default deployed Sepolia Ledger](README.md#deployed-sepolia-ledger); replace the public-node placeholder and client allowlist as described below. v0.2.0 images support only the direct API and cannot serve an inbox.
+This guide uses the published [current image and deployment bundle](https://github.com/oyaprotocol/oya-commitments/releases/latest). Use the same release for the [local worker](run-locally.md). Its templates include the [default deployed Sepolia Ledger](README.md#deployed-sepolia-ledger); replace the public-node placeholder and client allowlist as described below. v0.2.0 images support only the direct API and cannot serve an inbox.
 
 ## Prepare the host
+
+The download selects a release once. For the other host, set `OYA_NODE_RELEASE` to the same tag before running these commands.
 
 Use Linux Docker/Compose 2.30+, Bash or zsh, `curl`, and `tar` as a non-root operator. The published Oya image is Linux amd64; an ARM host needs amd64 emulation or an [optional native source build](run-locally.md#optional-source-build). You need a DNS hostname pointing to the inbox host and inbound TCP 80/443 for Caddy. Restrict administrative access through your normal host controls. Do not expose PostgreSQL port 5432 publicly. Only the local node runs Kubo or holds a funded signing key.
 
@@ -17,19 +19,21 @@ Use a separate terminal from the local worker, including when both roles share a
 ```sh
 docker version
 docker compose version
-export OYA_BUNDLE_DIR="$HOME/oya-bundles/node-v0.4.0"
+export OYA_NODE_RELEASE="${OYA_NODE_RELEASE:-$(curl -fsSL https://github.com/oyaprotocol/oya-commitments/releases/latest/download/release.txt | sed -n 's/^Git tag: //p')}"
+: "${OYA_NODE_RELEASE:?Could not resolve a release tag}"
+export OYA_BUNDLE_DIR="$HOME/oya-bundles/$OYA_NODE_RELEASE"
 umask 077
 mkdir -p "$(dirname "$OYA_BUNDLE_DIR")"
 mkdir "$OYA_BUNDLE_DIR"
 curl -fL \
-  https://github.com/oyaprotocol/oya-commitments/releases/download/node-v0.4.0/oya-node-v0.4.0.tar.gz \
-  -o "$OYA_BUNDLE_DIR/oya-node-v0.4.0.tar.gz"
+  "https://github.com/oyaprotocol/oya-commitments/releases/download/$OYA_NODE_RELEASE/oya-$OYA_NODE_RELEASE.tar.gz" \
+  -o "$OYA_BUNDLE_DIR/oya-$OYA_NODE_RELEASE.tar.gz"
 ```
 
-Before extracting, run `shasum -a 256 "$OYA_BUNDLE_DIR/oya-node-v0.4.0.tar.gz"` on macOS or `sha256sum "$OYA_BUNDLE_DIR/oya-node-v0.4.0.tar.gz"` on Linux. Compare the result with the archive SHA-256 in the [node-v0.4.0 release notes](https://github.com/oyaprotocol/oya-commitments/releases/tag/node-v0.4.0). Continue only if it matches.
+Before extracting, run `shasum -a 256 "$OYA_BUNDLE_DIR/oya-$OYA_NODE_RELEASE.tar.gz"` on macOS or `sha256sum "$OYA_BUNDLE_DIR/oya-$OYA_NODE_RELEASE.tar.gz"` on Linux. Compare the result with the archive SHA-256 in the release notes at `https://github.com/oyaprotocol/oya-commitments/releases/tag/$OYA_NODE_RELEASE`. Continue only if it matches.
 
 ```sh
-tar -xzpf "$OYA_BUNDLE_DIR/oya-node-v0.4.0.tar.gz" -C "$OYA_BUNDLE_DIR"
+tar -xzpf "$OYA_BUNDLE_DIR/oya-$OYA_NODE_RELEASE.tar.gz" -C "$OYA_BUNDLE_DIR"
 export OYA_NODE_IMAGE="$(cat "$OYA_BUNDLE_DIR/node/production/image.txt")"
 export OYA_NODE_PLATFORM=linux/amd64
 docker pull --platform "$OYA_NODE_PLATFORM" "$OYA_NODE_IMAGE"

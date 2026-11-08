@@ -18,7 +18,7 @@ The default deployment runs Oya and Kubo on your local device, with a portable P
 | Develop or validate the runtime | [Install and validate](#install-and-validate). |
 | Publish an image and bundle | [Maintainer release guide](release-image.md). |
 
-The setup guides use the published [node-v0.4.0 image and matching bundle](release-image.md#published-deployment-release), including Sepolia defaults, and cover Ledger and explicit IPFS-only modes. v0.2.0 images support only the direct API.
+The setup guides use the published [current image and matching bundle](release-image.md#published-deployment-release), including Sepolia defaults, and cover Ledger and explicit IPFS-only modes. v0.2.0 images support only the direct API.
 
 ## Deployed Sepolia Ledger
 
@@ -50,7 +50,7 @@ For [IPFS-only operation](#ipfs-only-configuration), set `mode` to `ipfs` on the
 
 ### Release compatibility and existing installations
 
-The `node-v0.4.0` image and matching bundle include these defaults and updated templates. Older releases, including `node-v0.3.1`, predate them. With older compatible images/bundles, explicitly set `mode`, `chainId`, `ledgerContract`, and `rpcUrl` in private node settings, and `mode`, `chainId`, `ledgerContract`, and the real public `nodeAddress` in inbox execution settings, as shown in [Run locally](run-locally.md) and [Host the inbox](host-inbox.md).
+Releases from `node-v0.4.0` onward include these defaults and updated templates. Older releases, including `node-v0.3.1`, predate them. With older compatible images/bundles, explicitly set `mode`, `chainId`, `ledgerContract`, and `rpcUrl` in private node settings, and `mode`, `chainId`, `ledgerContract`, and the real public `nodeAddress` in inbox execution settings, as shown in [Run locally](run-locally.md) and [Host the inbox](host-inbox.md).
 
 Preserve existing private configuration, execution identities, keys, volumes, and targets. A deliberate mode/chain/contract/node-account change requires reconciling pending work and creating a new inbox target. A new contract requires the [advanced deployment workflow](#deploy-ledger-on-sepolia), separate authorization, and deployer credentials.
 

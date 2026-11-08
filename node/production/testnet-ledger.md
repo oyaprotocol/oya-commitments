@@ -1,6 +1,6 @@
 # Testnet Ledger acceptance
 
-Use this checklist after review to demonstrate the inbox → IPFS → Ledger workflow. Obtain broadcast authorization and use [node-v0.4.0](release-image.md#published-deployment-release) or a reviewed later image/revision containing the receipt-identity hardening tested below.
+Use this checklist after review to demonstrate the inbox → IPFS → Ledger workflow. Obtain broadcast authorization and use a [release from v0.4.0 onward](release-image.md#published-deployment-release) containing the receipt-identity hardening tested below.
 
 ## Establish inputs before starting
 
