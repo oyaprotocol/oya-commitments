@@ -31,6 +31,10 @@ Complete the human guide's acceptance sequence: public TLS, private health route
 
 If a check fails, preserve state, capture redacted diagnostics, and fix the identified problem. Do not delete volumes, erase queue records, regenerate identities, or create another transaction to hide uncertain work. Stop workers and reconcile transactions before any database rollback. A different image cannot automatically reverse a schema migration.
 
+## Upgrade an existing installation
+
+Follow [Verified release upgrades](../../node/production/upgrade-node.md) and use `node/production/scripts/upgrade-node.py` from a trusted reviewed checkout or a bundle that includes it. The already-published v0.4.0 bundle predates this helper. Preview both roles, review compatibility, preserve existing execution mode/identities and private overrides, then quiesce every worker before applying the inbox upgrade. The coordinator must verify remote worker shutdown and inbox readiness; CLI acknowledgements do not discover other hosts. The helper replaces only the application service, retains dependencies/volumes and recovery records, and checks a bundled PostgreSQL dump before inbox replacement. Use existing Keychain references and helper lifecycle for Keychain workers. Unsupported topology, external databases and migrations require separate planning. Never restore an old database or replace an unresolved transaction automatically after failure. Verify exact image, health, retained job/checkpoint state and content before reporting success.
+
 ## Finish the handoff
 
 Leave private commands for monitoring, submitting messages, restarting, backing up, and recovering. State whether backups and pruning are actually scheduled, the latest verified backup, sleep/offline behavior, provider cost, and remaining limitations. Retain credential references rather than values in the record. Update the ExecPlan with evidence and unresolved checks.

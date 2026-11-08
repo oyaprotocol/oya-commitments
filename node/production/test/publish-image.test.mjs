@@ -20,10 +20,10 @@ function fixture(t) {
     mkdirSync(join(source, 'scripts'), { recursive: true });
     mkdirSync(bin);
     for (const name of ['src', 'docker', 'inbox', 'Dockerfile', '.dockerignore', 'package.json', 'package-lock.json',
-        'compose.yaml', 'README.md', 'deploy-droplet.md', 'deploy-with-agent.md', 'run-locally.md', 'run-direct.md', 'host-inbox.md', 'inbox-api.md', 'release-image.md', 'testnet-ledger.md']) {
+        'compose.yaml', 'README.md', 'deploy-droplet.md', 'deploy-with-agent.md', 'run-locally.md', 'run-direct.md', 'host-inbox.md', 'inbox-api.md', 'release-image.md', 'testnet-ledger.md', 'upgrade-node.md']) {
         cpSync(join(runtime, name), join(source, name), { recursive: true });
     }
-    for (const name of ['publish-image.sh', 'deploy-droplet.sh', 'deploy-droplet-remote.sh', 'keychain-worker.py']) {
+    for (const name of ['publish-image.sh', 'deploy-droplet.sh', 'deploy-droplet-remote.sh', 'keychain-worker.py', 'upgrade-node.py']) {
         cpSync(join(runtime, 'scripts', name), join(source, 'scripts', name));
     }
     const agent = 'agent-library/agents/hourly-message-test/agent.mjs';
@@ -65,6 +65,22 @@ writeFileSync(args[args.indexOf('--metadata-file') + 1], JSON.stringify(metadata
     return { directory, checkout, source, output, git, run };
 }
 
+test('stages the source archive before extraction instead of piping git into an early-closing tar', (t) => {
+    const f = fixture(t);
+    const git = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+    writeFileSync(join(f.directory, 'bin/git'), `#!${process.execPath}
+import { spawnSync } from 'node:child_process';
+const args = process.argv.slice(2);
+// Reproduce the producer failure when a tar reader closes before git drains.
+if (args.includes('archive') && !args.some(arg => arg.startsWith('--output='))) process.exit(141);
+const child = spawnSync(${JSON.stringify(git)}, args, { stdio: 'inherit' });
+process.exit(child.status ?? 1);
+`, { mode: 0o755 });
+    const result = f.run();
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(existsSync(join(f.output, 'oya-node-v0.1.0.tar.gz')));
+});
+
 test('publishes committed source and bundles matching scripts with this build’s digest', (t) => {
     const f = fixture(t);
     const result = f.run();
@@ -101,10 +117,10 @@ mkdir "$3"
     assert.equal(statSync(privateDirectory).mode & 0o777, 0o700, 'Subsequent private directories retain the operator umask.');
     assert.equal(statSync(join(privateDirectory, 'node.env')).mode & 0o777, 0o600, 'Subsequent private files retain the operator umask.');
     assert.deepEqual(readdirSync(bundle).sort(), ['README.md', 'compose.yaml', 'deploy-droplet.md', 'deploy-with-agent.md', 'docker', 'host-inbox.md', 'image.txt',
-        'inbox', 'inbox-api.md', 'release-image.md', 'run-direct.md', 'run-locally.md', 'scripts', 'testnet-ledger.md']);
+        'inbox', 'inbox-api.md', 'release-image.md', 'run-direct.md', 'run-locally.md', 'scripts', 'testnet-ledger.md', 'upgrade-node.md']);
     assert.deepEqual(readdirSync(join(bundle, 'inbox')).sort(), ['Caddyfile', 'compose.https.yaml', 'compose.keychain-worker.yaml', 'compose.postgres.yaml',
         'compose.worker.yaml', 'compose.yaml', 'inbox.example.json', 'worker.example.json']);
-    assert.deepEqual(readdirSync(join(bundle, 'scripts')).sort(), ['deploy-droplet-remote.sh', 'deploy-droplet.sh', 'keychain-worker.py']);
+    assert.deepEqual(readdirSync(join(bundle, 'scripts')).sort(), ['deploy-droplet-remote.sh', 'deploy-droplet.sh', 'keychain-worker.py', 'upgrade-node.py']);
     assert.deepEqual(readdirSync(join(bundle, 'docker')).sort(), ['Caddyfile', 'compose.http.yaml', 'compose.testing.yaml', 'config.example.json', 'runtime.env.example']);
     const nodeDefaults = JSON.parse(readFileSync(join(bundle, 'docker/config.example.json')));
     const inboxDefaults = JSON.parse(readFileSync(join(bundle, 'inbox/inbox.example.json'))).execution;
@@ -119,7 +135,7 @@ mkdir "$3"
     assert.equal(statSync(join(unpacked, agent)).mode & 0o777, 0o644, 'The container user must be able to read the mounted agent source.');
     assert.equal(readFileSync(join(unpacked, agent), 'utf8'), readFileSync(join(f.checkout, agent), 'utf8'));
     assert.equal(readFileSync(join(bundle, 'image.txt'), 'utf8'), `${repository}@${digest}\n`);
-    for (const name of ['deploy-droplet.sh', 'deploy-droplet-remote.sh', 'keychain-worker.py']) {
+    for (const name of ['deploy-droplet.sh', 'deploy-droplet-remote.sh', 'keychain-worker.py', 'upgrade-node.py']) {
         assert.equal(readFileSync(join(bundle, 'scripts', name), 'utf8'), readFileSync(join(f.source, 'scripts', name), 'utf8'));
     }
     assert.equal((result.stdout + result.stderr).includes('private-fixture-marker'), false);

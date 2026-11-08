@@ -25,7 +25,9 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 mkdir "$staging/source"
 # Preserve public source modes inside private staging: the image runs as non-root.
-git -C "$root" -c tar.umask=0022 archive "$revision:node/production" | tar -xpf - -C "$staging/source"
+# Stage the archive so a tar reader closing at EOF cannot SIGPIPE git on macOS.
+git -C "$root" -c tar.umask=0022 archive --output="$staging/source.tar" "$revision:node/production"
+tar -xpf "$staging/source.tar" -C "$staging/source"
 version=${release#node-}
 echo "Publishing $repository:$version from $revision for Linux amd64."
 docker buildx build --platform linux/amd64 --push --tag "$repository:$version" \
@@ -43,7 +45,7 @@ mkdir -p "$bundle/docker" "$bundle/scripts" "$bundle/inbox"
 cp "$staging/source/compose.yaml" "$staging/source/README.md" \
     "$staging/source/deploy-droplet.md" "$staging/source/run-locally.md" "$staging/source/run-direct.md" \
     "$staging/source/host-inbox.md" "$staging/source/inbox-api.md" "$staging/source/deploy-with-agent.md" \
-    "$staging/source/release-image.md" "$staging/source/testnet-ledger.md" "$bundle/"
+    "$staging/source/release-image.md" "$staging/source/testnet-ledger.md" "$staging/source/upgrade-node.md" "$bundle/"
 cp "$staging/source/docker/compose.http.yaml" "$staging/source/docker/Caddyfile" \
     "$staging/source/docker/compose.testing.yaml" \
     "$staging/source/docker/config.example.json" "$staging/source/docker/runtime.env.example" "$bundle/docker/"
@@ -54,7 +56,7 @@ mkdir -p "$staging/bundle/agent-library/agents/hourly-message-test"
 git -C "$root" show "$revision:agent-library/agents/hourly-message-test/agent.mjs" \
     > "$staging/bundle/agent-library/agents/hourly-message-test/agent.mjs"
 cp "$staging/source/scripts/deploy-droplet.sh" "$staging/source/scripts/deploy-droplet-remote.sh" "$bundle/scripts/"
-cp "$staging/source/scripts/keychain-worker.py" "$bundle/scripts/"
+cp "$staging/source/scripts/keychain-worker.py" "$staging/source/scripts/upgrade-node.py" "$bundle/scripts/"
 printf '%s@%s\n' "$repository" "$digest" > "$bundle/image.txt"
 cp "$bundle/image.txt" "$output/image.txt"
 printf 'Git tag: %s\nGit commit: %s\nImage: %s@%s\n' "$release" "$revision" "$repository" "$digest" > "$output/release.txt"
