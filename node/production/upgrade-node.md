@@ -10,7 +10,7 @@ Use this guide and helper from a trusted, reviewed checkout or a subsequent rele
 
 Choose an exact tag, for example `node-v0.4.0`, and read its compatibility, migration and rollback notes on the project's GitHub Releases page. The helper does not infer that an arbitrary release is schema-compatible. Resolve any migration requirements before using the application-only procedure.
 
-Use the **existing** private `compose.env` for each role. Its saved selectors must include absolute bundle/private paths, the immutable image, project name, and Compose files, plus any custom interpolation overrides. Use literal exported values as produced by the setup guides' `printf %q` commands. The helper parses these settings without executing shell code; general shell commands and substitutions are rejected. Put Docker on your invoking shell's `PATH` if necessary.
+Use the **existing** private `compose.env` for each role. Its saved selectors must include absolute bundle/private paths, the immutable image, project name, and Compose files, plus any custom interpolation overrides. Use literal exported values as produced by the setup guides' `printf %q` commands. The helper parses these settings without executing shell code; general shell commands and substitutions are rejected. Put Docker on your invoking shell's `PATH` if necessary. Finish configuration edits before starting maintenance. The helper fingerprints the exact `compose.env` bytes it parsed and rejects edits detected during preflight rather than overwriting them; later configuration drift is rechecked before stopping services and before saving selectors.
 
 Worker host:
 
@@ -55,7 +55,7 @@ For a worker already managed by `keychain-worker.py`, append both existing refer
 --keychain-account oya-deploy --keychain-service oya-deploy-worker
 ```
 
-These are item names, not credential values. Detection of a helper-managed/missing token mount requires the explicit references. Quiesce and apply use the existing helper's stop/start lifecycle, retain `restart: "no"`, and remove temporary token files after startup or cleanup. Startup may request macOS approval; the upgrader does not weaken access controls or move the token into a persistent plaintext file. Never substitute ordinary `docker compose up` for Keychain startup. Changing credential modes is a separate operation.
+These are item names, not credential values. Detection of a helper-managed/missing token mount requires the explicit references. Quiesce and apply use the existing helper's stop/start lifecycle, retain `restart: "no"`, and remove temporary token files after startup or cleanup. Startup may request macOS approval; the upgrader does not weaken access controls or move the token into a persistent plaintext file. Never substitute ordinary `docker compose up` for Keychain startup. Changing credential modes is a separate operation. A file-backed worker may also use `restart: "no"`; disabling restart alone does not select Keychain mode or require Keychain references.
 
 ## 3. Upgrade the inbox first
 

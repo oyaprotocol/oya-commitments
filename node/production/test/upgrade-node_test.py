@@ -627,6 +627,59 @@ class Fixture(unittest.TestCase):
         journal = json.loads((self.private / '.oya-upgrades' / marker['attempt'] / 'journal.json').read_text())
         self.assertFalse(journal['shutdown_confirmed'])
 
+    def test_compose_env_edits_during_initial_inspection_are_preserved(self):
+        cases = [('worker', 'preview'), ('worker', 'quiesce'), ('worker', 'apply'),
+                 ('inbox', 'preview'), ('inbox', 'apply')]
+        inventory = upgrade.inventory
+        for role, action in cases:
+            for edit in ['added-export', 'changed-export']:
+                with self.subTest(role=role, action=action, edit=edit):
+                    self.configure(role)
+                    original = self.env_file.read_bytes()
+                    changed = (original + b"export OPERATOR_NOTE='preserve this edit'\n" if edit == 'added-export'
+                               else original.replace(b'literal value = unchanged', b'operator changed this value'))
+                    edited = False
+                    def edit_during_inspection(env):
+                        nonlocal edited
+                        if not edited:
+                            self.env_file.write_bytes(changed)
+                            edited = True
+                        return inventory(env)
+                    with patch.object(upgrade, 'inventory', side_effect=edit_during_inspection):
+                        with self.assertRaisesRegex(upgrade.UpgradeError, 'compose.env changed'):
+                            self.run_upgrade(action, workers_stopped=role == 'inbox',
+                                             inbox_ready=RELEASE if role == 'worker' else None)
+                    self.assertTrue(edited)
+                    self.assertEqual(self.env_file.read_bytes(), changed)
+                    self.assertEqual(self.mutations(), [])
+                    service = 'node' if role == 'worker' else 'inbox'
+                    self.assertTrue(self.read_state()['containers'][service]['State']['Running'])
+                    self.assertFalse((self.private / '.oya-upgrades/active.json').exists())
+
+    def test_file_backed_worker_restart_no_supports_every_action(self):
+        for platform in ['linux', 'darwin']:
+            for action in ['preview', 'quiesce', 'apply']:
+                with self.subTest(platform=platform, action=action):
+                    self.configure('worker')
+                    self.state['model']['services']['node']['restart'] = 'no'
+                    self.state['containers']['node']['HostConfig']['RestartPolicy']['Name'] = 'no'
+                    self.put(self.private / 'platform.yaml', 'services:\n  node:\n    restart: "no"\n')
+                    self.save_state()
+                    token = (self.private / 'worker-secrets.json').read_bytes()
+                    with patch.object(upgrade.sys, 'platform', platform), patch.object(
+                            upgrade, 'helper_action', side_effect=AssertionError('File-backed workers must not invoke Keychain')):
+                        self.run_upgrade(action, inbox_ready=RELEASE)
+                    state = self.read_state()
+                    self.assertEqual(state['containers']['node']['HostConfig']['RestartPolicy']['Name'], 'no')
+                    self.assertEqual(state['containers']['node']['State']['Running'], action != 'quiesce')
+                    self.assertEqual((self.private / 'worker-secrets.json').read_bytes(), token)
+                    self.assertFalse((self.private / '.keychain-runtime').exists())
+                    if action == 'preview':
+                        self.assertEqual(self.mutations(), [])
+                    if action == 'apply':
+                        self.assertEqual(state['containers']['node']['Config']['Image'], NEW)
+                    self.assertEqual(state['containers']['ipfs'], self.state['containers']['ipfs'])
+
     def test_changed_configuration_between_pull_and_stop_fails_closed(self):
         command = upgrade.command
         def change_after_pull(args, env, **kwargs):

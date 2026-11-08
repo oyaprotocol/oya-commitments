@@ -527,8 +527,8 @@ def keychain_selection(installation, args, live):
     mounts = [m for m in node.get('Mounts', []) if m.get('Destination') == '/run/secrets/worker.json']
     missing_mount = bool(mounts and not Path(host_bind_source(mounts[0]['Source'], installation)).is_file())
     overlay = str(installation['old_bundle'] / 'node/production/inbox/compose.keychain-worker.yaml')
+    # File-backed workers may also disable restart; credential evidence decides.
     detected = (overlay in installation['files'] or missing_mount
-                or node.get('HostConfig', {}).get('RestartPolicy', {}).get('Name') == 'no'
                 or runtime.parent.exists())
     enabled = bool(args.keychain_account or args.keychain_service)
     require(not detected or enabled, 'Keychain-managed or missing worker mount detected: provide --keychain-account and --keychain-service.')
@@ -710,7 +710,12 @@ def configuration_files(installation, model, keychain):
                 if keychain and name == 'node' and mount['target'] == '/run/secrets/worker.json':
                     continue
                 files.add(path)
-    return {str(path): sha(regular(path)) for path in sorted(files)}
+    # The saved selectors are reconstructed from raw, not a later disk read.
+    fingerprints = {str(path): sha(installation['raw'] if path == installation['path'] else regular(path))
+                    for path in sorted(files)}
+    require(sha(regular(installation['path'])) == fingerprints[str(installation['path'])],
+            'Saved compose.env changed during preflight; retry using the current saved settings.')
+    return fingerprints
 
 
 def ensure_unchanged(fingerprints):
