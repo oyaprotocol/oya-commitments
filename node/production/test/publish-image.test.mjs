@@ -75,7 +75,7 @@ test('publishes committed source and bundles matching scripts with this build’
     assert.equal(args[args.indexOf('--tag') + 1], `${repository}:v0.1.0`);
     assert.ok(args.includes(`org.opencontainers.image.revision=${f.git('rev-parse', 'HEAD')}`));
     assert.equal(readFileSync(join(f.directory, 'build-source.mjs'), 'utf8'), readFileSync(join(runtime, 'src/main.mjs'), 'utf8'));
-    assert.deepEqual(readdirSync(f.output).sort(), ['image.txt', 'oya-node-v0.1.0.tar.gz', 'release.txt']);
+    assert.deepEqual(readdirSync(f.output).sort(), ['build.json', 'image.txt', 'oya-node-v0.1.0.tar.gz', 'release.txt']);
     assert.equal(readFileSync(join(f.output, 'image.txt'), 'utf8'), `${repository}@${digest}\n`);
     assert.ok(readFileSync(join(f.output, 'release.txt'), 'utf8').includes(f.git('rev-parse', 'HEAD')));
     const unpacked = join(f.directory, 'unpacked');
@@ -115,6 +115,13 @@ mkdir "$3"
     }
     assert.equal(nodeDefaults.rpcUrl, 'https://ethereum-sepolia-rpc.publicnode.com');
     assert.equal(inboxDefaults.nodeAddress, 'REPLACE_WITH_PUBLIC_NODE_ADDRESS');
+    for (const name of ['run-locally.md', 'host-inbox.md']) {
+        const guide = readFileSync(join(bundle, name), 'utf8');
+        assert.ok(guide.includes('export OYA_NODE_RELEASE="node-v0.1.0"'));
+        assert.ok(guide.includes('/releases/tag/node-v0.1.0)'));
+        assert.ok(!guide.includes('/releases/latest'));
+        assert.ok(guide.includes('node-v0.2.0') || guide.includes('v0.2.0'), 'Historical compatibility must be preserved.');
+    }
     const agent = 'agent-library/agents/hourly-message-test/agent.mjs';
     assert.equal(statSync(join(unpacked, agent)).mode & 0o777, 0o644, 'The container user must be able to read the mounted agent source.');
     assert.equal(readFileSync(join(unpacked, agent), 'utf8'), readFileSync(join(f.checkout, agent), 'utf8'));
@@ -124,6 +131,17 @@ mkdir "$3"
     }
     assert.equal((result.stdout + result.stderr).includes('private-fixture-marker'), false);
     assert.notEqual(f.run().status, 0, 'must not overwrite previous release output');
+});
+
+test('dry run loads the image locally, preserves build metadata, and never pushes', (t) => {
+    const f = fixture(t);
+    const result = f.run('', [repository, 'node-v0.1.0', f.output, '--dry-run']);
+    assert.equal(result.status, 0, result.stderr);
+    const args = JSON.parse(readFileSync(join(f.directory, 'commands.json')));
+    assert.ok(args.includes('--load'));
+    assert.ok(!args.includes('--push'));
+    assert.equal(JSON.parse(readFileSync(join(f.output, 'build.json')))['containerimage.digest'], digest);
+    assert.ok(result.stdout.includes('no image was pushed'));
 });
 
 test('rejects dirty source, mismatched or missing tags, and unsafe publication arguments before Docker', async (t) => {
@@ -149,7 +167,7 @@ test('failed push or invalid metadata leaves no deployment bundle', async (t) =>
         await t.test(mode, (t) => {
             const f = fixture(t);
             assert.notEqual(f.run(mode).status, 0);
-            assert.deepEqual(readdirSync(f.output), []);
+            assert.deepEqual(readdirSync(f.output), mode === 'build' ? [] : ['build.json']);
         });
     }
 });
