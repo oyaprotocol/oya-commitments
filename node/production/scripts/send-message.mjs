@@ -13,7 +13,7 @@ try {
     const body = JSON.stringify({ text, signer: wallet.address, signature: await wallet.signMessage(text) });
     signal = AbortSignal.timeout(timeoutMs);
     const response = await fetch(`${nodeUrl.replace(/\/$/, '')}/v1/messages`, {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body, signal,
+        method: 'POST', headers: { 'content-type': 'application/json' }, body, signal, redirect: 'error',
     });
     console.log(JSON.stringify(await response.json(), null, 2));
     if (response.status !== 200) process.exitCode = 1;
