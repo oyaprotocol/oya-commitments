@@ -85,6 +85,33 @@ test('sender rejects invalid deadline settings before making requests', async t 
     assert.equal(f.requests(), 0);
 });
 
+for (const status of [301, 302, 303, 307, 308]) {
+    test(`sender rejects ${status} redirects without contacting the destination`, async t => {
+        let redirectedRequests = 0;
+        const destination = createServer((request, response) => {
+            redirectedRequests++;
+            request.resume();
+            response.end('{"status":"published"}');
+        });
+        await new Promise(resolve => destination.listen(0, '127.0.0.1', resolve));
+        t.after(() => new Promise(resolve => { destination.close(resolve); destination.closeAllConnections(); }));
+        const f = await fixture(t, response => {
+            response.writeHead(status, { location: `http://127.0.0.1:${destination.address().port}/private-marker` });
+            response.end();
+        });
+        await assert.rejects(f.send(), error => {
+            assert.equal(error.code, 1);
+            assert.equal(error.stdout, '');
+            assert.match(error.stderr, /Could not submit message/);
+            assert.doesNotMatch(error.stderr, /private-marker|exact message|127\.0\.0\.1/);
+            assert.equal(error.stderr.includes(f.wallet.privateKey), false);
+            return true;
+        });
+        assert.equal(f.requests(), 1);
+        assert.equal(redirectedRequests, 0);
+    });
+}
+
 test('sender rejects NUL text before making requests', async t => {
     const f = await fixture(t, response => response.end('{}'));
     await writeFile(f.textFile, 'before\0after');
