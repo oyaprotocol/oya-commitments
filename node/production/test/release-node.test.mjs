@@ -212,6 +212,9 @@ test('asset validation rejects inconsistent records and generated notes include 
     assert.ok(notes.includes(sha));
     assert.ok(notes.includes(pin));
     assert.ok(notes.includes('Back up the database before upgrading.'));
+    assert.ok(notes.includes(`[verified inbox and worker upgrade guide](https://github.com/${repository}/blob/${release.tag}/node/production/upgrade-node.md)`));
+    assert.ok(notes.includes(`/blob/${release.tag}/node/production/host-inbox.md#retention-recovery-and-migration`));
+    assert.ok(!notes.includes('run-locally.md#monitor-stop-and-resume'));
     writeFileSync(join(f.output, 'release.txt'), 'wrong source');
     assert.throws(() => readAssets(f.output, release), /record mismatch/);
 });

@@ -101,7 +101,7 @@ ${changes.trim() || 'Rebuild of the selected source.'}
 
 ## Deployment
 
-Use the matching image and bundle. Review configuration and migration changes before upgrading. Preserve existing keys, execution identities, database/IPFS volumes, and targets. Follow the [worker upgrade](https://github.com/${repository}/blob/${release.tag}/node/production/run-locally.md#monitor-stop-and-resume) and [database recovery](https://github.com/${repository}/blob/${release.tag}/node/production/host-inbox.md#retention-recovery-and-migration) guides. ARM hosts require the documented amd64 platform override and emulation.
+Use the matching image and bundle. Review configuration and migration changes before upgrading. Preserve existing keys, execution identities, database/IPFS volumes, and targets. Follow the [verified inbox and worker upgrade guide](https://github.com/${repository}/blob/${release.tag}/node/production/upgrade-node.md) for supported Compose installations, and the [database recovery](https://github.com/${repository}/blob/${release.tag}/node/production/host-inbox.md#retention-recovery-and-migration) guide. ARM hosts require the documented amd64 platform override and emulation.
 
 \`\`\`text
 Git tag: ${release.tag}
