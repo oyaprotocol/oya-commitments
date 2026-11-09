@@ -80,6 +80,10 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) and the applicable [AGENTS.md](AGENTS.md
 
 Maintainers publish node images and matching bundles through the [node release guide](node/production/release-image.md). Installing or operating a released node does not require publishing anything. Kernel library releases have a separate [package workflow](packages/README.md#validate-a-release).
 
+## Project dialogue
+
+The [Oya Gardener dialogue](docs/gardener-dialogue.md) is a growing, searchable public Q&A about Oya's goals, philosophy, future plans, working style, and technical and architectural choices. It gives human contributors and coding agents context for decisions. Oya Gardener asks one question per PR; its human collaborator answers in a comment, and the answer becomes part of the document.
+
 ## Contributors
 
 Thanks to the people and automation helping Oya Commitments grow:

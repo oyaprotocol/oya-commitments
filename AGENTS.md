@@ -12,6 +12,11 @@
 2. `AGENTS.md` is authoritative for agent behavior.
 3. Root-level files apply unless overridden by a closer area-level file.
 
+## Project Dialogue
+- Consult [the Oya Gardener dialogue](docs/gardener-dialogue.md) for searchable Q&A on project goals, philosophy, future plans, working style, and technical and architectural judgment. Coding agents, especially Oya Gardener, may find it useful when choosing work or proposing designs.
+- Cite relevant question IDs when using this context. Answers are dated perspectives; apply current task requirements and agent instructions, and surface conflicts or changed views explicitly.
+- The dialogue job owns PRs marked `<!-- oya-gardener:dialogue -->` or using `gardener/dialogue-qNNN` branches. General PR-follow-up automation must leave those PRs to that job.
+
 ## ExecPlans
 - For complex features, significant refactors, migrations, multi-hour debugging sessions, or work expected to require substantial research and iteration, use an ExecPlan from design through implementation.
 - An ExecPlan is a living, self-contained Markdown document that lets a stateless agent or a new contributor resume the work from the plan alone.
