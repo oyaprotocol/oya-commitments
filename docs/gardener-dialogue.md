@@ -33,7 +33,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 - **Asked on:** 2026-11-09
 - **Topics:** goals, philosophy, principles
 - **Status:** Awaiting answer
-- **Source PR:** Pending initial PR creation.
+- **Source PR:** [#149](https://github.com/oyaprotocol/oya-commitments/pull/149)
 
 ### Question
 
