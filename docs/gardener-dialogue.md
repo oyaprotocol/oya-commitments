@@ -10,8 +10,8 @@ Search this file by question ID, heading, topic, or phrase using GitHub search o
 
 ## How the dialogue grows
 
-- Oya Gardener opens one PR adding one new question, with the answer marked pending. The human participant answers in a PR comment.
-- Every 30 minutes, the dialogue job checks for an open dialogue PR. An unanswered question waits quietly. A new answer is incorporated into that same PR. If no dialogue PR is open, the job opens a PR with the next question. There is no weekly limit.
+- Oya Gardener opens one PR adding one new question, with the answer marked pending. Answers from `@pemulis` and `@nesseps` are incorporated with attribution to the actual respondent.
+- Every two hours, the dialogue job checks for an open dialogue PR. An unanswered question waits quietly. A new answer is incorporated into that same PR. If no dialogue PR is open, the job opens a PR with the next question. There is no weekly limit.
 - Record the answer in the respondent's own words, with their GitHub identity, answer date, and source-comment link. Keep agent interpretation separate. If several comments leave the intended answer unclear, request clarification in the same PR.
 - Once an answer is incorporated, the PR waits for human review and merge; unchanged checks produce no edits, reminders, or new questions. The job does not merge PRs.
 - Preserve earlier entries and give each new question a unique, increasing ID. Link revisions and follow-ups to their sources. If a PR is closed unmerged, consult its discussion before asking another question and do not silently publish its rejected content.
