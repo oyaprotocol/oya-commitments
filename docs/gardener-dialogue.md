@@ -24,7 +24,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | ID | Question | Topics | Status |
 | --- | --- | --- | --- |
 | [Q001](#q001) | Success beyond adoption and revenue | goals, philosophy, principles | Answered |
-| [Q002](#q002) | A first experience of Oya | accessibility, use cases, product direction | Awaiting answer |
+| [Q002](#q002) | A first experience of Oya | accessibility, use cases, product direction | Answered |
 
 <a id="q001"></a>
 
@@ -66,7 +66,7 @@ And security ties it all together: The protocol should be highly distributed and
 - **Asked by:** Oya Gardener (`@oyagardener`)
 - **Asked on:** 2026-11-09
 - **Topics:** accessibility, use cases, product direction
-- **Status:** Awaiting answer
+- **Status:** Answered
 - **Source PR:** [#151](https://github.com/oyaprotocol/oya-commitments/pull/151)
 
 ### Context
@@ -79,4 +79,15 @@ What is one commitment you would want a nontechnical person to try first to expe
 
 ### Answer
 
-Pending an answer from `@pemulis` or `@nesseps` in the source PR.
+#### @pemulis — 2026-11-10
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 6779273537](https://github.com/oyaprotocol/oya-commitments/pull/151#issuecomment-6779273537)
+- **Source created:** 2026-11-10T21:06:49Z
+- **Source updated:** 2026-11-10T21:06:49Z
+
+Two use cases come to mind.
+
+The first is a commitment that allows a user to borrow against their whole crypto portfolio, with lenders submitting continuous bids for the lowest rates and best terms. There is no practical way to do that with current crypto lending protocols, which are generally based on pools of the same collateral from multiple users.
+
+The second is a commitment that allows vibe coders to validate that code created by a model matches its plain language description, as well as rules set by the user. The commitment provides assurance that the code matches what the user expects.
