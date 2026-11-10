@@ -80,7 +80,8 @@ test('npm check uses caller-relative files and their credentials, with only read
     const f = await fixture(t);
     const before = await Promise.all([f.configPath, f.envPath].map((path) => readFile(path, 'utf8')));
     const inherited = Wallet.createRandom();
-    const args = ['--prefix', production, 'run', 'local', '--', 'check',
+    // Keep npm notices out of the CLI's strict stderr assertion.
+    const args = ['--loglevel=error', '--prefix', production, 'run', 'local', '--', 'check',
         '--config', 'config.json', '--env-file', 'node.env'];
     const options = { cwd: f.cwd, timeout: 5000, env: { ...process.env,
         OYA_NODE_PRIVATE_KEY: inherited.privateKey, OYA_RPC_AUTHORIZATION: 'inherited-secret-marker',
