@@ -67,7 +67,7 @@ And security ties it all together: The protocol should be highly distributed and
 - **Asked on:** 2026-11-09
 - **Topics:** accessibility, use cases, product direction
 - **Status:** Awaiting answer
-- **Source PR:** Pending PR creation.
+- **Source PR:** [#151](https://github.com/oyaprotocol/oya-commitments/pull/151)
 
 ### Context
 
