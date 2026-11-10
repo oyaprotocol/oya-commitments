@@ -31,7 +31,8 @@ async function fixture(t) {
         const method = rpc?.method ?? 'ipfs-version';
         calls.push({ method, params: rpc?.params, path: request.url,
             verb: request.method, authorization: request.headers.authorization });
-        response.writeHead(rpc ? 200 : state.ipfsStatus, { 'content-type': 'application/json' });
+        response.writeHead(rpc ? 200 : state.ipfsStatus, { 'content-type': 'application/json',
+            ...(!rpc && state.location ? { location: state.location } : {}) });
         if (state.hang === method) {
             response.write('{'); // Headers arrive, but the response body never finishes.
             return;
@@ -181,6 +182,31 @@ test('check bounds stalled RPC and IPFS response bodies', { timeout: 5000 }, asy
         assertRedacted(f.output.join('\n'), f.wallet);
     }
 });
+
+for (const status of [301, 302, 303, 307, 308]) {
+    test(`check rejects IPFS ${status} redirects without contacting the destination`, async (t) => {
+        const f = await fixture(t);
+        let requests = 0;
+        const destination = createServer((request, response) => {
+            requests++;
+            request.resume();
+            response.end(JSON.stringify({ Version: 'redirected-version' }));
+        });
+        t.after(() => new Promise(resolve => {
+            destination.close(resolve);
+            destination.closeAllConnections();
+        }));
+        destination.listen(0, '127.0.0.1');
+        await once(destination, 'listening');
+        f.state.ipfsStatus = status;
+        f.state.location = `http://127.0.0.1:${destination.address().port}/redirect-secret-marker`;
+        const result = await f.check();
+        assert.equal(requests, 0, 'the readiness probe must not follow redirects');
+        assert.equal(result, 1);
+        assert.match(f.output.at(-1), /FAIL IPFS API/);
+        assertRedacted(f.output.join('\n'), f.wallet);
+    });
+}
 
 test('unreachable RPC reports a bounded sanitized failure', async (t) => {
     const f = await fixture(t);

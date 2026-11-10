@@ -24,7 +24,7 @@ export async function checkLocalNode({ config, nodeAddress }, {
         ]),
         ['IPFS API', 'Check the Kubo API endpoint and its authorization.', async (signal) => {
             const response = await fetch(`${config.ipfs.url}/api/v0/version`, {
-                method: 'POST', headers: config.ipfs.headers, signal,
+                method: 'POST', headers: config.ipfs.headers, signal, redirect: 'error',
             });
             const body = await response.json();
             return response.ok && typeof body?.Version === 'string' && body.Version.trim().length > 0;
