@@ -33,7 +33,7 @@ export async function main(args = process.argv.slice(2)) {
             if (rest.length !== 2) throw new Error();
             const [job, settings] = await Promise.all(rest.map(readEvidenceJson));
             report = await verifyLedgerEvidence(job, settings);
-        } catch { report = evidenceInputFailure(); }
+        } catch (error) { report = evidenceInputFailure(error); }
         console.log(JSON.stringify(report, null, 2));
         process.exitCode = evidenceExitCode(report);
     } else if (command === 'keygen' && rest.length === 1) {

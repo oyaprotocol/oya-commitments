@@ -12,7 +12,8 @@ An operator can run the inbox client's `evidence` command with a saved signed jo
 - [x] 2026-11-10 18:49Z: Implemented bounded read-only evidence module and client command.
 - [x] 2026-11-10 18:49Z: Added adversarial and real-loopback CLI tests, a signing/file/environment access guard, and operator docs.
 - [x] 2026-11-10 18:51Z: Focused tests passed (93/93) and full production suites passed (402/402) on both Node 24.22.2 and Node 26.12.1.
-- [x] 2026-11-10 18:51Z: Reviewed the complete diff and recorded the final code budget; implementation is ready for local handoff.
+- [x] 2026-11-10: Independent review found one input-classification issue; malformed readable JSON/UTF-8 now returns mismatch, with CLI regression coverage. Final Node 24 focused/full suites passed (93/402 tests).
+- [x] 2026-11-10: Reviewed the complete cumulative diff; ready for human PR review.
 
 ## Surprises & Discoveries
 
@@ -24,6 +25,7 @@ The existing `.dockerignore` already includes `src/inbox/*.mjs`, and the release
 
 ## Decision Log
 
+- 2026-11-10 / Oya Gardener: Compared merged PR #142's full peer-network plan (including the official Git-hosted testnet directory) with #137's evidence candidate against current main. Choose usable evidence checks for existing operators first: full peer delivery couples membership, authorization/preflight, maintenance, durable fanout and destination safety. The next bounded candidate is an offline official directory validator/inspector with revision checks; runtime enrollment remains later. The current development policy removes separate plan approval, while human PR review and deployment authorization remain required.
 - 2026-11-10 / Hermes: Use the existing read-only receipt kernel with a bounded transport, no retry, and decodeLedgerEvent. Reuse validateJob with checkExpiry false. Avoid importing the processor or worker.
 - 2026-11-10 / Hermes: Supply trusted identity and endpoints through a strict separate JSON settings file, never status-derived URLs or environment credentials. Require independent target, chain, Ledger and node values. This keeps the command usable and dependency surface small, following dialogue Q001's accessibility/security emphasis.
 - 2026-11-10 / Hermes: Implement snapshot consistency rather than peer availability. Trust the chosen RPC/Kubo; do not claim finality, trustless UnixFS CID verification, or causal proof that this request caused the transaction. Peer directory, fanout and authorization policy remain separate work.
@@ -56,7 +58,7 @@ The command only reads saved files and performs status, receipt, block and Kubo 
 
 ## Artifacts and Notes
 
-Pinned install completed: 30 packages added with `npm ci --ignore-scripts --no-audit --no-fund` in `node/production`. Focused command `node --test node/production/test/ledger-evidence.test.mjs` passed 93 tests on each of Node 24.22.2 and 26.12.1. Full command `npm --prefix node/production test` passed 402 tests on each version, with zero failures or skips. After the final test-guard tightening, the focused suite passed again on both versions. `git diff --check` passed. Code/test churn is 599 added-plus-deleted lines, below the 3,000-line limit.
+Pinned install completed: 30 packages added with `npm ci --ignore-scripts --no-audit --no-fund` in `node/production`. Focused command `node --test node/production/test/ledger-evidence.test.mjs` passed 93 tests on each of Node 24.22.2 and 26.12.1. Full command `npm --prefix node/production test` passed 402 tests on each version, with zero failures or skips. After the final test-guard tightening, the focused suite passed again on both versions. `git diff --check` passed. Code/test churn is 610 additions plus 2 deletions (612 lines), below the 3,000-line limit. Independent review found no blocking security defect; its malformed-input classification finding was fixed, with final Node 24 focused/full reruns passing 93/402 tests.
 
 ## Interfaces and Dependencies
 

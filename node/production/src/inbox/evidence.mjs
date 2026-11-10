@@ -33,7 +33,8 @@ export async function readEvidenceJson(path) {
             size += bytesRead;
         }
         if (size > FILE_LIMIT) throw new Error();
-        return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, size)));
+        try { return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, size))); }
+        catch { throw new EvidenceError('mismatch', 'invalid_input_json'); }
     } finally { await file.close(); }
 }
 
@@ -99,7 +100,9 @@ async function readJson(endpoint, suffix, body, signal, timeoutMs) {
 }
 
 export const evidenceExitCode = report => ({ verified: 0, mismatch: 2, unavailable: 3 })[report.status];
-export const evidenceInputFailure = () => ({ version: 1, status: 'unavailable', reason: 'input_unreadable',
+export const evidenceInputFailure = error => ({ version: 1,
+    status: error instanceof EvidenceError ? error.status : 'unavailable',
+    reason: error instanceof EvidenceError ? error.reason : 'input_unreadable',
     stage: 'input', observedAt: new Date().toISOString() });
 
 export async function verifyLedgerEvidence(job, input) {

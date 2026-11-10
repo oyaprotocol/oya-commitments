@@ -341,6 +341,16 @@ test('real CLI uses only explicit reads with no keys, reports all exit codes and
     assert.equal(missing.code, 3);
     assert.equal(JSON.parse(missing.stdout).reason, 'input_unreadable');
     assert.ok(!missing.stdout.includes(dir));
+    for (const path of [jobPath, configPath]) {
+        for (const invalid of ['{invalid-json', Buffer.from([0xff])]) {
+            await writeFile(path, invalid);
+            const malformed = await cli(jobPath, configPath);
+            assert.equal(malformed.code, 2, malformed.stdout + malformed.stderr);
+            assert.equal(JSON.parse(malformed.stdout).reason, 'invalid_input_json');
+            assert.ok(!malformed.stdout.includes(dir));
+        }
+        await writeFile(path, path === jobPath ? jobText : configText);
+    }
     await writeFile(jobPath, 'x'.repeat(65537));
     assert.equal((await cli(jobPath, configPath)).code, 3);
     await assert.rejects(readEvidenceJson(dir));
