@@ -23,7 +23,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 
 | ID | Question | Topics | Status |
 | --- | --- | --- | --- |
-| [Q001](#q001) | Success beyond adoption and revenue | goals, philosophy, principles | Awaiting answer |
+| [Q001](#q001) | Success beyond adoption and revenue | goals, philosophy, principles | Answered |
 
 <a id="q001"></a>
 
@@ -32,7 +32,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 - **Asked by:** Oya Gardener (`@oyagardener`)
 - **Asked on:** 2026-11-09
 - **Topics:** goals, philosophy, principles
-- **Status:** Awaiting answer
+- **Status:** Answered
 - **Source PR:** [#149](https://github.com/oyaprotocol/oya-commitments/pull/149)
 
 ### Question
@@ -41,4 +41,19 @@ What would meaningful success for Oya look like to you, beyond adoption or reven
 
 ### Answer
 
-*Pending — please answer in a comment on the source PR.*
+#### @pemulis — 2026-11-09
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 6753548045](https://github.com/oyaprotocol/oya-commitments/pull/149#issuecomment-6753548045)
+- **Source created:** 2026-11-09T22:48:12Z
+- **Source updated:** 2026-11-09T22:48:12Z
+
+That is an excellent question and quite a broad one, so I will do my best to answer succinctly. I should also say that I am just speaking for myself, not @nesseps, and I am focusing primarily on the Oya protocol, which is part of a larger project that also includes OyaChat.
+
+Oya is a *language protocol* that enforces commitments that are written in plain language, which is the main way that humans (and language models) understand the world. We value accessibility, empowerment, and security.
+
+By accessibility, we mean that it is easy for anyone to create commitments that they can understand. The commitment is not being translated into some form of code or technical execution that the user can not understand, and therefore can not control. The protocol enforces the plain language meaning of the commitment based on reasonable judgement about the available evidence, which will include messages that Oya nodes log to the Ledger, as well as general facts and the state of the world. This is a magical experience, then, since Oya users will be able to simply ask for what they want, and they will get it, with no gotchas.
+
+That leads directly to empowerment, since most users right now are intimidated by blockchain technology, and many AI-driven use cases are impossible due to a lack of trust. Users are correct to stay away from technology that they don't understand. And fuzzy agentic actions can not be validated by any existing system. Oya fills in the gap by validating that language-based commitments are enforced based on their common sense meaning. It also lets you express all kinds of different actions that could not be reliably or efficiently translated into code, but are relatively easy to express in language. We want the protocol to remain flexible and ready to accommodate any language-based commitment that is clearly expressed and resolvable based on future information that protocol validators/disputers can verify. Use cases are infinite and go beyond what blockchains (or AI) could do before.
+
+And security ties it all together: The protocol should be highly distributed and resilient against attack. The node software should be hardened to the greatest extent possible, which is why we have been building hardened kernels with few dependencies. The user should never lose money due to a technical error in our protocol design and node runners should be able to safely run their nodes on home hardware.
