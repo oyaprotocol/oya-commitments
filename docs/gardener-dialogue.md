@@ -24,6 +24,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | ID | Question | Topics | Status |
 | --- | --- | --- | --- |
 | [Q001](#q001) | Success beyond adoption and revenue | goals, philosophy, principles | Answered |
+| [Q002](#q002) | A first experience of Oya | accessibility, use cases, product direction | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -57,3 +58,25 @@ By accessibility, we mean that it is easy for anyone to create commitments that 
 That leads directly to empowerment, since most users right now are intimidated by blockchain technology, and many AI-driven use cases are impossible due to a lack of trust. Users are correct to stay away from technology that they don't understand. And fuzzy agentic actions can not be validated by any existing system. Oya fills in the gap by validating that language-based commitments are enforced based on their common sense meaning. It also lets you express all kinds of different actions that could not be reliably or efficiently translated into code, but are relatively easy to express in language. We want the protocol to remain flexible and ready to accommodate any language-based commitment that is clearly expressed and resolvable based on future information that protocol validators/disputers can verify. Use cases are infinite and go beyond what blockchains (or AI) could do before.
 
 And security ties it all together: The protocol should be highly distributed and resilient against attack. The node software should be hardened to the greatest extent possible, which is why we have been building hardened kernels with few dependencies. The user should never lose money due to a technical error in our protocol design and node runners should be able to safely run their nodes on home hardware.
+
+<a id="q002"></a>
+
+## Q002 — A first experience of Oya
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-09
+- **Topics:** accessibility, use cases, product direction
+- **Status:** Awaiting answer
+- **Source PR:** Pending PR creation.
+
+### Context
+
+In [Q001](#q001), @pemulis described accessibility and empowerment through commitments expressed in plain language. A concrete first experience could help us choose examples and judge whether our onboarding communicates that promise.
+
+### Question
+
+What is one commitment you would want a nontechnical person to try first to experience what Oya makes possible?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps` in the source PR.
