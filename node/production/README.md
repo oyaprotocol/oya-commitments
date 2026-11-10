@@ -14,6 +14,7 @@ The default deployment runs Oya and Kubo on your local device, with a portable P
 | Maintain or recover the inbox | [Retention, recovery, and migration](host-inbox.md#retention-recovery-and-migration). |
 | Write a message sender | [Submit and track a message](run-locally.md#4-submit-and-track-a-message) and the [inbox API](inbox-api.md). |
 | Use a synchronous API without an inbox | [Advanced direct HTTP setup](run-direct.md). |
+| Check a saved job's Ledger evidence without a key | [Read-only evidence command](inbox-api.md#verify-ledger-evidence) — signatures, receipt, Ledger event and retrieved content. |
 | Verify automatic testnet CID logging | [Testnet Ledger acceptance](testnet-ledger.md) — isolated installation, receipt evidence and recovery; requires separate broadcast authorization. |
 | Develop or validate the runtime | [Install and validate](#install-and-validate). |
 | Publish an image and bundle | [Maintainer release guide](release-image.md). |

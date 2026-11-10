@@ -32,6 +32,44 @@ Use `signJob` in `src/inbox/protocol.mjs` or the bundled client to avoid encodin
 
 Public results contain request ID, state, attempts, timestamps, and available CID/transaction hash/result/error. They exclude leases, tokens, raw transaction bytes, and message content. States are `queued`, `processing`, `published`, `logged`, `failed`, and `expired`. `processing` may include `execution_retry` or `awaiting_reconciliation`. The attempt counter counts claims, including crash recovery.
 
+## Verify Ledger evidence
+
+Use the existing saved job file and independently obtain the expected target, chain, Ledger address and publishing node address from your operator. Create a private `evidence.json` (replace the example endpoints and addresses):
+
+```json
+{
+  "target": "my-node",
+  "inboxUrl": "https://inbox.example.com",
+  "chainId": 11155111,
+  "ledgerContract": "0xe6DeB4B3c31E15DBeA0f932830e2f20Ba2EddAa3",
+  "nodeAddress": "0x2222222222222222222222222222222222222222",
+  "rpcUrl": "https://rpc.example.com",
+  "ipfsUrl": "http://127.0.0.1:5001"
+}
+```
+
+From the repository root, with production dependencies installed:
+
+```sh
+node node/production/src/inbox/client.mjs evidence job.json evidence.json
+```
+
+The command requires no private key or worker token. It verifies both original signatures, allowing historical expiry, reads `/v1/status` using that exact job, and checks the logged result against the expected chain, receipt sender/destination, Ledger event and retrieved signed-message fields. The result's checkpoint CID/hash must agree with its completion record. The original signed target scopes the status request; v1 status itself does not carry a target. The configured inbox remains trusted for the job-to-result association.
+
+| JSON `status` / exit code | Meaning |
+| --- | --- |
+| `verified` / `0` | All snapshot consistency checks passed. |
+| `mismatch` / `2` | Invalid inputs, malformed evidence, or contradictory signatures, identities, receipt/event or content. |
+| `unavailable` / `3` | Unreadable input files, not-yet-logged or publication-only status, missing evidence, HTTP/RPC failure, timeout or body limit. |
+
+Reports include a fixed `reason`, `stage`, local UTC `observedAt`, and validated public identifiers. After receipt validation, `block` identifies the receipt block; its `timestamp` is Unix seconds from the RPC block lookup, and its `number` is decimal. A failed report can include partial evidence: only `verified` means all checks passed. Reports omit message content, signatures, endpoints, credentials and raw errors.
+
+**Trust boundary:** this is a snapshot against your chosen inbox, RPC and Kubo, not a finality guarantee, trustless UnixFS CID/DAG proof, or proof that this request caused the transaction. Exact returned message fields and signatures must match the saved job; Kubo is trusted to return the bytes for the CID. The receipt block hash must agree with a block-by-number lookup at observation time; later reorganizations remain possible. Verify the Ledger implementation separately. This command does not establish long-term pinning or peer availability.
+
+Only operator-supplied endpoints are used. Use HTTPS remotely (HTTP is permitted on loopback), an inbox origin without path/query, an RPC URL, and the Kubo base URL (without `/api/v0` or query). Optional `rpcAuthorization` and `ipfsAuthorization` strings go only to their respective endpoint; store them in this private file, not shell arguments. Environment credentials are ignored, URL userinfo is rejected, and redirects are refused. Kubo `cat` may retrieve/cache blocks as part of a read; the command never uploads or pins, submits jobs, signs, broadcasts, or calls worker mutation routes.
+
+Each file is limited to 65,536 bytes and each response to 131,072 decoded bytes. `requestTimeoutMs` defaults to 10,000 (maximum 30,000); `timeoutMs` bounds the whole verification at 30,000 by default (maximum 120,000). Both are positive integers and cover response-body streaming. There are at most five HTTP requests with no polling or retries. Re-run explicitly for a new observation after inspecting a failure.
+
 ## Worker endpoints
 
 All `/v1/worker/*` endpoints require `Authorization: Bearer TOKEN` and return HTTP 200 on success. Claim takes `{target, execution}` matching the target's persisted identity and returns `{work, leaseMs}`, where `work` is null when unavailable. A work object includes the signed envelope, request ID, random lease UUID, deadline, and `{cid, transaction}` checkpoint. The worker verifies signatures/allowlist again. Ledger transaction checkpoints contain `rawTransaction` and `transactionHash`; raw bytes are visible only to the authenticated worker/database, not public job status.
