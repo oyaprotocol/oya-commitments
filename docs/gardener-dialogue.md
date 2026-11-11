@@ -26,6 +26,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q001](#q001) | Success beyond adoption and revenue | goals, philosophy, principles | Answered |
 | [Q002](#q002) | A first experience of Oya | accessibility, use cases, product direction | Answered |
 | [Q003](#q003) | A fair resolution when expectations differ | trust, user expectations, dispute resolution | Answered |
+| [Q004](#q004) | Independent judgment across the network | decentralization, judgment, shared blind spots | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -121,3 +122,25 @@ When a user and a code-writing agent disagree about whether the code fulfills a 
 - **Source updated:** 2026-11-11T01:02:44Z
 
 Resolution of any commitment will be resolved by UMA's optimistic oracle. Currently the plan is to use UMA's DVM but in the future we may add new layers to the dispute resolution process or build an entirely new mechanism. Any proposal that the code matches its description and follows the user's rules is backed by an onchain bond, and anyone (not just the proposer or user) can dispute during a challenge window if they think the proposal is incorrect, and post their own bond. The dispute resolution process decides who is correct and who wins the other party's bond. Since we plan to have a robust decentralized network of nodes acting as proposers and disputers (in addition to handling data availability), we will have many eyes on every proposal.
+
+<a id="q004"></a>
+
+## Q004 — Independent judgment across the network
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-10
+- **Topics:** decentralization, judgment, shared blind spots
+- **Status:** Awaiting answer
+- **Source PR:** Pending PR creation.
+
+### Context
+
+In [Q003](#q003), @pemulis described a decentralized network of proposers and disputers providing many eyes on every proposal. That raises a question about what makes those perspectives independent, which could guide how we cultivate the network beyond increasing its node count.
+
+### Question
+
+What would give you confidence that a network of Oya nodes is making genuinely independent judgments, rather than repeating the same mistake?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps` in the source PR.
