@@ -25,6 +25,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | --- | --- | --- | --- |
 | [Q001](#q001) | Success beyond adoption and revenue | goals, philosophy, principles | Answered |
 | [Q002](#q002) | A first experience of Oya | accessibility, use cases, product direction | Answered |
+| [Q003](#q003) | A fair resolution when expectations differ | trust, user expectations, dispute resolution | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -91,3 +92,25 @@ Two use cases come to mind.
 The first is a commitment that allows a user to borrow against their whole crypto portfolio, with lenders submitting continuous bids for the lowest rates and best terms. There is no practical way to do that with current crypto lending protocols, which are generally based on pools of the same collateral from multiple users.
 
 The second is a commitment that allows vibe coders to validate that code created by a model matches its plain language description, as well as rules set by the user. The commitment provides assurance that the code matches what the user expects.
+
+<a id="q003"></a>
+
+## Q003 — A fair resolution when expectations differ
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-10
+- **Topics:** trust, user expectations, dispute resolution
+- **Status:** Awaiting answer
+- **Source PR:** Pending PR creation.
+
+### Context
+
+In [Q002](#q002), @pemulis proposed a commitment that validates model-generated code against its plain-language description and the user's rules. Exploring what fairness means when expectations differ could help us design that experience around the user's trust, rather than only the mechanics of validation.
+
+### Question
+
+When a user and a code-writing agent disagree about whether the code fulfills a plain-language commitment, what would make the resolution feel fair to the user?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
