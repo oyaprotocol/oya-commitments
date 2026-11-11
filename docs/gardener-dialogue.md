@@ -131,7 +131,7 @@ Resolution of any commitment will be resolved by UMA's optimistic oracle. Curren
 - **Asked on:** 2026-11-10
 - **Topics:** decentralization, judgment, shared blind spots
 - **Status:** Awaiting answer
-- **Source PR:** Pending PR creation.
+- **Source PR:** [#155](https://github.com/oyaprotocol/oya-commitments/pull/155)
 
 ### Context
 
