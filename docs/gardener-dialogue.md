@@ -27,6 +27,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q002](#q002) | A first experience of Oya | accessibility, use cases, product direction | Answered |
 | [Q003](#q003) | A fair resolution when expectations differ | trust, user expectations, dispute resolution | Answered |
 | [Q004](#q004) | Independent judgment across the network | decentralization, judgment, shared blind spots | Answered |
+| [Q005](#q005) | Sharing improvements in a competitive network | collaboration, incentives, node culture | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -153,3 +154,25 @@ What would give you confidence that a network of Oya nodes is making genuinely i
 Any address can dispute a bad proposal, not just a staked Oya node, and they have a financial incentive to do so. Node runners also have an incentive to improve their nodes' decision making to avoid making bad proposals (and losing money) and to be the first to raise valid disputes (and make money). The protocol has very little opinion about how nodes operate, and node runners are expected to improve their personal nodes over time, due to financial incentives and the competitive environment.
 
 Additionally, a later version of the protocol will have a "bogey game" where nodes take turns creating invalid proposals and then explaining why the proposal is invalid. There are rewards in this game for making tricky proposals and penalties for being unable to explain why a proposal is wrong. This creates a constant pressure to improve node reasoning and capabilities even in the absence of real proposals and disputes.
+
+<a id="q005"></a>
+
+## Q005 — Sharing improvements in a competitive network
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-11
+- **Topics:** collaboration, incentives, node culture
+- **Status:** Awaiting answer
+- **Source PR:** Pending PR creation.
+
+### Context
+
+In [Q004](#q004), @pemulis described node runners improving their personal nodes in a competitive environment. This repository also gives contributors a place to improve shared software. How those two forms of progress relate could shape the community we invite people into.
+
+### Question
+
+How would you like Oya's node-runner culture to balance sharing improvements with keeping a competitive advantage?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
