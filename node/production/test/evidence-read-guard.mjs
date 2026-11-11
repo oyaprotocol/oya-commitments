@@ -14,7 +14,7 @@ BaseWallet.prototype.signTypedData = denied;
 SigningKey.prototype.sign = denied;
 const open = promises.open;
 promises.open = async (path, flags, ...args) => {
-    if (!process.argv.slice(3).includes(path) || flags !== (fs.constants.O_RDONLY | fs.constants.O_NONBLOCK)) denied();
+    if (!process.argv.slice(-2).includes(path) || flags !== (fs.constants.O_RDONLY | fs.constants.O_NONBLOCK)) denied();
     return open(path, flags, ...args);
 };
 // Node's module loader also uses public fs reads on some supported versions.
