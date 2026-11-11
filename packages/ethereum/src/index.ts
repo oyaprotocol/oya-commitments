@@ -1,3 +1,4 @@
+export { getAddress } from './address.js';
 export { createHttpConfig, HttpStatusError } from '@oyaprotocol/utils';
 export type {
     CreateHttpConfigOptions,

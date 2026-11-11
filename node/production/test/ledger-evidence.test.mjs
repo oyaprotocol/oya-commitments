@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { Wallet, Interface } from 'ethers';
+import { Wallet, Interface, getIcapAddress } from 'ethers';
 import { hashLedgerCid } from '@oyaprotocol/ethereum';
 import { jobText, signJob } from '../src/inbox/protocol.mjs';
 import { verifyLedgerEvidence, evidenceExitCode, readEvidenceJson } from '../src/inbox/evidence.mjs';
@@ -71,6 +71,42 @@ function readOnly(state) {
     const routes = state.requests.map(r => r.url === '/rpc' ? r.body.method : r.url);
     assert.equal(new Set(routes).size, routes.length, 'no automatic retries');
 }
+
+test('invalid expected addresses fail before HTTP, without leaking their values', async t => {
+    const valid = '0x8ba1f109551bD432803012645Ac136ddd64DBA72';
+    for (const key of ['ledgerContract', 'nodeAddress']) {
+        for (const value of [null, {}, 'secret-address', valid + '\n', valid.slice(0, -1),
+            '0x8Ba1f109551bD432803012645Ac136ddd64DBA72',
+            'XE65GB6LDNXYOFTX0NSV3FUWKOWIXAMJK37', `0x${'0'.repeat(40)}`, 'XE50000000000000000000000000000000']) {
+            const f = await setup(t);
+            f.config[key] = value;
+            const report = await f.run();
+            assert.equal(report.status, 'mismatch');
+            assert.equal(report.reason, 'invalid_settings');
+            assert.equal(report.stage, 'input');
+            assert.equal(f.state.requests.length, 0);
+            assert.equal(report.expected, undefined);
+            assert.ok(!JSON.stringify(report).includes('secret-address'));
+        }
+    }
+});
+
+test('hex casing, prefixless hex and direct ICAP settings preserve evidence identity', async t => {
+    for (const form of [value => value.toLowerCase(), value => `0x${value.slice(2).toUpperCase()}`,
+        value => value.slice(2), getIcapAddress]) {
+        const f = await setup(t);
+        const address = '0x8ba1f109551bD432803012645Ac136ddd64DBA72';
+        f.config.ledgerContract = f.config.nodeAddress = form(address);
+        f.state.receipt.from = f.state.receipt.to = address;
+        f.state.receipt.logs[0].address = address;
+        Object.assign(f.state.receipt.logs[0], abi.encodeEventLog(abi.getEvent('Log'), [address, hashLedgerCid(cid), cid]));
+        const report = await f.run();
+        assert.equal(report.status, 'verified');
+        assert.equal(report.expected.nodeAddress, address.toLowerCase());
+        assert.equal(report.expected.ledgerContract, address.toLowerCase());
+        readOnly(f.state);
+    }
+});
 
 test('historically expired job verifies exact signatures/content and read-only snapshot', async t => {
     const f = await setup(t);
