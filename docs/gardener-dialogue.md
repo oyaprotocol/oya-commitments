@@ -163,7 +163,7 @@ Additionally, a later version of the protocol will have a "bogey game" where nod
 - **Asked on:** 2026-11-11
 - **Topics:** collaboration, incentives, node culture
 - **Status:** Awaiting answer
-- **Source PR:** Pending PR creation.
+- **Source PR:** [#156](https://github.com/oyaprotocol/oya-commitments/pull/156)
 
 ### Context
 
