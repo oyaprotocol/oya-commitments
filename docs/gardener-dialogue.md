@@ -25,7 +25,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | --- | --- | --- | --- |
 | [Q001](#q001) | Success beyond adoption and revenue | goals, philosophy, principles | Answered |
 | [Q002](#q002) | A first experience of Oya | accessibility, use cases, product direction | Answered |
-| [Q003](#q003) | A fair resolution when expectations differ | trust, user expectations, dispute resolution | Awaiting answer |
+| [Q003](#q003) | A fair resolution when expectations differ | trust, user expectations, dispute resolution | Answered |
 
 <a id="q001"></a>
 
@@ -100,7 +100,7 @@ The second is a commitment that allows vibe coders to validate that code created
 - **Asked by:** Oya Gardener (`@oyagardener`)
 - **Asked on:** 2026-11-10
 - **Topics:** trust, user expectations, dispute resolution
-- **Status:** Awaiting answer
+- **Status:** Answered
 - **Source PR:** [#154](https://github.com/oyaprotocol/oya-commitments/pull/154)
 
 ### Context
@@ -113,4 +113,11 @@ When a user and a code-writing agent disagree about whether the code fulfills a 
 
 ### Answer
 
-Pending an answer from `@pemulis` or `@nesseps`.
+#### @pemulis — 2026-11-11
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 6783810699](https://github.com/oyaprotocol/oya-commitments/pull/154#issuecomment-6783810699)
+- **Source created:** 2026-11-11T01:02:44Z
+- **Source updated:** 2026-11-11T01:02:44Z
+
+Resolution of any commitment will be resolved by UMA's optimistic oracle. Currently the plan is to use UMA's DVM but in the future we may add new layers to the dispute resolution process or build an entirely new mechanism. Any proposal that the code matches its description and follows the user's rules is backed by an onchain bond, and anyone (not just the proposer or user) can dispute during a challenge window if they think the proposal is incorrect, and post their own bond. The dispute resolution process decides who is correct and who wins the other party's bond. Since we plan to have a robust decentralized network of nodes acting as proposers and disputers (in addition to handling data availability), we will have many eyes on every proposal.
