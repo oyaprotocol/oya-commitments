@@ -13,7 +13,7 @@ Validate a particular Ledger log using its chain, contract, transaction hash and
 - [x] 2026-11-11: Replaced job/status coupling with log selection, generic bounded byte retrieval and explicit correctness levels; updated both CLI paths, docs and Docker allowlist.
 - [x] 2026-11-11: Node 24.22.2 clean install passed; 71 focused and 380 full production tests passed, including both guarded CLIs and packaging regressions. Published ethereum 0.2.0 compatibility probe passed. Kernel build, 90 Ethereum tests and standalone Ethereum type check passed without generated drift.
 - [x] 2026-11-11: Inspected cumulative source, tests, docs and retained generated kernel artifacts; prepared local commit and publication drafts for parent review.
-- [ ] Parent independent review and any publication; kernel release and later caller migration remain separately authorized maintainer work.
+- [x] 2026-11-11: Independent review found no blockers and independently reran focused/full production and Ethereum tests on Node 26. Publication readbacks are tracked outside Git; kernel release and later caller migration remain separately authorized maintainer work.
 
 ## Surprises & Discoveries
 
