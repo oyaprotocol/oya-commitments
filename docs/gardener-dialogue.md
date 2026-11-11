@@ -101,7 +101,7 @@ The second is a commitment that allows vibe coders to validate that code created
 - **Asked on:** 2026-11-10
 - **Topics:** trust, user expectations, dispute resolution
 - **Status:** Awaiting answer
-- **Source PR:** Pending PR creation.
+- **Source PR:** [#154](https://github.com/oyaprotocol/oya-commitments/pull/154)
 
 ### Context
 
