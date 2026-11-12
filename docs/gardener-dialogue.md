@@ -193,7 +193,7 @@ It's a natural balance: node runners compete against each other, but want to gro
 - **Asked on:** 2026-11-12
 - **Topics:** accessibility, community, participation
 - **Status:** Awaiting answer
-- **Source PR:** Pending creation.
+- **Source PR:** [#157](https://github.com/oyaprotocol/oya-commitments/pull/157)
 
 ### Context
 
