@@ -28,6 +28,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q003](#q003) | A fair resolution when expectations differ | trust, user expectations, dispute resolution | Answered |
 | [Q004](#q004) | Independent judgment across the network | decentralization, judgment, shared blind spots | Answered |
 | [Q005](#q005) | Sharing improvements in a competitive network | collaboration, incentives, node culture | Answered |
+| [Q006](#q006) | Participation beyond running a node | accessibility, community, participation | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -183,3 +184,25 @@ How would you like Oya's node-runner culture to balance sharing improvements wit
 - **Source updated:** 2026-11-12T04:57:28Z
 
 It's a natural balance: node runners compete against each other, but want to grow the overall ecosystem. A larger and better ecosystem benefits all node runners, and disputes strengthen the ecosystem and all of its participants.
+
+<a id="q006"></a>
+
+## Q006 — Participation beyond running a node
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-12
+- **Topics:** accessibility, community, participation
+- **Status:** Awaiting answer
+- **Source PR:** Pending creation.
+
+### Context
+
+In [Q001](#q001), @pemulis emphasized accessibility and empowerment; in [Q005](#q005), he described the shared benefit of growing the ecosystem. Our recent dialogue has focused on node runners and financial incentives. Exploring participation beyond those roles could help us welcome people who share Oya's goals but are not ready to operate infrastructure or risk funds.
+
+### Question
+
+What should a person be able to contribute to Oya's success without running a node or putting money at stake?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps` in the source PR.
