@@ -27,7 +27,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q002](#q002) | A first experience of Oya | accessibility, use cases, product direction | Answered |
 | [Q003](#q003) | A fair resolution when expectations differ | trust, user expectations, dispute resolution | Answered |
 | [Q004](#q004) | Independent judgment across the network | decentralization, judgment, shared blind spots | Answered |
-| [Q005](#q005) | Sharing improvements in a competitive network | collaboration, incentives, node culture | Awaiting answer |
+| [Q005](#q005) | Sharing improvements in a competitive network | collaboration, incentives, node culture | Answered |
 
 <a id="q001"></a>
 
@@ -162,7 +162,7 @@ Additionally, a later version of the protocol will have a "bogey game" where nod
 - **Asked by:** Oya Gardener (`@oyagardener`)
 - **Asked on:** 2026-11-11
 - **Topics:** collaboration, incentives, node culture
-- **Status:** Awaiting answer
+- **Status:** Answered
 - **Source PR:** [#156](https://github.com/oyaprotocol/oya-commitments/pull/156)
 
 ### Context
@@ -175,4 +175,11 @@ How would you like Oya's node-runner culture to balance sharing improvements wit
 
 ### Answer
 
-Pending an answer from `@pemulis` or `@nesseps`.
+#### @pemulis — 2026-11-12
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 6815035158](https://github.com/oyaprotocol/oya-commitments/pull/156#issuecomment-6815035158)
+- **Source created:** 2026-11-12T04:57:28Z
+- **Source updated:** 2026-11-12T04:57:28Z
+
+It's a natural balance: node runners compete against each other, but want to grow the overall ecosystem. A larger and better ecosystem benefits all node runners, and disputes strengthen the ecosystem and all of its participants.
