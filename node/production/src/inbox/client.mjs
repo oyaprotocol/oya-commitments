@@ -26,7 +26,10 @@ async function readMessage(path) {
 }
 export async function main(args = process.argv.slice(2)) {
     const [command, ...rest] = args;
-    if (command === 'keygen' && rest.length === 1) {
+    if (command === 'evidence') {
+        const { main: verify } = await import('../verify-ledger.mjs');
+        await verify(rest);
+    } else if (command === 'keygen' && rest.length === 1) {
         const wallet = Wallet.createRandom();
         await saveNew(rest[0], wallet.privateKey + '\n');
         console.log(JSON.stringify({ address: wallet.address }));
@@ -43,7 +46,7 @@ export async function main(args = process.argv.slice(2)) {
         const [url, jobFile] = rest;
         const result = await createInboxClient(inboxUrl(url))(`/v1/${command === 'submit' ? 'jobs' : 'status'}`, await readJson(jobFile));
         console.log(JSON.stringify(result, null, 2));
-    } else throw new Error('Usage: client keygen KEY_FILE | prepare KEY_FILE TARGET TEXT_FILE JOB_FILE | submit|status INBOX_URL JOB_FILE');
+    } else throw new Error('Usage: client keygen KEY_FILE | prepare KEY_FILE TARGET TEXT_FILE JOB_FILE | submit|status INBOX_URL JOB_FILE | evidence LOG_FILE SETTINGS_FILE');
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
     main().catch(error => {

@@ -8,6 +8,7 @@ Ethereum JSON-RPC utilities for Oya kernel code. This package is a hardened kern
 
 ## Current Surface
 
+- `getAddress(value)`: normalize a hex or direct ICAP address to its ERC-55 checksum spelling (unreleased; not in npm `0.2.0`).
 - `createHttpConfig(options)`: validate explicit HTTP transport settings, re-exported from `@oyaprotocol/utils`.
 - `requestEthereumJsonRpc(options)`: send one JSON-RPC POST request with explicit config and injected `fetch`, returning the raw `result`, attempt count, id, and parsed response payload.
 - `parseTransactionQuantity(value, name)`: parse an Ethereum hexadecimal quantity into a `bigint`, rejecting noncanonical syntax and values larger than 256 bits. Available since `0.1.2`.
@@ -26,6 +27,8 @@ Ethereum JSON-RPC utilities for Oya kernel code. This package is a hardened kern
 - `EthereumTransactionReceiptTimeoutError`: thrown when the overall receipt wait expires, exposing `transactionHash`, `timeoutMs`, and `pollCount`.
 
 ## Behavior
+
+`getAddress(value: unknown): string` accepts exactly 40 hexadecimal digits with an optional lowercase `0x` prefix, or direct ICAP (`XE`, two check digits, and 30–31 base-36 characters). It checks mixed-case hex against [ERC-55](https://eips.ethereum.org/EIPS/eip-55), checks ICAP's mod-97 digits and 160-bit bound, and returns `0x`-prefixed checksummed hex. Lowercase and uppercase hex are accepted without a supplied checksum. Whitespace, non-string values, malformed encodings and invalid checksums throw fixed errors without echoing input. Zero is a valid address here; hosts enforce nonzero policy. This preserves ethers `getAddress` address forms, but does not expose ethers error metadata. It performs no I/O and uses the existing pinned Noble Keccak implementation.
 
 `createHttpConfig(...)` accepts the shared `CreateHttpConfigOptions` shape from `@oyaprotocol/utils`. The `url` value is normalized by trimming trailing slashes before JSON-RPC requests are sent.
 
