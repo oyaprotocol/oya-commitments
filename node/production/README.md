@@ -16,6 +16,7 @@ The default deployment runs Oya and Kubo on your local device, with a portable P
 | Use a synchronous API without an inbox | [Advanced direct HTTP setup](run-direct.md). |
 | Verify a Ledger log from any source without a key | [Job-independent evidence command](inbox-api.md#verify-ledger-evidence) — record identity, content availability and explicit byte-integrity checks. |
 | Verify automatic testnet CID logging | [Testnet Ledger acceptance](testnet-ledger.md) — isolated installation, receipt evidence and recovery; requires separate broadcast authorization. |
+| Inspect or review the public peer directory | [Offline directory guide](peers/README.md) — schema, revisions and pinned snapshots; no runtime peer authorization yet. |
 | Develop or validate the runtime | [Install and validate](#install-and-validate). |
 | Publish an image and bundle | [Maintainer release guide](release-image.md). |
 

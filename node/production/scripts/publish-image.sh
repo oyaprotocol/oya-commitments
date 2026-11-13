@@ -46,7 +46,7 @@ console.log(JSON.parse(readFileSync(process.argv[1], "utf8"))["containerimage.di
 printf '%s@%s\n' "$repository" "$digest" > "$output/image.txt"
 printf 'Git tag: %s\nGit commit: %s\nImage: %s@%s\n' "$release" "$revision" "$repository" "$digest" > "$output/release.txt"
 bundle="$staging/bundle/node/production"
-mkdir -p "$bundle/docker" "$bundle/scripts" "$bundle/inbox"
+mkdir -p "$bundle/docker" "$bundle/scripts" "$bundle/inbox" "$bundle/peers"
 cp "$staging/source/compose.yaml" "$staging/source/README.md" \
     "$staging/source/deploy-droplet.md" "$staging/source/run-locally.md" "$staging/source/run-direct.md" \
     "$staging/source/host-inbox.md" "$staging/source/inbox-api.md" "$staging/source/deploy-with-agent.md" \
@@ -63,6 +63,19 @@ git -C "$root" show "$revision:agent-library/agents/hourly-message-test/agent.mj
 cp "$staging/source/scripts/deploy-droplet.sh" "$staging/source/scripts/deploy-droplet-remote.sh" "$bundle/scripts/"
 cp "$staging/source/scripts/keychain-worker.py" "$staging/source/scripts/upgrade-node.py" "$bundle/scripts/"
 cp "$output/image.txt" "$bundle/image.txt"
+cp "$staging/source/peers/testnet-directory.json" "$staging/source/peers/README.md" "$bundle/peers/"
+# Bind the exact bundled registry bytes to the source revision (not live freshness).
+node --input-type=module - "$bundle/peers" "$revision" <<'NODE'
+import { createHash } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+const [directory, sourceCommit] = process.argv.slice(2);
+const bytes = readFileSync(join(directory, 'testnet-directory.json'));
+writeFileSync(join(directory, 'snapshot.json'), JSON.stringify({
+    version: 1, sourceCommit, directoryRevision: JSON.parse(bytes).revision,
+    fileSha256: createHash('sha256').update(bytes).digest('hex'),
+}, null, 2) + '\n');
+NODE
 # Source guides resolve the latest release; immutable bundles select their own tag.
 node --input-type=module - "$bundle" "$release" <<'NODE'
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';

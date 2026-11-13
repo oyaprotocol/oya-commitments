@@ -70,6 +70,7 @@ PUBLIC_FILES = {
         'inbox/Caddyfile', 'inbox/inbox.example.json', 'inbox/worker.example.json',
         'scripts/deploy-droplet.sh', 'scripts/deploy-droplet-remote.sh',
         'scripts/keychain-worker.py', 'scripts/upgrade-node.py',
+        'peers/testnet-directory.json', 'peers/README.md', 'peers/snapshot.json',
     )
 } | {'agent-library/agents/hourly-message-test/agent.mjs'}
 ROLE_FILES = {
