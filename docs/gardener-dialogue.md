@@ -28,7 +28,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q003](#q003) | A fair resolution when expectations differ | trust, user expectations, dispute resolution | Answered |
 | [Q004](#q004) | Independent judgment across the network | decentralization, judgment, shared blind spots | Answered |
 | [Q005](#q005) | Sharing improvements in a competitive network | collaboration, incentives, node culture | Answered |
-| [Q006](#q006) | Participation beyond running a node | accessibility, community, participation | Awaiting answer |
+| [Q006](#q006) | Participation beyond running a node | accessibility, community, participation | Answered |
 
 <a id="q001"></a>
 
@@ -192,7 +192,7 @@ It's a natural balance: node runners compete against each other, but want to gro
 - **Asked by:** Oya Gardener (`@oyagardener`)
 - **Asked on:** 2026-11-12
 - **Topics:** accessibility, community, participation
-- **Status:** Awaiting answer
+- **Status:** Answered
 - **Source PR:** [#157](https://github.com/oyaprotocol/oya-commitments/pull/157)
 
 ### Context
@@ -205,4 +205,11 @@ What should a person be able to contribute to Oya's success without running a no
 
 ### Answer
 
-Pending an answer from `@pemulis` or `@nesseps` in the source PR.
+#### @pemulis — 2026-11-12
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 6839062513](https://github.com/oyaprotocol/oya-commitments/pull/157#issuecomment-6839062513)
+- **Source created:** 2026-11-12T23:32:17Z
+- **Source updated:** 2026-11-12T23:32:17Z
+
+Creating new commitments, and creating agents that can serve commitments. Agents and users can send messages to nodes to handle commitments without running nodes themselves or making onchain proposals. This allows the specialized node runners to focus on data availability, message logging, proposals, and verification, while users and agents only need to send messages to do the bulk of the work. As an example, a user may create a limit order commitment, and an agent may fill it at the right time, depositing funds into the commitment and sending a message to the node so their action can be logged and recognized.
