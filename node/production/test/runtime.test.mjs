@@ -27,6 +27,21 @@ test('config fails closed on missing allowlist, invalid chain, and invalid endpo
     assert.equal(config.host, '127.0.0.1');
 });
 
+test('fee limits require decimal strings without coercing JSON numbers or arrays', () => {
+    const parseFee = maxFeePerGasWei => parseConfig({ ...configInput, maxFeePerGasWei }, { env: {} }).limits.feePerGas;
+    const rounded = JSON.parse('{"fee":9007199254740993}').fee;
+    for (const value of [30000000000, rounded, ['30000000000'], null, true, {}, 30000000000n]) {
+        assert.throws(() => parseFee(value), { message: 'maxFeePerGasWei must be a positive decimal string.' });
+    }
+    assert.equal(parseFee(undefined), 30000000000n);
+    for (const value of ['1', '30000000000', '9007199254740993', '9'.repeat(78)]) {
+        assert.equal(parseFee(value), BigInt(value));
+    }
+    for (const value of ['', '0', '-1', '01', '1.5', '1e9', '9'.repeat(79)]) {
+        assert.throws(() => parseFee(value), /positive decimal string/);
+    }
+});
+
 test('implicit public RPC never receives a configured authorization secret', () => {
     const input = { allowedSigners: [agent.address], ipfsUrl: 'http://127.0.0.1:5001' };
     const env = { OYA_RPC_AUTHORIZATION: 'Bearer test-provider-credential' };

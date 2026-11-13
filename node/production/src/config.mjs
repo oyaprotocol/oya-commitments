@@ -62,7 +62,8 @@ export function parseConfig(input, { env = process.env } = {}) {
     if (input.host !== undefined && (typeof input.host !== 'string' || !input.host.trim())) {
         throw new Error('host must be a nonempty string.');
     }
-    if (input.maxFeePerGasWei !== undefined && !/^[1-9][0-9]{0,77}$/.test(input.maxFeePerGasWei)) {
+    if (input.maxFeePerGasWei !== undefined && (typeof input.maxFeePerGasWei !== 'string' ||
+        !/^[1-9][0-9]{0,77}$/.test(input.maxFeePerGasWei))) {
         throw new Error('maxFeePerGasWei must be a positive decimal string.');
     }
     const transport = (url, authorization) => ({
