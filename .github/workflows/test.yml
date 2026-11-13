@@ -7,6 +7,10 @@ on:
   pull_request:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      directory_base:
+        required: true
+        type: string
 
 env:
   FOUNDRY_PROFILE: ci
@@ -144,7 +148,7 @@ jobs:
 
       - name: Validate peer directory revision against base
         env:
-          DIRECTORY_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          DIRECTORY_BASE: ${{ inputs.directory_base || github.event.pull_request.base.sha || github.event.before }}
         run: |
           if [ -n "$DIRECTORY_BASE" ] && [ "$DIRECTORY_BASE" != "0000000000000000000000000000000000000000" ]; then
             node node/production/scripts/check-peer-directory.mjs "$DIRECTORY_BASE"

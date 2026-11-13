@@ -16,9 +16,14 @@ This is a bounded prerequisite of `plans/peer-node-network-execplan.md`, not tha
 - [x] 2026-11-13: Added empty bootstrap snapshot and release metadata, updated upgrader allowlist; first focused run passed 94 tests.
 - [x] 2026-11-13: Focused success/failure/recovery and packaging tests passed (97); full production suite passed on Node 24.22.3 (459 tests, no skips/failures). Syntax and whitespace checks passed.
 - [x] 2026-11-13: Completed separate self-review, fixed sparse-array handling and trailing-dot endpoint aliases, and rechecked all open PRs; no substantial feature or overlapping paths.
-- [ ] Publish one PR after final budget and sensitive-information review; record read-back/CI evidence outside the branch.
+- [x] 2026-11-13: Published PR #161; review follow-up remains local for parent review and publication.
+- [x] 2026-11-13: Reproduced all three Codex findings with regressions (79 pass, 3 fail before fixes); pinned the release fallback base, rejected duplicate JSON names and restored checksummed comparison records.
+- [x] 2026-11-13: Follow-up validation passed 100 focused tests and 462 complete production tests on Node 24.22.3, with no failures or skips.
+- [ ] Parent independently reviews and publishes the local follow-up commit; human review/merge remains required.
 
 ## Surprises & Discoveries
+
+Review follow-up confirmed that a release-dispatch reusable CI call had no event base and silently took the schema-only path. A fixture with unbumped membership passes that path but fails base-aware validation. `JSON.parse` discards duplicate names, including Unicode-escaped equivalents, before object-field validation; the original text must also be checked. Comparison used normalized hash records for display and lost checksum casing.
 
 The full peer plan is merged at `90f2d3fcbaab3f0c0a0c3853313a01e6f4320878` (2026-11-07). It retains an earlier separate-plan-approval gate. The user's current instruction explicitly authorizes this bounded implementation without routine plan approval; it does not authorize deployment or completion of the remaining network milestones. Pemulis's public direction in PR #142 comment 6712305115 requires a repository registry and reviewed enrollment, not an invented live roster. None has been supplied, so `nodes` must start empty.
 
@@ -28,12 +33,17 @@ The release upgrader has an explicit public-file allowlist. New bundle assets mu
 
 ## Decision Log
 
+- 2026-11-13 / Oya Gardener review follow-up: Pass the exact checked-out source’s first-parent SHA from release preflight to a required reusable-workflow input. Fetch two commits and fail preflight if that parent is unavailable. Ordinary standalone manual CI keeps its explicit schema-only behavior.
+- 2026-11-13 / Oya Gardener review follow-up: Keep native JSON grammar validation, then scan the intact bounded text with an iterative object-scope stack and decoded name sets before schema validation. Reject duplicate names using the existing sanitized JSON error, without new dependencies. Return checksummed parsed records in comparisons; retain normalized identity matching and content hashing.
+
 - 2026-11-13 / Oya Gardener: Implement only offline validation/inspection and review distribution. The full peer-policy/outbox/transport feature cannot safely fit this milestone's bounded review budget. Q001 emphasizes hardened home-node security; Q006 supports specializing nodes in logging and verification.
 - 2026-11-13 / Oya Gardener: Reuse already installed ethers address checking, with strict hex input and nonzero checks. No dependency or generated-output changes.
 - 2026-11-13 / Oya Gardener: Maintain separate exact-byte checksum and normalized content hash. Formatting, node ordering and address casing are not membership changes. Revision changes must be monotonic; domain changes are rejected in comparisons and need a new directory/network migration. Neither hash proves upstream provenance, freshness, endpoint ownership or safe network routing.
 - 2026-11-13 / Oya Gardener: CLI outputs sanitized JSON, exit 0 for success, 1 for validation/revision failure and 2 for usage errors. It never prints raw input on failures. Empty directory is valid bootstrap data but explicitly not a runnable peer network.
 
 ## Outcomes & Retrospective
+
+Review follow-up resolves all three reported defects. Regression coverage executes the workflow shell blocks in disposable Git repositories (stale revision, corrected revision, unavailable base and missing parent), rejects duplicate names at all schema levels through decoding/CLI/Git-base paths, and verifies checksummed added/removed/updated records without treating casing-only edits as content changes. Current results supersede the original counts below: 100 focused and 462 full production tests pass on Node 24.22.3. Hosted Actions and Docker/PostgreSQL/live-chain integration were not executed during this offline follow-up.
 
 Offline schema/inspection/comparison, exact Git-base revision CI, the empty official registry, and release checksum/source metadata are implemented and exercised. The full production suite passed 459 tests on Node 24.22.3; focused validation passed 97 tests on Node 26.12.1. Real Git/archive extraction and upgrade verification are tested with Docker/network responses stubbed. No runtime build step exists for these standalone `.mjs` files; Node syntax checks, Python AST parsing, shell syntax and `git diff --check` passed. Docker/PostgreSQL/live-chain integration was not rerun because runtime behavior and image inputs are unchanged.
 

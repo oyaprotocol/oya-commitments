@@ -66,6 +66,47 @@ test('accepts exact grammar, node count, integer and byte boundaries', () => {
     reject(() => decodePeerDirectory(Buffer.concat([exact, Buffer.from(' ')])), 'directory_too_large');
 });
 
+test('JSON decoding rejects duplicate member names before schema validation', () => {
+    const text = JSON.stringify(directory());
+    for (const [field, value] of [['revision', '99'], ['nodes', '[]'], ['chainId', '1'],
+        ['receiveUrl', '"https://other.example/v1/jobs"'], ['target', '"private-marker"']]) {
+        for (const key of [field, `\\u${field.charCodeAt(0).toString(16).padStart(4, '0')}${field.slice(1)}`]) {
+            const duplicate = text.replace(`"${field}":`, `"${key}":${value},"${field}":`);
+            reject(() => decodePeerDirectory(Buffer.from(duplicate)), 'invalid_directory_json');
+        }
+    }
+    const escaped = text.replace('"target"', '"\\u0074arget"');
+    assert.deepEqual(decodePeerDirectory(Buffer.from(escaped)).directory, parsePeerDirectory(directory()));
+    const separate = directory(); separate.nodes.push(node(addressB, 'b'));
+    assert.equal(decodePeerDirectory(Buffer.from(JSON.stringify(separate))).directory.nodes.length, 2);
+    // Strings containing punctuation and escaped quotes must not look like object keys.
+    const tricky = '{"value":"\\\"x\\\":1,{}[]\\\\","value":2}';
+    reject(() => decodePeerDirectory(Buffer.from(tricky)), 'invalid_directory_json');
+    reject(() => decodePeerDirectory(Buffer.from('{"value":"\\\"x\\\":1,{}[]\\\\"}')), 'invalid_directory_fields');
+    reject(() => decodePeerDirectory(Buffer.from('['.repeat(10000) + '0' + ']'.repeat(10000))), 'invalid_directory_fields');
+});
+
+test('comparison displays checksummed records but ignores address casing for identity', t => {
+    const base = { ...directory(), nodes: [node(mixedAddress.toLowerCase())] };
+    const candidate = { ...base, nodes: [node('0x' + mixedAddress.slice(2).toUpperCase())] };
+    assert.deepEqual(comparePeerDirectories(base, candidate), {
+        baseRevision: 1, revision: 1, changed: false, added: [], removed: [], updated: [],
+    });
+    assert.equal(inspectPeerDirectory(base).contentSha256, inspectPeerDirectory(candidate).contentSha256);
+    const empty = { ...base, nodes: [] };
+    const added = comparePeerDirectories(empty, { ...candidate, revision: 2 });
+    assert.deepEqual(added.added, [node(mixedAddress)]);
+    assert.deepEqual(comparePeerDirectories(base, { ...empty, revision: 2 }).removed, [node(mixedAddress)]);
+    candidate.revision = 2; candidate.nodes[0].target = 'changed';
+    const updated = comparePeerDirectories(base, candidate);
+    assert.deepEqual(updated.updated, [{ before: node(mixedAddress), after: { ...node(mixedAddress), target: 'changed' } }]);
+    const dir = fixture(t), before = join(dir, 'before.json'), after = join(dir, 'after.json');
+    writeFileSync(before, JSON.stringify(base)); writeFileSync(after, JSON.stringify(candidate));
+    const result = spawnSync(process.execPath, [join(runtime, 'scripts/peer-directory.mjs'), 'compare', before, after], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout).updated, updated.updated);
+});
+
 const invalid = [
     ['root null', () => null, 'invalid_directory_fields'],
     ['root array', () => [], 'invalid_directory_fields'],
@@ -221,6 +262,13 @@ syncBuiltinESMExports();\n`);
     assert.equal(failed.status, 1); assert.equal(failed.stdout, '');
     assert.deepEqual(JSON.parse(failed.stderr), { error: 'invalid_directory_json' });
     assert.ok(!failed.stderr.includes(path) && !failed.stderr.includes('private-marker'));
+    writeFileSync(path, JSON.stringify(directory()).replace('"revision":1', '"revision":"private-marker","revision":1'));
+    const duplicate = run('inspect', path);
+    assert.equal(duplicate.status, 1); assert.equal(duplicate.stdout, '');
+    assert.deepEqual(JSON.parse(duplicate.stderr), { error: 'invalid_directory_json' });
+    writeFileSync(base, JSON.stringify(directory()));
+    assert.equal(run('compare', base, path).status, 1);
+    assert.equal(run('compare', path, base).status, 1);
     writeFileSync(path, JSON.stringify(directory())); writeFileSync(base, readFileSync(path));
     const before = readFileSync(path), first = run('inspect', path), second = run('inspect', path);
     assert.equal(first.status, 0, first.stderr); assert.equal(first.stderr, '');

@@ -27,8 +27,42 @@ function fixture(t) {
     const run = (...args) => spawnSync(process.execPath, [join(local, 'scripts/check-peer-directory.mjs'), ...args], {
         cwd: root, encoding: 'utf8', timeout: 5000,
     });
-    return { root, raw, write, commit, absent, run };
+    return { root, raw, write, commit, absent, run, git };
 }
+
+test('release fallback passes a pinned parent base and rejects stale directory content', t => {
+    const release = readFileSync(new URL('../../../.github/workflows/release-node.yml', import.meta.url), 'utf8');
+    const workflow = readFileSync(new URL('../../../.github/workflows/test.yml', import.meta.url), 'utf8');
+    assert.match(release, /directory_base: \$\{\{ steps\.directory-base\.outputs\.sha \}\}/);
+    assert.match(release, /directory_base: \$\{\{ needs\.preflight\.outputs\.directory_base \}\}/);
+    assert.match(workflow, /workflow_call:\n    inputs:\n      directory_base:\n        required: true\n        type: string/);
+    assert.match(workflow, /DIRECTORY_BASE: \$\{\{ inputs\.directory_base \|\| github\.event\.pull_request\.base\.sha \|\| github\.event\.before \}\}/);
+    const resolver = release.match(/id: directory-base\n        run: \|\n((?:          .*\n)+)/)?.[1].replace(/^          /gm, '');
+    assert.ok(resolver, 'release preflight must resolve a full parent commit');
+    const check = workflow.match(/DIRECTORY_BASE:.*\n        run: \|\n((?:          .*\n)+)/)?.[1].replace(/^          /gm, '');
+    assert.ok(check);
+    const f = fixture(t), base = f.commit();
+    const candidate = { ...f.raw, nodes: [{ nodeAddress: '0x1111111111111111111111111111111111111111',
+        receiveUrl: 'https://a.example/v1/jobs', target: 'a' }] };
+    f.write(candidate); f.commit();
+    const output = join(f.root, 'output');
+    const resolved = spawnSync('bash', ['-e', '-c', resolver], { cwd: f.root, encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: output } });
+    assert.equal(resolved.status, 0, resolved.stderr);
+    assert.equal(readFileSync(output, 'utf8'), `sha=${base}\n`);
+    const run = value => spawnSync('bash', ['-e', '-c', check], { cwd: f.root, encoding: 'utf8',
+        env: { ...process.env, DIRECTORY_BASE: value } });
+    assert.equal(run('').status, 0, 'manual schema-only validation alone misses stale content');
+    const rejected = run(base);
+    assert.equal(rejected.status, 1);
+    assert.deepEqual(JSON.parse(rejected.stderr), { error: 'directory_revision_not_advanced' });
+    candidate.revision = 2; f.write(candidate);
+    assert.equal(run(base).status, 0);
+    assert.equal(run('f'.repeat(40)).status, 1, 'unavailable base fails closed');
+    f.git('checkout', '--', registry);
+    f.git('checkout', '--detach', f.absent);
+    assert.notEqual(spawnSync('bash', ['-e', '-c', resolver], { cwd: f.root,
+        env: { ...process.env, GITHUB_OUTPUT: output } }).status, 0, 'missing parent fails preflight');
+});
 
 test('CI verifies first introduction and never treats missing/unavailable base as an empty registry', t => {
     const f = fixture(t);
@@ -78,7 +112,8 @@ test('CI rejects unbumped membership and deletion, then accepts a corrected high
 
 test('CI rejects corrupt, oversized and symlink base data instead of bypassing revision checks', t => {
     const f = fixture(t);
-    for (const bad of ['{"private-marker":', ' '.repeat(256 * 1024 + 1)]) {
+    for (const bad of ['{"private-marker":', ' '.repeat(256 * 1024 + 1),
+        JSON.stringify(f.raw).replace('"revision":1', '"revision":"private-marker","revision":1')]) {
         f.write(bad); const base = f.commit(); f.write(f.raw);
         const result = f.run(base);
         assert.equal(result.status, 1); assert.equal(result.stdout, '');

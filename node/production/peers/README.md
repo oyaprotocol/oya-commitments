@@ -28,7 +28,7 @@ These checks prove structure and consistency, **not** upstream provenance, lates
 
 ## Version 1 schema
 
-Only these exact fields are accepted; missing or extra fields fail at every level:
+Only these exact fields are accepted; missing, extra or repeated JSON field names (including escaped equivalents) fail at every level:
 
 | Location | Fields and constraints |
 | --- | --- |

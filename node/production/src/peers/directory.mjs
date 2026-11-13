@@ -64,8 +64,28 @@ export function parsePeerDirectory(raw) {
 export function decodePeerDirectory(bytes) {
     requireValue(bytes instanceof Uint8Array && bytes.byteLength <= MAX_DIRECTORY_BYTES, 'directory_too_large');
     let raw;
-    try { raw = JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)); }
-    catch { fail('invalid_directory_json'); }
+    try {
+        const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+        raw = JSON.parse(text); // Validate grammar before scanning the intact source for duplicate names.
+        const scopes = [];
+        // Consume whole strings so punctuation/escaped quotes inside values cannot create scopes.
+        // An iterative stack also handles deeply nested (schema-invalid) JSON without recursion.
+        for (const match of text.matchAll(/"(?:[^"\\]|\\.)*"|[{}\[\]]/g)) {
+            const token = match[0];
+            if (token === '{') scopes.push(new Set());
+            else if (token === '[') scopes.push(null);
+            else if (token === '}' || token === ']') scopes.pop();
+            else {
+                let next = match.index + token.length;
+                while (/\s/.test(text[next] ?? '') && next < text.length) next++;
+                if (text[next] === ':') {
+                    const name = JSON.parse(token), names = scopes.at(-1);
+                    requireValue(!names.has(name), 'invalid_directory_json');
+                    names.add(name);
+                }
+            }
+        }
+    } catch { fail('invalid_directory_json'); }
     return Object.freeze({ directory: parsePeerDirectory(raw), fileSha256: sha256(bytes) });
 }
 
@@ -115,12 +135,13 @@ export function comparePeerDirectories(baseRaw, candidateRaw) {
     const changed = JSON.stringify(oldContent) !== JSON.stringify(newContent);
     requireValue(candidate.revision >= base.revision && (!changed || candidate.revision > base.revision),
         'directory_revision_not_advanced');
-    const oldNodes = new Map(oldContent.nodes.map(node => [node.nodeAddress, node]));
-    const newNodes = new Map(newContent.nodes.map(node => [node.nodeAddress, node]));
+    const identity = node => node.nodeAddress.toLowerCase();
+    const oldNodes = new Map(base.nodes.map(node => [identity(node), node]));
+    const newNodes = new Map(candidate.nodes.map(node => [identity(node), node]));
     return { baseRevision: base.revision, revision: candidate.revision, changed,
-        added: newContent.nodes.filter(node => !oldNodes.has(node.nodeAddress)),
-        removed: oldContent.nodes.filter(node => !newNodes.has(node.nodeAddress)),
-        updated: newContent.nodes.filter(node => oldNodes.has(node.nodeAddress) &&
-            JSON.stringify(oldNodes.get(node.nodeAddress)) !== JSON.stringify(node))
-            .map(node => ({ before: oldNodes.get(node.nodeAddress), after: node })) };
+        added: candidate.nodes.filter(node => !oldNodes.has(identity(node))),
+        removed: base.nodes.filter(node => !newNodes.has(identity(node))),
+        updated: candidate.nodes.filter(node => oldNodes.has(identity(node)) &&
+            JSON.stringify(oldNodes.get(identity(node))) !== JSON.stringify(node))
+            .map(node => ({ before: oldNodes.get(identity(node)), after: node })) };
 }
