@@ -16,10 +16,11 @@ This is a bounded prerequisite of `plans/peer-node-network-execplan.md`, not tha
 - [x] 2026-11-13: Added empty bootstrap snapshot and release metadata, updated upgrader allowlist; first focused run passed 94 tests.
 - [x] 2026-11-13: Focused success/failure/recovery and packaging tests passed (97); full production suite passed on Node 24.22.3 (459 tests, no skips/failures). Syntax and whitespace checks passed.
 - [x] 2026-11-13: Completed separate self-review, fixed sparse-array handling and trailing-dot endpoint aliases, and rechecked all open PRs; no substantial feature or overlapping paths.
-- [x] 2026-11-13: Published PR #161; review follow-up remains local for parent review and publication.
+- [x] 2026-11-13: Published PR #161; subsequent corrections stay on the same feature branch.
 - [x] 2026-11-13: Reproduced all three Codex findings with regressions (79 pass, 3 fail before fixes); pinned the release fallback base, rejected duplicate JSON names and restored checksummed comparison records.
 - [x] 2026-11-13: Follow-up validation passed 100 focused tests and 462 complete production tests on Node 24.22.3, with no failures or skips.
-- [ ] Parent independently reviews and publishes the local follow-up commit; human review/merge remains required.
+- [x] 2026-11-13: Independent review of the follow-up found no blockers; reviewer reran all 100 focused tests successfully on Node 24.22.3. Publication/readback evidence is maintained outside Git.
+- [ ] Human review and merge.
 
 ## Surprises & Discoveries
 
@@ -47,7 +48,7 @@ Review follow-up resolves all three reported defects. Regression coverage execut
 
 Offline schema/inspection/comparison, exact Git-base revision CI, the empty official registry, and release checksum/source metadata are implemented and exercised. The full production suite passed 459 tests on Node 24.22.3; focused validation passed 97 tests on Node 26.12.1. Real Git/archive extraction and upgrade verification are tested with Docker/network responses stubbed. No runtime build step exists for these standalone `.mjs` files; Node syntax checks, Python AST parsing, shell syntax and `git diff --check` passed. Docker/PostgreSQL/live-chain integration was not rerun because runtime behavior and image inputs are unchanged.
 
-A separate self-review corrected sparse in-memory arrays and trailing-dot hostname aliases before final validation. Independent review could not be delegated in this session; no claim of independent approval is made. Human review/merge remains required. Inspection changes no production files or running services. The larger network plan remains deliberately incomplete.
+A separate self-review corrected sparse in-memory arrays and trailing-dot hostname aliases before final validation. Independent review could not be delegated during initial implementation; the later review follow-up received the independent review recorded above. Human review/merge remains required. Inspection changes no production files or running services. The larger network plan remains deliberately incomplete.
 
 ## Context and Orientation
 
@@ -81,7 +82,7 @@ All validation commands are read-only and repeatable. Invalid data remains untou
 
 ## Artifacts and Notes
 
-Open #160 is an 18-line fee-parser bugfix, #159 is dialogue documentation and #22 is legacy agent predicate/hydration work with a stale base; none is a substantial production node feature or edits these proposed paths. #153 is merged. No open PRs will be edited or commented by this task. Count all implementation/test/script/config/JSON line additions and deletions against 3,000; count Markdown separately. Independent delegation is unavailable in this session; perform and label a separate self-review rather than claiming independent review.
+Open #160 is an 18-line fee-parser bugfix, #159 is dialogue documentation and #22 is legacy agent predicate/hydration work with a stale base; none is a substantial production node feature or edits these proposed paths. #153 is merged. These were the initial publication overlap findings. Later review corrections remain on PR #161. Count all implementation/test/script/config/JSON line additions and deletions against 3,000; count Markdown separately. Initial implementation used a labeled self-review because delegation was unavailable; follow-up review evidence is recorded in Progress.
 
 ## Interfaces and Dependencies
 
