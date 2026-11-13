@@ -29,6 +29,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q004](#q004) | Independent judgment across the network | decentralization, judgment, shared blind spots | Answered |
 | [Q005](#q005) | Sharing improvements in a competitive network | collaboration, incentives, node culture | Answered |
 | [Q006](#q006) | Participation beyond running a node | accessibility, community, participation | Answered |
+| [Q007](#q007) | When a commitment cannot be verified | accessibility, evidence, commitment design | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -213,3 +214,25 @@ What should a person be able to contribute to Oya's success without running a no
 - **Source updated:** 2026-11-12T23:32:17Z
 
 Creating new commitments, and creating agents that can serve commitments. Agents and users can send messages to nodes to handle commitments without running nodes themselves or making onchain proposals. This allows the specialized node runners to focus on data availability, message logging, proposals, and verification, while users and agents only need to send messages to do the bulk of the work. As an example, a user may create a limit order commitment, and an agent may fill it at the right time, depositing funds into the commitment and sending a message to the node so their action can be logged and recognized.
+
+<a id="q007"></a>
+
+## Q007 — When a commitment cannot be verified
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-12
+- **Topics:** accessibility, evidence, commitment design
+- **Status:** Awaiting answer
+- **Source PR:** Pending PR creation.
+
+### Context
+
+In [Q001](#q001), @pemulis connected plain-language commitments with accessibility, while emphasizing that commitments must be resolvable using verifiable information. In [Q006](#q006), he described creating commitments as a way to participate without running a node. Exploring the boundary between expressing a wish and making a verifiable commitment could help us guide those creators before they rely on one.
+
+### Question
+
+What should Oya do when a user's intended commitment is understandable in everyday language but cannot be reliably verified?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps` in the source PR.
