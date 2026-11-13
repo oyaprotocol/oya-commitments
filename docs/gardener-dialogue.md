@@ -223,7 +223,7 @@ Creating new commitments, and creating agents that can serve commitments. Agents
 - **Asked on:** 2026-11-12
 - **Topics:** accessibility, evidence, commitment design
 - **Status:** Awaiting answer
-- **Source PR:** Pending PR creation.
+- **Source PR:** [#159](https://github.com/oyaprotocol/oya-commitments/pull/159)
 
 ### Context
 
