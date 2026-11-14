@@ -21,7 +21,7 @@ function fixture(t) {
     mkdirSync(join(source, 'scripts'), { recursive: true });
     mkdirSync(bin);
     for (const name of ['src', 'docker', 'inbox', 'peers', 'Dockerfile', '.dockerignore', 'package.json', 'package-lock.json',
-        'compose.yaml', 'README.md', 'deploy-droplet.md', 'deploy-with-agent.md', 'run-locally.md', 'run-direct.md', 'host-inbox.md', 'inbox-api.md', 'release-image.md', 'testnet-ledger.md', 'upgrade-node.md']) {
+        'compose.yaml', 'README.md', 'batch-logging.md', 'deploy-droplet.md', 'deploy-with-agent.md', 'run-locally.md', 'run-direct.md', 'host-inbox.md', 'inbox-api.md', 'release-image.md', 'testnet-ledger.md', 'upgrade-node.md']) {
         cpSync(join(runtime, name), join(source, name), { recursive: true });
     }
     for (const name of ['publish-image.sh', 'deploy-droplet.sh', 'deploy-droplet-remote.sh', 'keychain-worker.py', 'upgrade-node.py', 'peer-directory.mjs']) {
@@ -117,7 +117,7 @@ mkdir "$3"
     assert.equal(statSync(f.output).mode & 0o777, 0o700, 'The operator release output directory stays private.');
     assert.equal(statSync(privateDirectory).mode & 0o777, 0o700, 'Subsequent private directories retain the operator umask.');
     assert.equal(statSync(join(privateDirectory, 'node.env')).mode & 0o777, 0o600, 'Subsequent private files retain the operator umask.');
-    assert.deepEqual(readdirSync(bundle).sort(), ['README.md', 'compose.yaml', 'deploy-droplet.md', 'deploy-with-agent.md', 'docker', 'host-inbox.md', 'image.txt',
+    assert.deepEqual(readdirSync(bundle).sort(), ['README.md', 'batch-logging.md', 'compose.yaml', 'deploy-droplet.md', 'deploy-with-agent.md', 'docker', 'host-inbox.md', 'image.txt',
         'inbox', 'inbox-api.md', 'peers', 'release-image.md', 'run-direct.md', 'run-locally.md', 'scripts', 'testnet-ledger.md', 'upgrade-node.md']);
     assert.deepEqual(readdirSync(join(bundle, 'inbox')).sort(), ['Caddyfile', 'compose.https.yaml', 'compose.keychain-worker.yaml', 'compose.postgres.yaml',
         'compose.worker.yaml', 'compose.yaml', 'inbox.example.json', 'worker.example.json']);

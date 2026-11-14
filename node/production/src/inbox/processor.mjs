@@ -14,7 +14,7 @@ export async function processWork({ work, config, target, allowedSigners, signer
     fetch = globalThis.fetch, signal, log = () => {} }) {
     await validateJob(work.job, { target, allowedSigners, maxTextBytes: config.maxTextBytes, checkExpiry: false });
     signal?.throwIfAborted();
-    const identity = executionIdentity(config, signer?.address);
+    executionIdentity(config, signer?.address);
     let { cid, transaction } = work.checkpoint;
     if (!cid) {
         const publication = await publishSignedMessage(work.job.message, { config: config.ipfs, fetch, signal });
@@ -23,6 +23,13 @@ export async function processWork({ work, config, target, allowedSigners, signer
         log({ event: 'ipfs_published', requestId: work.requestId, cid });
     }
     if (config.mode === 'ipfs') return { status: 'published', cid };
+    return logCheckpointedCid({ cid, transaction, config, signer, save, fetch, signal, log, requestId: work.requestId });
+}
+
+// Shared durable Ledger stage: persist exact signed bytes before any broadcast.
+export async function logCheckpointedCid({ cid, transaction, config, signer, save,
+    fetch = globalThis.fetch, signal, log = () => {}, requestId }) {
+    const identity = executionIdentity(config, signer?.address);
     await checkLedger(config, fetch, signal);
     if (!transaction) {
         const prepare = createTransactionPreparer({ config: config.rpc, fetch, chainId: config.chainId, signer, limits: config.limits });
@@ -41,7 +48,7 @@ export async function processWork({ work, config, target, allowedSigners, signer
             // Duplicate, timeout and nonce errors are not proof of failure. Reconcile the known hash.
             signal?.throwIfAborted();
         }
-        log({ event: 'ledger_pending', requestId: work.requestId, cid, transactionHash: transaction.transactionHash });
+        log({ event: 'ledger_pending', requestId, cid, transactionHash: transaction.transactionHash });
         ({ receipt } = await ethWaitForTransactionReceipt({ ...receiptOptions,
             timeoutMs: config.receiptTimeoutMs, pollIntervalMs: config.pollIntervalMs }));
     }

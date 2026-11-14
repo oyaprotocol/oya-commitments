@@ -1,3 +1,4 @@
+import { BatchUnavailable } from './batch-logging.mjs';
 import { createServer } from 'node:http';
 import { handleSignedMessage, publishSignedMessage, publishAndLogSignedMessage, PublishAndLogSignedMessageError } from '@oyaprotocol/messages';
 import { EthereumTransactionReceiptTimeoutError, LogCidError } from '@oyaprotocol/ethereum';
@@ -73,8 +74,9 @@ function readBody(request, maxBytes, timeoutMs) {
     });
 }
 
-export function createNodeServer({ config, transactionPreparer, nodeAddress, fetch = globalThis.fetch,
+export function createNodeServer({ config, transactionPreparer, nodeAddress, batch, fetch = globalThis.fetch,
     log = (record) => console.log(JSON.stringify(record)) }) {
+    if (config.batchLogging && !batch) throw new Error('Batch configuration requires the durable batch coordinator.');
     let active = null;
     let outcomeUnknown = false;
     let stopping = false;
@@ -91,11 +93,16 @@ export function createNodeServer({ config, transactionPreparer, nodeAddress, fet
         let outcome;
         try {
             if (request.url === '/healthz' && request.method === 'GET') {
-                return respond(response, stopping || outcomeUnknown ? 503 : 200, {
-                    status: stopping ? 'shutting_down' : outcomeUnknown ? 'transaction_outcome_unknown' : active ? 'busy' : 'ready',
-                    mode: config.mode, busy: active !== null,
+                const batchState = batch?.status();
+                return respond(response, stopping || outcomeUnknown || batchState?.blocked ? 503 : 200, {
+                    status: stopping ? 'shutting_down' : outcomeUnknown ? 'transaction_outcome_unknown' : batchState?.blocked ? 'batch_blocked' : active || batchState?.busy ? 'busy' : 'ready',
+                    ...(batchState ? { batchLogging: true, batchPending: Boolean(batchState.pending) } : {}),
+                    mode: config.mode, busy: active !== null || Boolean(batchState?.busy),
                     ...(!ipfsOnly ? { chainId: config.chainId, ledgerContract: config.ledgerContract, nodeAddress } : {}),
                 }, { connection: 'close' });
+            }
+            if (batch && request.url === '/v1/batches' && request.method === 'GET') {
+                return respond(response, 200, batch.status());
             }
             if (request.url !== '/v1/messages') {
                 return respond(response, 404, { code: 'not_found' }, { connection: 'close' });
@@ -131,6 +138,7 @@ export function createNodeServer({ config, transactionPreparer, nodeAddress, fet
                     timer = setTimeout(() => controller.abort(), config.operationTimeoutMs);
                     let completed;
                     try {
+                        if (batch) return await batch.accept(message, controller.signal);
                         if (ipfsOnly) {
                             const publication = await publishSignedMessage(message, {
                                 config: config.ipfs, fetch, signal: controller.signal,
@@ -146,6 +154,10 @@ export function createNodeServer({ config, transactionPreparer, nodeAddress, fet
                             signal: controller.signal,
                         });
                     } catch (error) {
+                        if (batch) throw new HttpFailure(error instanceof BatchUnavailable ? 503 : 502, {
+                            code: error instanceof BatchUnavailable ? error.code : 'batch_admission_failed',
+                            started: true, loggingOutcome: 'pending_or_not_admitted',
+                        });
                         const failure = operationFailure(error, controller.signal.aborted, ipfsOnly);
                         outcomeUnknown = failure.body.loggingOutcome === 'unknown';
                         throw failure;
@@ -158,8 +170,8 @@ export function createNodeServer({ config, transactionPreparer, nodeAddress, fet
                     };
                 },
             });
-            outcome = result.status === 202 ? { status: 200, body: {
-                status: ipfsOnly ? 'published' : 'logged', signer: result.body.signer, publication: result.handleSignedMessageResult,
+            outcome = result.status === 202 ? { status: batch ? 202 : 200, body: {
+                status: batch ? 'pending' : ipfsOnly ? 'published' : 'logged', signer: result.body.signer, publication: result.handleSignedMessageResult,
             } } : result;
         } catch (error) {
             if (error instanceof HttpFailure) {
@@ -197,7 +209,7 @@ export function createNodeServer({ config, transactionPreparer, nodeAddress, fet
             stopping = true;
             closing ??= Promise.all([
                 new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
-                active,
+                active, batch?.close(),
             ]).then(() => {});
             return closing;
         },

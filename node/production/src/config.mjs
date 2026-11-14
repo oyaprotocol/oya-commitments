@@ -1,3 +1,4 @@
+import { parseBatch } from './batch-logging.mjs';
 import { readFile } from 'node:fs/promises';
 import { createSignedMessageAuthorizer } from '@oyaprotocol/messages';
 import { createHttpConfig } from '@oyaprotocol/ethereum';
@@ -30,7 +31,7 @@ export function parseConfig(input, { env = process.env } = {}) {
     if (!['ledger', 'ipfs'].includes(mode)) throw new Error('mode must be ledger or ipfs.');
     const fields = new Set(['mode', 'host', 'port', 'chainId', 'ledgerContract', 'allowedSigners', 'rpcUrl', 'ipfsUrl',
         'maxBodyBytes', 'maxTextBytes', 'bodyTimeoutMs', 'receiptTimeoutMs', 'pollIntervalMs',
-        'operationTimeoutMs', 'gasLimit', 'maxFeePerGasWei', 'maxMessageRequestsPerMinute']);
+        'operationTimeoutMs', 'gasLimit', 'maxFeePerGasWei', 'maxMessageRequestsPerMinute', 'batchLogging']);
     for (const key of Object.keys(input)) {
         if (!fields.has(key)) throw new Error('Config contains an unsupported field.');
     }
@@ -71,6 +72,7 @@ export function parseConfig(input, { env = process.env } = {}) {
         maxRetries: 2, retryDelayMs: 250,
     });
     return Object.freeze({
+        batchLogging: parseBatch(input.batchLogging, mode),
         mode, host: input.host ?? '127.0.0.1', port: integer(input.port, 'port', 8787, 65535), authorize,
         maxMessageRequestsPerMinute: integer(input.maxMessageRequestsPerMinute, 'maxMessageRequestsPerMinute', 60),
         maxBodyBytes: integer(input.maxBodyBytes, 'maxBodyBytes', 16_384, 1_048_576),
