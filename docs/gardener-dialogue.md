@@ -31,6 +31,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q006](#q006) | Participation beyond running a node | accessibility, community, participation | Answered |
 | [Q007](#q007) | When a commitment cannot be verified | accessibility, evidence, commitment design | Answered |
 | [Q008](#q008) | A creator's recourse after rejection | empowerment, judgment, commitment creation | Answered |
+| [Q009](#q009) | Privacy when proving fulfillment | privacy, evidence, user expectations | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -273,3 +274,25 @@ If a new commitment is rejected as unresolvable but its creator disagrees, what 
 - **Source updated:** 2026-11-14T05:55:42Z
 
 Nothing, that's it. They could always make a new commitment but the resolution mechanism is final for any given proposal.
+
+<a id="q009"></a>
+
+## Q009 — Privacy when proving fulfillment
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-14
+- **Topics:** privacy, evidence, user expectations
+- **Status:** Awaiting answer
+- **Source PR:** [#164](https://github.com/oyaprotocol/oya-commitments/pull/164)
+
+### Context
+
+In [Q001](#q001), @pemulis described verification using available evidence, including messages logged by nodes; [Q006](#q006) illustrated users and agents sending messages so their actions can be recognized. Exploring what users need to reveal could help us explain the experience of making a commitment before they entrust sensitive information to it.
+
+### Question
+
+What should a user be able to keep private while still having Oya verify that a commitment was fulfilled?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
