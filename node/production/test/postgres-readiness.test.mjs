@@ -29,6 +29,37 @@ test('PostgreSQL fixture does not retry authentication, database, or SQL errors'
     }
 });
 
+test('PostgreSQL fixture rejects cancellation during a successful probe', async () => {
+    const controller = new AbortController();
+    const reason = Object.assign(new Error('Fixture cancelled'), { code: 'ECONNRESET' });
+    let probes = 0;
+    await assert.rejects(waitForPostgres({ async query() {
+        probes++;
+        controller.abort(reason);
+    } }, { signal: controller.signal }), error => error === reason);
+    assert.equal(probes, 1);
+});
+
+test('PostgreSQL fixture rejects success at or beyond the deadline', async t => {
+    let now = 0;
+    t.mock.method(performance, 'now', () => now);
+    for (const elapsed of [10, 11]) {
+        now = 0;
+        await assert.rejects(waitForPostgres({ async query() { now = elapsed; } }, { timeoutMs: 10 }),
+            /did not become ready before its startup deadline/);
+    }
+});
+
+test('PostgreSQL fixture does not start a probe after the retry budget expires', async t => {
+    const times = [0, 0, 9, 10];
+    t.mock.method(performance, 'now', () => times.shift() ?? 10);
+    let probes = 0;
+    await assert.rejects(waitForPostgres({ async query() {
+        if (++probes === 1) throw Object.assign(new Error('reset'), { code: 'ECONNRESET' });
+    } }, { timeoutMs: 10, pollIntervalMs: 1 }), /did not become ready before its startup deadline/);
+    assert.equal(probes, 1);
+});
+
 test('PostgreSQL fixture bounds persistent resets and respects cancellation', async () => {
     const reset = Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' });
     await assert.rejects(waitForPostgres({ async query() { throw reset; } }, { timeoutMs: 10, pollIntervalMs: 1 }),
