@@ -253,7 +253,7 @@ We haven't finalized this yet, but one thought is that new commitments need to b
 - **Asked on:** 2026-11-13
 - **Topics:** empowerment, judgment, commitment creation
 - **Status:** Awaiting answer
-- **Source PR:** Pending PR creation.
+- **Source PR:** [#162](https://github.com/oyaprotocol/oya-commitments/pull/162)
 
 ### Context
 
