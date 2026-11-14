@@ -13,7 +13,8 @@ Keep the repository's trusted public node addresses and receive endpoints in a s
 - [x] 2026-11-14: Reproduced Codex findings 4570003511 and 4570003520 before simplification: a legitimate revision-2 roster breaks the introduction fixture; a changed domain passes without a base but fails base-aware validation.
 - [x] 2026-11-14: Replaced that machinery with a plain list and `list`/`fetch` helper, packaged the helper with the list, and restored preexisting CI/release workflows.
 - [x] 2026-11-14: Node 24.22.3 validation passed: 25 focused and 387 complete production tests, no failures or skips. Packaging/upgrader and the documented save/retry workflow are exercised with local fixtures.
-- [ ] Independent review and human merge; release and deployment remain separate operations.
+- [x] 2026-11-14: Independent review found no blockers and independently reran all 25 focused and 387 production tests. Corrected its shell-example exit-status nit and verified failure propagation.
+- [ ] Human review and merge; release and deployment remain separate operations.
 
 ## Surprises & Discoveries
 
@@ -30,7 +31,7 @@ The inbox protocol needs a `target` as well as a receive URL. Keep that routing 
 
 ## Outcomes & Retrospective
 
-The implementation is now a small trusted address book and an operator loading/fetching workflow. The original review tooling was unnecessary for this milestone. `target` remains because the current inbox requires it; network/execution-domain policy belongs to the later runtime feature, not this file. Validation passed on Node 24.22.3: 25 focused and 387 full production tests, with no failures or skips. Real fixture archives pass the strict upgrade verifier and their packaged helper runs without dependencies. A populated-roster mutation also passed all 25 focused tests. A temporary overlay of the current-main fee fix passed 388 full production tests and was restored afterward; this follow-up retains the original PR parentage. Fetch responses are mocked; the official file becomes available only after merge. Docker/PostgreSQL/live-chain integration was not run locally. Independent review and human merge remain pending.
+The implementation is now a small trusted address book and an operator loading/fetching workflow. The original review tooling was unnecessary for this milestone. `target` remains because the current inbox requires it; network/execution-domain policy belongs to the later runtime feature, not this file. Validation passed on Node 24.22.3: 25 focused and 387 full production tests, with no failures or skips. Real fixture archives pass the strict upgrade verifier and their packaged helper runs without dependencies. A populated-roster mutation also passed all 25 focused tests. A temporary overlay of the current-main fee fix passed 388 full production tests and was restored afterward; this follow-up retains the original PR parentage. Fetch responses are mocked; the official file becomes available only after merge. Docker/PostgreSQL/live-chain integration was not run locally. Independent review found no blockers and independently reran the focused and full suites; human review and merge remain pending.
 
 ## Context and Orientation
 

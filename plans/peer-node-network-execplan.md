@@ -4,7 +4,7 @@ This living ExecPlan follows [PLANS.md](../PLANS.md) and the repository instruct
 
 **Scoped implementation update (2026-11-14):** PR #142 merged on 2026-11-07 at `90f2d3fcbaab3f0c0a0c3853313a01e6f4320878`. PR #161 implements the [minimal registry milestone](peer-directory-v1-execplan.md), revised following pemulis’s review 5899973061 and comment 6868468543: a trusted JSON address list, default bundled-list loading and an explicit upstream fetch helper. Registry revisions, execution metadata, hashes, enrollment verification and custom CI are removed. The remaining runtime policy and delivery work below is a future proposal, not implemented by the registry helper or authorized for deployment. Its message-signature and role-consistency checks remain security requirements; they must not be confused with registry verification.
 
-**Historical status at plan publication: proposal; plan only.** This PR must contain only this document. It does not implement configuration fields, create a peer registry, enroll nodes, enable forwarding, change an installation, or authorize transactions. **Implementation may begin only after an authorized human explicitly approves this plan and this plan PR is merged into upstream `main`.** Both conditions are required. A bot review, passing CI, approval of another PR, or merge without explicit plan approval is not sufficient. Before the first implementation change, record the approval evidence and merged plan revision in this document, fetch current `main`, and reconcile intervening changes. Material design changes require renewed approval. Do not auto-merge this PR or start implementation while waiting.
+**Sequencing:** The original plan-only approval gate is historical. Under the November 10 policy, next-feature proposals are informational candidates, not separate approval gates. After the current feature merges, the daily feature job may select the next scoped milestone and reconcile current main. Review follow-up must not start it. Normal PR review, explicit stop instructions, deployment and spending boundaries remain unchanged.
 
 ## Purpose / Big Picture
 
@@ -22,10 +22,10 @@ This establishes identities, routing, signed content and publication records for
 - [x] 2026-11-07: Addressed Codex plan feedback by specifying persistent admission-only maintenance and ASCII network IDs; runtime implementation and acceptance tests remain gated.
 - [x] 2026-11-07: Incorporated pemulis’s request for an official repository-hosted testnet registry, PR-based enrollment and mandatory support for all listed peers; no registry or runtime implementation added.
 - [x] 2026-11-14: Recorded the merged plan and pemulis’s explicit registry simplification direction. PR #161 supplies the address book and operator fetch workflow only.
-- [ ] Reconcile and approve the remaining runtime policy/delivery scope before implementing it.
-- [ ] After approval and merge: implement and validate directory loading and consistent signer policy.
-- [ ] After approval and merge: implement node-originated messages and bounded, durable outbound delivery.
-- [ ] After approval and merge: validate a three-node network, package operator assets and document controlled rollout/recovery.
+- [ ] Reconcile the remaining runtime policy/delivery candidate when selected by the daily feature job after the current feature merges.
+- [ ] In subsequent scoped feature PRs: implement and validate directory loading and consistent signer policy.
+- [ ] In subsequent scoped feature PRs: implement node-originated messages and bounded, durable outbound delivery.
+- [ ] In subsequent scoped feature PRs: validate a three-node network, package operator assets and document controlled rollout/recovery.
 
 ## Surprises & Discoveries
 
@@ -84,7 +84,7 @@ A **peer** is a directory-enrolled node other than this installation. Its `nodeA
 
 ### Milestone 0 — verify permission and integrate with current main
 
-Wait for explicit plan approval and merge. Then create a fresh implementation branch from current upstream `main`, record the approval reference, inspect merged/open changes named above, and reread applicable repository instructions. Do not include implementation commits in this plan-only PR. Subsequent implementation PRs should link the merged plan, update its progress and obtain normal review. This gate does not authorize releases, live enrollment, key changes, deployments or public-chain spending.
+After the current feature merges, the daily feature job may select a bounded next milestone from this proposal. Fetch current upstream `main`, inspect intervening merged/open changes and reread repository instructions before implementation. Link the merged plan, update progress and obtain normal PR review. No separate next-plan approval is required; this does not authorize releases, live enrollment, key changes, deployments or public-chain spending.
 
 ### Milestone 1 — bootstrap directory and identical local signer policy
 
@@ -175,7 +175,7 @@ All repository commands below run from the repository root. Commands involving n
 
 For this plan-only PR, check required ExecPlan sections, local documentation links, example JSON shape, formatting and the exact one-document diff. Do not create implementation scaffolding or commit tests merely to make proposed commands runnable.
 
-After the approval gate, prepare the development environment with Node 24, Python 3, Docker/Compose and the repository's pinned Foundry toolchain:
+For a selected runtime milestone, prepare the development environment with Node 24, Python 3, Docker/Compose and the repository's pinned Foundry toolchain:
 
 ```sh
 npm --prefix node/production ci --ignore-scripts --no-audit --no-fund
@@ -256,13 +256,13 @@ Tests own unique service names, fresh accounts and disposable volumes and clean 
 
 The baseline inspection found the existing public receive/status paths at `/v1/jobs` and `/v1/status`, and separate authenticated `/v1/worker/*` routes. `processWork` already revalidates the job and checkpoints the CID and signed transaction before broadcast. Ledger's event records the publishing caller and opaque CID claim, not a directory enrollment or storage guarantee. These source observations justify reuse instead of a parallel publisher, new logging contract or unauthenticated peer-ingress API.
 
-The two JSON examples define a reviewable proposed data shape only. The first real registry entries must be assembled through reviewed pull requests from explicitly approved node addresses, targets and public endpoints with owner confirmation; no addresses should be scraped from transaction logs or copied from private installation records into a public PR.
+The JSON configuration example defines a proposed data shape only. The first real registry entries must be assembled through reviewed pull requests from explicitly approved node addresses, targets and public endpoints with owner confirmation; no addresses should be scraped from transaction logs or copied from private installation records into a public PR.
 
 The independent source-architecture review confirmed the inbox-first design, the raw-worker-allowlist integration trap, same-signer restrictions, origin-versus-publisher distinction and current availability limitations. It also prompted explicit statements about target-only destination binding, no transport fallback, one nonce-producing worker per account, and continued reconciliation after job expiration.
 
 The independent plan review was resolved by requiring declared-origin/recovered-signer equality, explicit direct-runtime rejection, complete revocation of overlapping manual grants, bidirectional peer-policy presence checks with old-inbox preflight protection, and precise expiry/status-retention semantics. Matching snapshots are not represented as proof of global freshness.
 
-Plan-only validation passed for the twelve required headings, both proposed JSON examples, eighteen repository-relative links/anchors, whitespace and sensitive-information checks. The diff contains only this Markdown document. No runtime or prospective peer acceptance tests were run; there is no implemented feature to claim validated. Record later approval references here before beginning implementation. Keep signed jobs, credentials, private deployment state and test scratch artifacts outside the committed plan. All implementation acceptance results remain pending until the gate is satisfied and those tests actually run.
+Historical plan-only validation covered twelve headings, the then-current examples and local links, whitespace and sensitive-information checks. Current registry validation is recorded in `peer-directory-v1-execplan.md`; proposed runtime acceptance checks have not run. Keep signed jobs, credentials, private deployment state and scratch artifacts outside the committed plan. Record actual results as each later milestone is implemented.
 
 ## Interfaces and Dependencies
 

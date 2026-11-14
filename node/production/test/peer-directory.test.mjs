@@ -117,6 +117,7 @@ test('documented refresh preserves the saved list on failure and replaces it on 
             NODE_OPTIONS: `--import=${JSON.stringify(join(f.dir, 'fetch.mjs'))}` } });
     f.mock('globalThis.fetch = async () => new Response("failed", {status: 404});');
     const failed = run();
+    assert.equal(failed.status, 1);
     assert.match(failed.stderr, /Unable to load peer registry/);
     assert.deepEqual(JSON.parse(readFileSync(saved)), nodes);
     f.mock('globalThis.fetch = async () => new Response("[]");');

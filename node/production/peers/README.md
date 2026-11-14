@@ -52,6 +52,7 @@ candidate=$(mktemp ./testnet-directory.XXXXXX) && {
     mv "$candidate" ./testnet-directory.json
   else
     rm -f "$candidate"
+    false
   fi
 }
 ```
