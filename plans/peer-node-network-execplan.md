@@ -1,6 +1,20 @@
-# Bootstrap trusted node peers and exchange publishable messages
+# Peer network design history and message-only boundary
 
-This living ExecPlan follows [PLANS.md](../PLANS.md) and the repository instruction hierarchy.
+This document follows [PLANS.md](../PLANS.md) and the repository instruction hierarchy.
+
+## Current direction — 2026-11-14 revision
+
+[pemulis's clarification 4571135806](https://github.com/oyaprotocol/oya-commitments/pull/161#discussion_r4571135806) supersedes the publication-oriented runtime design retained below: registered peers should be able to send messages recognized and handled by the inbox, **not** gain IPFS publication or onchain transaction authority. Registry membership must not be merged into publication `allowedSigners`. Existing explicit agent publication grants and pending transactions remain unchanged.
+
+The current informational candidate is **peer-inbox-messages-v1**, described in [the active registry ExecPlan](peer-directory-v1-execplan.md#next-feature-candidate-after-merge). It proposes an isolated signed message receive operation with bounded local receipt/storage and acknowledgment, not the publication queue. Its endpoint, signed operation/domain and retention contract need design before implementation. Acceptance must prove no IPFS or transaction side effects, reject malformed/unauthorized/replayed messages, and preserve ordinary publication and recovery. No message-only runtime exists in PR #161.
+
+Progress: the founder clarification is incorporated into both plans; runtime implementation remains unstarted. Decision: Oya Gardener, 2026-11-14, withdraws automatic publication grants and the previous runtime estimate because message recognition is a different capability. Discovery: `node/production/src/inbox/http.mjs` queues accepted `/v1/jobs` requests, and `node/production/src/inbox/processor.mjs` publishes them to IPFS before optional Ledger processing; merely adding peers to the existing signer list cannot implement message-only reception. Outcome: this is a documentation correction, not a new permission or deployment.
+
+**Everything below is superseded design history, not an executable plan or current acceptance contract.** In particular, automatic publication grants, the A/B/C publication demonstration, shared publication-policy union, execution-chain requirements and old approval-gate language must not be carried into the new candidate. Retained descriptions of existing security/recovery behavior are context, not permission to weaken it. When the daily feature job selects the next milestone after #161 merges, it must write a self-contained current implementation plan and re-estimate within the 3,000-code-line cap. No separate routine plan approval is required; the hourly follow-up does not start that milestone.
+
+---
+
+## Superseded publication-network proposal
 
 **Scoped implementation update (2026-11-14):** PR #142 merged on 2026-11-07 at `90f2d3fcbaab3f0c0a0c3853313a01e6f4320878`. PR #161 implements the [minimal registry milestone](peer-directory-v1-execplan.md), revised following pemulis’s review 5899973061 and comment 6868468543: a trusted JSON address list, default bundled-list loading and an explicit upstream fetch helper. Registry revisions, execution metadata, hashes, enrollment verification and custom CI are removed. The remaining runtime policy and delivery work below is a future proposal, not implemented by the registry helper or authorized for deployment. Its message-signature and role-consistency checks remain security requirements; they must not be confused with registry verification.
 
