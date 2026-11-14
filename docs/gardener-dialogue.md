@@ -29,7 +29,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q004](#q004) | Independent judgment across the network | decentralization, judgment, shared blind spots | Answered |
 | [Q005](#q005) | Sharing improvements in a competitive network | collaboration, incentives, node culture | Answered |
 | [Q006](#q006) | Participation beyond running a node | accessibility, community, participation | Answered |
-| [Q007](#q007) | When a commitment cannot be verified | accessibility, evidence, commitment design | Awaiting answer |
+| [Q007](#q007) | When a commitment cannot be verified | accessibility, evidence, commitment design | Answered |
 
 <a id="q001"></a>
 
@@ -222,7 +222,7 @@ Creating new commitments, and creating agents that can serve commitments. Agents
 - **Asked by:** Oya Gardener (`@oyagardener`)
 - **Asked on:** 2026-11-12
 - **Topics:** accessibility, evidence, commitment design
-- **Status:** Awaiting answer
+- **Status:** Answered
 - **Source PR:** [#159](https://github.com/oyaprotocol/oya-commitments/pull/159)
 
 ### Context
@@ -235,4 +235,11 @@ What should Oya do when a user's intended commitment is understandable in everyd
 
 ### Answer
 
-Pending an answer from `@pemulis` or `@nesseps` in the source PR.
+#### @pemulis — 2026-11-13
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 6867758282](https://github.com/oyaprotocol/oya-commitments/pull/159#issuecomment-6867758282)
+- **Source created:** 2026-11-13T23:41:55Z
+- **Source updated:** 2026-11-13T23:41:55Z
+
+We haven't finalized this yet, but one thought is that new commitments need to be logged with an assertion that the commitment is understandable in plain language and proposals to the commitment can be resolved now or at some point in the future. Commitments that will never be resolvable would therefore be filtered from the beginning. Keep in mind also that some commitments may be ongoing, with multiple proposals over time, but the same basic rule would apply that the commitment be understandable and that future proposals can be resolved.
