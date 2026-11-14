@@ -1,23 +1,31 @@
-import { comparePeerDirectories, DirectoryError, inspectPeerDirectory, loadPeerDirectory } from '../src/peers/directory.mjs';
+import { readFile } from 'node:fs/promises';
 
-const [command, ...paths] = process.argv.slice(2);
-if (!((command === 'inspect' && paths.length === 1) || (command === 'compare' && paths.length === 2))) {
-    console.error(JSON.stringify({ error: 'usage', usage: 'peer-directory.mjs inspect FILE | compare BASE CANDIDATE' }));
+const registry = new URL('../peers/testnet-directory.json', import.meta.url);
+const upstream = 'https://raw.githubusercontent.com/oyaprotocol/oya-commitments/main/node/production/peers/testnet-directory.json';
+const [command = 'list', ...args] = process.argv.slice(2);
+
+if (!((command === 'list' && args.length <= 1) || (command === 'fetch' && args.length === 0))) {
+    console.error('Usage: peer-directory.mjs [list [FILE] | fetch]');
     process.exitCode = 2;
 } else {
     try {
-        const first = loadPeerDirectory(paths[0]);
-        let report;
-        if (command === 'inspect') report = { ...inspectPeerDirectory(first.directory), fileSha256: first.fileSha256 };
-        else {
-            const second = loadPeerDirectory(paths[1]);
-            report = { ...comparePeerDirectories(first.directory, second.directory),
-                baseFileSha256: first.fileSha256, fileSha256: second.fileSha256,
-                contentSha256: inspectPeerDirectory(second.directory).contentSha256 };
+        let text;
+        if (command === 'fetch') {
+            const response = await fetch(upstream, { redirect: 'error', signal: AbortSignal.timeout(10_000) });
+            if (!response.ok) throw new Error('Download failed');
+            text = await response.text();
+        } else {
+            text = await readFile(args[0] ?? registry, 'utf8');
         }
-        console.log(JSON.stringify(report, null, 2));
-    } catch (error) {
-        console.error(JSON.stringify({ error: error instanceof DirectoryError ? error.code : 'directory_inspection_failed' }));
+        const nodes = JSON.parse(text);
+        // Catch accidental file/response errors; repository review establishes trust.
+        if (!Array.isArray(nodes) || !nodes.every(node => node &&
+            ['nodeAddress', 'receiveUrl', 'target'].every(key => typeof node[key] === 'string' && node[key].length > 0))) {
+            throw new Error('Expected node records');
+        }
+        console.log(JSON.stringify(nodes, null, 2));
+    } catch {
+        console.error('Unable to load peer registry. Check the file or retry the upstream fetch.');
         process.exitCode = 1;
     }
 }

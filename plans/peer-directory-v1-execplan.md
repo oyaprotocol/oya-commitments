@@ -1,89 +1,77 @@
-# Deliver an offline, reviewable testnet peer directory
+# Deliver a minimal testnet peer registry
 
 This living ExecPlan follows `PLANS.md`. Feature ID: `peer-directory-v1`.
 
 ## Purpose / Big Picture
 
-Operators and reviewers can validate and compare public directory snapshots without contacting peers or changing node authorization. A repository-hosted, initially empty testnet directory establishes a reviewed source of public routing data. An offline CLI exposes exact-byte SHA-256 checksums, normalized content hashes, revisions, public records and added/removed/changed identities. CI enforces revision progression. Release bundles carry the snapshot and source/checksum metadata.
-
-This is a bounded prerequisite of `plans/peer-node-network-execplan.md`, not that plan's full peer network. No runtime config integration, signer policy, delivery, key access, enrollment, deployment or chain operations are included.
+Keep the repository's trusted public node addresses and receive endpoints in a simple JSON list. Operators can load the bundled list or explicitly fetch the current upstream list using a dependency-free helper. Registry data is an address book, not an authorization policy: existing inbox/worker signature checks and explicitly configured `allowedSigners` remain the authority.
 
 ## Progress
 
-- [x] 2026-11-13: Read repository guidance, merged plan #142, ledger proposal #137, dialogue Q001–Q006, current source, recent merges and complete open-PR inventory.
-- [x] 2026-11-13: Selected offline directory milestone and isolated a branch from upstream main.
-- [x] 2026-11-13: Implemented strict schema, bounded loader, deterministic inspection/comparison CLI and Git-base CI checks.
-- [x] 2026-11-13: Added empty bootstrap snapshot and release metadata, updated upgrader allowlist; first focused run passed 94 tests.
-- [x] 2026-11-13: Focused success/failure/recovery and packaging tests passed (97); full production suite passed on Node 24.22.3 (459 tests, no skips/failures). Syntax and whitespace checks passed.
-- [x] 2026-11-13: Completed separate self-review, fixed sparse-array handling and trailing-dot endpoint aliases, and rechecked all open PRs; no substantial feature or overlapping paths.
-- [x] 2026-11-13: Published PR #161; subsequent corrections stay on the same feature branch.
-- [x] 2026-11-13: Reproduced all three Codex findings with regressions (79 pass, 3 fail before fixes); pinned the release fallback base, rejected duplicate JSON names and restored checksummed comparison records.
-- [x] 2026-11-13: Follow-up validation passed 100 focused tests and 462 complete production tests on Node 24.22.3, with no failures or skips.
-- [x] 2026-11-13: Independent review of the follow-up found no blockers; reviewer reran all 100 focused tests successfully on Node 24.22.3. Publication/readback evidence is maintained outside Git.
-- [ ] Human review and merge.
+- [x] 2026-11-13: Implemented and published the original offline directory milestone as PR #161, then corrected initial review findings. That implementation's schema, revisions, hashes and comparison CI are superseded below.
+- [x] 2026-11-14: Read pemulis's review 5899973061 and comment 6868468543 requesting a minimum viable trusted repository registry and an updated ExecPlan.
+- [x] 2026-11-14: Reproduced Codex findings 4570003511 and 4570003520 before simplification: a legitimate revision-2 roster breaks the introduction fixture; a changed domain passes without a base but fails base-aware validation.
+- [x] 2026-11-14: Replaced that machinery with a plain list and `list`/`fetch` helper, packaged the helper with the list, and restored preexisting CI/release workflows.
+- [x] 2026-11-14: Node 24.22.3 validation passed: 25 focused and 387 complete production tests, no failures or skips. Packaging/upgrader and the documented save/retry workflow are exercised with local fixtures.
+- [ ] Independent review and human merge; release and deployment remain separate operations.
 
 ## Surprises & Discoveries
 
-Review follow-up confirmed that a release-dispatch reusable CI call had no event base and silently took the schema-only path. A fixture with unbumped membership passes that path but fails base-aware validation. `JSON.parse` discards duplicate names, including Unicode-escaped equivalents, before object-field validation; the original text must also be checked. Comparison used normalized hash records for display and lost checksum casing.
+The initial milestone made review of a trusted temporary address book harder than editing the list. Revision fixtures also depended on the mutable official roster. Separate schema-only and base-aware CI paths could disagree, while existing release CI reuse accepted a successful run for the same commit. Removing the introduced domain/revision policy removes both defects without changing preexisting release gates.
 
-The full peer plan is merged at `90f2d3fcbaab3f0c0a0c3853313a01e6f4320878` (2026-11-07). It retains an earlier separate-plan-approval gate. The user's current instruction explicitly authorizes this bounded implementation without routine plan approval; it does not authorize deployment or completion of the remaining network milestones. Pemulis's public direction in PR #142 comment 6712305115 requires a repository registry and reviewed enrollment, not an invented live roster. None has been supplied, so `nodes` must start empty.
-
-The npm 12 `npx --package=node@24` invocation reported the installed Node 26 rather than the requested runtime. Re-running through the bundled npm launcher reported Node 24.22.3 and the entire production suite passed there; validation records use the observed runtime, not the requested version.
-
-The release upgrader has an explicit public-file allowlist. New bundle assets must be added there and exercised through the real archive verifier. Existing runtime configuration rejects unknown fields, which remains intentional.
+The inbox protocol needs a `target` as well as a receive URL. Keep that routing field so a listed endpoint is useful; do not turn the list into a new signed-message or permission format. No bootstrap roster has been supplied, so the official array remains empty.
 
 ## Decision Log
 
-- 2026-11-13 / Oya Gardener review follow-up: Pass the exact checked-out source’s first-parent SHA from release preflight to a required reusable-workflow input. Fetch two commits and fail preflight if that parent is unavailable. Ordinary standalone manual CI keeps its explicit schema-only behavior.
-- 2026-11-13 / Oya Gardener review follow-up: Keep native JSON grammar validation, then scan the intact bounded text with an iterative object-scope stack and decoded name sets before schema validation. Reject duplicate names using the existing sanitized JSON error, without new dependencies. Return checksummed parsed records in comparisons; retain normalized identity matching and content hashing.
-
-- 2026-11-13 / Oya Gardener: Implement only offline validation/inspection and review distribution. The full peer-policy/outbox/transport feature cannot safely fit this milestone's bounded review budget. Q001 emphasizes hardened home-node security; Q006 supports specializing nodes in logging and verification.
-- 2026-11-13 / Oya Gardener: Reuse already installed ethers address checking, with strict hex input and nonzero checks. No dependency or generated-output changes.
-- 2026-11-13 / Oya Gardener: Maintain separate exact-byte checksum and normalized content hash. Formatting, node ordering and address casing are not membership changes. Revision changes must be monotonic; domain changes are rejected in comparisons and need a new directory/network migration. Neither hash proves upstream provenance, freshness, endpoint ownership or safe network routing.
-- 2026-11-13 / Oya Gardener: CLI outputs sanitized JSON, exit 0 for success, 1 for validation/revision failure and 2 for usage errors. It never prints raw input on failures. Empty directory is valid bootstrap data but explicitly not a runnable peer network.
+- 2026-11-14 / Oya Gardener, following pemulis: Trust normal repository review for addresses and endpoints. Remove custom schema enforcement, JSON duplicate-name scanning, revision/domain comparison, hashes, snapshot metadata and registry-specific CI. Keep only JSON/required-string checks to catch accidental wrong files or failed downloads.
+- 2026-11-14 / Oya Gardener: Choose the requested easy-fetch workflow rather than changing runtime startup permissions. A no-argument helper loads the shipped list; `fetch` retrieves only the fixed official upstream URL and prints JSON. It never writes configuration or contacts listed peers.
+- 2026-11-14 / Oya Gardener: Retain the existing release checks and strict public bundle allowlist. Replace the PR's generated snapshot metadata with the standalone helper in that allowlist, retaining older-bundle support.
+- 2026-11-14 / Oya Gardener: Keep runtime peer-policy integration as the next feature proposal, not an implicit side effect of this registry change.
 
 ## Outcomes & Retrospective
 
-Review follow-up resolves all three reported defects. Regression coverage executes the workflow shell blocks in disposable Git repositories (stale revision, corrected revision, unavailable base and missing parent), rejects duplicate names at all schema levels through decoding/CLI/Git-base paths, and verifies checksummed added/removed/updated records without treating casing-only edits as content changes. Current results supersede the original counts below: 100 focused and 462 full production tests pass on Node 24.22.3. Hosted Actions and Docker/PostgreSQL/live-chain integration were not executed during this offline follow-up.
-
-Offline schema/inspection/comparison, exact Git-base revision CI, the empty official registry, and release checksum/source metadata are implemented and exercised. The full production suite passed 459 tests on Node 24.22.3; focused validation passed 97 tests on Node 26.12.1. Real Git/archive extraction and upgrade verification are tested with Docker/network responses stubbed. No runtime build step exists for these standalone `.mjs` files; Node syntax checks, Python AST parsing, shell syntax and `git diff --check` passed. Docker/PostgreSQL/live-chain integration was not rerun because runtime behavior and image inputs are unchanged.
-
-A separate self-review corrected sparse in-memory arrays and trailing-dot hostname aliases before final validation. Independent review could not be delegated during initial implementation; the later review follow-up received the independent review recorded above. Human review/merge remains required. Inspection changes no production files or running services. The larger network plan remains deliberately incomplete.
+The implementation is now a small trusted address book and an operator loading/fetching workflow. The original review tooling was unnecessary for this milestone. `target` remains because the current inbox requires it; network/execution-domain policy belongs to the later runtime feature, not this file. Validation passed on Node 24.22.3: 25 focused and 387 full production tests, with no failures or skips. Real fixture archives pass the strict upgrade verifier and their packaged helper runs without dependencies. A populated-roster mutation also passed all 25 focused tests. A temporary overlay of the current-main fee fix passed 388 full production tests and was restored afterward; this follow-up retains the original PR parentage. Fetch responses are mocked; the official file becomes available only after merge. Docker/PostgreSQL/live-chain integration was not run locally. Independent review and human merge remain pending.
 
 ## Context and Orientation
 
-Production node code is under `node/production`. The existing inbox accepts signed jobs at `/v1/jobs`; directory records pair Ethereum node addresses with that HTTPS endpoint and inbox target. The Ledger domain is the chain ID plus Ledger contract, not proof of actual deployment. `src/defaults.mjs` holds existing Sepolia defaults. `src/peers/directory.mjs` will be standalone and imported only by the offline CLI/tests. `scripts/peer-directory.mjs` will expose `inspect FILE` and `compare BASE CANDIDATE`. `scripts/check-peer-directory.mjs` will compare a Git base snapshot in CI without a shell or network request. `scripts/publish-image.sh` assembles release archives; `scripts/upgrade-node.py` verifies their public contents.
+`node/production/peers/testnet-directory.json` is an array of `{nodeAddress, receiveUrl, target}` records. `nodeAddress` is the public Ethereum node identity; `receiveUrl` is the public HTTPS `/v1/jobs` endpoint; `target` is the inbox's destination name. `peers/README.md` documents edits and loading/fetching. `scripts/peer-directory.mjs` reads the bundled file relative to itself, accepts a local filename, or fetches the fixed official GitHub raw URL. It uses only Node built-ins, a ten-second fetch deadline and redirect rejection.
+
+`scripts/publish-image.sh` includes the public list, guide and helper in deployment bundles. `scripts/upgrade-node.py` names those exact public files in its existing allowlist. `test/peer-directory.test.mjs` exercises fixed synthetic records and subprocess behavior; `test/publish-image.test.mjs` extracts real fixture archives and runs the packaged helper. Runtime modules, signing, configuration and database schemas are untouched.
 
 ## Plan of Work
 
-First add pure schema validation, a bounded regular-file reader and deterministic comparison functions with strict identity/endpoint/target uniqueness. Then expose inspection and revision checks through CLI entrypoints. Add the empty official registry at `node/production/peers/testnet-directory.json` and contribution guidance. Connect the CI base revision check and release provenance metadata, retaining older-bundle support. Finally add negative, recovery and packaging tests, review all changed files, and publish after a fresh open-PR overlap gate.
+Replace the introduced parser/comparer and CI base checker with the standalone list/fetch helper. Keep the official list empty until maintainers add real public records through normal review. Restore both workflows to their pre-feature behavior. Package the helper and test real extraction/upgrader compatibility. Update operator instructions and the broader network plan so the next implementation does not recreate the removed registry machinery. Complete production regression tests and review the whole diff before local commit.
 
 ## Concrete Steps
 
 From the repository root with Node 24 and Python 3:
 
     npm --prefix node/production ci --ignore-scripts --no-audit --no-fund
-    node node/production/scripts/peer-directory.mjs inspect node/production/peers/testnet-directory.json
-    node node/production/scripts/peer-directory.mjs compare node/production/peers/testnet-directory.json node/production/peers/testnet-directory.json
-    node --test node/production/test/peer-directory*.test.mjs node/production/test/publish-image.test.mjs
+    node node/production/scripts/peer-directory.mjs
+    node --test node/production/test/peer-directory.test.mjs node/production/test/publish-image.test.mjs
     npm --prefix node/production test
+    node --check node/production/scripts/peer-directory.mjs
     bash -n node/production/scripts/publish-image.sh
     git diff --check
 
-The CLI should report an empty bootstrap, two distinct hashes and unchanged comparison; no DNS, HTTP, signer, database or configuration writes. CI uses a full base commit SHA supplied as an argument, retrieves the base registry through Git, and requires advancement for changed content. Initial introduction is allowed only with revision 1 and an empty roster. Existing base registry errors must fail closed, not be treated as absent.
+The default command prints the included JSON array. Once merged, `node node/production/scripts/peer-directory.mjs fetch` prints the latest upstream array. Before merge that URL may not exist; tests substitute HTTP responses without requiring publication. Follow the temporary-file-and-rename example in `peers/README.md` to save updates safely.
 
 ## Validation and Acceptance
 
-Test valid boundaries; unknown fields at each level; wrong types, zero/checksum-invalid addresses; ASCII IDs and targets (including final newline); duplicate addresses/endpoints/targets; strict HTTPS URLs without normalization escapes, credentials or query/fragment; bounded node count and bytes; invalid UTF-8/JSON, symlink/FIFO/directory/missing/truncated reads; changed, unchanged, backwards and domain-changing revisions; added/removed/rotated records; deterministic output and input immutability. CLI subprocess tests exercise sanitized failure followed by recovery without rewriting input. Git fixtures cover initial creation, deletion, unavailable base and revision violations. Packaging tests extract actual archives and verify exact source bytes, commit/checksum binding and acceptance by the upgrader. Full production tests protect existing behavior. There is no build step for these `.mjs` files; use syntax checks and tests. No external service validation is needed for an explicitly offline feature.
+The no-argument command must work from any current directory and in an extracted bundle without installed dependencies. Fixed fixtures cover nonempty/empty lists, malformed or missing files, bad arguments, upstream HTTP failure, invalid JSON/records, transport failure, response-body failure, deadlines and successful retry. The documented save workflow must preserve an existing copy on failure and replace it on success. Tests must remain valid after maintainers add records to the official list. Packaging tests retain source/tag/digest checks and exercise the strict upgrade verifier. Run the complete production suite to protect existing authorization and signing behavior. Docker/PostgreSQL/live-chain runs are not required for this address-book helper; do not claim they ran locally.
 
 ## Idempotence and Recovery
 
-All validation commands are read-only and repeatable. Invalid data remains untouched; fix a candidate explicitly and rerun. Never silently download, trim or repair an identifier. A reverted membership edit must be a new reviewed higher revision, not a rollback to an old numeric revision. Bundles are pinned historical artifacts, not automatic membership updates. Rollback of this feature reverts CLI/CI/assets only; runtime permissions and database state are unchanged. Real future enrollment requires owner evidence, review and coordinated full-snapshot rollout on both roles under the later peer-policy milestone.
+Loading/fetching is read-only and repeatable. A failed command emits no list, exits nonzero and leaves files alone. Save to a temporary file first, then rename only on success; a failed fetch leaves the previous copy usable. Maintainers can revert a list edit through ordinary Git review without managing a separate numeric revision. Reverting this feature changes public tooling/assets, not runtime permissions or stored jobs.
 
 ## Artifacts and Notes
 
-Open #160 is an 18-line fee-parser bugfix, #159 is dialogue documentation and #22 is legacy agent predicate/hydration work with a stale base; none is a substantial production node feature or edits these proposed paths. #153 is merged. These were the initial publication overlap findings. Later review corrections remain on PR #161. Count all implementation/test/script/config/JSON line additions and deletions against 3,000; count Markdown separately. Initial implementation used a labeled self-review because delegation was unavailable; follow-up review evidence is recorded in Progress.
+Review feedback and pre-change reproductions are recorded in the PR discussion and local validation artifacts. Count all added/deleted implementation, JSON, tests, scripts and configuration against the 3,000-line limit; report Markdown separately. Final logs and proposed replies stay outside Git. Existing PR #161 remains the review vehicle.
 
 ## Interfaces and Dependencies
 
-`parsePeerDirectory(raw)` returns a deeply frozen, checksummed snapshot. `loadPeerDirectory(path)` returns the snapshot and exact file SHA-256. `inspectPeerDirectory(snapshot)` produces stable public fields and normalized content hash. `comparePeerDirectories(base, candidate)` enforces immutable network/execution domain and monotonic revision, returning sorted added/removed/changed records. Node standard library and the existing pinned ethers dependency are sufficient. No environment variables, secrets or network connectivity are required for offline operations.
+`peer-directory.mjs [list [FILE] | fetch]` prints a JSON array on success. Exit 0 means success, 1 means loading failed, and 2 means incorrect arguments. No package dependency or environment variable is added. The helper requires Node.js; online fetching additionally requires HTTPS access to the official GitHub source. It does not load keys, grant permissions or send peer jobs.
+
+## Next feature candidate after merge
+
+**peer-policy-v1 — consistent inbox/worker peer authorization.** Consume this simple registry through an explicitly enabled, shared policy for both roles; keep manual agent grants, self/target identity, locally configured network/chain/Ledger identity, authenticated policy agreement and admission-only maintenance for safe updates. Keep signature/domain checks at the message authorization boundary, not in registry enrollment proofs or revision CI. Acceptance must cover mismatched/old roles, unknown signers, overlapping manual grants, malformed signed messages and draining/recovery using disposable fixtures. Estimate 1,800–2,700 added/deleted code lines, capped at 3,000. Reconcile the remaining proposal in `peer-node-network-execplan.md` before implementation; outbound delivery/outbox and deployment remain separate. This follow-up implements none of that next feature.

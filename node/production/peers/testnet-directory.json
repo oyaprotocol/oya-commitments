@@ -1,11 +1,1 @@
-{
-  "version": 1,
-  "networkId": "oya-sepolia-v1",
-  "revision": 1,
-  "execution": {
-    "mode": "ledger",
-    "chainId": 11155111,
-    "ledgerContract": "0xe6DeB4B3c31E15DBeA0f932830e2f20Ba2EddAa3"
-  },
-  "nodes": []
-}
+[]

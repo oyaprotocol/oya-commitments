@@ -34,18 +34,11 @@ jobs:
       actions: read
     outputs:
       ci_passed: ${{ steps.check.outputs.ci_passed }}
-      directory_base: ${{ steps.directory-base.outputs.sha }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 2
           persist-credentials: false
-      - name: Resolve peer directory comparison base
-        id: directory-base
-        run: |
-          base=$(git rev-parse --verify HEAD^1)
-          printf 'sha=%s\n' "$base" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
@@ -63,8 +56,6 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/test.yml
-    with:
-      directory_base: ${{ needs.preflight.outputs.directory_base }}
 
   publish:
     needs: [preflight, tests]

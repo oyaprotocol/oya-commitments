@@ -64,18 +64,7 @@ cp "$staging/source/scripts/deploy-droplet.sh" "$staging/source/scripts/deploy-d
 cp "$staging/source/scripts/keychain-worker.py" "$staging/source/scripts/upgrade-node.py" "$bundle/scripts/"
 cp "$output/image.txt" "$bundle/image.txt"
 cp "$staging/source/peers/testnet-directory.json" "$staging/source/peers/README.md" "$bundle/peers/"
-# Bind the exact bundled registry bytes to the source revision (not live freshness).
-node --input-type=module - "$bundle/peers" "$revision" <<'NODE'
-import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-const [directory, sourceCommit] = process.argv.slice(2);
-const bytes = readFileSync(join(directory, 'testnet-directory.json'));
-writeFileSync(join(directory, 'snapshot.json'), JSON.stringify({
-    version: 1, sourceCommit, directoryRevision: JSON.parse(bytes).revision,
-    fileSha256: createHash('sha256').update(bytes).digest('hex'),
-}, null, 2) + '\n');
-NODE
+cp "$staging/source/scripts/peer-directory.mjs" "$bundle/scripts/"
 # Source guides resolve the latest release; immutable bundles select their own tag.
 node --input-type=module - "$bundle" "$release" <<'NODE'
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';

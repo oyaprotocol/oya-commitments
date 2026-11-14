@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -25,7 +24,7 @@ function fixture(t) {
         'compose.yaml', 'README.md', 'deploy-droplet.md', 'deploy-with-agent.md', 'run-locally.md', 'run-direct.md', 'host-inbox.md', 'inbox-api.md', 'release-image.md', 'testnet-ledger.md', 'upgrade-node.md']) {
         cpSync(join(runtime, name), join(source, name), { recursive: true });
     }
-    for (const name of ['publish-image.sh', 'deploy-droplet.sh', 'deploy-droplet-remote.sh', 'keychain-worker.py', 'upgrade-node.py']) {
+    for (const name of ['publish-image.sh', 'deploy-droplet.sh', 'deploy-droplet-remote.sh', 'keychain-worker.py', 'upgrade-node.py', 'peer-directory.mjs']) {
         cpSync(join(runtime, 'scripts', name), join(source, 'scripts', name));
     }
     const agent = 'agent-library/agents/hourly-message-test/agent.mjs';
@@ -122,16 +121,16 @@ mkdir "$3"
         'inbox', 'inbox-api.md', 'peers', 'release-image.md', 'run-direct.md', 'run-locally.md', 'scripts', 'testnet-ledger.md', 'upgrade-node.md']);
     assert.deepEqual(readdirSync(join(bundle, 'inbox')).sort(), ['Caddyfile', 'compose.https.yaml', 'compose.keychain-worker.yaml', 'compose.postgres.yaml',
         'compose.worker.yaml', 'compose.yaml', 'inbox.example.json', 'worker.example.json']);
-    assert.deepEqual(readdirSync(join(bundle, 'scripts')).sort(), ['deploy-droplet-remote.sh', 'deploy-droplet.sh', 'keychain-worker.py', 'upgrade-node.py']);
+    assert.deepEqual(readdirSync(join(bundle, 'scripts')).sort(), ['deploy-droplet-remote.sh', 'deploy-droplet.sh', 'keychain-worker.py', 'peer-directory.mjs', 'upgrade-node.py']);
     assert.deepEqual(readdirSync(join(bundle, 'docker')).sort(), ['Caddyfile', 'compose.http.yaml', 'compose.testing.yaml', 'config.example.json', 'runtime.env.example']);
     const directoryBytes = readFileSync(join(bundle, 'peers/testnet-directory.json'));
     assert.deepEqual(directoryBytes, readFileSync(join(f.source, 'peers/testnet-directory.json')));
-    assert.deepEqual(JSON.parse(readFileSync(join(bundle, 'peers/snapshot.json'))), {
-        version: 1, sourceCommit: f.git('rev-parse', 'HEAD'),
-        directoryRevision: JSON.parse(directoryBytes).revision,
-        fileSha256: createHash('sha256').update(directoryBytes).digest('hex'),
+    assert.deepEqual(readdirSync(join(bundle, 'peers')).sort(), ['README.md', 'testnet-directory.json']);
+    const listed = spawnSync(process.execPath, [join(bundle, 'scripts/peer-directory.mjs')], {
+        cwd: f.directory, encoding: 'utf8',
     });
-    assert.deepEqual(readdirSync(join(bundle, 'peers')).sort(), ['README.md', 'snapshot.json', 'testnet-directory.json']);
+    assert.equal(listed.status, 0, listed.stderr);
+    assert.deepEqual(JSON.parse(listed.stdout), JSON.parse(directoryBytes));
     assert.equal(statSync(join(bundle, 'peers/testnet-directory.json')).mode & 0o777, 0o644);
     const nodeDefaults = JSON.parse(readFileSync(join(bundle, 'docker/config.example.json')));
     const inboxDefaults = JSON.parse(readFileSync(join(bundle, 'inbox/inbox.example.json'))).execution;
@@ -153,7 +152,7 @@ mkdir "$3"
     assert.equal(statSync(join(unpacked, agent)).mode & 0o777, 0o644, 'The container user must be able to read the mounted agent source.');
     assert.equal(readFileSync(join(unpacked, agent), 'utf8'), readFileSync(join(f.checkout, agent), 'utf8'));
     assert.equal(readFileSync(join(bundle, 'image.txt'), 'utf8'), `${repository}@${digest}\n`);
-    for (const name of ['deploy-droplet.sh', 'deploy-droplet-remote.sh', 'keychain-worker.py', 'upgrade-node.py']) {
+    for (const name of ['deploy-droplet.sh', 'deploy-droplet-remote.sh', 'keychain-worker.py', 'upgrade-node.py', 'peer-directory.mjs']) {
         assert.equal(readFileSync(join(bundle, 'scripts', name), 'utf8'), readFileSync(join(f.source, 'scripts', name), 'utf8'));
     }
     assert.equal((result.stdout + result.stderr).includes('private-fixture-marker'), false);
