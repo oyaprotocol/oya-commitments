@@ -2,13 +2,13 @@
 
 `testnet-directory.json` is the public address book maintained through reviewed PRs to `oyaprotocol/oya-commitments`. We trust the addresses and endpoints accepted into this repository. The list starts empty because no roster has been supplied; do not enroll example identities.
 
-Each entry contains the node's public Ethereum `nodeAddress`, its HTTPS `receiveUrl` ending in `/v1/jobs`, and its inbox `target` (the destination name required by the existing signed-job protocol). For example, **not an enrolled node**:
+Each entry contains the node's public Ethereum `nodeAddress`, its HTTPS `url` ending in `/v1/jobs`, and its inbox `target` (the destination name required by the existing signed-job protocol). For example, **not an enrolled node**:
 
 ```json
 [
   {
     "nodeAddress": "0x1111111111111111111111111111111111111111",
-    "receiveUrl": "https://node.example/v1/jobs",
+    "url": "https://node.example/v1/jobs",
     "target": "example-node"
   }
 ]

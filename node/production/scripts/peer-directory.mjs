@@ -20,7 +20,7 @@ if (!((command === 'list' && args.length <= 1) || (command === 'fetch' && args.l
         const nodes = JSON.parse(text);
         // Catch accidental file/response errors; repository review establishes trust.
         if (!Array.isArray(nodes) || !nodes.every(node => node &&
-            ['nodeAddress', 'receiveUrl', 'target'].every(key => typeof node[key] === 'string' && node[key].length > 0))) {
+            ['nodeAddress', 'url', 'target'].every(key => typeof node[key] === 'string' && node[key].length > 0))) {
             throw new Error('Expected node records');
         }
         console.log(JSON.stringify(nodes, null, 2));

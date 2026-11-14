@@ -10,7 +10,7 @@ const cli = fileURLToPath(new URL('../scripts/peer-directory.mjs', import.meta.u
 const official = new URL('../peers/testnet-directory.json', import.meta.url);
 // Fixed synthetic records, independent of future edits to the official roster.
 const nodes = [{ nodeAddress: '0x1111111111111111111111111111111111111111',
-    receiveUrl: 'https://node.example/v1/jobs', target: 'example-node' }];
+    url: 'https://node.example/v1/jobs', target: 'example-node' }];
 function fixture(t) {
     const dir = mkdtempSync(join(tmpdir(), 'oya-registry-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -33,7 +33,8 @@ test('default loads the bundled registry from any working directory without netw
 test('local list preserves records and recovers from malformed or missing files', t => {
     const f = fixture(t), path = join(f.dir, 'registry.json');
     assert.equal(f.run('list', path).status, 1);
-    for (const invalid of ['private-marker', '{}', '[null]', '[{}]', '[{"nodeAddress":1}]']) {
+    for (const invalid of ['private-marker', '{}', '[null]', '[{}]', '[{"nodeAddress":1}]',
+        ...[undefined, '', null, 1].map(url => JSON.stringify([{ ...nodes[0], url }]))]) {
         writeFileSync(path, invalid);
         const result = f.run('list', path);
         assert.equal(result.status, 1);

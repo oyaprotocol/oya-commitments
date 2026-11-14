@@ -88,7 +88,9 @@ After the current feature merges, the daily feature job may select a bounded nex
 
 ### Milestone 1 — bootstrap directory and identical local signer policy
 
-PR #161 supplies `node/production/peers/testnet-directory.json` and its loading/fetching guide. Reuse its simple array of `{nodeAddress, receiveUrl, target}` records; repository review is the trust boundary for those public addresses and endpoints. The empty initial list contains no enrolled nodes. No numeric revision, registry execution domain, hash or enrollment proof is required.
+**2026-11-14 candidate revision:** pemulis requests automatic grants during testnet (PR #161 comment 4570981899). The optional-mode design below is not a final decision about defaults: reconcile it with the requested automatic behavior once the Sepolia/inbox-worker versus other-runtime boundary is clarified. No runtime grants are implemented in PR #161 yet.
+
+PR #161 supplies `node/production/peers/testnet-directory.json` and its loading/fetching guide. Reuse its simple array of `{nodeAddress, url, target}` records; repository review is the trust boundary for those public addresses and endpoints. The empty initial list contains no enrolled nodes. No numeric revision, registry execution domain, hash or enrollment proof is required.
 
 The next feature proposes `node/production/src/peers/config.mjs` for shared runtime policy derivation. Proposed optional fragment in each node and corresponding inbox configuration:
 
@@ -173,7 +175,7 @@ A receiving inbox accepts jobs but does not serve stored content. A node-specifi
 
 All repository commands below run from the repository root. Commands involving new files or `peer` scripts are **proposed acceptance commands after approval**, not claims that those files exist now.
 
-For this plan-only PR, check required ExecPlan sections, local documentation links, example JSON shape, formatting and the exact one-document diff. Do not create implementation scaffolding or commit tests merely to make proposed commands runnable.
+For plan revisions, check required ExecPlan sections, local documentation links, example JSON shape and formatting alongside the complete implementation diff. Do not create implementation scaffolding or commit tests merely to make proposed commands runnable.
 
 For a selected runtime milestone, prepare the development environment with Node 24, Python 3, Docker/Compose and the repository's pinned Foundry toolchain:
 
@@ -208,7 +210,7 @@ npm --prefix node/production run peer -- status NODE_JSON OUTBOX_DIRECTORY
 
 Inspection and preparation must be offline. Inspection reports public self/network identity, the loaded directory, peer destinations and effective signer count, never secrets. Preparation stores signed jobs but makes no request. Submission and status are the explicit network actions; Ledger publication occurs only at authorized receivers under their established execution policy.
 
-Before every handoff, run `git diff --check`, inspect all staged/unstaged/new files and PR text under [Before Human Review](../AGENTS.md#before-human-review), and record actual validation. For the plan PR, the only changed path must be `plans/peer-node-network-execplan.md`. Future implementation PRs must not claim this plan's prospective tests have already passed.
+Before every handoff, run `git diff --check`, inspect all staged/unstaged/new files and PR text under [Before Human Review](../AGENTS.md#before-human-review), and record actual validation. The original plan-only PR changed only this document; PR #161 also contains the registry implementation. Future implementation PRs must not claim this plan's prospective tests have already passed.
 
 ## Validation and Acceptance
 
