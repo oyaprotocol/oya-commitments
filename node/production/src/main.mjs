@@ -1,3 +1,4 @@
+import { createBatchLogger } from './batch-logging.mjs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createTransactionPreparer, requestEthereumJsonRpc } from '@oyaprotocol/ethereum';
@@ -24,11 +25,17 @@ export async function startNode(config, signer, {
         });
     }
     const nodeAddress = config.mode === 'ledger' ? signer.address : undefined;
-    const runtime = createNodeServer({ config, transactionPreparer, nodeAddress, fetch, log });
-    await new Promise((resolveListening, reject) => {
-        runtime.server.once('error', reject);
-        runtime.server.listen(config.port, config.host, resolveListening);
-    });
+    const batch = config.batchLogging ? await createBatchLogger({ config, signer, fetch, log }) : undefined;
+    const runtime = createNodeServer({ config, transactionPreparer, nodeAddress, fetch, log, batch });
+    try {
+        await new Promise((resolveListening, reject) => {
+            runtime.server.once('error', reject);
+            runtime.server.listen(config.port, config.host, resolveListening);
+        });
+    } catch (error) {
+        await batch?.close();
+        throw error;
+    }
     if (handleSignals) {
         const logLifecycle = (record) => {
             try { log(record); } catch {
