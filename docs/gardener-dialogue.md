@@ -30,6 +30,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q005](#q005) | Sharing improvements in a competitive network | collaboration, incentives, node culture | Answered |
 | [Q006](#q006) | Participation beyond running a node | accessibility, community, participation | Answered |
 | [Q007](#q007) | When a commitment cannot be verified | accessibility, evidence, commitment design | Answered |
+| [Q008](#q008) | A creator's recourse after rejection | empowerment, judgment, commitment creation | Answered |
 
 <a id="q001"></a>
 
@@ -243,3 +244,32 @@ What should Oya do when a user's intended commitment is understandable in everyd
 - **Source updated:** 2026-11-13T23:41:55Z
 
 We haven't finalized this yet, but one thought is that new commitments need to be logged with an assertion that the commitment is understandable in plain language and proposals to the commitment can be resolved now or at some point in the future. Commitments that will never be resolvable would therefore be filtered from the beginning. Keep in mind also that some commitments may be ongoing, with multiple proposals over time, but the same basic rule would apply that the commitment be understandable and that future proposals can be resolved.
+
+<a id="q008"></a>
+
+## Q008 — A creator's recourse after rejection
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-13
+- **Topics:** empowerment, judgment, commitment creation
+- **Status:** Answered
+- **Source PR:** [#162](https://github.com/oyaprotocol/oya-commitments/pull/162)
+
+### Context
+
+In [Q007](#q007), @pemulis suggested an initial assertion that a commitment is understandable and its proposals can be resolved, while noting that this approach is not finalized. Exploring a creator's recourse when that judgment is contested could help connect this safeguard with the empowerment described in [Q001](#q001).
+
+### Question
+
+If a new commitment is rejected as unresolvable but its creator disagrees, what should they be able to do next?
+
+### Answer
+
+#### @pemulis — 2026-11-14
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 6872714245](https://github.com/oyaprotocol/oya-commitments/pull/162#issuecomment-6872714245)
+- **Source created:** 2026-11-14T05:55:42Z
+- **Source updated:** 2026-11-14T05:55:42Z
+
+Nothing, that's it. They could always make a new commitment but the resolution mechanism is final for any given proposal.
