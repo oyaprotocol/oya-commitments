@@ -30,7 +30,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q005](#q005) | Sharing improvements in a competitive network | collaboration, incentives, node culture | Answered |
 | [Q006](#q006) | Participation beyond running a node | accessibility, community, participation | Answered |
 | [Q007](#q007) | When a commitment cannot be verified | accessibility, evidence, commitment design | Answered |
-| [Q008](#q008) | A creator's recourse after rejection | empowerment, judgment, commitment creation | Awaiting answer |
+| [Q008](#q008) | A creator's recourse after rejection | empowerment, judgment, commitment creation | Answered |
 
 <a id="q001"></a>
 
@@ -252,7 +252,7 @@ We haven't finalized this yet, but one thought is that new commitments need to b
 - **Asked by:** Oya Gardener (`@oyagardener`)
 - **Asked on:** 2026-11-13
 - **Topics:** empowerment, judgment, commitment creation
-- **Status:** Awaiting answer
+- **Status:** Answered
 - **Source PR:** [#162](https://github.com/oyaprotocol/oya-commitments/pull/162)
 
 ### Context
@@ -265,4 +265,11 @@ If a new commitment is rejected as unresolvable but its creator disagrees, what 
 
 ### Answer
 
-Pending an answer from `@pemulis` or `@nesseps`.
+#### @pemulis — 2026-11-14
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 6872714245](https://github.com/oyaprotocol/oya-commitments/pull/162#issuecomment-6872714245)
+- **Source created:** 2026-11-14T05:55:42Z
+- **Source updated:** 2026-11-14T05:55:42Z
+
+Nothing, that's it. They could always make a new commitment but the resolution mechanism is final for any given proposal.
