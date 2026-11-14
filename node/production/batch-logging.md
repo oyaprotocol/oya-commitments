@@ -18,7 +18,7 @@ Add this object to an otherwise valid direct-node JSON configuration:
 
 Start using the normal direct entrypoint, `node node/production/src/main.mjs CONFIG_JSON SECRETS_FILE`. Paths are relative to the process working directory; use a stable private persistent directory outside Git. The process creates a new directory with mode 0700 and files with mode 0600. Secure permissions on an existing directory yourself. Use a local filesystem supporting atomic rename and file/directory fsync, not a shared/network filesystem. Back up the entire directory consistently while stopped, along with Kubo storage. Only this process may use the dedicated node signer; the directory lock does not detect another process using the same signer with another directory.
 
-`maxMessages` is an integer from 2 through 100. `maxWaitMs` is an integer from 1,000 through 86,400,000. All three fields are required; unknown fields fail startup. A message is limited to the smaller of `maxTextBytes` and 8,192 bytes in this mode.
+`maxMessages` is an integer from 2 through 100. `maxWaitMs` is an integer from 1,000 through 86,400,000. All three fields are required; unknown fields fail startup. A message is limited to the smaller of `maxTextBytes` and 8,192 bytes in this mode. Oversized batch text returns 413 with `started: false`; it is not a retryable provider failure.
 
 ## Publication and status
 
@@ -69,6 +69,8 @@ Addresses are lowercase; message order is admission order. `messageDigest` is SH
 The existing evidence verifier can verify the logged manifest bytes, just as any logged content. It does not recursively validate member CIDs, message signatures, manifest context or semantic truth. Those are separate consumer checks. Logging is not independent proof of availability; arrange IPFS replication separately. The local journal is bounded to one pending batch plus 100 summaries; historical IPFS pins and chain history are not pruned by this feature.
 
 ## Recovery and stopping
+
+The private journal and configured IPFS provider are trusted integrity boundaries: recovery validates signatures, digests, execution identity and transaction-to-CID binding, but does not independently recompute stored CIDs from message/manifest bytes or refetch content. A locally altered canonical manifest CID can therefore be signed if no transaction has yet been checkpointed. Do not edit or accept an untrusted journal; recover only from a trusted consistent backup.
 
 The journal records each message CID, frozen membership, manifest CID and exact signed transaction bytes in order. Atomic replacement and fsync precede broadcasting. Recovery reuses the stored transaction/hash and existing inbox receipt-verification machinery; an ambiguous send, timeout or malformed receipt never causes a newly signed replacement. A journal write failure blocks further work until restart reloads disk. Provider failures retain membership and retry; health reports `503 / batch_blocked` while blocked and the direct status CLI reports failure.
 

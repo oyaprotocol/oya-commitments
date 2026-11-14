@@ -20,7 +20,7 @@ export function parseBatch(input, mode) {
 }
 
 export class BatchUnavailable extends Error {
-    constructor(code = 'batch_unavailable') { super(code); this.code = code; }
+    constructor(code = 'batch_unavailable', status = 503) { super(code); this.code = code; this.status = status; }
 }
 
 // One process, one pending batch, 100 recent summaries. A private local filesystem is required.
@@ -145,8 +145,8 @@ export async function createBatchLogger({ config, signer, fetch = globalThis.fet
         async accept(message, signal) {
             return run(async () => {
                 message = await config.authorize(message);
-                if (message.text.includes('\0')) throw new BatchUnavailable('invalid_text');
-                if (Buffer.byteLength(message.text) > Math.min(config.maxTextBytes, 8192)) throw new BatchUnavailable('batch_text_too_large');
+                if (message.text.includes('\0')) throw new BatchUnavailable('invalid_text', 400);
+                if (Buffer.byteLength(message.text) > Math.min(config.maxTextBytes, 8192)) throw new BatchUnavailable('batch_text_too_large', 413);
                 const messageDigest = digest(message);
                 const existing = state.pending?.entries.find(entry => entry.messageDigest === messageDigest);
                 if (existing) return { status: 'pending', cid: existing.cid, batchId: state.pending.id };

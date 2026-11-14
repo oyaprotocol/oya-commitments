@@ -154,10 +154,13 @@ export function createNodeServer({ config, transactionPreparer, nodeAddress, bat
                             signal: controller.signal,
                         });
                     } catch (error) {
-                        if (batch) throw new HttpFailure(error instanceof BatchUnavailable ? 503 : 502, {
-                            code: error instanceof BatchUnavailable ? error.code : 'batch_admission_failed',
-                            started: true, loggingOutcome: 'pending_or_not_admitted',
-                        });
+                        if (batch) {
+                            const rejected = error instanceof BatchUnavailable;
+                            throw new HttpFailure(rejected ? error.status : 502, {
+                                code: rejected ? error.code : 'batch_admission_failed',
+                                started: !rejected, loggingOutcome: rejected ? 'not_started' : 'pending_or_not_admitted',
+                            });
+                        }
                         const failure = operationFailure(error, controller.signal.aborted, ipfsOnly);
                         outcomeUnknown = failure.body.loggingOutcome === 'unknown';
                         throw failure;

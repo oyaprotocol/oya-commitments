@@ -381,6 +381,17 @@ test('HTTP admission failure is sanitized and health/status report blocked backg
     assert.equal((await fetch(`${s.url}/healthz`)).status, 200);
 });
 
+test('HTTP permanent batch size rejection is non-retryable and has no side effects', async t => {
+    const s = await setup(t, { maxTextBytes: 16384 });
+    await s.start();
+    const response = await s.post(await signedMessage(s.f.agent, 'x'.repeat(8193)));
+    assert.equal(response.status, 413);
+    assert.deepEqual(await response.json(), { code: 'batch_text_too_large', started: false, loggingOutcome: 'not_started' });
+    assert.equal(s.uploads.length, 0);
+    assert.equal(s.f.state.signs, 0);
+    assert.equal((await s.status()).pending, null);
+});
+
 test('HTTP signature and allowlist failures have no batch publication effects', async t => {
     const s = await setup(t);
     await s.start();
