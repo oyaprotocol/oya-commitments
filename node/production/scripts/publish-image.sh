@@ -46,7 +46,7 @@ console.log(JSON.parse(readFileSync(process.argv[1], "utf8"))["containerimage.di
 printf '%s@%s\n' "$repository" "$digest" > "$output/image.txt"
 printf 'Git tag: %s\nGit commit: %s\nImage: %s@%s\n' "$release" "$revision" "$repository" "$digest" > "$output/release.txt"
 bundle="$staging/bundle/node/production"
-mkdir -p "$bundle/docker" "$bundle/scripts" "$bundle/inbox"
+mkdir -p "$bundle/docker" "$bundle/scripts" "$bundle/inbox" "$bundle/peers"
 cp "$staging/source/compose.yaml" "$staging/source/README.md" \
     "$staging/source/deploy-droplet.md" "$staging/source/run-locally.md" "$staging/source/run-direct.md" \
     "$staging/source/host-inbox.md" "$staging/source/inbox-api.md" "$staging/source/deploy-with-agent.md" \
@@ -63,6 +63,8 @@ git -C "$root" show "$revision:agent-library/agents/hourly-message-test/agent.mj
 cp "$staging/source/scripts/deploy-droplet.sh" "$staging/source/scripts/deploy-droplet-remote.sh" "$bundle/scripts/"
 cp "$staging/source/scripts/keychain-worker.py" "$staging/source/scripts/upgrade-node.py" "$bundle/scripts/"
 cp "$output/image.txt" "$bundle/image.txt"
+cp "$staging/source/peers/testnet-directory.json" "$staging/source/peers/README.md" "$bundle/peers/"
+cp "$staging/source/scripts/peer-directory.mjs" "$bundle/scripts/"
 # Source guides resolve the latest release; immutable bundles select their own tag.
 node --input-type=module - "$bundle" "$release" <<'NODE'
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
