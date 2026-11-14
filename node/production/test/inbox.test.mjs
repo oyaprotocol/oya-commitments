@@ -32,6 +32,17 @@ test('remote inbox requires HTTPS and database URL cannot override verified TLS'
     await assert.rejects(databaseOptions(config, { databaseUrl: 'postgres://localhost/test?sslmode=no-verify' }));
 });
 
+test('inbox host defaults to loopback and rejects malformed explicit settings', () => {
+    const input = { target: 'test', allowedSigners: [Wallet.createRandom().address], execution: { mode: 'ipfs' } };
+    assert.equal(parseInboxConfig(input).host, '127.0.0.1');
+    for (const host of ['', ' ', '\t\n', null, false, true, 0, 8788, [], {}]) {
+        assert.throws(() => parseInboxConfig({ ...input, host }), /host must be a nonempty string/);
+    }
+    for (const host of ['127.0.0.1', '::1', '0.0.0.0', '::', 'localhost']) {
+        assert.equal(parseInboxConfig({ ...input, host }).host, host);
+    }
+});
+
 test('IPFS work reuses committed publication and verifies signatures locally', async t => {
     const f = await fixture(t);
     const job = await signJob(f.agent, 'test', 'ipfs content');
