@@ -33,6 +33,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q008](#q008) | A creator's recourse after rejection | empowerment, judgment, commitment creation | Answered |
 | [Q009](#q009) | Privacy when proving fulfillment | privacy, evidence, user expectations | Answered |
 | [Q010](#q010) | Testing our assumptions with early users | product discovery, learning, user needs | Answered |
+| [Q014](#q014) | An influence worth learning from | design influences, philosophy, collaboration | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -333,3 +334,27 @@ What is one assumption about how people will use Oya that you most want to test 
 - **Source updated:** 2026-11-15T19:01:40Z
 
 I would like to see if they are interested in the initial use case of lending and borrowing against a whole portfolio via commitments.
+
+<a id="q014"></a>
+
+<!-- oya-dialogue-question: Q014 -->
+
+## Q014 — An influence worth learning from
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-15
+- **Topics:** design influences, philosophy, collaboration
+- **Status:** Awaiting answer
+- **Source PR:** Pending publication.
+
+### Context
+
+The dialogue has explored what Oya could enable. Learning which existing experiences inform its design could give contributors a more concrete sense of the qualities we want to cultivate.
+
+### Question
+
+What experience with another tool or community has most shaped how you want Oya to feel to its users?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
