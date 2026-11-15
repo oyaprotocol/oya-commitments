@@ -12,6 +12,7 @@
     "test:docker": "node scripts/test-docker.mjs",
     "test:ipfs": "node scripts/test-docker-ipfs.mjs",
     "test:inbox": "node scripts/test-inbox.mjs",
+    "test:peers": "node scripts/test-peer-receive.mjs",
     "test:inbox:docker": "node scripts/test-inbox-docker.mjs",
     "test:http": "node scripts/test-docker.mjs --http",
     "test:testing": "node scripts/test-docker.mjs --testing",

@@ -61,4 +61,4 @@ The command itself writes no files; the shell saves and replaces the public list
 
 ## Routing is separate from authorization
 
-Loading or fetching this address book does **not** change `allowedSigners`, node keys, inbox/worker configuration or running services. Current inbox and worker startup do not consume it. Keep existing explicitly configured signer permissions; do not paste this array into an allowlist or add the future `peers` configuration. Signed jobs still require the existing signature, target and authorization checks. Runtime peer-policy integration and outbound node messaging are separate follow-up work.
+Loading or fetching this address book does **not** change `allowedSigners`, node keys, configuration or running services. Operators may explicitly enable [peer publication reception](receive.md) using an installed snapshot on both inbox and worker. That opt-in adds all members to effective publication authorization while preserving explicit local grants. The guide also covers offline preparation and explicit one-shot submit/status commands.
