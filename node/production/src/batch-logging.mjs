@@ -149,7 +149,7 @@ export async function createBatchLogger({ config, signer, fetch = globalThis.fet
                 if (Buffer.byteLength(message.text) > Math.min(config.maxTextBytes, 8192)) throw new BatchUnavailable('batch_text_too_large', 413);
                 const messageDigest = digest(message);
                 const existing = state.pending?.entries.find(entry => entry.messageDigest === messageDigest);
-                if (existing) return { status: 'pending', cid: existing.cid, batchId: state.pending.id };
+                if (existing) return { status: 'pending', cid: existing.cid, uri: `ipfs://${existing.cid}`, batchId: state.pending.id };
                 if (fault || state.pending?.sealed || state.pending?.entries.length >= policy.maxMessages) throw new BatchUnavailable();
                 const publication = await publishSignedMessage(message, { config: config.ipfs, fetch, signal });
                 const batch = state.pending ?? { id: randomUUID(), entries: [] };

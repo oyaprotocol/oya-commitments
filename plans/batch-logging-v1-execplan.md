@@ -13,9 +13,12 @@ Opt-in direct nodes publish each authorized signed message independently, then p
 - [x] 2026-11-14 17:14Z: Focused 22/22 and full production 410/410 tests pass, zero failures/skips. All new chain/IPFS tests use synthetic mocked transports.
 - [x] 2026-11-14: Independent review reran 22 focused and 410 production tests; no blockers under the trusted-journal/provider model. Parent corrected permanent size failures to HTTP 413 and documented the journal integrity boundary.
 - [x] 2026-11-14: Parent validation on Node 24.22.3: 23 focused and 411 production tests passed, no failures/skips. Cumulative code budget: 673 additions + 20 deletions = 693 lines, below 3,000.
-- [ ] Publish after final live open-feature/overlap check; human review and merge remain required.
+- [x] 2026-11-15 16:05Z: Reviewed PR165 feedback and reproduced the duplicate admission URI omission and packaged runtime import failure. Fixed both with response/restart regressions and the missing Docker allowlist entry.
+- [x] 2026-11-15 16:05Z: Follow-up validation passed: 23 focused and 411 production tests on Node 24.22.2, nine PostgreSQL integration tests, Linux amd64 direct Docker lifecycle, and packaged HTTPS inbox/worker scenarios. Human review and merge remain required; follow-up is local only.
 
 ## Surprises & Discoveries
+
+PR165 review found that the pending-duplicate branch omitted `uri`; a full HTTP response equality assertion failed on that field alone. The Docker build allowlist also excluded `src/batch-logging.mjs`, despite unconditional imports from runtime configuration. A fresh image reproduced `ERR_MODULE_NOT_FOUND`, explaining the worker CI failure and the direct runtime's startup failure. Adding the module restored imports and both failed CI commands passed locally.
 
 The direct runtime has no durable state. The inbox processor already checkpoints raw signed transactions before broadcast and verifies receipts. Extract its Ledger stage rather than create a second transaction recovery implementation. The earlier evidence feature verifies arbitrary logged bytes; it neither produces batches nor verifies membership of signed messages inside manifests.
 
@@ -23,11 +26,15 @@ Initial tests exposed cleanup ordering in the synthetic fixture (directory remov
 
 ## Decision Log
 
+- 2026-11-15, Hermes: derive the retry URI from the saved canonical CID and retain the strict Docker build allowlist with one added module. Both failures need no transaction or inbox API changes; existing Docker integrations cover the packaging regression.
+
 - 2026-11-14, Hermes: limit this milestone to direct Ledger runtime. Inbox/worker batching needs multi-job lease/checkpoint semantics and is explicitly rejected rather than silently ignored.
 - 2026-11-14, Hermes: one bounded pending batch, bounded recent results, serialized admission/flush, local atomic journal with exclusive lock; failures block admission until recovery. A crash leaves a lock for deliberate operator recovery, avoiding unsafe lock stealing.
 - 2026-11-14, Hermes: maintain context binding (chain, contract, node), manifest version, ordered message CIDs and message digests. Authorization is rechecked before new transaction preparation; an already checkpointed transaction must reconcile even after revocation.
 
 ## Outcomes & Retrospective
+
+The November 15 follow-up preserves the admission response on exact pending retries, including after journal reload, without another upload or signature. The packaged immediate direct runtime and inbox workers now load the batch module. No transaction implementation changes were needed. Both previously failing integration paths pass against disposable local services; batch-specific chain/IPFS coverage remains synthetic.
 
 The direct-runtime milestone is implemented and exercised: independent message publications, versioned context-bound manifest, count/time scheduling, atomic checkpoint recovery, bounded status retention, authorization and safe shutdown. The unchanged immediate path and inbox/worker regressions pass. The operator guide documents 202 semantics, pending-only deduplication, recovery after revocation, stale-lock removal, single-signer ownership and the trusted private-journal/IPFS-provider integrity boundary. Review reproduced a permanent oversized request incorrectly returning 503; it now returns 413 without publication side effects, protected by a regression. Inbox/worker batching remains future work requiring a separate multi-job lease design. No live chain, funded transaction, release or deployment was performed.
 
@@ -53,7 +60,9 @@ Preserve the state directory and its checkpoint. Never discard a checkpointed ra
 
 ## Artifacts and Notes
 
-The operator contract is in `node/production/batch-logging.md`. This is source functionality, not a claim about any published image. Validation used Node v26.12.1 and npm 12.0.2, with the unchanged pinned lockfile installed via `npm ci --ignore-scripts`. Initial focused suite: 22 passed; initial full production suite: 410 passed. After independent review, parent Node 24.22.3 validation passed 23 focused and 411 full production tests, zero failed/cancelled/skipped. New tests use synthetic mocked chain/IPFS; real power-loss, Docker, public-chain and replication acceptance remain unperformed. The suite includes mocked packaging/upgrade checks; it did not publish a release. Default inbox deployment remains immediate logging.
+The operator contract is in `node/production/batch-logging.md`. This is source functionality, not a claim about any published image. Initial validation used Node v26.12.1 and npm 12.0.2, with the unchanged pinned lockfile installed via `npm ci --ignore-scripts`: 22 focused and 410 production tests passed. After independent review, parent Node 24.22.3 validation passed 23 focused and 411 production tests.
+
+November 15 follow-up validation used Node 24.22.2, Foundry 1.5.1, Docker 29.9.2 and Compose 5.6.1. From the repository root, `node --test node/production/test/batch-logging.test.mjs` passed 23 tests and `npm --prefix node/production test` passed 411. `forge build --root contracts` built the local fixture. `npm --prefix node/production run test:inbox` passed nine tests, including checkpoint/broadcast/completion acknowledgement-loss recovery. `npm --prefix node/production run test:docker -- --verbose --platform linux/amd64` passed the direct publication, persistence, shutdown-drain, uncertain-receipt and backup lifecycle test (amd64 image on arm64 Docker). `npm --prefix node/production run test:inbox:docker` passed IPFS, Ledger and Sepolia-default identity scenarios through real PostgreSQL, HTTPS, offline Kubo and isolated Anvil chains. All tests had zero failures/skips. Real power-loss, public-chain, replication and batch-specific Docker acceptance remain unperformed. No release was published; default inbox logging remains immediate.
 
 ## Interfaces and Dependencies
 

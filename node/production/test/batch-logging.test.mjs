@@ -100,8 +100,11 @@ test('HTTP count threshold publishes separate messages then one bound manifest a
     const admission = await first.json();
     assert.equal(admission.status, 'pending');
     assert.equal(s.f.state.signs, 0);
-    const duplicate = await (await s.post()).json();
-    assert.equal(duplicate.publication.cid, admission.publication.cid);
+    assert.equal(admission.publication.uri, `ipfs://${admission.publication.cid}`);
+    const retry = await s.post();
+    assert.equal(retry.status, 202);
+    const duplicate = await retry.json();
+    assert.deepEqual(duplicate, admission);
     assert.equal(s.uploads.length, 1);
     assert.equal((await s.post(await signedMessage(s.f.agent, 'second message'))).status, 202);
     await waitFor(async () => (await s.status()).recent.length === 1);
@@ -147,6 +150,9 @@ test('idle batches never publish and shutdown retains underfilled batch for rest
     assert.equal(s.f.state.signs, 0);
     batch = await s.open();
     assert.equal(batch.status().pending.batchId, result.batchId);
+    assert.deepEqual(await batch.accept(s.f.message), result);
+    assert.equal(s.uploads.length, 1);
+    assert.equal(s.f.state.signs, 0);
     await batch.flush();
     assert.equal(batch.status().recent[0].status, 'logged');
     assert.equal(s.uploads.length, 2);
