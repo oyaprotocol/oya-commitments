@@ -16,7 +16,12 @@ Opt-in direct nodes publish each authorized signed message independently, then p
 - [x] 2026-11-15 16:05Z: Reviewed PR165 feedback and reproduced the duplicate admission URI omission and packaged runtime import failure. Fixed both with response/restart regressions and the missing Docker allowlist entry.
 - [x] 2026-11-15 16:05Z: Follow-up validation passed: 23 focused and 411 production tests on Node 24.22.2, nine PostgreSQL integration tests, Linux amd64 direct Docker lifecycle, and packaged HTTPS inbox/worker scenarios. Human review and merge remain required; follow-up is local only.
 
+- [x] 2026-11-15 16:46Z: Reproduced founder comment 6897727483 with a failing HTTP manifest-shape regression; removed public batch/execution/digest metadata. Added cross-context content identity and failure/restart coverage.
+- [x] 2026-11-15: Local Node 24.22.2 validation passed 30 focused and 418 production tests. Independent review is pending; no remote writes.
+
 ## Surprises & Discoveries
+
+Founder clarification on November 15 separates IPFS content identity from transaction execution identity. The regression failed because the published manifest included `batchId`, `execution` and `messageDigest`. The journal already stores all recovery metadata separately, so the correction changes only manifest serialization. Existing manifest-CID checkpoints can be resumed without republishing, including the earlier format.
 
 PR165 review found that the pending-duplicate branch omitted `uri`; a full HTTP response equality assertion failed on that field alone. The Docker build allowlist also excluded `src/batch-logging.mjs`, despite unconditional imports from runtime configuration. A fresh image reproduced `ERR_MODULE_NOT_FOUND`, explaining the worker CI failure and the direct runtime's startup failure. Adding the module restored imports and both failed CI commands passed locally.
 
@@ -30,13 +35,15 @@ Initial tests exposed cleanup ordering in the synthetic fixture (directory remov
 
 - 2026-11-14, Hermes: limit this milestone to direct Ledger runtime. Inbox/worker batching needs multi-job lease/checkpoint semantics and is explicitly rejected rather than silently ignored.
 - 2026-11-14, Hermes: one bounded pending batch, bounded recent results, serialized admission/flush, local atomic journal with exclusive lock; failures block admission until recovery. A crash leaves a lock for deliberate operator recovery, avoiding unsafe lock stealing.
-- 2026-11-14, Hermes: maintain context binding (chain, contract, node), manifest version, ordered message CIDs and message digests. Authorization is rechecked before new transaction preparation; an already checkpointed transaction must reconcile even after revocation.
+- 2026-11-15, Hermes, superseding the initial manifest-context decision: publish only the type/version and ordered CID strings. Content must be independent of batch ID, node, chain and Ledger; message digests remain private checkpoint checks. Retain journal execution binding, signed-message authorization and transaction validation. Keep version 1 for this pre-merge correction; retain existing legacy manifest CIDs and raw transactions exactly rather than migrate uncertain work.
 
 ## Outcomes & Retrospective
 
+The founder correction publishes a content-only CID list. Identical ordered members now yield identical bytes across different batch IDs, node accounts, chains and contracts; reversing order changes the content CID. Signed transactions still target the configured identity. Regression tests reject changed recovery identities without side effects, retry identical manifest bytes after a lost upload acknowledgement, and preserve unsigned/signed legacy manifest checkpoints with the original authorization/reconciliation boundaries. The source change is confined to serialization.
+
 The November 15 follow-up preserves the admission response on exact pending retries, including after journal reload, without another upload or signature. The packaged immediate direct runtime and inbox workers now load the batch module. No transaction implementation changes were needed. Both previously failing integration paths pass against disposable local services; batch-specific chain/IPFS coverage remains synthetic.
 
-The direct-runtime milestone is implemented and exercised: independent message publications, versioned context-bound manifest, count/time scheduling, atomic checkpoint recovery, bounded status retention, authorization and safe shutdown. The unchanged immediate path and inbox/worker regressions pass. The operator guide documents 202 semantics, pending-only deduplication, recovery after revocation, stale-lock removal, single-signer ownership and the trusted private-journal/IPFS-provider integrity boundary. Review reproduced a permanent oversized request incorrectly returning 503; it now returns 413 without publication side effects, protected by a regression. Inbox/worker batching remains future work requiring a separate multi-job lease design. No live chain, funded transaction, release or deployment was performed.
+The direct-runtime milestone is implemented and exercised: independent message publications, versioned content-only manifest, count/time scheduling, atomic checkpoint recovery, bounded status retention, authorization and safe shutdown. The unchanged immediate path and inbox/worker regressions pass. The operator guide documents 202 semantics, pending-only deduplication, recovery after revocation, stale-lock removal, single-signer ownership and the trusted private-journal/IPFS-provider integrity boundary. Review reproduced a permanent oversized request incorrectly returning 503; it now returns 413 without publication side effects, protected by a regression. Inbox/worker batching remains future work requiring a separate multi-job lease design. No live chain, funded transaction, release or deployment was performed.
 
 ## Context and Orientation
 
@@ -63,6 +70,14 @@ Preserve the state directory and its checkpoint. Never discard a checkpointed ra
 The operator contract is in `node/production/batch-logging.md`. This is source functionality, not a claim about any published image. Initial validation used Node v26.12.1 and npm 12.0.2, with the unchanged pinned lockfile installed via `npm ci --ignore-scripts`: 22 focused and 410 production tests passed. After independent review, parent Node 24.22.3 validation passed 23 focused and 411 production tests.
 
 November 15 follow-up validation used Node 24.22.2, Foundry 1.5.1, Docker 29.9.2 and Compose 5.6.1. From the repository root, `node --test node/production/test/batch-logging.test.mjs` passed 23 tests and `npm --prefix node/production test` passed 411. `forge build --root contracts` built the local fixture. `npm --prefix node/production run test:inbox` passed nine tests, including checkpoint/broadcast/completion acknowledgement-loss recovery. `npm --prefix node/production run test:docker -- --verbose --platform linux/amd64` passed the direct publication, persistence, shutdown-drain, uncertain-receipt and backup lifecycle test (amd64 image on arm64 Docker). `npm --prefix node/production run test:inbox:docker` passed IPFS, Ledger and Sepolia-default identity scenarios through real PostgreSQL, HTTPS, offline Kubo and isolated Anvil chains. All tests had zero failures/skips. Real power-loss, public-chain, replication and batch-specific Docker acceptance remain unperformed. No release was published; default inbox logging remains immediate.
+
+### Founder correction validation
+
+On Node 24.22.2, `node --test node/production/test/batch-logging.test.mjs` passes 30 tests and `npm --prefix node/production test` passes 418 tests, with no failures or skips. The exact HTTP shape assertion first failed against `036e4379df` on execution metadata, batch ID and per-message digest objects. Synthetic transports exercise actual signatures, transaction preparation, disk checkpoints and HTTP. Earlier Docker/PostgreSQL results above belong to the previous follow-up, not this correction. Independent review and any publication remain pending.
+
+### Next feature — informational candidate
+
+`batch-evidence-v1`: bounded read-only verification of a signed message's membership in an IPFS manifest through the existing evidence CLI. Validate the content-only manifest shape, ordered CID list, selected member CID/bytes and message signature; separately verify any supplied Ledger receipt against its chain, contract and transaction signer. Do not infer the originating publisher or require chain/node/contract metadata in the manifest. Cover malformed/oversized manifests, unavailable content, invalid membership/bytes/signatures and mismatched receipt context. Estimate 1,200–2,200 changed code/test lines under an independent 3,000-line cap. Reconcile open evidence work before implementation; this is informational, not an approval gate.
 
 ## Interfaces and Dependencies
 

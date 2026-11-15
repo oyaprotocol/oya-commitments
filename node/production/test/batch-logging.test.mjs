@@ -92,7 +92,7 @@ test('strict opt-in limits and role boundaries', async () => {
     assert.equal(called, false);
 });
 
-test('HTTP count threshold publishes separate messages then one bound manifest and one transaction', async t => {
+test('HTTP count threshold publishes separate messages then one content-only manifest and one transaction', async t => {
     const s = await setup(t);
     await s.start();
     const first = await s.post();
@@ -115,16 +115,146 @@ test('HTTP count threshold publishes separate messages then one bound manifest a
     assert.equal(s.f.state.sends, 1);
     assert.notEqual(s.uploads[0].cid, s.uploads[1].cid);
     const manifest = JSON.parse(s.uploads[2].text);
-    assert.equal(manifest.type, 'oya-message-batch');
-    assert.equal(manifest.version, 1);
-    assert.equal(manifest.batchId, admission.publication.batchId);
-    assert.equal(manifest.execution.nodeAddress, s.f.wallet.address.toLowerCase());
-    assert.equal(manifest.execution.chainId, s.f.config.chainId);
-    assert.deepEqual(manifest.messages.map(m => m.cid), s.uploads.slice(0, 2).map(m => m.cid));
+    assert.deepEqual(manifest, { type: 'oya-message-batch', version: 1,
+        messages: s.uploads.slice(0, 2).map(m => m.cid) });
     assert.equal(abi.decodeFunctionData('log', s.f.state.transactions[0].data)[0], s.uploads[2].cid);
     assert.ok(!JSON.stringify(status).includes('rawTransaction'));
     assert.ok(!JSON.stringify(status).includes(s.f.message.text));
 });
+
+test('identical ordered CIDs produce identical manifest bytes across nodes, chains and batches', async t => {
+    const first = await setup(t);
+    const second = await setup(t, { chainId: 31338,
+        ledgerContract: '0x2222222222222222222222222222222222222222', allowedSigners: [first.f.agent.address] });
+    const messages = [first.f.message, await signedMessage(first.f.agent, 'second content')];
+    const batches = [];
+    for (const s of [first, second]) {
+        const batch = await s.open();
+        batches.push(batch);
+        for (const message of messages) await batch.accept(message);
+        assert.equal(s.f.state.signs, 0);
+        await batch.flush();
+        const tx = s.f.state.transactions[0];
+        assert.equal(tx.chainId, BigInt(s.f.config.chainId));
+        assert.equal(tx.to.toLowerCase(), s.f.config.ledgerContract.toLowerCase());
+        assert.equal(tx.from, s.f.wallet.address);
+        assert.equal(abi.decodeFunctionData('log', tx.data)[0], s.uploads[2].cid);
+    }
+    assert.notEqual(batches[0].status().recent[0].batchId, batches[1].status().recent[0].batchId);
+    assert.notEqual(first.f.wallet.address, second.f.wallet.address);
+    assert.deepEqual(first.uploads, second.uploads);
+    for (const message of messages) await batches[0].accept(message);
+    await batches[0].flush();
+    assert.deepEqual(first.uploads[5], first.uploads[2]);
+    for (const message of [...messages].reverse()) await batches[0].accept(message);
+    await batches[0].flush();
+    assert.notEqual(first.uploads[8].cid, first.uploads[2].cid);
+    assert.deepEqual(JSON.parse(first.uploads[8].text).messages, JSON.parse(first.uploads[2].text).messages.reverse());
+});
+
+for (const changed of ['chain', 'contract', 'node']) {
+    test(`content-only manifest does not allow recovery under a changed ${changed}`, async t => {
+        const s = await setup(t);
+        s.f.config.receiptTimeoutMs = 25;
+        const batch = await s.open();
+        await batch.accept(s.f.message);
+        s.f.state.receiptMode = 'pending';
+        await assert.rejects(batch.flush());
+        await batch.close();
+        const before = await s.journal();
+        const options = { ...s.options, config: { ...s.f.config } };
+        if (changed === 'chain') options.config.chainId++;
+        if (changed === 'contract') options.config.ledgerContract = '0x2222222222222222222222222222222222222222';
+        if (changed === 'node') options.signer = { address: Wallet.createRandom().address };
+        await assert.rejects(createBatchLogger(options), /identity/);
+        assert.deepEqual(await s.journal(), before);
+        assert.equal(s.f.state.signs, 1);
+        assert.equal(s.f.state.sends, 1);
+        assert.equal(s.uploads.length, 2);
+    });
+}
+
+test('manifest upload acknowledgement loss retries identical bytes after restart before any signing', async t => {
+    const s = await setup(t);
+    const transport = s.options.fetch;
+    let loseAck = true;
+    s.options.fetch = async (url, request) => {
+        const response = await transport(url, request);
+        if (loseAck && url.startsWith(s.f.config.ipfs.url) && s.uploads.length === 2) {
+            throw new Error('lost manifest acknowledgement');
+        }
+        return response;
+    };
+    let batch = await s.open();
+    await batch.accept(s.f.message);
+    await assert.rejects(batch.flush());
+    const saved = await s.journal();
+    assert.equal(saved.pending.sealed, true);
+    assert.equal(saved.pending.cid, undefined);
+    assert.equal(s.f.state.signs, 0);
+    assert.equal(s.f.state.sends, 0);
+    await assert.rejects(batch.accept(await signedMessage(s.f.agent, 'cannot join')));
+    await batch.close();
+    loseAck = false;
+    batch = await s.open();
+    await batch.flush();
+    assert.deepEqual(s.uploads[2], s.uploads[1]);
+    assert.equal(s.uploads.length, 3);
+    assert.equal(s.f.state.signs, 1);
+    assert.equal(batch.status().recent[0].manifestCid, s.uploads[1].cid);
+});
+
+for (const signed of [false, true]) {
+    test(`pre-correction manifest checkpoint is retained on restart (${signed ? 'signed' : 'unsigned'})`, async t => {
+        const s = await setup(t);
+        const transport = s.options.fetch;
+        // Emulate bytes published by the earlier revision, without changing the journal format.
+        s.options.fetch = async (url, request) => {
+            if (url.startsWith(s.f.config.ipfs.url)) {
+                const text = await request.body.get('file').text();
+                if (JSON.parse(text).type === 'oya-message-batch') {
+                    const saved = await s.journal();
+                    const legacy = { type: 'oya-message-batch', version: 1, batchId: saved.pending.id,
+                        execution: saved.identity,
+                        messages: saved.pending.entries.map(({ cid, messageDigest }) => ({ cid, messageDigest })) };
+                    const body = new FormData();
+                    body.append('file', new Blob([JSON.stringify(legacy)], { type: 'application/json' }), 'oya-message-batch.json');
+                    request = { ...request, body };
+                }
+            }
+            return transport(url, request);
+        };
+        s.f.config.receiptTimeoutMs = 25;
+        let batch = await s.open();
+        await batch.accept(s.f.message);
+        if (signed) s.f.state.receiptMode = 'pending';
+        else s.f.state.preparationFailure = true;
+        await assert.rejects(batch.flush());
+        const saved = await s.journal();
+        assert.ok(saved.pending.cid);
+        assert.equal(Boolean(saved.pending.transaction), signed);
+        assert.ok(JSON.parse(s.uploads[1].text).execution);
+        await batch.close();
+        s.options.fetch = transport;
+        s.f.state.receiptMode = 'mined';
+        s.f.state.preparationFailure = false;
+        const authorize = s.f.config.authorize;
+        s.f.config.authorize = () => { throw new Error('revoked'); };
+        batch = await s.open();
+        if (!signed) {
+            await assert.rejects(batch.flush(), /revoked/);
+            assert.equal(s.f.state.signs, 0);
+            assert.equal(s.f.state.sends, 0);
+            s.f.config.authorize = authorize;
+        }
+        await batch.flush();
+        assert.equal(s.uploads.length, 2);
+        assert.equal(s.f.state.signs, 1);
+        assert.equal(s.f.state.sends, 1);
+        assert.equal(batch.status().recent[0].manifestCid, saved.pending.cid);
+        if (signed) assert.equal(batch.status().recent[0].transactionHash, saved.pending.transaction.transactionHash);
+    });
+}
 
 test('elapsed trigger uses persisted time since last verified log, including idle time', async t => {
     const s = await setup(t);

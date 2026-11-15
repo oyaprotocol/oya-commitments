@@ -51,28 +51,21 @@ Before publishing the manifest, the runtime durably freezes batch membership and
 {
   "type": "oya-message-batch",
   "version": 1,
-  "batchId": "a UUID",
-  "execution": {
-    "mode": "ledger",
-    "chainId": 11155111,
-    "ledgerContract": "0x...",
-    "nodeAddress": "0x..."
-  },
-  "messages": [
-    { "cid": "bafk...", "messageDigest": "64 lowercase hexadecimal characters" }
-  ]
+  "messages": ["bafk...", "bafk..."]
 }
 ```
 
-Addresses are lowercase; message order is admission order. `messageDigest` is SHA-256 of UTF-8 JSON of the signed-message object with keys recursively lexicographically sorted (`signature`, `signer`, `text`); string values are preserved exactly. The listed CID points to the independent signed envelope. The node uploads/pins the manifest and logs **its** CID, not each member CID. A manifest may contain one message when the timer fires. `batchId` distinguishes otherwise identical publications.
+`messages` lists published CIDs in admission order, independent of the originating node or any logging chain or Ledger. The manifest contains only `type`, `version` and `messages`; batch IDs, execution identity and message digests stay in the private journal. Identical ordered CIDs produce identical manifest bytes across nodes and batches. Each CID points to the independent signed envelope; no prior Ledger log is required. The node uploads/pins the manifest before logging **its** CID, not each member CID. A manifest may contain one message when the timer fires.
 
-The existing evidence verifier can verify the logged manifest bytes, just as any logged content. It does not recursively validate member CIDs, message signatures, manifest context or semantic truth. Those are separate consumer checks. Logging is not independent proof of availability; arrange IPFS replication separately. The local journal is bounded to one pending batch plus 100 summaries; historical IPFS pins and chain history are not pruned by this feature.
+The existing evidence verifier can verify the logged manifest bytes, just as any logged content. Member CID integrity, message signatures and membership require separate consumer checks. The manifest itself makes no claim about a chain, contract or publishing node; those belong to the separately verified Ledger transaction/event. Logging is not independent proof of availability; arrange IPFS replication separately. The local journal is bounded to one pending batch plus 100 summaries; historical IPFS pins and chain history are not pruned by this feature.
 
 ## Recovery and stopping
 
 The private journal and configured IPFS provider are trusted integrity boundaries: recovery validates signatures, digests, execution identity and transaction-to-CID binding, but does not independently recompute stored CIDs from message/manifest bytes or refetch content. A locally altered canonical manifest CID can therefore be signed if no transaction has yet been checkpointed. Do not edit or accept an untrusted journal; recover only from a trusted consistent backup.
 
 The journal records each message CID, frozen membership, manifest CID and exact signed transaction bytes in order. Atomic replacement and fsync precede broadcasting. Recovery reuses the stored transaction/hash and existing inbox receipt-verification machinery; an ambiguous send, timeout or malformed receipt never causes a newly signed replacement. A journal write failure blocks further work until restart reloads disk. Provider failures retain membership and retry; health reports `503 / batch_blocked` while blocked and the direct status CLI reports failure.
+
+This pre-merge format correction retains manifest version 1. Earlier source revisions included execution metadata and per-message digests. An already checkpointed manifest CID (and any signed transaction) is retained exactly on upgrade; it is never rewritten into the new format. Pending work without a manifest CID publishes the content-only format. Drain earlier revisions before upgrading when uniform manifest shape matters, and distinguish legacy objects from CID strings when reading historical manifests. The journal schema and its execution-identity checks are unchanged.
 
 A changed chain, contract or node account fails journal identity validation. Keep existing fee limits sufficient to validate a pending transaction. A revoked signer blocks a batch that has not yet checkpointed a transaction; restore authorization only after an explicit local decision. Once a transaction was durably signed, it may already have broadcast: recovery reconciles/rebroadcasts those exact bytes even if the message signer was subsequently removed. It does not authorize new messages from that signer or sign a replacement. A verified revert is terminal and visible; it is not automatically charged another transaction.
 
