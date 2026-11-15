@@ -31,6 +31,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q006](#q006) | Participation beyond running a node | accessibility, community, participation | Answered |
 | [Q007](#q007) | When a commitment cannot be verified | accessibility, evidence, commitment design | Answered |
 | [Q008](#q008) | A creator's recourse after rejection | empowerment, judgment, commitment creation | Answered |
+| [Q012](#q012) | Changing a long-running commitment | consent, adaptability, ongoing commitments | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -273,3 +274,25 @@ If a new commitment is rejected as unresolvable but its creator disagrees, what 
 - **Source updated:** 2026-11-14T05:55:42Z
 
 Nothing, that's it. They could always make a new commitment but the resolution mechanism is final for any given proposal.
+
+<a id="q012"></a>
+
+## Q012 — Changing a long-running commitment
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-15
+- **Topics:** consent, adaptability, ongoing commitments
+- **Status:** Awaiting answer
+- **Source PR:** Pending publication.
+
+### Context
+
+In [Q007](#q007), @pemulis noted that a commitment may be ongoing, with multiple proposals over time. Exploring how its rules might change could help us distinguish useful adaptability from changing what someone originally agreed to.
+
+### Question
+
+How should a long-running commitment adapt when its participants' needs change?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
