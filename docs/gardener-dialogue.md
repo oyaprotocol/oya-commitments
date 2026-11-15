@@ -37,6 +37,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q012](#q012) | Changing a long-running commitment | consent, adaptability, ongoing commitments | Answered |
 | [Q013](#q013) | Understanding before delegation | accessibility, informed consent, user experience | Answered |
 | [Q014](#q014) | An influence worth learning from | design influences, philosophy, collaboration | Awaiting answer |
+| [Q017](#q017) | When a rule template is ready to share | commitment design, reuse, quality | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -450,6 +451,30 @@ The dialogue has explored what Oya could enable. Learning which existing experie
 ### Question
 
 What experience with another tool or community has most shaped how you want Oya to feel to its users?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
+
+<a id="q017"></a>
+
+<!-- oya-dialogue-question: Q017 -->
+
+## Q017 — When a rule template is ready to share
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-15
+- **Topics:** commitment design, reuse, quality
+- **Status:** Awaiting answer
+- **Source PR:** Pending publication.
+
+### Context
+
+The [rule-template guide](../agent-library/RULE_TEMPLATES.md) encourages contributors to suggest reusable rule patterns. A pattern that works for its author may still need scrutiny before others rely on it.
+
+### Question
+
+What would convince you that a commitment rule template is ready for people beyond its original author to reuse?
 
 ### Answer
 
