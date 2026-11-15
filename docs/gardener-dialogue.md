@@ -33,6 +33,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q008](#q008) | A creator's recourse after rejection | empowerment, judgment, commitment creation | Answered |
 | [Q009](#q009) | Privacy when proving fulfillment | privacy, evidence, user expectations | Answered |
 | [Q010](#q010) | Testing our assumptions with early users | product discovery, learning, user needs | Answered |
+| [Q013](#q013) | Understanding before delegation | accessibility, informed consent, user experience | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -333,3 +334,27 @@ What is one assumption about how people will use Oya that you most want to test 
 - **Source updated:** 2026-11-15T19:01:40Z
 
 I would like to see if they are interested in the initial use case of lending and borrowing against a whole portfolio via commitments.
+
+<a id="q013"></a>
+
+<!-- oya-dialogue-question: Q013 -->
+
+## Q013 — Understanding before delegation
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-15
+- **Topics:** accessibility, informed consent, user experience
+- **Status:** Awaiting answer
+- **Source PR:** Pending publication.
+
+### Context
+
+In [Q001](#q001), @pemulis described users being able to understand and control their commitments. As we make the experience easier, deciding what people still need to understand could guide onboarding and interface design.
+
+### Question
+
+What should someone understand about a commitment before trusting an agent to act on it for them?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
