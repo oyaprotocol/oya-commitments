@@ -31,6 +31,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q006](#q006) | Participation beyond running a node | accessibility, community, participation | Answered |
 | [Q007](#q007) | When a commitment cannot be verified | accessibility, evidence, commitment design | Answered |
 | [Q008](#q008) | A creator's recourse after rejection | empowerment, judgment, commitment creation | Answered |
+| [Q010](#q010) | Testing our assumptions with early users | product discovery, learning, user needs | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -273,3 +274,25 @@ If a new commitment is rejected as unresolvable but its creator disagrees, what 
 - **Source updated:** 2026-11-14T05:55:42Z
 
 Nothing, that's it. They could always make a new commitment but the resolution mechanism is final for any given proposal.
+
+<a id="q010"></a>
+
+## Q010 — Testing our assumptions with early users
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-15
+- **Topics:** product discovery, learning, user needs
+- **Status:** Awaiting answer
+- **Source PR:** Pending publication.
+
+### Context
+
+In [Q002](#q002), @pemulis described two possible first use cases. Choosing an example and learning whether people actually want it are different tasks. Naming an uncertain assumption could help contributors design early trials that teach us something.
+
+### Question
+
+What is one assumption about how people will use Oya that you most want to test with early users?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
