@@ -17,7 +17,7 @@ Opt-in direct nodes publish each authorized signed message independently, then p
 - [x] 2026-11-15 16:05Z: Follow-up validation passed: 23 focused and 411 production tests on Node 24.22.2, nine PostgreSQL integration tests, Linux amd64 direct Docker lifecycle, and packaged HTTPS inbox/worker scenarios. Human review and merge remain required; follow-up is local only.
 
 - [x] 2026-11-15 16:46Z: Reproduced founder comment 6897727483 with a failing HTTP manifest-shape regression; removed public batch/execution/digest metadata. Added cross-context content identity and failure/restart coverage.
-- [x] 2026-11-15: Local Node 24.22.2 validation passed 30 focused and 418 production tests. Independent review is pending; no remote writes.
+- [x] 2026-11-15: Local Node 24.22.2 validation passed 30 focused and 418 production tests. Independent parent review found no blockers and independently reran all 30 focused tests. Publication remains pending.
 
 ## Surprises & Discoveries
 
@@ -73,11 +73,11 @@ November 15 follow-up validation used Node 24.22.2, Foundry 1.5.1, Docker 29.9.2
 
 ### Founder correction validation
 
-On Node 24.22.2, `node --test node/production/test/batch-logging.test.mjs` passes 30 tests and `npm --prefix node/production test` passes 418 tests, with no failures or skips. The exact HTTP shape assertion first failed against `036e4379df` on execution metadata, batch ID and per-message digest objects. Synthetic transports exercise actual signatures, transaction preparation, disk checkpoints and HTTP. Earlier Docker/PostgreSQL results above belong to the previous follow-up, not this correction. Independent review and any publication remain pending.
+On Node 24.22.2, `node --test node/production/test/batch-logging.test.mjs` passes 30 tests and `npm --prefix node/production test` passes 418 tests, with no failures or skips. The exact HTTP shape assertion first failed against `036e4379df` on execution metadata, batch ID and per-message digest objects. Synthetic transports exercise actual signatures, transaction preparation, disk checkpoints and HTTP. Earlier Docker/PostgreSQL results above belong to the previous follow-up, not this correction. Independent parent review found no blockers and reran all 30 focused tests. Publication remains pending.
 
 ### Next feature — informational candidate
 
-`batch-evidence-v1`: bounded read-only verification of a signed message's membership in an IPFS manifest through the existing evidence CLI. Validate the content-only manifest shape, ordered CID list, selected member CID/bytes and message signature; separately verify any supplied Ledger receipt against its chain, contract and transaction signer. Do not infer the originating publisher or require chain/node/contract metadata in the manifest. Cover malformed/oversized manifests, unavailable content, invalid membership/bytes/signatures and mismatched receipt context. Estimate 1,200–2,200 changed code/test lines under an independent 3,000-line cap. Reconcile open evidence work before implementation; this is informational, not an approval gate.
+Candidate revision 2 (November 15): `batch-evidence-v1`, bounded read-only verification of a signed message's membership in an IPFS manifest through the existing evidence CLI. Validate the content-only manifest shape, ordered CID list, selected member CID/bytes and message signature; separately verify any supplied Ledger receipt against its chain, contract and transaction signer. Do not infer the originating publisher or require chain/node/contract metadata in the manifest. Cover malformed/oversized manifests, unavailable content, invalid membership/bytes/signatures and mismatched receipt context. Estimate 1,200–2,200 changed code/test lines under an independent 3,000-line cap. Reconcile open evidence work before implementation; this is informational, not an approval gate.
 
 ## Interfaces and Dependencies
 
