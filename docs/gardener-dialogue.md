@@ -33,6 +33,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q008](#q008) | A creator's recourse after rejection | empowerment, judgment, commitment creation | Answered |
 | [Q009](#q009) | Privacy when proving fulfillment | privacy, evidence, user expectations | Answered |
 | [Q010](#q010) | Testing our assumptions with early users | product discovery, learning, user needs | Answered |
+| [Q011](#q011) | Connections between independent commitments | composability, ecosystem, application design | Answered |
 | [Q014](#q014) | An influence worth learning from | design influences, philosophy, collaboration | Awaiting answer |
 
 <a id="q001"></a>
@@ -334,6 +335,35 @@ What is one assumption about how people will use Oya that you most want to test 
 - **Source updated:** 2026-11-15T19:01:40Z
 
 I would like to see if they are interested in the initial use case of lending and borrowing against a whole portfolio via commitments.
+
+<a id="q011"></a>
+
+## Q011 — Connections between independent commitments
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-15
+- **Topics:** composability, ecosystem, application design
+- **Status:** Answered
+- **Source PR:** [#171](https://github.com/oyaprotocol/oya-commitments/pull/171)
+
+### Context
+
+In [Q006](#q006), @pemulis described users creating commitments and agents serving them through messages. A concrete example of separately created commitments working together could help us explore what makes Oya useful as an ecosystem, beyond individual applications.
+
+### Question
+
+What is the first useful interaction you would like to see between two independently created Oya commitments?
+
+### Answer
+
+#### @pemulis — 2026-11-15
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 6899645660](https://github.com/oyaprotocol/oya-commitments/pull/171#issuecomment-6899645660)
+- **Source created:** 2026-11-15T19:03:58Z
+- **Source updated:** 2026-11-15T19:03:58Z
+
+As an example, one commitment could request to borrow funds against collateral, and a different commitment could offer to lend funds to other commitments that meet certain terms. An agent could then optimistically lend funds to the borrower, and request reimbursement (and reassignment of the loan) to the lender, and collect some fee in the process. This matches up borrowers and lenders. In addition, you could imagine lending and borrowing happening within the same commitment, so that an account could earn yield against their funds while also borrowing cash against their overall portfolio as it earns yield.
 
 <a id="q014"></a>
 
