@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
+import { inspectQueue } from './inspection.mjs';
 import { assertCanonicalCid } from '@oyaprotocol/utils';
 import { digest, reject, validateTransaction, validId } from './protocol.mjs';
 
@@ -67,6 +68,7 @@ export class InboxStore {
         if (!row || row.payload_hash !== digest(job)) reject(404, 'job_not_found');
         return publicJob(row);
     }
+    async inspect() { return inspectQueue(this.pool, this.config); }
     async claim(identity) {
         if (digest(identity) !== digest(this.config.execution)) reject(409, 'execution_identity_mismatch');
         return this.locked(async client => {

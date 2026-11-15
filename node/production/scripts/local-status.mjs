@@ -21,7 +21,8 @@ export async function statusLocalNode({ config, nodeAddress }, {
     }
     const running = health?.status === 'ready' || health?.status === 'busy';
     const ipfsOnly = config.mode === 'ipfs';
-    const unavailable = health?.status === 'shutting_down' || (!ipfsOnly && health?.status === 'transaction_outcome_unknown');
+    const unavailable = health?.status === 'shutting_down' || (!ipfsOnly && (health?.status === 'transaction_outcome_unknown' ||
+        (config.batchLogging && health?.status === 'batch_blocked')));
     if ((!running && !unavailable) || response.status !== (running ? 200 : 503)
         || typeof health.busy !== 'boolean' || (running && health.busy !== (health.status === 'busy'))) {
         return fail('Malformed node health response. Check the service at the configured local port.');

@@ -101,6 +101,38 @@ Worker request bodies must be JSON objects (not null, arrays, or scalars); claim
 
 Renew takes `{requestId, lease}`. Checkpoint takes `{requestId, lease, checkpoint}` where checkpoint contains only `cid` or only `transaction`. Completion takes `{requestId, lease, result}`. Retry takes `{requestId, lease}` and lets the database decide whether to retry, fail after ten pre-transaction attempts, or keep a transaction awaiting reconciliation. Stale/expired leases return 409. Worker tokens are privileged: a holder can read queued messages and report execution results. This is operator-controlled infrastructure, not proof of work by an untrusted executor.
 
+## Inspect the queue without claiming work
+
+An operator can inspect the complete queue's counts and its next blocking job without a client's signed job file. `POST /v1/worker/inspect` requires the existing worker bearer token, `Content-Type: application/json`, and exactly `{"target":"my-node"}`. A different target returns 409 `target_mismatch`; extra or missing fields return 400 `invalid_worker_request`. The response is not public. **The worker token still grants full worker authority; this endpoint does not make that credential read-only.** Keep it on operator-controlled machines and send it only to the approved inbox origin.
+
+With production dependencies installed, run from the repository root:
+
+```sh
+node node/production/src/inbox/client.mjs inspect https://inbox.example.org my-node TOKEN_FILE
+```
+
+Replace the example origin, target and `TOKEN_FILE` with your installation's values. The protected token file contains only the existing worker token, optionally followed by a newline; do not supply an environment file or a signing key. The command never reads signing keys or sends the token in command-line arguments. HTTPS is required except on loopback; redirects are rejected. Exit 0 means a valid snapshot was retrieved, **not** that the worker is running or the queue is healthy. Invalid inputs, unavailable services and malformed responses exit 1 with a generic error. An older inbox without this endpoint returns HTTP 404; upgrade through the ordinary reviewed release process rather than using `claim` to inspect it.
+
+The bounded JSON response includes:
+
+| Field | Interpretation |
+| --- | --- |
+| `target`, `observedAt` | Queue identity and database statement time, not a worker heartbeat. |
+| `capacity.maxJobs`, `retainedJobs`, `availableJobs` | Configured capacity, all retained records, and nonnegative remaining slots. Terminal replay records occupy capacity until ordinary pruning. Reducing capacity below retained rows reports zero available slots. |
+| `counts` | Stored counts for `queued`, `processing`, `published`, `logged`, `failed`, `expired`. These are database results, not independently verified chain/content evidence. |
+| `queued.ready` | Queued records whose deadline has not passed; they can still be blocked by processing work. |
+| `queued.expiredPendingSweep` | Queued records whose deadline has passed but the next worker claim has not yet marked them expired. Inspection does not expire them. |
+| `queued.oldestCreatedAt` | Oldest unexpired queued record's creation time, or null. Compare with `observedAt` to assess waiting time. |
+| `head` | The processing record, otherwise the oldest unexpired queued record (creation time then request ID), or null. Includes request ID, status, attempts, creation/update/expiry times, lease deadline and the indicators below. |
+| `head.leaseState` | `active`: a lease ID and future deadline exist; `backoff`: a future deadline without a lease ID; `available`: no future deadline. Active does not prove a live worker; available does not authorize skipping this job. |
+| `head.checkpoint` | `none`, `cid`, or `transaction`: the furthest saved execution stage. A transaction checkpoint does not establish broadcast, mining or success. |
+
+The response excludes signed payloads, signatures, lease IDs, CIDs, transaction hashes/bytes, credentials and arbitrary error text. It is safe to repeat the read, but operational identifiers and timing can still be private. Use the existing signed-job status and Ledger evidence tools when more specific evidence is required.
+
+All fields come from one SQL snapshot in a read-only transaction. The query scans retained rows with a two-second statement deadline and does not acquire the target's mutation lock. Each inbox process permits one inspection in flight; concurrent requests receive 503 `inspection_busy`. Other database failures return 503 `inbox_unavailable`. The client bounds the HTTP exchange at ten seconds and the response at 131,072 bytes, validates the response shape and makes no automatic retries. Avoid frequent polling on large queues; inspect again after a failure or a meaningful worker transition.
+
+An inspection never claims, expires, prunes, retries or repairs work and does not contact IPFS or Ethereum. The view can become stale immediately. A processing transaction checkpoint continues to block later jobs even after its lease or original job deadline expires. Keep the original worker identity and checkpoint, and use the existing reconciliation procedure; never delete or replace a transaction to make the queue appear healthy.
+
 ## Transaction safety
 
 Claims and mutations lock a PostgreSQL target row, and an index permits only one `processing` job per target. Retry delays retain that job at the head of the queue. A new lease cannot replace a saved CID or signed transaction. The worker publishes, saves the CID, prepares a transaction, commits its signed bytes, and only then broadcasts. A lost checkpoint acknowledgement causes no broadcast in that attempt. Recovery reads the committed checkpoint and reuses the same bytes and hash. A delayed worker can at most rebroadcast that same transaction; its stale lease cannot alter state.

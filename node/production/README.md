@@ -14,6 +14,7 @@ The default deployment runs Oya and Kubo on your local device, with a portable P
 | Maintain or recover the inbox | [Retention, recovery, and migration](host-inbox.md#retention-recovery-and-migration). |
 | Write a message sender | [Submit and track a message](run-locally.md#4-submit-and-track-a-message) and the [inbox API](inbox-api.md). |
 | Use a synchronous API without an inbox | [Advanced direct HTTP setup](run-direct.md). |
+| Batch direct-runtime Ledger logs (source opt-in) | [Batch logging](batch-logging.md) — bounded durable batches; inbox/worker explicitly unsupported. |
 | Verify a Ledger log from any source without a key | [Job-independent evidence command](inbox-api.md#verify-ledger-evidence) — record identity, content availability and explicit byte-integrity checks. |
 | Verify automatic testnet CID logging | [Testnet Ledger acceptance](testnet-ledger.md) — isolated installation, receipt evidence and recovery; requires separate broadcast authorization. |
 | Load or fetch the public peer list | [Testnet registry guide](peers/README.md) — public addresses and endpoints; signer permissions stay explicitly configured. |
@@ -69,7 +70,7 @@ flowchart LR
 
 ## Advanced direct runtime reference
 
-For normal inbox/worker installation, follow the task guides above. The remaining sections document the **advanced synchronous HTTP runtime** and shared configuration/contract tools. For existing released local installations, see [direct HTTP setup](run-direct.md). A direct node accepts signed text and returns `200 / published` in IPFS mode or `200 / logged` after Ledger receipt verification; it has no durable inbox. Do not run it concurrently with a worker using the same node signing account.
+For normal inbox/worker installation, follow the task guides above. The remaining sections document the **advanced synchronous HTTP runtime** and shared configuration/contract tools. The optional [direct batch mode](batch-logging.md) instead returns 202 after durable local admission and logs a manifest later; the descriptions below cover the unchanged immediate default. For existing released local installations, see [direct HTTP setup](run-direct.md). A direct node accepts signed text and returns `200 / published` in IPFS mode or `200 / logged` after Ledger receipt verification; it has no durable inbox. Do not run it concurrently with a worker using the same node signing account.
 
 After signature, allowlist, and request-limit checks, the HTTP handler calls the kernel's `publishSignedMessage` in IPFS mode or `publishAndLogSignedMessage` in Ledger mode. One complete operation runs at a time. Additional authenticated requests within the request budget receive `503 node_busy`; there is no waiting queue.
 

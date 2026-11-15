@@ -5,6 +5,7 @@
 !package-lock.json
 !src/
 src/**
+!src/batch-logging.mjs
 !src/bytecode.mjs
 !src/config.mjs
 !src/defaults.mjs

@@ -31,7 +31,8 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q006](#q006) | Participation beyond running a node | accessibility, community, participation | Answered |
 | [Q007](#q007) | When a commitment cannot be verified | accessibility, evidence, commitment design | Answered |
 | [Q008](#q008) | A creator's recourse after rejection | empowerment, judgment, commitment creation | Answered |
-| [Q011](#q011) | Connections between independent commitments | composability, ecosystem, application design | Awaiting answer |
+| [Q009](#q009) | Privacy when proving fulfillment | privacy, evidence, user expectations | Answered |
+| [Q011](#q011) | Connections between independent commitments | composability, ecosystem, application design | Answered |
 
 <a id="q001"></a>
 
@@ -275,6 +276,35 @@ If a new commitment is rejected as unresolvable but its creator disagrees, what 
 
 Nothing, that's it. They could always make a new commitment but the resolution mechanism is final for any given proposal.
 
+<a id="q009"></a>
+
+## Q009 — Privacy when proving fulfillment
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-14
+- **Topics:** privacy, evidence, user expectations
+- **Status:** Answered
+- **Source PR:** [#164](https://github.com/oyaprotocol/oya-commitments/pull/164)
+
+### Context
+
+In [Q001](#q001), @pemulis described verification using available evidence, including messages logged by nodes; [Q006](#q006) illustrated users and agents sending messages so their actions can be recognized. Exploring what users need to reveal could help us explain the experience of making a commitment before they entrust sensitive information to it.
+
+### Question
+
+What should a user be able to keep private while still having Oya verify that a commitment was fulfilled?
+
+### Answer
+
+#### @pemulis — 2026-11-15
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 6897317134](https://github.com/oyaprotocol/oya-commitments/pull/164#issuecomment-6897317134)
+- **Source created:** 2026-11-15T16:04:02Z
+- **Source updated:** 2026-11-15T16:04:02Z
+
+For initial use cases we will focus on commitments where all of the rules and evidence can be public. Privacy is particularly hard for dispute resolution. Future privacy-preserving use cases will require encrypted commitments and evidence, and pre-designated arbitrators and dispute mechanisms. They will necessarily have fewer eyes on them than public commitments since only privileged viewers will be able to raise disputes, see evidence, and arbitrate disputes. We'll get to that eventually, though, since privacy will be important for certain types of applications.
+
 <a id="q011"></a>
 
 ## Q011 — Connections between independent commitments
@@ -282,7 +312,7 @@ Nothing, that's it. They could always make a new commitment but the resolution m
 - **Asked by:** Oya Gardener (`@oyagardener`)
 - **Asked on:** 2026-11-15
 - **Topics:** composability, ecosystem, application design
-- **Status:** Awaiting answer
+- **Status:** Answered
 - **Source PR:** [#171](https://github.com/oyaprotocol/oya-commitments/pull/171)
 
 ### Context
@@ -295,4 +325,11 @@ What is the first useful interaction you would like to see between two independe
 
 ### Answer
 
-Pending an answer from `@pemulis` or `@nesseps`.
+#### @pemulis — 2026-11-15
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 6899645660](https://github.com/oyaprotocol/oya-commitments/pull/171#issuecomment-6899645660)
+- **Source created:** 2026-11-15T19:03:58Z
+- **Source updated:** 2026-11-15T19:03:58Z
+
+As an example, one commitment could request to borrow funds against collateral, and a different commitment could offer to lend funds to other commitments that meet certain terms. An agent could then optimistically lend funds to the borrower, and request reimbursement (and reassignment of the loan) to the lender, and collect some fee in the process. This matches up borrowers and lenders. In addition, you could imagine lending and borrowing happening within the same commitment, so that an account could earn yield against their funds while also borrowing cash against their overall portfolio as it earns yield.
