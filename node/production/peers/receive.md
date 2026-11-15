@@ -20,6 +20,8 @@ Startup loads a fixed snapshot and never fetches or sends messages. To revoke a 
 
 ## Prepare once, submit explicitly
 
+For a one-command send selected by registry address, use the [chosen-node sender](send.md). The lower-level commands below remain available for separate offline preparation.
+
 With Node 24 or newer and installed production dependencies, run from the repository root:
 
 ```sh

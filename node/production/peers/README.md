@@ -59,6 +59,10 @@ candidate=$(mktemp ./testnet-directory.XXXXXX) && {
 
 The command itself writes no files; the shell saves and replaces the public list. Retry a failed fetch later or continue using the previous copy.
 
+## Send to one chosen node
+
+Use the [chosen-node sender](send.md) to select an explicit address from an installed registry, sign and save one ordinary job, and submit it in one command. Retry/status reuse the saved destination without loading a key. The same functions are importable by automation.
+
 ## Routing is separate from authorization
 
 Loading or fetching this address book does **not** change `allowedSigners`, node keys, configuration or running services. Operators may explicitly enable [peer publication reception](receive.md) using an installed snapshot on both inbox and worker. That opt-in adds all members to effective publication authorization while preserving explicit local grants. The guide also covers offline preparation and explicit one-shot submit/status commands.
