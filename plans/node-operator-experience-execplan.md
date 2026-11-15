@@ -6,7 +6,7 @@ This ExecPlan is a living document maintained according to [PLANS.md](../PLANS.m
 
 An operator should be able to upgrade a worker whose node signing key is in macOS Keychain, send a signed message with one command, and check whether the selected node is running without unlocking a signing key. New inbox jobs should remain eligible for execution for seven days, accommodating intermittently online devices. Operators should be able to configure warnings about a stopped node or low native-currency balance and see the local limits on gas spending.
 
-The proposed implementation covers the production node under `node/production/`, its deployment bundle, and its operator documentation. Approval of this plan authorizes implementation and disposable local validation. Deployments, funded-chain transactions, notification delivery to real recipients, and enrollment in an external monitoring service require their own established operator authorization.
+The proposed implementation covers the production node under `node/production/`, its deployment bundle, and its operator documentation. Standardize host management on JavaScript ES modules (`.mjs`) with Node.js 24 on the host. Port the two existing Python helpers and their tests before extending them; the operator features then use the same language and test tooling as the existing JavaScript commands. Approval of this plan authorizes implementation and disposable local validation. Deployments, funded-chain transactions, notification delivery to real recipients, and enrollment in an external monitoring service require their own established operator authorization.
 
 | Operator feedback | Proposed outcome |
 | --- | --- |
@@ -21,7 +21,9 @@ The proposed implementation covers the production node under `node/production/`,
 - [x] 2026-11-15 15:29Z: Read repository guidance and inspected upgrade, Keychain, client, health, expiry, gas, and release-packaging paths at `bda9c5c704c3fe296ae9ed602d4180eae0be3313`.
 - [x] 2026-11-15 15:29Z: Confirmed upstream `main` matches the inspected revision and checked open PRs for overlapping production-node work.
 - [x] 2026-11-15: Drafted the proposed behavior, milestones, compatibility boundaries, and acceptance tests below.
+- [x] 2026-11-15 16:22Z: Revised the proposal toward JavaScript standardization after reviewing the existing host commands and the requester's language preference; team approval of the revised plan remains pending.
 - [ ] Record team approval, the approved revision, and any requested design changes in the Decision Log. **Implementation gate.**
+- [ ] Port the existing Python helpers and all 68 test cases to JavaScript, validating migration and recovery before adding features.
 - [ ] Implement credential references and Keychain-safe worker upgrades.
 - [ ] Implement operator commands and seven-day default job expiry.
 - [ ] Implement optional monitoring and expose the existing gas policy.
@@ -34,13 +36,14 @@ The proposed implementation covers the production node under `node/production/`,
 - `scripts/send-message.mjs` serves the direct HTTP API. Inbox sending currently requires separate `prepare`, `submit`, and `status` invocations in `src/inbox/client.mjs`. The saved signed job is necessary for safe resubmission and authenticated status lookup.
 - `src/inbox/protocol.mjs:signJob()` defaults to `Date.now() + 86400_000`, while `validateJob()` already accepts deadlines up to seven days ahead. Existing signed envelopes bind the deadline cryptographically and cannot be extended in place.
 - `src/config.mjs` already supports `gasLimit` (default `200000`) and `maxFeePerGasWei` (default `"30000000000"`). Both the direct runtime and inbox processor pass these limits to the transaction preparer. `scripts/local-check.mjs` currently checks only that the wallet balance is greater than zero.
-- The release bundle deliberately works without host Node.js or npm dependencies. The image contains `src/`, while `scripts/publish-image.sh` explicitly copies host helpers. New assets also need entries in the upgrader's `PUBLIC_FILES` allowlist. An existing older upgrader will reject an archive containing unfamiliar files; the release instructions must identify the reviewed helper needed to cross that boundary.
+- The basic Docker deployment workflow currently works without host Node.js, but optional host tools already use JavaScript: `local-node.mjs`, `local-deploy.mjs`, `send-message.mjs`, `peer-directory.mjs`, and `release-node.mjs`. The new host-management interface will explicitly require Node.js 24. The image contains `src/`, while `scripts/publish-image.sh` explicitly copies host helpers. New assets also need entries in the upgrader's `PUBLIC_FILES` allowlist. An existing older upgrader will reject an archive containing unfamiliar files; the release instructions must identify the reviewed helper needed to cross that boundary.
+- The Python migration covers `scripts/keychain-worker.py` (155 lines) and `scripts/upgrade-node.py` (1,063 lines), plus 1,197 lines of Python tests containing 68 test methods. Counts include comments and blank lines. `test/publish-image.test.mjs` also embeds Python validation and must be migrated to remove the production tooling's Python dependency. Unix file locking, constrained archive extraction, and compatibility with old bundles need explicit migration validation.
 - Open [PR #165](https://github.com/oyaprotocol/oya-commitments/pull/165) proposes optional direct-node batch logging, including HTTP 202 responses and durable transactions. Recheck its status before implementation and preserve its transaction/recovery semantics if merged. [PR #163](https://github.com/oyaprotocol/oya-commitments/pull/163) touches inbox configuration validation. Neither is a prerequisite for this plan; avoid copying changes from their unmerged branches.
 
 ## Decision Log
 
 - Decision: Submit a plan-only PR and stop before implementation until team approval is recorded. Rationale: The requester explicitly requires team approval before code changes. Date/author: 2026-11-15 / Codex.
-- Decision: Use a Python standard-library host entrypoint and the pinned runtime image for message signing. Rationale: Existing operators already use Python for upgrades/Keychain, and released installations should retain their no-host-Node.js workflow. Keep signing and job protocol logic in JavaScript with the existing dependencies. Date/author: 2026-11-15 / Codex; proposed for approval.
+- Decision: Standardize host-management scripts on JavaScript ES modules and Node.js 24, superseding the initial Python proposal. Rationale: Existing host commands, runtime clients, shared libraries, and the test harness already use JavaScript. A single implementation language outweighs avoiding a host Node.js prerequisite. Port the existing Python helpers as a separate milestone so their safety checks can be evaluated before feature changes. Date/author: 2026-11-15 / Codex, following requester feedback; revised plan proposed for approval.
 - Decision: Store credential references in a private manifest, with separate worker, node, and sender roles. Rationale: A worker token authorizes queue operations; a node key spends gas; a sender key signs messages. Their access and lifecycle must stay distinct. Date/author: 2026-11-15 / Codex; proposed for approval.
 - Decision: Default new jobs to exactly seven days and leave the server's seven-day maximum, leases, and retention rule intact. Rationale: This addresses offline queuing without rewriting signed authorization or changing transaction recovery. Date/author: 2026-11-15 / Codex; proposed for approval.
 - Decision: Keep existing transaction ceilings authoritative and make low-balance warnings advisory. Rationale: A daily spending ledger or new transaction-blocking policy would add recovery semantics beyond the requested configuration gap, which is already covered by existing caps. Date/author: 2026-11-15 / Codex; proposed for approval.
@@ -48,7 +51,7 @@ The proposed implementation covers the production node under `node/production/`,
 
 ## Outcomes & Retrospective
 
-Planning identified two existing capabilities to build upon: seven-day server acceptance and enforced local gas ceilings. The main gaps are credential lifecycle support, everyday command usability, and independent monitoring. This revision supplies the design for approval. Runtime behavior, deployment state, and external monitoring configuration have not been changed; implementation acceptance remains pending.
+Planning identified two existing capabilities to build upon: seven-day server acceptance and enforced local gas ceilings. The main gaps are credential lifecycle support, everyday command usability, and independent monitoring. This revision adopts JavaScript for host management and adds a migration milestone ahead of the operator features. It makes host Node.js a prerequisite and preserves the team-approval gate. Runtime behavior, deployment state, and external monitoring configuration have not been changed; implementation acceptance remains pending.
 
 ## Context and Orientation
 
@@ -75,9 +78,21 @@ Abbreviated production paths in this document are relative to `node/production/`
 
 Open the initial PR with this document as its only changed file. Ask the team to review the proposed command/profile format, Keychain lifecycle, seven-day default, and monitoring approach. Record approval and its revision before proceeding. If the team changes scope, revise this self-contained plan first. No real credentials or operator environment are needed for design review.
 
-### Milestone 1: Resolve credentials consistently and upgrade Keychain-backed workers
+### Milestone 1: Migrate the existing helpers to JavaScript
 
-Add `node/production/scripts/operator_credentials.py` for typed credential references, bounded secret reads, and cleanup. Extend `keychain-worker.py` and `upgrade-node.py` with `--credentials FILE`. Keep the existing `--account`/`--service` worker helper flags and `--keychain-account`/`--keychain-service` upgrade flags compatible. Reject conflicting new and legacy selections. A manifest can select a protected file or Keychain for each supported role, allowing mixed installations.
+Create `node/production/scripts/keychain-worker.mjs` and `scripts/upgrade-node.mjs`, with small shared modules for subprocesses, private files, locking, and archive handling. Preserve the current actions, credential references, execution identities, literal Compose-environment parsing, release verification, backup checks, durable journal format, and failure behavior. Use argument arrays rather than shell interpolation, bounded subprocess/network output, explicit cancellation cleanup, and atomic writes with file/directory synchronization. Status and monitoring must be able to run on the host even when Docker is unavailable. Existing JavaScript release, peer-directory, and development scripts remain the baseline; shell launchers can continue invoking them.
+
+Port the ten Keychain and 58 upgrade test cases into the existing `test/keychain-worker.test.mjs` and `test/upgrade-node.test.mjs` files. Replace the embedded fake-Docker Python program and packaging-test Python snippets with JavaScript fixtures. During migration, run the Python tests as a reference and compare normalized command traces, preserved files, and failure outcomes for the same fixture scenarios. Delete the migrated Python implementations/tests once their JavaScript equivalents and bundle compatibility tests pass; the completed production test suite must not invoke Python.
+
+Start with a bounded portability prototype for advisory locking and archive inspection. The baseline is the current Python behavior, including locks released by the OS after a process exits, rejection of concurrent legacy operations, and rejection of archive traversal, links, special files, duplicate entries, extended metadata, excessive member counts, and decompression bombs. Use a maintained Node-compatible locking binding that preserves the existing `flock` behavior and a maintained archive parser; do not replace these with shell-based extraction or time-based stale-lock eviction. Pin and package required dependencies with the host tools. Validate binding availability on macOS/Linux and supported CPU architectures with Node.js 24, and validate that the archive parser exposes enough information to retain every rejection. Promote the prototype only after the existing adversarial fixtures and real subprocess lock/crash checks pass; otherwise revise the dependency/distribution design in this plan before proceeding. Record selected versions, platform constraints, and packaging cost in the Decision Log.
+
+The JavaScript upgrader must support installations created with older bundles without dynamically importing their Python helper. Reuse the reviewed JavaScript lifecycle implementation against the explicitly validated old/new Compose assets and credential references. Preserve the same lock locations so old and new invocations cannot overlap. Require compatible helper/image capabilities before stopping services. Document the new `node .../*.mjs` invocations and how to obtain the trusted migration helper; do not modify old published bundles or reinitialize installations.
+
+Acceptance for this milestone is behavior parity on the 68 cases, additional cross-version/process-lock tests, a disposable macOS Keychain lifecycle check, Linux upgrade validation, and a release-bundle fixture that operates with Node.js available and Python absent. Node.js becomes an explicit operator prerequisite; any native locking artifact must be provided for the supported host/runtime combinations rather than requiring operators to compile it.
+
+### Milestone 2: Resolve credentials consistently and upgrade Keychain-backed workers
+
+Add `node/production/scripts/operator-credentials.mjs` for typed credential references, bounded secret reads, and cleanup. Extend the migrated `keychain-worker.mjs` and `upgrade-node.mjs` with `--credentials FILE`. Keep the existing `--account`/`--service` worker helper flags and `--keychain-account`/`--keychain-service` upgrade flags compatible. Reject conflicting new and legacy selections. A manifest can select a protected file or Keychain for each supported role, allowing mixed installations.
 
 Node Keychain entries map to the existing literal environment fields `OYA_NODE_PRIVATE_KEY`, `OYA_RPC_AUTHORIZATION`, and `OYA_IPFS_AUTHORIZATION`. Resolve only fields needed by the action. Validate node-key format and reject line breaks/NUL in environment values before creating a runtime file. Sender-key access belongs only to sending; the worker and upgrade process never retrieve it. `status`, upgrade preview, and stopping a worker never unlock signing keys. IPFS mode does not retrieve a node signing key.
 
@@ -87,9 +102,11 @@ Teach upgrade preflight, mount comparison, fingerprinting, stop/start, and failu
 
 Use mocked Keychain and Docker tests first. Then run a disposable macOS/Docker Desktop test with synthetic keys to verify that both mounted files can be removed after startup, restart requires the helper, failed startup cleans up, and the worker identity is preserved through upgrade. Real installation Keychain items are unnecessary.
 
-### Milestone 2: Make status and sending one-command operations
+### Milestone 3: Make status and sending one-command operations
 
-Add `node/production/scripts/operator-node.py` as a thin command dispatcher with small sibling modules `operator_status.py` and `operator_client.py`. Select a private versioned `operator.json` using `--profile FILE` or `OYA_OPERATOR_PROFILE`. Resolve relative paths against the profile's directory, validate all settings before side effects, and reject unknown keys. The profile points at existing node/worker configuration, credential references, expected public identity, and a private state directory. It does not duplicate gas-policy values or contain private signing keys. Supply a clearly marked `operator.example.json` and a short optional shell alias in the guide; installation must preserve existing files.
+Add `node/production/scripts/operator-node.mjs` as a thin command dispatcher with small sibling modules `operator-status.mjs` and `operator-client.mjs`. Select a private versioned `operator.json` using `--profile FILE` or `OYA_OPERATOR_PROFILE`. Resolve relative paths against the profile's directory, validate all settings before side effects, and reject unknown keys. The profile points at existing node/worker configuration, credential references, expected public identity, and a private state directory. It does not duplicate gas-policy values or contain private signing keys. Supply a clearly marked `operator.example.json` and a short optional shell alias in the guide; installation must preserve existing files.
+
+Reuse or extract pure configuration, health-validation, and client functions from the existing JavaScript tools instead of maintaining competing implementations. Keep signing-key loading separate from read-only settings so status can share validation without retrieving a key. Preserve existing documented JavaScript commands as compatible entrypoints while promoting the unified operator interface.
 
 `status` runs on the host with a five-second deadline and bounded response reading. It queries only the configured loopback health endpoint and works even when Docker is unavailable. Validate direct-node `ready`/`busy` and worker `idle`/`processing`, as well as the correct role, mode, target, and Ledger identity. Extend worker health with additive public execution identity fields; it already tracks last successful poll and processing state. Match the worker's existing freshness bound of `operationTimeoutMs + 60000` milliseconds and reject timestamps more than five seconds ahead of the host clock. Report stopped/unreachable, starting, retrying, inbox unavailable, shutting down, and unknown transaction outcome distinctly. Treat HTTP success with the wrong identity or malformed/stale health as failure. Older workers lacking identity fields can be described as reachable but unverified with a nonzero exit and an upgrade hint. The command must not need a node private key, inspect secret mounts, or treat inbox reachability alone as proof that a worker is running.
 
@@ -101,7 +118,7 @@ For a direct profile, sign the direct message format, submit once to `/v1/messag
 
 All HTTP requests use verified HTTPS off-host, reject redirects, and bound connection/body time and response bytes. Exception text and remote response bodies are not printed indiscriminately. `--json` returns a stable, sanitized result schema. Existing advanced clients remain usable. Document the new entrypoint prominently from both worker and direct-node guides and link it from existing local-command help.
 
-### Milestone 3: Default new jobs to seven days
+### Milestone 4: Default new jobs to seven days
 
 Define a named seven-day duration in `src/inbox/protocol.mjs` and use it for `signJob()`'s default and the existing validation maximum. Preserve explicit shorter `expiresAt` callers and the version-1 envelope format. Expose `--expires-in SECONDS` on new preparation/sending interfaces with a positive integer maximum of `604800`. Existing `prepare` positional arguments continue to work and inherit the new default. Display the absolute signed deadline so users can see remaining queue time.
 
@@ -109,13 +126,13 @@ Add fixed-clock tests for exactly `604800000` milliseconds, the seven-day bounda
 
 Keep `InboxStore.claim()`'s expiry rule for queued jobs, current short leases, in-progress reconciliation, and pruning of terminal rows only after signed expiry plus seven days. Old jobs retain their signed deadlines. Test processing/recovery after a deadline and replay protection through the retention boundary. Explain that default jobs may retain terminal records for roughly fourteen days from creation, so `maxJobs`, disk usage, and prune scheduling deserve review. Update the 24-hour wording in deployment and inbox guides.
 
-### Milestone 4: Expose gas policy and add useful alerts
+### Milestone 5: Expose gas policy and add useful alerts
 
 `gas-policy` reads the selected node configuration and displays the effective `gasLimit`, `maxFeePerGasWei`, and their product as a worst-case execution-gas ceiling for one new transaction. The defaults are 200,000 gas and 30 gwei, giving a ceiling of 0.006 native units. Describe this as a per-transaction bound, not a daily budget or a complete fee estimate for every chain. Keep these fields in `node.json`; preserve explicit values through upgrades. IPFS mode reports that gas policy is inapplicable. Regression tests must show over-cap preparation stops before signing/broadcast in direct and worker paths. Keep the current warning that lowering caps below a persisted transaction can pause its reconciliation.
 
 `balance` reads the public node address and approved RPC configuration, verifies chain ID, and calls `eth_getBalance` without constructing a signer. An optional RPC authorization reference is distinct from the node key. Parse quantities with exact integers and enforce bounded, redacted requests. Report RPC failure as unknown rather than zero. Monitoring thresholds are decimal-string wei values, with no floating-point comparisons.
 
-Add `scripts/operator_monitor.py`, invoked by `operator-node.py monitor --once` or `monitor --watch`. Run it as a separate host process so Docker or worker shutdown does not kill it. Provide optional user-level launchd and systemd examples for installation under the operator's control. `monitor --once` only reports; `monitor --watch` enables configured notification delivery. Default settings when monitoring is enabled are a 60-second health poll, a 300-second balance poll, and three consecutive bad health samples before a stopped/degraded warning. Default low-balance warning is twice the configured one-transaction gas ceiling, overridable with `lowBalanceWei`; it is a conservative reserve threshold, not a forecast of messages remaining. Recover at 110% of the warning threshold to reduce repeated boundary alerts. Zero is always unhealthy for Ledger funding. IPFS mode skips RPC and balance warnings.
+Add `scripts/operator-monitor.mjs`, invoked by `operator-node.mjs monitor --once` or `monitor --watch`. Run it as a separate host process so Docker or worker shutdown does not kill it. Provide optional user-level launchd and systemd examples for installation under the operator's control. `monitor --once` only reports; `monitor --watch` enables configured notification delivery. Default settings when monitoring is enabled are a 60-second health poll, a 300-second balance poll, and three consecutive bad health samples before a stopped/degraded warning. Default low-balance warning is twice the configured one-transaction gas ceiling, overridable with `lowBalanceWei`; it is a conservative reserve threshold, not a forecast of messages remaining. Recover at 110% of the warning threshold to reduce repeated boundary alerts. Zero is always unhealthy for Ledger funding. IPFS mode skips RPC and balance warnings.
 
 Persist only sanitized incident state under the private state directory, with atomic writes and a single-monitor lock. Emit one alert on transition, one recovery, and at most one reminder per hour. Local alerts go to structured stdout and, when `desktopNotifications` is explicitly enabled on macOS, native notifications through a bounded `osascript` subprocess with fixed script text and separate sanitized arguments. Honor OS permission prompts; unsupported explicitly selected notification backends must report a configuration error. Linux operators can use service logs and the external delivery option below. Keep runtime health, low balance, RPC failure, and notification failure distinct. Startup must detect an already stopped node after the grace period; a working HTTP listener without current worker progress is insufficient. A notification outage must not affect node execution, signing, or transaction recovery. Tests use an injected clock and fake transports rather than wall-clock waits.
 
@@ -123,23 +140,27 @@ Recommend two optional external heartbeat checks: runtime availability and walle
 
 The local monitor provides diagnosis; missing remote pings indicate lost healthy observations, not a proven root cause. Configure external grace/schedules to tolerate the operator's normal laptop closures. Document planned maintenance and resuming external checks, without sending fabricated healthy pings during downtime. No external service is enrolled by default. A separate read-only balance monitor on an always-on host is an optional operational recommendation when balance observation must continue during laptop sleep; it needs only the public address and authorized RPC access.
 
-### Milestone 5: Package, document, and validate the operator workflow
+### Milestone 6: Package, document, and validate the operator workflow
 
-Include every new host module, overlay, template, and guide in `scripts/publish-image.sh` and the upgrader's explicit archive allowlist. Keep runtime JavaScript under `src/` so the image includes it. Test that extracted bundles work outside a checkout with no host npm installation and no implicit imports from the source tree. Specify minimum helper/image compatibility; old images lacking the signing entrypoint need a clear diagnostic. Update the deployment skill and human guides together, including new-installation handoffs and preserving existing private profiles during upgrade.
+Include every new host module, overlay, template, and guide in `scripts/publish-image.sh` and the migrated upgrader's explicit archive allowlist. Package the host helpers and their pinned dependencies, including supported native locking artifacts, as reviewed release assets. Keep runtime JavaScript under `src/` so the image includes it. Test that extracted bundles work outside a checkout with no host npm installation and no implicit imports from the source tree. Specify minimum helper/image compatibility; old images lacking the signing entrypoint need a clear diagnostic. Update the deployment skill and human guides together, including new-installation handoffs and preserving existing private profiles during upgrade.
 
 Extend the existing integration harnesses and add `node/production/scripts/test-operator.mjs` to drive the actual host CLI against disposable services. Cover offline submission, seven-day eligibility, restart, Keychain lifecycle, health, gas policy, and notification transitions. Use a controlled notification receiver, disposable PostgreSQL/Kubo, and Anvil with synthetic accounts. Finish by reviewing the full proposed change and resolving findings. Update this plan with exact validation results, implementation decisions, and any remaining limitations before requesting implementation review.
 
 ## Concrete Steps
 
-All repository commands below run from the repository root. During the current plan-only stage, inspect this document and PR scope and run `git diff --check`; do not run implementation milestones. After approval, use Node.js 24, Python 3.9+, Docker/Compose, and Foundry for the integration harness. Existing locked dependencies can be installed with `npm --prefix node/production ci --ignore-scripts --no-audit --no-fund` when needed.
+All repository commands below run from the repository root. During the current plan-only stage, inspect this document and PR scope and run `git diff --check`; do not run implementation milestones. After approval, use Node.js 24, Docker/Compose, and Foundry for the integration harness. Python 3.9+ is needed only to run the old reference tests during the migration milestone. Existing locked dependencies can be installed with `npm --prefix node/production ci --ignore-scripts --no-audit --no-fund` when needed.
 
-Run focused checks as each milestone lands. New filenames below are planned test files to add, with Python wrappers following `test/keychain-worker.test.mjs` so the full suite includes them:
+Run the reference suites before removing the old implementations:
 
-    python3 node/production/test/keychain-worker_test.py
-    python3 node/production/test/upgrade-node_test.py
-    python3 node/production/test/operator-credentials_test.py
-    python3 node/production/test/operator-node_test.py
-    python3 node/production/test/operator-monitor_test.py
+    python3 -B node/production/test/keychain-worker_test.py
+    python3 -B node/production/test/upgrade-node_test.py
+
+Run focused JavaScript checks as each milestone lands. New filenames below are planned test files; the existing helper test files will contain the migrated tests directly instead of invoking Python:
+
+    node --test node/production/test/keychain-worker.test.mjs node/production/test/upgrade-node.test.mjs
+    node --test node/production/test/operator-credentials.test.mjs
+    node --test node/production/test/operator-node.test.mjs
+    node --test node/production/test/operator-monitor.test.mjs
     node --test node/production/test/operator-sign.test.mjs
     node --test node/production/test/inbox.test.mjs node/production/test/inbox-client.test.mjs
     node --test node/production/test/inbox-worker.test.mjs node/production/test/inbox-ledger.test.mjs
@@ -160,13 +181,13 @@ The new integration script must create isolated resources, report sanitized evid
 After implementation, the operator-facing examples below work from a checkout or extracted bundle root after selecting a private profile. The environment variable holds a path, not a credential:
 
     export OYA_OPERATOR_PROFILE="$OYA_LOCAL_DIR/operator.json"
-    python3 node/production/scripts/operator-node.py status
-    python3 node/production/scripts/operator-node.py send --file "$MESSAGE_FILE"
-    python3 node/production/scripts/operator-node.py job-status --job "$JOB_FILE"
-    python3 node/production/scripts/operator-node.py send --job "$JOB_FILE"
-    python3 node/production/scripts/operator-node.py gas-policy
-    python3 node/production/scripts/operator-node.py balance
-    python3 node/production/scripts/operator-node.py monitor --once
+    node node/production/scripts/operator-node.mjs status
+    node node/production/scripts/operator-node.mjs send --file "$MESSAGE_FILE"
+    node node/production/scripts/operator-node.mjs job-status --job "$JOB_FILE"
+    node node/production/scripts/operator-node.mjs send --job "$JOB_FILE"
+    node node/production/scripts/operator-node.mjs gas-policy
+    node node/production/scripts/operator-node.mjs balance
+    node node/production/scripts/operator-node.mjs monitor --once
 
 `MESSAGE_FILE` and `JOB_FILE` are operator-selected private files. The send commands publish content and can cause Ledger gas expenditure; execute them in acceptance only against the disposable fixture or within separately authorized live scope. Monitoring setup examples must name the expected service state and external grace configuration so a user can verify whether alerts are actually enabled.
 
@@ -174,6 +195,7 @@ After implementation, the operator-facing examples below work from a checkout or
 
 | Behavior | Required evidence |
 | --- | --- |
+| JavaScript migration | All 68 existing Python cases have equivalent JavaScript coverage; embedded Python fixtures are replaced; legacy/current helpers contend on the same locks; killed processes release locks; archive rejection and recovery invariants hold. Bundled host tools work without Python or a source checkout on supported macOS/Linux hosts with Node.js 24. |
 | Keychain upgrade | Token-only, node-key-only, combined, and mixed-file selections pass; preview/stop do not retrieve secrets; denied/missing/locked items, changed manifests, Docker failure, symlinks, concurrent operations, partial startup, and cleanup failures leave recoverable state. Synthetic secret sentinels are absent from output, argv, Docker environments, and journals. |
 | Real Keychain lifecycle | A disposable macOS installation upgrades with synthetic Keychain credentials, retains public node identity, removes temporary host files, preserves unrelated containers/volumes, and resumes the same saved job. Mock tests alone do not satisfy this platform check. |
 | Simple status | Direct and worker healthy/busy states succeed; stopped Docker/node, wrong target/address/chain/mode, stale polling, malformed bodies, timeout, retrying, and unknown transaction outcome produce actionable nonzero results. No signing key is retrieved. |
@@ -198,7 +220,7 @@ Monitoring changes do not restart the node, top up wallets, raise gas caps, repl
 
 ## Artifacts and Notes
 
-The only artifact in the initial PR is this ExecPlan. Future implementation artifacts include the operator CLI and modules, a credential-reference example, a profile example, a node-secret overlay, monitor service examples, tests, and a concise operator guide. Use fixture identities and placeholder paths in committed examples; real profiles, keys, job envelopes, alert URLs, and upgrade/monitor records stay outside Git.
+The only artifact in this PR remains this ExecPlan. Future implementation artifacts include the migrated JavaScript upgrade/Keychain helpers and tests, packaged host dependencies, the operator CLI and modules, a credential-reference example, a profile example, a node-secret overlay, monitor service examples, tests, and a concise operator guide. Use fixture identities and placeholder paths in committed examples; real profiles, keys, job envelopes, alert URLs, and upgrade/monitor records stay outside Git.
 
 Approval should identify the approved plan revision and any changes to the recommended defaults. Runtime evidence should contain command names, versions, pass/fail counts, and sanitized observations. Finish each milestone by updating Progress, discoveries, decisions, and outcomes. Recheck overlapping PRs before code changes and resolve compatibility with any newly merged batch logging behavior.
 
@@ -206,12 +228,12 @@ Approval should identify the approved plan revision and any changes to the recom
 
 Proposed host command interface:
 
-    operator-node.py [--profile FILE] status [--json]
-    operator-node.py [--profile FILE] send (--file FILE | --job FILE) [--expires-in SECONDS] [--wait SECONDS] [--json]
-    operator-node.py [--profile FILE] job-status --job FILE [--json]
-    operator-node.py [--profile FILE] gas-policy [--json]
-    operator-node.py [--profile FILE] balance [--json]
-    operator-node.py [--profile FILE] monitor (--once | --watch) [--json]
+    node operator-node.mjs [--profile FILE] status [--json]
+    node operator-node.mjs [--profile FILE] send (--file FILE | --job FILE) [--expires-in SECONDS] [--wait SECONDS] [--json]
+    node operator-node.mjs [--profile FILE] job-status --job FILE [--json]
+    node operator-node.mjs [--profile FILE] gas-policy [--json]
+    node operator-node.mjs [--profile FILE] balance [--json]
+    node operator-node.mjs [--profile FILE] monitor (--once | --watch) [--json]
 
 Use exit 0 for a successful read, accepted submission, or completed publication; 1 for unavailable/unhealthy/unknown/failed operation; and 2 for invalid arguments/configuration. Successful command output always includes an explicit state, so accepted work cannot be confused with completion. A `--wait` deadline ends with a pending result and exit 1, retaining the original acceptance and job identity. Reject `--expires-in` with `--job` or a direct profile and reject `job-status` with a direct profile. If direct batching exists at implementation time, expose its distinct documented result lookup without treating a batch as an inbox job.
 
@@ -219,4 +241,4 @@ Use exit 0 for a successful read, accepted submission, or completed publication;
 
 `credentials.json` version 1 has optional `worker`, `node`, `sender`, and monitoring entries. Each role selects exactly one source. Worker files contain the existing worker-secrets JSON; node files contain the existing literal `KEY=value` format; sender files contain a private key. A worker/sender Keychain source contains only `kind: "keychain"`, `account`, and `service`. A node Keychain source contains `kind: "keychain"` and an `items` map of allowed node-secret environment names to account/service references. Monitoring URL references use protected files or Keychain entries. Missing required references fail the selected action; unrelated roles are not resolved. Both helper entrypoints consume this same schema, and legacy CLI selections adapt to it without writing migration files automatically.
 
-Existing protocols remain authoritative: EIP-191 message signatures, version-1 inbox job signatures, `/v1/jobs`, `/v1/status`, and private `/healthz`. The new signing entrypoint imports existing protocol/validation helpers and returns captured structured data. Host code uses Python's standard library and `security` on macOS; signing uses the pinned Node.js image with existing `ethers`/Oya packages. No new database, contract, paid service, or npm package is required by the proposed core workflow.
+Existing protocols remain authoritative: EIP-191 message signatures, version-1 inbox job signatures, `/v1/jobs`, `/v1/status`, and private `/healthz`. The new signing entrypoint imports existing protocol/validation helpers and returns captured structured data. Host code uses JavaScript ES modules on Node.js 24, with `security` on macOS; signing reuses the existing JavaScript `ethers`/Oya implementation in the pinned image. Host dependency versions are locked and distributed with the release bundle; native locking support is validated for each supported host/runtime combination in the migration milestone. Operators should not need npm installation or a compiler to run the extracted tools. No new database, contract, or paid service is required by the proposed core workflow.
