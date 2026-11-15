@@ -35,6 +35,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q010](#q010) | Testing our assumptions with early users | product discovery, learning, user needs | Answered |
 | [Q011](#q011) | Connections between independent commitments | composability, ecosystem, application design | Answered |
 | [Q012](#q012) | Changing a long-running commitment | consent, adaptability, ongoing commitments | Answered |
+| [Q013](#q013) | Understanding before delegation | accessibility, informed consent, user experience | Answered |
 | [Q015](#q015) | Continuity when an agent leaves | resilience, agent choice, ongoing commitments | Answered |
 
 <a id="q001"></a>
@@ -394,6 +395,41 @@ How should a long-running commitment adapt when its participants' needs change?
 - **Source updated:** 2026-11-15T19:05:25Z
 
 A commitment could include rules that allow updates to their rules. That would not necessarily be the case for every commitment, and there is no reason the same user could not spread activity across multiple commitments. But it would definitely be useful for long-running commitments, and changes to the rules may include timelocks before the new rules go into effect to clear up old business.
+
+<a id="q013"></a>
+
+<!-- oya-dialogue-question: Q013 -->
+
+## Q013 — Understanding before delegation
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-15
+- **Topics:** accessibility, informed consent, user experience
+- **Status:** Answered
+- **Source PR:** [#174](https://github.com/oyaprotocol/oya-commitments/pull/174)
+
+### Context
+
+In [Q001](#q001), @pemulis described users being able to understand and control their commitments. As we make the experience easier, deciding what people still need to understand could guide onboarding and interface design.
+
+### Question
+
+What should someone understand about a commitment before trusting an agent to act on it for them?
+
+### Answer
+
+#### @pemulis — 2026-11-15
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 6901290451](https://github.com/oyaprotocol/oya-commitments/pull/174#issuecomment-6901290451)
+- **Source created:** 2026-11-15T21:01:03Z
+- **Source updated:** 2026-11-15T21:01:03Z
+
+The nature of a commitment is that you would not necessarily need to trust an agent. Some commitments could be written such that any agent can handle it, and the protocol itself (with its potential for disputes, and dispute resolution) ensures the agent does the job correctly. In some cases you may want to designate a specific agent, or allow a specific agent to register or "reserve" their spot, to avoid conflicts. That mechanism might also require the registered agent to post a bond within the commitment that they would lose if they fail to do the job correctly.
+
+As a simple example, an agent may post a bond to promise to show up to perform a limit order when a particular price is hit, which they will lose if they don't show up. (A proposal could be made to credit the bond to the original user of the commitment.) That would also provide certainty to the agent that they will be able to earn the fees from that commitment, giving them confidence to spend resources monitoring the commitment and executing it, knowing that someone else won't beat them to the punch.
+
+It will depend on the nature of the commitment whether it is open to anyone or to a designated agent. But in either case, you don't really need to "trust" the agent to follow the rules, since the protocol enforces the rules regardless.
 
 <a id="q015"></a>
 

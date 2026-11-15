@@ -9,6 +9,7 @@ import { readJson, inboxUrl, positive, token } from './config.mjs';
 import { targetName, executionIdentity, validId } from './protocol.mjs';
 import { createInboxClient, json } from './http.mjs';
 import { processWork } from './processor.mjs';
+import { parsePeers, loadPeers, publicationSigners } from '../peers/config.mjs';
 
 // Synchronous log callbacks must not change job state or interrupt cleanup.
 const safeLogger = log => record => { try { log(record); } catch {} };
@@ -96,10 +97,11 @@ async function main() {
     const input = await readJson(nodeFile);
     const config = parseConfig(input, { env: secrets });
     if (config.batchLogging) throw new Error('Batch logging is supported only by the direct runtime.');
-    const { allowedSigners } = input;
     const worker = await readJson(workerFile);
-    if (Object.keys(worker).some(key => !['url', 'target', 'pollIntervalMs'].includes(key))) throw new Error('Unknown worker field.');
+    if (Object.keys(worker).some(key => !['url', 'target', 'pollIntervalMs', 'peers'].includes(key))) throw new Error('Unknown worker field.');
     const target = targetName(worker.target);
+    const peers = await loadPeers({ peers: parsePeers(worker.peers) }, workerFile);
+    const allowedSigners = publicationSigners(input.allowedSigners, peers);
     const api = createInboxClient(inboxUrl(worker.url), token((await readJson(workerSecretsFile)).workerToken));
     const pollIntervalMs = positive(worker.pollIntervalMs, 5000, 60000);
     if (pollIntervalMs < 1000) throw new Error('Polling interval must be at least one second.');

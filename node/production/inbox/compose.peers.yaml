@@ -1,0 +1,9 @@
+# Opt-in installed registry snapshot. Recreate inbox to adopt edits.
+services:
+  inbox:
+    volumes:
+      - type: bind
+        source: ${OYA_INBOX_DIR:?Set OYA_INBOX_DIR}/peer-registry.json
+        target: /config/peer-registry.json
+        read_only: true
+        bind: {create_host_path: false}
