@@ -8,26 +8,30 @@ A reviewer can retrieve one manifest and one selected original signed message, v
 
 ## Progress
 
-- [x] 2026-11-15: Read root guidance, production architecture, producer, historical formats and generic evidence implementation.
+- [x] 2026-11-15: Read root guidance, production architecture, producer, manifest formats and generic evidence implementation.
 - [x] 2026-11-15: Implemented the library, read-only CLI, operator guidance and Docker allowlist.
 - [x] 2026-11-15: Resumed unpublished work after fresh discovery at `f51fd93`. PRs #165 and #169 are merged. PR #173 is the only open substantial node feature and owns ordinary v1 registry-authorized publication.
 - [x] 2026-11-15: Independent review passed 186 focused and 519 production tests with no failures/skips or code blockers. Parent reran all 519 production tests and passed syntax, whitespace, local image build and offline packaged import checks.
 - [x] 2026-11-15: Inspected the cumulative diff and measured 799 changed code/test/config lines against the 3,000-line limit. Reconciled the next candidate with founder comments on #173.
-- [ ] Publish after the final live capacity/overlap check, then verify remote PR, head, label and initial CI.
+- [x] 2026-11-15: PR #177 published. Assigned head `b843215748c04198bfb607761db24b117cfeda7d` had seven successful CI checks before this follow-up.
+- [x] 2026-11-15: Applied founder correction: accept only CID lines, reject both unmerged JSON shapes, and remove obsolete metadata reporting and compatibility guidance.
+- [x] 2026-11-15: Validated the correction: 186 focused and 519 production tests passed with no failures or skips. Source/CLI/test syntax and whitespace checks passed.
+- [x] 2026-11-15: Reviewed the correction and its regression tests.
+- [ ] Verify the published follow-up head and its CI.
 
 ## Surprises & Discoveries
 
-The existing verifier already permits forwarding contracts and attributes `Log.node` to the immediate Ledger caller. The previous candidate's reference to transaction signer is incorrect. New manifests are plain LF-separated canonical CIDs, while historical checkpoints retain two JSON formats. Generic evidence intentionally permits arbitrary binary content and must remain unchanged.
+The existing verifier already permits forwarding contracts and attributes `Log.node` to the immediate Ledger caller. The previous candidate's reference to transaction signer is incorrect. Manifests are plain LF-separated canonical CIDs. Founder pemulis clarified in PR #177 comment 6901968095 that the JSON format was never merged, so there are no historical JSON formats to support. Generic evidence intentionally permits arbitrary binary content and must remain unchanged.
 
 ## Decision Log
 
 - 2026-11-15, Hermes: Select `batch-evidence-v1` from batch logging candidate revision 3. The producer and inspection work are merged in the assigned base. This delivers independently useful read-only review and avoids the peer-publication feature's transport decisions.
 - 2026-11-15, Hermes: Reuse bounded transport, CID integrity, input reading and receipt verification from `ledger-evidence.mjs`. Require raw CID binding for both objects. Unsupported codecs produce partial results, never signature-only success. Optional Ledger verification re-reads the manifest using the generic verifier, preserving its independent checks.
-- 2026-11-15, Hermes: Accept exactly the current line format and two historical version-1 JSON shapes. Historical execution/digest metadata is syntax checked but not treated as authenticated execution identity. Select by CID, retain order and report all matching positions. Fetch no other members.
+- 2026-11-15, Hermes: Supersede the initial JSON-compatibility decision following founder comment 6901968095. Accept only newline-separated CIDs because neither proposed JSON format was merged. Reject both JSON shapes before member or Ledger reads. Select by CID, retain order and report all matching positions. Fetch no other members.
 
 ## Outcomes & Retrospective
 
-The read-only review path is implemented and validated. It verifies the original signed member only after both raw CID bindings and manifest membership succeed. Optional Ledger evidence remains a distinct provider-snapshot check. Independent review found no code blockers. Publication and human review remain. The source implementation is not a deployment.
+The read-only review path is implemented and validated. It verifies the original signed member only after both raw CID bindings and manifest membership succeed. Optional Ledger evidence remains a distinct provider-snapshot check. The founder correction removes unneeded JSON parsing and metadata reports while retaining exact CID binding, signed-message validation, bounded reads and independent Ledger checks. The corrected implementation passes all 186 focused and 519 production tests. Remote verification and human review remain. The source implementation is not a deployment.
 
 ## Context and Orientation
 
@@ -49,11 +53,11 @@ From repository root:
     git diff --check
     git diff --numstat
 
-Keep test logs and the proposed PR body outside Git. Publish the owned feature branch only after the live capacity and overlap checks. Record remote publication and CI observations in the private checkpoint after handoff.
+Keep test logs outside Git. Publish the correction on the existing PR #177 branch after review and validation. Verify the exact remote head and current-head CI.
 
 ## Validation and Acceptance
 
-Prove exact CID/byte binding before parsing/signature claims; strict current and legacy shapes; bounded count/bytes/time; no URL traversal or recursive member fetching; invalid membership, signature and bytes failures; optional chain/contract/event/caller expectations; forwarding caller distinct from transaction sender; sanitized reports and guarded read-only CLI exit statuses. A local test must publish real signed messages through the production producer, log the manifest using real signed transaction bytes with a controlled RPC, retrieve the preserved originals and review through the CLI. Mocked storage/chain responses do not establish live Kubo, public availability, EVM execution or finality. Run the entire production suite. Cumulative added/deleted code, tests, scripts and config must stay below 3,000 lines.
+Prove exact CID/byte binding before parsing/signature claims; strict CID-line parsing and rejection of both unmerged JSON shapes; bounded count/bytes/time; no URL traversal or recursive member fetching; invalid membership, signature and bytes failures; optional chain/contract/event/caller expectations; forwarding caller distinct from transaction sender; sanitized reports and guarded read-only CLI exit statuses. A local test must publish real signed messages through the production producer, log the manifest using real signed transaction bytes with a controlled RPC, retrieve the preserved originals and review through the CLI. Mocked storage/chain responses do not establish live Kubo, public availability, EVM execution or finality. Run the entire production suite. Cumulative added/deleted code, tests, scripts and config must stay below 3,000 lines.
 
 ## Idempotence and Recovery
 
@@ -61,9 +65,11 @@ Review makes bounded reads only and can be repeated. No retries, state writes or
 
 ## Artifacts and Notes
 
-On Node 26.12.1, the focused command passed 186 tests and the production command passed 519, with zero failures or skips. Independent review reran both. Parent independently reran all 519 production tests, both syntax checks and `git diff --cached --check`. A local build from `node/production` using `docker build -t oya-batch-evidence-check .` succeeded. Offline container imports of the library and CLI passed and invalid settings failed closed. These packaging checks do not exercise a live IPFS or EVM service.
+Before the founder correction, on Node 26.12.1, the focused command passed 186 tests and the production command passed 519, with zero failures or skips. Independent review reran both. Parent independently reran all 519 production tests, both syntax checks and `git diff --cached --check`. A local build from `node/production` using `docker build -t oya-batch-evidence-check .` succeeded. Offline container imports of the library and CLI passed and invalid settings failed closed. These packaging checks do not exercise a live IPFS or EVM service.
 
-Cumulative code/test/config budget is 799 additions + 0 deletions = 799 lines. The controlled-transport end-to-end test publishes two genuinely signed messages through production HTTP, preserves actual uploaded bytes, prepares/signs one manifest transaction, then runs the guarded CLI to retrieve and review the original message. Transport-provided receipt data is synthetic, not EVM execution or public-chain evidence.
+Before the founder correction, cumulative code/test/config budget was 799 additions + 0 deletions = 799 lines. The controlled-transport end-to-end test publishes two genuinely signed messages through production HTTP, preserves actual uploaded bytes, prepares/signs one manifest transaction, then runs the guarded CLI to retrieve and review the original message. Transport-provided receipt data is synthetic, not EVM execution or public-chain evidence.
+
+Correction validation on Node 26.12.1: `npm ci --prefix node/production --ignore-scripts` succeeded. The focused and full production commands above passed 186 and 519 tests respectively, with zero failures, cancellations or skips. Syntax checks for the library, CLI and test module and `git diff --check` passed. Docker and live-service checks were not rerun for this correction. Cumulative code/test/config changes now total 782 lines, below the 3,000-line budget. The next feature candidate below is unchanged.
 
 ## Interfaces and Dependencies
 
