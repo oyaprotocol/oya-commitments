@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFile, execFileSync, spawnSync } from 'node:child_process';
+import { createServer } from 'node:http';
+import { promisify } from 'node:util';
 import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,10 +23,10 @@ function fixture(t) {
     mkdirSync(join(source, 'scripts'), { recursive: true });
     mkdirSync(bin);
     for (const name of ['src', 'docker', 'inbox', 'peers', 'Dockerfile', '.dockerignore', 'package.json', 'package-lock.json',
-        'compose.yaml', 'README.md', 'batch-logging.md', 'deploy-droplet.md', 'deploy-with-agent.md', 'run-locally.md', 'run-direct.md', 'host-inbox.md', 'inbox-api.md', 'release-image.md', 'testnet-ledger.md', 'upgrade-node.md']) {
+        'compose.yaml', 'README.md', 'operator-status.md', 'operator.example.json', 'batch-logging.md', 'deploy-droplet.md', 'deploy-with-agent.md', 'run-locally.md', 'run-direct.md', 'host-inbox.md', 'inbox-api.md', 'release-image.md', 'testnet-ledger.md', 'upgrade-node.md']) {
         cpSync(join(runtime, name), join(source, name), { recursive: true });
     }
-    for (const name of ['publish-image.sh', 'deploy-droplet.sh', 'deploy-droplet-remote.sh', 'keychain-worker.py', 'upgrade-node.py', 'peer-directory.mjs']) {
+    for (const name of ['publish-image.sh', 'deploy-droplet.sh', 'deploy-droplet-remote.sh', 'keychain-worker.py', 'upgrade-node.py', 'peer-directory.mjs', 'operator-node.mjs', 'operator-profile.mjs', 'operator-status.mjs']) {
         cpSync(join(runtime, 'scripts', name), join(source, 'scripts', name));
     }
     const agent = 'agent-library/agents/hourly-message-test/agent.mjs';
@@ -120,10 +122,10 @@ mkdir "$3"
     assert.equal(statSync(privateDirectory).mode & 0o777, 0o700, 'Subsequent private directories retain the operator umask.');
     assert.equal(statSync(join(privateDirectory, 'node.env')).mode & 0o777, 0o600, 'Subsequent private files retain the operator umask.');
     assert.deepEqual(readdirSync(bundle).sort(), ['README.md', 'batch-logging.md', 'compose.yaml', 'deploy-droplet.md', 'deploy-with-agent.md', 'docker', 'host-inbox.md', 'image.txt',
-        'inbox', 'inbox-api.md', 'peers', 'release-image.md', 'run-direct.md', 'run-locally.md', 'scripts', 'testnet-ledger.md', 'upgrade-node.md']);
+        'inbox', 'inbox-api.md', 'operator-status.md', 'operator.example.json', 'peers', 'release-image.md', 'run-direct.md', 'run-locally.md', 'scripts', 'src', 'testnet-ledger.md', 'upgrade-node.md']);
     assert.deepEqual(readdirSync(join(bundle, 'inbox')).sort(), ['Caddyfile', 'compose.https.yaml', 'compose.keychain-worker.yaml', 'compose.peers.yaml', 'compose.postgres.yaml',
         'compose.worker.yaml', 'compose.yaml', 'inbox.example.json', 'worker.example.json']);
-    assert.deepEqual(readdirSync(join(bundle, 'scripts')).sort(), ['deploy-droplet-remote.sh', 'deploy-droplet.sh', 'keychain-worker.py', 'peer-directory.mjs', 'upgrade-node.py']);
+    assert.deepEqual(readdirSync(join(bundle, 'scripts')).sort(), ['deploy-droplet-remote.sh', 'deploy-droplet.sh', 'keychain-worker.py', 'operator-node.mjs', 'operator-profile.mjs', 'operator-status.mjs', 'peer-directory.mjs', 'upgrade-node.py']);
     assert.deepEqual(readdirSync(join(bundle, 'docker')).sort(), ['Caddyfile', 'compose.http.yaml', 'compose.testing.yaml', 'config.example.json', 'runtime.env.example']);
     const directoryBytes = readFileSync(join(bundle, 'peers/testnet-directory.json'));
     assert.deepEqual(directoryBytes, readFileSync(join(f.source, 'peers/testnet-directory.json')));
@@ -154,11 +156,57 @@ mkdir "$3"
     assert.equal(statSync(join(unpacked, agent)).mode & 0o777, 0o644, 'The container user must be able to read the mounted agent source.');
     assert.equal(readFileSync(join(unpacked, agent), 'utf8'), readFileSync(join(f.checkout, agent), 'utf8'));
     assert.equal(readFileSync(join(bundle, 'image.txt'), 'utf8'), `${repository}@${digest}\n`);
-    for (const name of ['deploy-droplet.sh', 'deploy-droplet-remote.sh', 'keychain-worker.py', 'upgrade-node.py', 'peer-directory.mjs']) {
+    for (const name of ['deploy-droplet.sh', 'deploy-droplet-remote.sh', 'keychain-worker.py', 'upgrade-node.py', 'peer-directory.mjs', 'operator-node.mjs', 'operator-profile.mjs', 'operator-status.mjs']) {
         assert.equal(readFileSync(join(bundle, 'scripts', name), 'utf8'), readFileSync(join(f.source, 'scripts', name), 'utf8'));
     }
     assert.equal((result.stdout + result.stderr).includes('private-fixture-marker'), false);
     assert.notEqual(f.run().status, 0, 'must not overwrite previous release output');
+});
+
+test('runtime image allowlist includes shared public health dependencies', () => {
+    const rules = readFileSync(join(runtime, '.dockerignore'), 'utf8').split('\n');
+    for (const path of ['src/defaults.mjs', 'src/public-settings.mjs', 'src/health.mjs']) {
+        assert.ok(rules.includes(`!${path}`), `${path} must be shipped to the runtime image`);
+    }
+});
+
+test('extracted status closure works with no checkout, npm dependencies, Docker or secrets', async t => {
+    const f = fixture(t);
+    const published = f.run('', [repository, 'node-v0.1.0', f.output, '--dry-run']);
+    assert.equal(published.status, 0, published.stderr);
+    const unpacked = join(f.directory, 'standalone');
+    mkdirSync(unpacked);
+    execFileSync('tar', ['-xzpf', join(f.output, 'oya-node-v0.1.0.tar.gz'), '-C', unpacked]);
+    rmSync(f.checkout, { recursive: true, force: true });
+    const bundle = join(unpacked, 'node/production');
+    assert.equal(existsSync(join(bundle, 'node_modules')), false);
+    assert.deepEqual(readdirSync(join(bundle, 'src')).sort(), ['defaults.mjs', 'health.mjs', 'public-settings.mjs']);
+    const privateDir = join(f.directory, 'private-profile');
+    mkdirSync(privateDir, { mode: 0o700 });
+    const nodeAddress = '0x2222222222222222222222222222222222222222';
+    const ledgerContract = '0x1111111111111111111111111111111111111111';
+    let health;
+    const server = createServer((_req, res) => { res.end(JSON.stringify(health)); });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+    for (const role of ['direct', 'worker']) for (const mode of ['ledger', 'ipfs']) {
+        const identity = mode === 'ledger' ? { mode, chainId: 31337, ledgerContract, nodeAddress } : { mode };
+        health = { ...identity, ...(role === 'worker'
+            ? { role, target: 'test', status: 'idle', lastPollAt: new Date().toISOString() } : { status: 'ready', busy: false }) };
+        const config = mode === 'ledger' ? { mode, chainId: 31337, ledgerContract } : { mode };
+        writeFileSync(join(privateDir, 'node.json'), JSON.stringify(config));
+        writeFileSync(join(privateDir, 'worker.json'), JSON.stringify({ target: 'test' }));
+        const profile = { version: 1, role, nodeConfig: 'node.json', healthUrl: `http://127.0.0.1:${server.address().port}/healthz`,
+            ...(mode === 'ledger' ? { nodeAddress } : {}), ...(role === 'worker' ? { workerConfig: 'worker.json' } : {}) };
+        writeFileSync(join(privateDir, 'operator.json'), JSON.stringify(profile), { mode: 0o600 });
+        const result = await promisify(execFile)(process.execPath,
+            ['--', join(bundle, 'scripts/operator-node.mjs'), 'status', '--json'], {
+                cwd: unpacked, env: { PATH: '/nonexistent', OYA_OPERATOR_PROFILE: join(privateDir, 'operator.json') }, timeout: 10000,
+            });
+        assert.equal(result.stderr, '');
+        assert.equal(JSON.parse(result.stdout).healthy, true);
+        assert.equal(JSON.parse(result.stdout).verified, true);
+    }
 });
 
 test('dry run loads the image locally, preserves build metadata, and never pushes', (t) => {

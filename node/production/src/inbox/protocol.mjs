@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { targetName } from '../public-settings.mjs';
 import { verifyMessage, Transaction } from 'ethers';
 import { createSignedMessageAuthorizer } from '@oyaprotocol/messages';
 import { encodeLedgerCall } from '@oyaprotocol/ethereum';
@@ -11,10 +12,7 @@ const canonical = value => value && typeof value === 'object' ? (Array.isArray(v
     Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])]))) : value;
 export const digest = value => createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
 export const validId = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
-export function targetName(value) {
-    if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(value)) throw new Error('Invalid inbox target.');
-    return value;
-}
+export { targetName } from '../public-settings.mjs';
 export function jobText(job) {
     return 'Oya inbox job v1\n' + JSON.stringify([job.target, job.requestId, job.expiresAt,
         job.message.text, job.message.signer.toLowerCase(), job.message.signature]);

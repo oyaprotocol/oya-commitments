@@ -9,6 +9,7 @@ The default deployment runs Oya and Kubo on your local device, with a portable P
 | **Set up a first node with a coding agent** | **[Deploy with an agent](deploy-with-agent.md)** — default Sepolia Ledger setup, a task prompt, secure credential handoff, and acceptance checks. |
 | Look up the default chain and contract | [Deployed Sepolia Ledger](#deployed-sepolia-ledger) — target, verification evidence, prerequisites, and release compatibility. |
 | Set up a node manually | [Run locally](run-locally.md) — start here, then follow its [inbox hosting](host-inbox.md) step. |
+| Check direct or worker health without a key | [Host status](operator-status.md) — private profile, public identity and bounded loopback health. |
 | Monitor or resume an existing worker | [Local operation](run-locally.md#monitor-stop-and-resume), or [Keychain startup](deploy-with-agent.md#keychain-and-runtime-secrets-are-different) if configured. |
 | Upgrade an existing inbox and worker | [Verified release upgrades](upgrade-node.md) — preview, coordination, Keychain workers and recovery records. |
 | Maintain or recover the inbox | [Retention, recovery, and migration](host-inbox.md#retention-recovery-and-migration). |

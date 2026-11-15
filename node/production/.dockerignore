@@ -11,6 +11,8 @@ src/**
 !src/bytecode.mjs
 !src/config.mjs
 !src/defaults.mjs
+!src/public-settings.mjs
+!src/health.mjs
 !src/main.mjs
 !src/ledger-evidence.mjs
 !src/verify-ledger.mjs
