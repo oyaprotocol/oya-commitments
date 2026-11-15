@@ -2,7 +2,8 @@ import { open, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Wallet } from 'ethers';
-import { signJob } from './protocol.mjs';
+import { signJob, targetName } from './protocol.mjs';
+import { readWorkerToken, validateInspection } from './inspection.mjs';
 import { inboxUrl, readJson } from './config.mjs';
 import { createInboxClient } from './http.mjs';
 
@@ -29,6 +30,13 @@ export async function main(args = process.argv.slice(2)) {
     if (command === 'evidence') {
         const { main: verify } = await import('../verify-ledger.mjs');
         await verify(rest);
+    } else if (command === 'inspect' && rest.length === 3) {
+        const [url, target, tokenFile] = rest;
+        const origin = inboxUrl(url);
+        targetName(target);
+        const workerToken = await readWorkerToken(tokenFile);
+        const result = await createInboxClient(origin, workerToken)('/v1/worker/inspect', { target });
+        console.log(JSON.stringify(validateInspection(result, target), null, 2));
     } else if (command === 'keygen' && rest.length === 1) {
         const wallet = Wallet.createRandom();
         await saveNew(rest[0], wallet.privateKey + '\n');
@@ -46,7 +54,7 @@ export async function main(args = process.argv.slice(2)) {
         const [url, jobFile] = rest;
         const result = await createInboxClient(inboxUrl(url))(`/v1/${command === 'submit' ? 'jobs' : 'status'}`, await readJson(jobFile));
         console.log(JSON.stringify(result, null, 2));
-    } else throw new Error('Usage: client keygen KEY_FILE | prepare KEY_FILE TARGET TEXT_FILE JOB_FILE | submit|status INBOX_URL JOB_FILE | evidence LOG_FILE SETTINGS_FILE');
+    } else throw new Error('Usage: client keygen KEY_FILE | prepare KEY_FILE TARGET TEXT_FILE JOB_FILE | submit|status INBOX_URL JOB_FILE | inspect INBOX_URL TARGET TOKEN_FILE | evidence LOG_FILE SETTINGS_FILE');
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
     main().catch(error => {
