@@ -466,7 +466,7 @@ Pending an answer from `@pemulis` or `@nesseps`.
 - **Asked on:** 2026-11-15
 - **Topics:** commitment design, reuse, quality
 - **Status:** Awaiting answer
-- **Source PR:** Pending publication.
+- **Source PR:** [#180](https://github.com/oyaprotocol/oya-commitments/pull/180)
 
 ### Context
 
