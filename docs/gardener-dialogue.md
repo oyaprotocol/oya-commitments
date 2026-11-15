@@ -283,7 +283,7 @@ Nothing, that's it. They could always make a new commitment but the resolution m
 - **Asked on:** 2026-11-15
 - **Topics:** composability, ecosystem, application design
 - **Status:** Awaiting answer
-- **Source PR:** Pending publication.
+- **Source PR:** [#171](https://github.com/oyaprotocol/oya-commitments/pull/171)
 
 ### Context
 
