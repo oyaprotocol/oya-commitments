@@ -45,17 +45,14 @@ Only one operation runs at once. Concurrent work or a full/sealed/blocked batch 
 
 A timer checks at most once per second. A nonempty batch flushes when the count threshold is reached **or** elapsed wall-clock time since the last locally verified successful log reaches `maxWaitMs`. On first initialization the clock starts at journal creation. Idle time counts, so the first message after a long idle interval can flush at the next tick. The timestamp survives restart. Wall-clock corrections, sleep, active operations and provider failures can delay a flush; this is a scheduling target, not a delivery deadline. Empty batches never publish. A failed or interrupted sealed batch retries on later ticks without admitting new members. Each attempt is bounded by `operationTimeoutMs`; provider retry/receipt settings and gas/fee limits still apply.
 
-Before publishing the manifest, the runtime durably freezes batch membership and rechecks the current explicit signer policy. The manifest is UTF-8 JSON with this shape:
+Before publishing the manifest, the runtime durably freezes batch membership and rechecks the current explicit signer policy. The manifest is UTF-8 plain text: canonical CIDs in admission order, separated by a single LF (`\n`), with no trailing newline, header or JSON wrapper. For example (abbreviated CIDs):
 
-```json
-{
-  "type": "oya-message-batch",
-  "version": 1,
-  "messages": ["bafk...", "bafk..."]
-}
+```text
+bafk...
+bafk...
 ```
 
-`messages` lists published CIDs in admission order, independent of the originating node or any logging chain or Ledger. The manifest contains only `type`, `version` and `messages`; batch IDs, execution identity and message digests stay in the private journal. Identical ordered CIDs produce identical manifest bytes across nodes and batches. Each CID points to the independent signed envelope; no prior Ledger log is required. The node uploads/pins the manifest before logging **its** CID, not each member CID. A manifest may contain one message when the timer fires.
+Canonical CIDs contain no line breaks, so the separator is unambiguous. The list is independent of the originating node or any logging chain or Ledger; batch IDs, execution identity and message digests stay in the private journal. Identical ordered CIDs produce identical manifest bytes across nodes and batches. Each CID points to the independent signed envelope; no prior Ledger log is required. The node uploads/pins the manifest before logging **its** CID, not each member CID. A manifest may contain one message when the timer fires.
 
 The existing evidence verifier can verify the logged manifest bytes, just as any logged content. Member CID integrity, message signatures and membership require separate consumer checks. The manifest itself makes no claim about a chain, contract or publishing node; those belong to the separately verified Ledger transaction/event. Logging is not independent proof of availability; arrange IPFS replication separately. The local journal is bounded to one pending batch plus 100 summaries; historical IPFS pins and chain history are not pruned by this feature.
 
@@ -65,7 +62,7 @@ The private journal and configured IPFS provider are trusted integrity boundarie
 
 The journal records each message CID, frozen membership, manifest CID and exact signed transaction bytes in order. Atomic replacement and fsync precede broadcasting. Recovery reuses the stored transaction/hash and existing inbox receipt-verification machinery; an ambiguous send, timeout or malformed receipt never causes a newly signed replacement. A journal write failure blocks further work until restart reloads disk. Provider failures retain membership and retry; health reports `503 / batch_blocked` while blocked and the direct status CLI reports failure.
 
-This pre-merge format correction retains manifest version 1. Earlier source revisions included execution metadata and per-message digests. An already checkpointed manifest CID (and any signed transaction) is retained exactly on upgrade; it is never rewritten into the new format. Pending work without a manifest CID publishes the content-only format. Drain earlier revisions before upgrading when uniform manifest shape matters, and distinguish legacy objects from CID strings when reading historical manifests. The journal schema and its execution-identity checks are unchanged.
+Earlier source revisions published JSON with `type` and `version`, containing either CID strings or objects with per-message digests and execution metadata. An already checkpointed manifest CID (and any signed transaction) is retained exactly on upgrade; it is never rewritten into the line-separated format. Pending work without a manifest CID publishes the plain CID list, including a sealed batch whose upload was not checkpointed. Drain earlier revisions before upgrading when uniform manifest shape matters. Historical consumers must distinguish legacy JSON from newline-separated CIDs. A one-member manifest is just that CID, with no newline. The private journal schema and its execution-identity checks are unchanged.
 
 A changed chain, contract or node account fails journal identity validation. Keep existing fee limits sufficient to validate a pending transaction. A revoked signer blocks a batch that has not yet checkpointed a transaction; restore authorization only after an explicit local decision. Once a transaction was durably signed, it may already have broadcast: recovery reconciles/rebroadcasts those exact bytes even if the message signer was subsequently removed. It does not authorize new messages from that signer or sign a replacement. A verified revert is terminal and visible; it is not automatically charged another transaction.
 

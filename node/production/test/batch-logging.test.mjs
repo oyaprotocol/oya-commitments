@@ -33,8 +33,10 @@ async function setup(t, overrides = {}) {
     } };
     const transport = async (url, request) => {
         if (url.startsWith(f.config.ipfs.url)) {
-            const text = await request.body.get('file').text();
-            if (JSON.parse(text).type === 'oya-message-batch' && f.state.manifestFailure) throw new Error('secret-provider-error');
+            const file = request.body.get('file');
+            const text = await file.text();
+            if (file.name === 'oya-message-batch.txt') assert.equal(file.type, 'text/plain');
+            if (file.name.startsWith('oya-message-batch.') && f.state.manifestFailure) throw new Error('secret-provider-error');
             const response = await f.transport(url, request);
             if (!response.ok) return response;
             const cid = contentCid(text);
@@ -114,9 +116,7 @@ test('HTTP count threshold publishes separate messages then one content-only man
     assert.equal(s.f.state.signs, 1);
     assert.equal(s.f.state.sends, 1);
     assert.notEqual(s.uploads[0].cid, s.uploads[1].cid);
-    const manifest = JSON.parse(s.uploads[2].text);
-    assert.deepEqual(manifest, { type: 'oya-message-batch', version: 1,
-        messages: s.uploads.slice(0, 2).map(m => m.cid) });
+    assert.equal(s.uploads[2].text, s.uploads.slice(0, 2).map(m => m.cid).join('\n'));
     assert.equal(abi.decodeFunctionData('log', s.f.state.transactions[0].data)[0], s.uploads[2].cid);
     assert.ok(!JSON.stringify(status).includes('rawTransaction'));
     assert.ok(!JSON.stringify(status).includes(s.f.message.text));
@@ -149,7 +149,7 @@ test('identical ordered CIDs produce identical manifest bytes across nodes, chai
     for (const message of [...messages].reverse()) await batches[0].accept(message);
     await batches[0].flush();
     assert.notEqual(first.uploads[8].cid, first.uploads[2].cid);
-    assert.deepEqual(JSON.parse(first.uploads[8].text).messages, JSON.parse(first.uploads[2].text).messages.reverse());
+    assert.deepEqual(first.uploads[8].text.split('\n'), first.uploads[2].text.split('\n').reverse());
 });
 
 for (const changed of ['chain', 'contract', 'node']) {
@@ -191,6 +191,7 @@ test('manifest upload acknowledgement loss retries identical bytes after restart
     const saved = await s.journal();
     assert.equal(saved.pending.sealed, true);
     assert.equal(saved.pending.cid, undefined);
+    assert.equal(s.uploads[1].text, s.uploads[0].cid);
     assert.equal(s.f.state.signs, 0);
     assert.equal(s.f.state.sends, 0);
     await assert.rejects(batch.accept(await signedMessage(s.f.agent, 'cannot join')));
@@ -204,17 +205,52 @@ test('manifest upload acknowledgement loss retries identical bytes after restart
     assert.equal(batch.status().recent[0].manifestCid, s.uploads[1].cid);
 });
 
-for (const signed of [false, true]) {
-    test(`pre-correction manifest checkpoint is retained on restart (${signed ? 'signed' : 'unsigned'})`, async t => {
+test('manifest checkpoint write failure retries exact CID lines after restart without premature signing', async t => {
+    const s = await setup(t);
+    const transport = s.options.fetch;
+    let failCheckpoint = true;
+    s.options.fetch = async (url, request) => {
+        const response = await transport(url, request);
+        if (failCheckpoint && url.startsWith(s.f.config.ipfs.url) && s.uploads.length === 3) {
+            failCheckpoint = false;
+            await mkdir(join(s.directory, 'batch.next'));
+        }
+        return response;
+    };
+    let batch = await s.open();
+    await batch.accept(s.f.message);
+    await batch.accept(await signedMessage(s.f.agent, 'second member'));
+    await assert.rejects(batch.flush());
+    const saved = await s.journal();
+    assert.equal(saved.pending.sealed, true);
+    assert.equal(saved.pending.cid, undefined);
+    assert.equal(s.f.state.signs, 0);
+    assert.equal(s.f.state.sends, 0);
+    await assert.rejects(batch.flush());
+    await batch.close();
+    await rm(join(s.directory, 'batch.next'), { recursive: true });
+    batch = await s.open();
+    await batch.flush();
+    assert.equal(s.uploads[2].text, s.uploads.slice(0, 2).map(({ cid }) => cid).join('\n'));
+    assert.deepEqual(s.uploads[3], s.uploads[2]);
+    assert.equal(s.uploads.length, 4);
+    assert.equal(s.f.state.signs, 1);
+    assert.equal(s.f.state.sends, 1);
+    assert.equal(batch.status().recent[0].manifestCid, s.uploads[2].cid);
+});
+
+for (const legacyFormat of ['execution-metadata', 'content-only-json']) for (const signed of [false, true]) {
+    test(`${legacyFormat} manifest checkpoint is retained on restart (${signed ? 'signed' : 'unsigned'})`, async t => {
         const s = await setup(t);
         const transport = s.options.fetch;
         // Emulate bytes published by the earlier revision, without changing the journal format.
         s.options.fetch = async (url, request) => {
             if (url.startsWith(s.f.config.ipfs.url)) {
-                const text = await request.body.get('file').text();
-                if (JSON.parse(text).type === 'oya-message-batch') {
+                if (request.body.get('file').name.startsWith('oya-message-batch.')) {
                     const saved = await s.journal();
-                    const legacy = { type: 'oya-message-batch', version: 1, batchId: saved.pending.id,
+                    const legacy = legacyFormat === 'content-only-json'
+                        ? { type: 'oya-message-batch', version: 1, messages: saved.pending.entries.map(({ cid }) => cid) }
+                        : { type: 'oya-message-batch', version: 1, batchId: saved.pending.id,
                         execution: saved.identity,
                         messages: saved.pending.entries.map(({ cid, messageDigest }) => ({ cid, messageDigest })) };
                     const body = new FormData();
@@ -233,7 +269,7 @@ for (const signed of [false, true]) {
         const saved = await s.journal();
         assert.ok(saved.pending.cid);
         assert.equal(Boolean(saved.pending.transaction), signed);
-        assert.ok(JSON.parse(s.uploads[1].text).execution);
+        assert.equal(Boolean(JSON.parse(s.uploads[1].text).execution), legacyFormat === 'execution-metadata');
         await batch.close();
         s.options.fetch = transport;
         s.f.state.receiptMode = 'mined';
@@ -252,7 +288,10 @@ for (const signed of [false, true]) {
         assert.equal(s.f.state.signs, 1);
         assert.equal(s.f.state.sends, 1);
         assert.equal(batch.status().recent[0].manifestCid, saved.pending.cid);
-        if (signed) assert.equal(batch.status().recent[0].transactionHash, saved.pending.transaction.transactionHash);
+        if (signed) {
+            assert.equal(batch.status().recent[0].transactionHash, saved.pending.transaction.transactionHash);
+            assert.equal(s.f.state.transactions[0].serialized, saved.pending.transaction.rawTransaction);
+        }
     });
 }
 
@@ -286,6 +325,7 @@ test('idle batches never publish and shutdown retains underfilled batch for rest
     await batch.flush();
     assert.equal(batch.status().recent[0].status, 'logged');
     assert.equal(s.uploads.length, 2);
+    assert.equal(s.uploads[1].text, s.uploads[0].cid);
 });
 
 test('failed manifest freezes membership, blocks admission, then retries without republishing messages', async t => {
@@ -322,6 +362,8 @@ for (const failure of ['pending', 'wrongReceipt', 'sendFailure']) {
         batch = await s.open();
         await batch.flush();
         assert.equal(batch.status().recent[0].transactionHash, checkpoint.pending.transaction.transactionHash);
+        assert.equal(s.uploads[1].text, s.uploads[0].cid);
+        for (const tx of s.f.state.transactions) assert.equal(tx.serialized, checkpoint.pending.transaction.rawTransaction);
         assert.equal(s.f.state.signs, 1);
         assert.equal(s.uploads.length, 2);
     });

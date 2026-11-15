@@ -115,10 +115,9 @@ export async function createBatchLogger({ config, signer, fetch = globalThis.fet
             }
             if (!batch.cid) {
                 // Content identity is independent of the journal and eventual Ledger transaction.
-                const manifest = { type: 'oya-message-batch', version: 1,
-                    messages: batch.entries.map(({ cid }) => cid) };
+                const manifest = batch.entries.map(({ cid }) => cid).join('\n');
                 const publication = await publishToIpfs({ config: config.ipfs, fetch, signal,
-                    content: JSON.stringify(manifest), filename: 'oya-message-batch.json', mediaType: 'application/json' });
+                    content: manifest, filename: 'oya-message-batch.txt', mediaType: 'text/plain' });
                 await persist({ ...state, pending: { ...batch, cid: publication.cid } });
                 batch = state.pending;
             }
