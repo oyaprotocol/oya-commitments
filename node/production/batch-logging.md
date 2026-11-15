@@ -54,7 +54,74 @@ bafk...
 
 Canonical CIDs contain no line breaks, so the separator is unambiguous. The list is independent of the originating node or any logging chain or Ledger; batch IDs, execution identity and message digests stay in the private journal. Identical ordered CIDs produce identical manifest bytes across nodes and batches. Each CID points to the independent signed envelope; no prior Ledger log is required. The node uploads/pins the manifest before logging **its** CID, not each member CID. A manifest may contain one message when the timer fires.
 
-The existing evidence verifier can verify the logged manifest bytes, just as any logged content. Member CID integrity, message signatures and membership require separate consumer checks. The manifest itself makes no claim about a chain, contract or publishing node; those belong to the separately verified Ledger transaction/event. Logging is not independent proof of availability; arrange IPFS replication separately. The local journal is bounded to one pending batch plus 100 summaries; historical IPFS pins and chain history are not pruned by this feature.
+The generic evidence verifier checks logged manifest bytes. Use [Review one batch member](#review-one-batch-member) to verify membership and the original signed message as well. The manifest itself makes no claim about a chain, contract or publishing node; those belong to the separately verified Ledger event. Logging is not independent proof of availability; arrange IPFS replication separately. The local journal is bounded to one pending batch plus 100 summaries; historical IPFS pins and chain history are not pruned by this feature.
+
+## Review one batch member
+
+From a source checkout with the production dependencies installed, run:
+
+```sh
+node node/production/src/verify-batch.mjs batch-record.json evidence-settings.json
+```
+
+The command reads only those two files, makes bounded read-only IPFS/RPC requests, and prints a JSON review. It loads no keys, environment credentials, worker configuration or journal. Library consumers import `verifyBatchEvidence(record, settings)` from `src/batch-evidence.mjs`. The generic `verify-ledger.mjs` interface retains its arbitrary-content behavior.
+
+Create `batch-record.json` with full canonical CIDs from publication/batch status (replace the abbreviated placeholders):
+
+```json
+{
+  "manifestCid": "REPLACE_WITH_MANIFEST_CID",
+  "memberCid": "REPLACE_WITH_MESSAGE_CID"
+}
+```
+
+Create private `evidence-settings.json` with an explicitly trusted Kubo API, for example:
+
+```json
+{
+  "ipfsUrl": "http://127.0.0.1:5001",
+  "timeoutMs": 30000,
+  "requestTimeoutMs": 10000
+}
+```
+
+Use HTTPS for non-loopback endpoints. Optional `ipfsAuthorization` is a complete Authorization header. Protect credential-bearing files outside Git. URLs embedded in content are never followed. Only the selected member is fetched; neighboring members need not be available. To require a known message author, add `"signer": "REPLACE_WITH_MESSAGE_SIGNER_ADDRESS"` to the record. Without it, the report recovers the signer but makes no claim that this signer was expected or authorized by a node.
+
+For an additional Ledger snapshot check, add both objects below to their respective files:
+
+```json
+{
+  "ledger": {
+    "transactionHash": "REPLACE_WITH_TRANSACTION_HASH",
+    "logIndex": 0,
+    "nodeAddress": "REPLACE_WITH_IMMEDIATE_LEDGER_CALLER"
+  }
+}
+```
+
+```json
+{
+  "ledger": {
+    "chainId": 11155111,
+    "ledgerContract": "0xe6DeB4B3c31E15DBeA0f932830e2f20Ba2EddAa3",
+    "rpcUrl": "https://REPLACE_WITH_APPROVED_RPC"
+  }
+}
+```
+
+Use the selected event's **block-global** `logIndex`, not its array position. `nodeAddress` is optional and means the immediate caller recorded in `Log.node`; it is neither the transaction signer nor the message author. Calls through forwarding contracts are supported. Optional `ledger.rpcAuthorization` is sent only to the configured RPC. The expected logged CID is always the manifest CID. Supplied Ledger settings/record must appear together and pass validation before any request.
+
+### Interpret the review
+
+The report distinguishes `checks.manifest` and `checks.member` (exact raw CID/byte integrity), `manifestFormat`, `membership`, `signature`, optional expected `signer`, and optional `ledger`. `memberIndexes` contains all matching zero-based positions in the ordered manifest. Repeated CIDs are preserved. After signature and any expected-signer check, `message` contains the original parsed `{text, signer, signature}` for review. Original downloaded bytes, not reserialized JSON, establish the CID. Treat message text as untrusted content; the report intentionally includes it on stdout. `semantics: not_assessed` means the signer's claims have not been judged true.
+
+Exit codes are **0 verified**, **2 mismatch**, **3 unavailable**, **4 partial**. A receipt failure keeps already-established member/signature checks and supplies the nested `ledger` report. A verified result without Ledger inputs proves membership and signature only. Ledger verification is a configured-provider snapshot, not independent chain consensus, finality, publisher provenance or durable replication.
+
+Both manifest and member require canonical lowercase Base32 CIDv1 with SHA-256 and the **raw** codec for complete verification. Non-raw codecs (including UnixFS/DAG-PB) return partial before fetching that object, and no signature-only integrity claim is made. There is no digest override for this adapter. The generic verifier's separate expected-content-digest option remains available for its different use case. The pinned signed-message kernel requires nonempty ASCII text and an EIP-191 signature; this command preserves that schema rather than inventing a new envelope.
+
+Supported manifests are the current 1–100 LF-separated canonical CID lines (no header, whitespace or trailing LF) and exactly two historical JSON shapes: `{type:"oya-message-batch",version:1,messages:[CID,...]}` and the earlier form with `batchId`, `execution:{mode,chainId,ledgerContract,nodeAddress}`, and `messages:[{cid,messageDigest},...]`. Unknown fields/versions and mixed entry shapes fail. Old execution/digest metadata is syntax checked but reported as `legacyMetadata: not_assessed`: it is not an independent identity or digest assertion. Receipt expectations come only from the explicit record/settings.
+
+Each input file is limited to 65,536 bytes. Each network body, including streamed bodies, is limited to 131,072 bytes. Overall timeout defaults to 30 seconds (maximum 120), with a per-request timeout of 10 seconds (maximum 30). There are no redirects, retries, recursive fetches, publication, pinning or chain writes. A successful content-only review makes two `cat` requests. With Ledger inputs it makes at most six reads total: two content reads plus chain ID, receipt, block and an independent manifest reread through the existing generic evidence verifier. Any failed check stops further work.
 
 ## Recovery and stopping
 
@@ -72,4 +139,4 @@ A crash leaves `batch.lock`. Startup deliberately refuses to steal it. Confirm e
 
 ## Validation
 
-`node --test node/production/test/batch-logging.test.mjs` exercises real HTTP, signatures, disk persistence, transaction preparation and receipt validation against **synthetic mocked IPFS/RPC transports**. `npm --prefix node/production test` includes the existing immediate and inbox/worker regressions. These tests do not constitute funded-chain, Docker, deployment, replication or power-loss filesystem acceptance.
+`node --test node/production/test/batch-logging.test.mjs node/production/test/batch-evidence.test.mjs` exercises real HTTP, signatures, disk persistence, transaction preparation and receipt validation against **controlled IPFS/RPC transports**. It includes publication through the direct runtime followed by retrieval of the actual uploaded bytes and guarded CLI review. `npm --prefix node/production test` includes the existing immediate and inbox/worker regressions. These tests do not constitute funded-chain, EVM, Docker, deployment, replication or power-loss filesystem acceptance.

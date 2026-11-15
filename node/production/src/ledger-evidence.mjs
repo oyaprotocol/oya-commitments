@@ -133,6 +133,12 @@ function rawCidDigest(cid) {
     return bytes[1] === 0x55 ? Buffer.from(bytes.slice(4)).toString('hex') : null;
 }
 
+// Shared read-only primitives for bounded semantic evidence adapters.
+export { EvidenceError, endpoint as evidenceEndpoint, positive as evidenceLimit,
+    address as evidenceAddress, keys as evidenceKeys, json as evidenceJson,
+    readBytes as readEvidenceBytes, rawCidDigest, settings as ledgerEvidenceSettings,
+    record as ledgerEvidenceRecord };
+
 export const evidenceExitCode = report => ({ verified: 0, mismatch: 2, unavailable: 3, partial: 4 })[report.status];
 const initialReport = () => ({ version: 2, status: 'unavailable', reason: 'incomplete', stage: 'input',
     observedAt: new Date().toISOString(),
