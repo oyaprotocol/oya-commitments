@@ -15,7 +15,8 @@ An operator enables a reviewed registry snapshot on the inbox and worker. A regi
 - [x] 2026-11-15: Updated operator guides to use the ordinary CLI and status contract. Kept discovery, image/bundle registry assets and explicit authorization.
 - [x] 2026-11-15: Added ordinary-route rejection/recovery tests and adapted real PostgreSQL/CLI/worker integration and signing/transaction failure tests.
 - [x] 2026-11-15: Passed 452 production tests, six registry PostgreSQL tests and 12 existing inbox PostgreSQL tests without skips. Built the pinned-base image and passed offline v1 CLI/signature/private-output checks.
-- [ ] Independent parent review and any authorized publication. This local task does not push, deploy, spend funds or contact a chain.
+- [x] 2026-11-15: Independent review found no blockers and reran 33 focused/packaging, 452 production, six registry PostgreSQL and 12 inbox PostgreSQL tests successfully.
+- [ ] Publish the validated follow-up on PR #173 and verify remote head and hosted CI.
 
 ## Surprises & Discoveries
 
@@ -35,9 +36,9 @@ Ordinary retries return the current job state, not an immutable admission receip
 
 ## Outcomes & Retrospective
 
-The local candidate uses one signed-job and execution pipeline. Registry membership authorizes normal publication on inbox and worker startup. Removed peer-specific code has no replacement wrapper. Discovery and release packaging remain available, with ordinary CLI instructions for both host and image use. The full feature is 558 added-plus-deleted non-Markdown lines against fetched main `f51fd93`, below the 3,000-line cap. The complete PR diff from its main merge-base is 724 lines including documentation. A direct tree comparison with main is 814 lines because main also contains 90 unrelated dialogue-document lines absent from this branch; no freshness-only merge is needed.
+The local candidate uses one signed-job and execution pipeline. Registry membership authorizes normal publication on inbox and worker startup. Removed peer-specific code has no replacement wrapper. Discovery and release packaging remain available, with ordinary CLI instructions for both host and image use. The full feature is 558 added-plus-deleted non-Markdown lines against fetched main `f51fd93`, below the 3,000-line cap. The complete PR diff from its main merge-base is 725 lines including documentation. A direct tree comparison with main is 815 lines because main also contains 90 unrelated dialogue-document lines absent from this branch; no freshness-only merge is needed.
 
-Informational next candidate: a separately scoped, operator-approved testnet message/publication/logging review loop using these same v1 commands. Before implementation, define recipients, frequency, gas/spend caps, stop conditions and evidence requirements. It is not part of PR #173, not a receiver-binding redesign, and does not authorize deployment, sending messages or transactions now.
+Informational next candidate, revision November 15, 2026 v3: a separately scoped testnet message/publication/logging review loop using these same v1 commands. As [pemulis clarified in comment 6901487008](https://github.com/oyaprotocol/oya-commitments/pull/173#issuecomment-6901487008), peer liveness and performance verification is later work based on onchain logs, rather than messaging-layer responses or receipts. Before implementation, define recipients, frequency, gas/spend caps, stop conditions and onchain evidence requirements. Deployment and transaction execution require separate authorization.
 
 ## Context and Orientation
 
@@ -47,7 +48,7 @@ Production code lives in `node/production`. `src/peers/config.mjs` reads the ins
 
 ## Plan of Work
 
-The implementation milestones are complete: remove the second pipeline, simplify role configuration, adapt tests to ordinary semantics, and align operator guidance. Final handoff requires reviewing the full cumulative source/tests/config/docs diff, computing its budget and checking sensitive information. Parent review precedes any remote publication.
+Implementation and independent review are complete. The remaining publication step verifies the existing PR head and source feedback before pushing, then reads back the resulting commit, description and response. Hosted CI is recorded separately from local validation.
 
 ## Concrete Steps
 
