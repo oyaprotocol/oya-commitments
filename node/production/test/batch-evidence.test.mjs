@@ -30,7 +30,7 @@ const txHash = `0x${'ab'.repeat(32)}`;
 const blockHash = `0x${'cd'.repeat(32)}`;
 const abi = new Interface(['function log(string cid)', 'event Log(address indexed node, bytes32 indexed cidKeccak256Hash, string cid)']);
 const encode = (cid, node = caller) => abi.encodeEventLog(abi.getEvent('Log'), [node, keccak256(toUtf8Bytes(cid)), cid]);
-const legacy = (members, metadata = false) => metadata ? {
+const unmergedJson = (members, metadata = false) => metadata ? {
     type: 'oya-message-batch', version: 1, batchId: '12345678-1234-4123-8123-123456789012',
     execution: { mode: 'ledger', chainId: 1, ledgerContract: sender, nodeAddress: sender },
     messages: members.map(cid => ({ cid, messageDigest: '0'.repeat(64) })),
@@ -122,23 +122,37 @@ test('raw CID vector and one-member original review without any Ledger settings'
     readOnly(f, [f.record.manifestCid, f.record.memberCid]);
 });
 
-for (const format of ['lines', 'json', 'metadata']) {
-    test(`${format}: ordered members, duplicate positions and unfetched unavailable neighbors`, async t => {
-        const f = await setup(t);
-        const other = cidFor('never fetched');
-        const members = [other, f.record.memberCid, f.record.memberCid, cidFor('also unavailable')];
-        f.manifest(format === 'lines' ? members.join('\n') : JSON.stringify(legacy(members, format === 'metadata')));
-        f.record.signer = f.wallet.address;
-        const report = await f.run();
-        assert.equal(report.status, 'verified', JSON.stringify(report));
-        assert.equal(report.memberCount, 4);
-        assert.deepEqual(report.memberIndexes, [1, 2]);
-        assert.equal(report.checks.signer, 'verified');
-        assert.equal(report.format, { lines: 'cid-lines', json: 'legacy-cid-json-v1', metadata: 'legacy-execution-json-v1' }[format]);
-        assert.equal(report.legacyMetadata, format === 'metadata' ? 'not_assessed' : undefined);
-        readOnly(f, [f.record.manifestCid, f.record.memberCid]);
-    });
-}
+test('CID lines: ordered members, duplicate positions and unfetched unavailable neighbors', async t => {
+    const f = await setup(t);
+    const other = cidFor('never fetched');
+    const members = [other, f.record.memberCid, f.record.memberCid, cidFor('also unavailable')];
+    f.manifest(members.join('\n'));
+    f.record.signer = f.wallet.address;
+    const report = await f.run();
+    assert.equal(report.status, 'verified', JSON.stringify(report));
+    assert.equal(report.memberCount, 4);
+    assert.deepEqual(report.memberIndexes, [1, 2]);
+    assert.equal(report.checks.signer, 'verified');
+    assert.equal(report.format, 'cid-lines');
+    readOnly(f, [f.record.manifestCid, f.record.memberCid]);
+});
+
+for (const metadata of [false, true]) test(`unmerged JSON ${metadata ? 'execution' : 'CID-list'} manifest is rejected`, async t => {
+    const f = await setup(t);
+    f.manifest(JSON.stringify(unmergedJson([f.record.memberCid], metadata)));
+    f.withLedger();
+    assert.throws(() => parseBatchManifest(f.state.content.get(f.record.manifestCid)), /invalid_manifest/);
+    const report = await f.run();
+    assert.equal(report.status, 'mismatch');
+    assert.equal(report.reason, 'invalid_manifest');
+    assert.equal(evidenceExitCode(report), 2);
+    assert.deepEqual(report.checks, { manifest: 'verified', manifestFormat: 'mismatch', membership: 'not_checked', member: 'not_checked',
+        signature: 'not_checked', signer: 'not_requested', ledger: 'not_checked', semantics: 'not_assessed' });
+    assert.equal(report.message, undefined);
+    assert.equal(report.format, undefined);
+    assert.equal(report.legacyMetadata, undefined);
+    readOnly(f, [f.record.manifestCid]);
+});
 
 test('both raw CID bindings precede signature claims, even for otherwise valid signatures', async t => {
     for (const target of ['manifest', 'member']) {
@@ -194,19 +208,19 @@ const malformedManifests = [
     ['header', cid => 'oya-message-batch\n' + cid], ['BOM', cid => '\ufeff' + cid],
     ['invalid UTF-8', () => Buffer.from([255])], ['URL', () => 'https://untrusted.example/private'],
     ['IPFS URI', cid => 'ipfs://' + cid], ['path', cid => cid + '/file'], ['uppercase', cid => cid.toUpperCase()],
-    ['array', cid => JSON.stringify([cid])], ['empty JSON list', () => JSON.stringify(legacy([]))],
-    ['unknown version', cid => JSON.stringify({ ...legacy([cid]), version: 2 })],
-    ['unknown type', cid => JSON.stringify({ ...legacy([cid]), type: 'unknown' })],
-    ['unknown field', cid => JSON.stringify({ ...legacy([cid]), rpcUrl: 'https://untrusted.example' })],
-    ['mixed entries', cid => JSON.stringify(legacy([cid, { cid }]))],
+    ['array', cid => JSON.stringify([cid])], ['empty JSON list', () => JSON.stringify(unmergedJson([]))],
+    ['unknown version', cid => JSON.stringify({ ...unmergedJson([cid]), version: 2 })],
+    ['unknown type', cid => JSON.stringify({ ...unmergedJson([cid]), type: 'unknown' })],
+    ['unknown field', cid => JSON.stringify({ ...unmergedJson([cid]), rpcUrl: 'https://untrusted.example' })],
+    ['mixed entries', cid => JSON.stringify(unmergedJson([cid, { cid }]))],
     ['too many lines', cid => Array(101).fill(cid).join('\n')],
-    ['too many JSON entries', cid => JSON.stringify(legacy(Array(101).fill(cid)))],
-    ['missing legacy digest', cid => JSON.stringify({ ...legacy([cid], true), messages: [{ cid }] })],
-    ['bad legacy digest', cid => JSON.stringify({ ...legacy([cid], true), messages: [{ cid, messageDigest: 'secret' }] })],
-    ['legacy UUID', cid => JSON.stringify({ ...legacy([cid], true), batchId: 'invalid' })],
-    ['legacy execution', cid => JSON.stringify({ ...legacy([cid], true), execution: { mode: 'ipfs' } })],
-    ['legacy extra entry field', cid => JSON.stringify({ ...legacy([cid], true), messages: [{ cid, messageDigest: '0'.repeat(64), url: 'https://untrusted.example' }] })],
-    ['truncated JSON', () => '{'], ['null entries', () => JSON.stringify(legacy(null))],
+    ['too many JSON entries', cid => JSON.stringify(unmergedJson(Array(101).fill(cid)))],
+    ['missing JSON digest', cid => JSON.stringify({ ...unmergedJson([cid], true), messages: [{ cid }] })],
+    ['bad JSON digest', cid => JSON.stringify({ ...unmergedJson([cid], true), messages: [{ cid, messageDigest: 'secret' }] })],
+    ['JSON UUID', cid => JSON.stringify({ ...unmergedJson([cid], true), batchId: 'invalid' })],
+    ['JSON execution', cid => JSON.stringify({ ...unmergedJson([cid], true), execution: { mode: 'ipfs' } })],
+    ['JSON extra entry field', cid => JSON.stringify({ ...unmergedJson([cid], true), messages: [{ cid, messageDigest: '0'.repeat(64), url: 'https://untrusted.example' }] })],
+    ['truncated JSON', () => '{'], ['null entries', () => JSON.stringify(unmergedJson(null))],
 ];
 for (const [name, build] of malformedManifests) test(`malformed manifest: ${name}`, async t => {
     const f = await setup(t);
@@ -223,9 +237,7 @@ for (const [name, build] of malformedManifests) test(`malformed manifest: ${name
 
 test('parser maximum, unsupported inputs and exact ordered list are bounded', async () => {
     const members = Array.from({ length: 100 }, (_, i) => cidFor(String(i)));
-    for (const bytes of [Buffer.from(members.join('\n')), Buffer.from(JSON.stringify(legacy(members))), Buffer.from(JSON.stringify(legacy(members, true)))]) {
-        assert.deepEqual(parseBatchManifest(bytes).members, members);
-    }
+    assert.deepEqual(parseBatchManifest(Buffer.from(members.join('\n'))), { format: 'cid-lines', members });
     for (const bytes of [undefined, null, '', {}, Buffer.alloc(131073)]) assert.throws(() => parseBatchManifest(bytes), /invalid_manifest/);
 });
 
@@ -331,9 +343,8 @@ test('independent expected signer fails without confusing message author and log
     assert.equal(report.message, undefined);
 });
 
-test('separate Ledger check permits forwarding and ignores legacy execution claims', async t => {
+test('separate Ledger check permits forwarding with CID-line manifests', async t => {
     const f = await setup(t);
-    f.manifest(JSON.stringify(legacy([f.record.memberCid], true)));
     f.withLedger();
     const report = await f.run();
     assert.equal(report.status, 'verified', JSON.stringify(report));
@@ -342,7 +353,6 @@ test('separate Ledger check permits forwarding and ignores legacy execution clai
     assert.equal(report.ledger.nodeAddress, caller);
     assert.notEqual(report.ledger.nodeAddress, f.state.receipt.from);
     assert.notEqual(report.ledger.nodeAddress, report.signer);
-    assert.equal(report.legacyMetadata, 'not_assessed');
     readOnly(f, [f.record.manifestCid, f.record.memberCid, f.record.manifestCid]);
     f.state.requests = [];
     f.record.ledger.nodeAddress = sender;

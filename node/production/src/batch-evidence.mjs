@@ -12,41 +12,15 @@ const exactKeys = (value, fields) => {
     if (Object.keys(value).length !== fields.length) throw new Error();
 };
 
-// Parse only authenticated manifest bytes. Metadata in the oldest format is descriptive,
-// not an independently established execution identity or a substitute for CID binding.
+// Parse only authenticated manifest bytes as ordered newline-separated CIDs.
 export function parseBatchManifest(bytes) {
     try {
         if (!(bytes instanceof Uint8Array) || bytes.length > 131072) throw new Error();
         const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
-        let format = 'cid-lines', members;
-        if (text.trimStart().startsWith('{')) {
-            const value = JSON.parse(text);
-            if (value.type !== 'oya-message-batch' || value.version !== 1) throw new Error();
-            if (Object.hasOwn(value, 'execution') || Object.hasOwn(value, 'batchId')) {
-                exactKeys(value, ['type', 'version', 'batchId', 'execution', 'messages']);
-                if (typeof value.batchId !== 'string' ||
-                    !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.batchId)) throw new Error();
-                exactKeys(value.execution, ['mode', 'chainId', 'ledgerContract', 'nodeAddress']);
-                if (value.execution.mode !== 'ledger') throw new Error();
-                evidenceLimit(value.execution.chainId, undefined, Number.MAX_SAFE_INTEGER);
-                evidenceAddress(value.execution.ledgerContract);
-                evidenceAddress(value.execution.nodeAddress);
-                if (!Array.isArray(value.messages) || value.messages.length > 100) throw new Error();
-                members = value.messages.map(entry => {
-                    exactKeys(entry, ['cid', 'messageDigest']);
-                    if (typeof entry.messageDigest !== 'string' || !/^[0-9a-f]{64}$/.test(entry.messageDigest)) throw new Error();
-                    return entry.cid;
-                });
-                format = 'legacy-execution-json-v1';
-            } else {
-                exactKeys(value, ['type', 'version', 'messages']);
-                members = value.messages;
-                format = 'legacy-cid-json-v1';
-            }
-        } else members = text.split('\n');
-        if (!Array.isArray(members) || !members.length || members.length > 100) throw new Error();
+        const members = text.split('\n');
+        if (!members.length || members.length > 100) throw new Error();
         members.forEach(cid => assertCanonicalCid(cid, 'member'));
-        return { format, members };
+        return { format: 'cid-lines', members };
     } catch { throw new EvidenceError('mismatch', 'invalid_manifest'); }
 }
 
@@ -125,7 +99,6 @@ export async function verifyBatchEvidence(record, settings) {
         const manifest = parseBatchManifest(manifestBytes);
         report.checks.manifestFormat = 'verified';
         report.format = manifest.format;
-        if (manifest.format === 'legacy-execution-json-v1') report.legacyMetadata = 'not_assessed';
         report.memberCount = manifest.members.length;
         report.stage = 'membership';
         report.memberIndexes = manifest.members.flatMap((cid, i) => cid === expected.memberCid ? [i] : []);
