@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
@@ -8,6 +11,7 @@ import { Pool } from 'pg';
 import { Wallet, keccak256 } from 'ethers';
 import { encodeLedgerCall } from '@oyaprotocol/ethereum';
 import { InboxStore } from '../src/inbox/store.mjs';
+import { validateInspection } from '../src/inbox/inspection.mjs';
 import { createInboxServer, createInboxClient } from '../src/inbox/http.mjs';
 import { parseInboxConfig } from '../src/inbox/config.mjs';
 import { signJob, executionIdentity } from '../src/inbox/protocol.mjs';
@@ -58,9 +62,119 @@ test('PostgreSQL inbox persists offline work and fences competing workers and tr
         servers.push(server);
         await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
         const url = `http://127.0.0.1:${server.address().port}`;
-        return { server, url, api: createInboxClient(url, workerToken), publicApi: createInboxClient(url) };
+        return { server, url, workerToken, api: createInboxClient(url, workerToken), publicApi: createInboxClient(url) };
     };
     const expireLease = store => store.pool.query(`UPDATE oya_inbox_jobs SET lease_until=clock_timestamp()-interval '1 second' WHERE target=$1`, [store.config.target]);
+
+    await t.test('inspection snapshots are target-scoped, bounded and do not advance expired or leased work', async () => {
+        const store = await newStore({ maxJobs: 6 });
+        const service = await serve(store);
+        const inspect = async () => validateInspection(await service.api('/v1/worker/inspect', { target: store.config.target }), store.config.target);
+        const empty = await inspect();
+        assert.equal(empty.head, null);
+        assert.deepEqual(empty.capacity, { maxJobs: 6, retainedJobs: 0, availableJobs: 6 });
+        const other = await newStore();
+        await other.enqueue(await signJob(agent, other.config.target, 'other target'));
+        const jobs = [];
+        for (const status of ['queued', 'queued', 'published', 'logged', 'failed', 'expired']) {
+            const job = await signJob(agent, store.config.target, status);
+            jobs.push(job);
+            await store.enqueue(job);
+            if (status !== 'queued') await store.pool.query('UPDATE oya_inbox_jobs SET status=$3 WHERE target=$1 AND request_id=$2',
+                [store.config.target, job.requestId, status]);
+        }
+        await store.pool.query(`UPDATE oya_inbox_jobs SET expires_at=clock_timestamp()-interval '1 second'
+            WHERE target=$1 AND request_id=$2`, [store.config.target, jobs[0].requestId]);
+        const rows = async () => (await store.pool.query('SELECT * FROM oya_inbox_jobs WHERE target=$1 ORDER BY request_id', [store.config.target])).rows;
+        const before = await rows();
+        const full = await inspect();
+        assert.deepEqual(await rows(), before, 'inspection must not expire, prune or otherwise mutate rows');
+        assert.deepEqual(full.counts, { queued: 2, processing: 0, published: 1, logged: 1, failed: 1, expired: 1 });
+        assert.deepEqual(full.capacity, { maxJobs: 6, retainedJobs: 6, availableJobs: 0 });
+        assert.equal(full.queued.ready, 1);
+        assert.equal(full.queued.expiredPendingSweep, 1);
+        assert.equal(full.head.requestId, jobs[1].requestId);
+        assert.equal(full.head.leaseState, 'available');
+        assert.equal(full.head.checkpoint, 'none');
+        const directory = await mkdtemp(join(tmpdir(), 'oya-inspect-postgres-'));
+        try {
+            const tokenFile = join(directory, 'token');
+            await writeFile(tokenFile, service.workerToken, { mode: 0o600 });
+            const output = await execute(process.execPath, [new URL('../src/inbox/client.mjs', import.meta.url).pathname,
+                'inspect', service.url, store.config.target, tokenFile], { timeout: 15000 });
+            assert.equal(output.stderr, '');
+            const cli = validateInspection(JSON.parse(output.stdout), store.config.target);
+            assert.deepEqual(cli.counts, full.counts);
+            assert.deepEqual(cli.head, full.head);
+            assert.deepEqual(await rows(), before);
+        } finally { await rm(directory, { recursive: true, force: true }); }
+        assert.equal(JSON.stringify(full).includes('payload'), false);
+        assert.equal(JSON.stringify(full).includes('signature'), false);
+        await assert.rejects(service.publicApi('/v1/worker/inspect', { target: store.config.target }), { status: 401 });
+        await assert.rejects(service.api('/v1/worker/inspect', { target: other.config.target }), { status: 409 });
+        const work = await store.claim({ mode: 'ipfs' });
+        const active = await inspect();
+        assert.equal(active.head.requestId, work.requestId);
+        assert.equal(active.head.leaseState, 'active');
+        assert.equal(active.counts.expired, 2);
+        assert.equal(active.queued.expiredPendingSweep, 0);
+        await store.checkpoint(work.requestId, work.lease, { cid });
+        assert.equal((await inspect()).head.checkpoint, 'cid');
+        await store.retry(work.requestId, work.lease);
+        assert.equal((await inspect()).head.leaseState, 'backoff');
+        await expireLease(store);
+        const retry = await inspect();
+        assert.equal(retry.head.leaseState, 'available');
+        assert.equal(retry.head.checkpoint, 'cid');
+        assert.equal(retry.head.attempts, 1);
+        const recovered = await store.claim({ mode: 'ipfs' });
+        await store.complete(recovered.requestId, recovered.lease, { status: 'published', cid });
+        const done = await inspect();
+        assert.equal(done.head, null);
+        assert.equal(done.counts.published, 2);
+        assert.equal(done.capacity.availableJobs, 0, 'terminal replay records still occupy capacity');
+    });
+
+    await t.test('inspection uses claim ordering and keeps expired processing work ahead of queued work', async () => {
+        const store = await newStore();
+        const ids = ['00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000001'];
+        for (const requestId of ids) await store.enqueue(await signJob(agent, store.config.target, 'ordered', { requestId }));
+        await store.pool.query(`UPDATE oya_inbox_jobs SET created_at='2026-01-01T00:00:00Z' WHERE target=$1`, [store.config.target]);
+        assert.equal((await store.inspect()).head.requestId, ids[1]);
+        const work = await store.claim({ mode: 'ipfs' });
+        assert.equal(work.requestId, ids[1]);
+        await store.pool.query(`UPDATE oya_inbox_jobs SET expires_at=clock_timestamp()-interval '1 second',
+            created_at=clock_timestamp(), lease_until=clock_timestamp()-interval '1 second'
+            WHERE target=$1 AND request_id=$2`, [store.config.target, work.requestId]);
+        store.config.maxJobs = 1;
+        const snapshot = validateInspection(await store.inspect(), store.config.target);
+        assert.deepEqual(snapshot.capacity, { maxJobs: 1, retainedJobs: 2, availableJobs: 0 });
+        assert.equal(snapshot.head.requestId, work.requestId);
+        assert.equal(snapshot.head.leaseState, 'available');
+        assert.equal(snapshot.queued.ready, 1);
+        assert.equal((await store.claim({ mode: 'ipfs' })).requestId, snapshot.head.requestId);
+    });
+
+    await t.test('inspection does not acquire writer locks and recovers after its SQL deadline', async () => {
+        const store = await newStore();
+        await store.enqueue(await signJob(agent, store.config.target, 'inspect through writer lock'));
+        const writer = await store.pool.connect();
+        try {
+            await writer.query('BEGIN');
+            await writer.query('SELECT target FROM oya_inbox_targets WHERE target=$1 FOR UPDATE', [store.config.target]);
+            assert.equal((await store.inspect()).counts.queued, 1);
+            // An exclusive table lock simulates a long schema operation. The inspection's
+            // statement deadline must roll back, return its pool client and permit a retry.
+            await writer.query('LOCK TABLE oya_inbox_jobs IN ACCESS EXCLUSIVE MODE');
+            await assert.rejects(store.inspect(), { code: '57014' });
+        } finally { await writer.query('ROLLBACK'); writer.release(); }
+        assert.equal((await store.inspect()).counts.queued, 1);
+        const client = await store.pool.connect();
+        try {
+            assert.notEqual((await client.query('SHOW statement_timeout')).rows[0].statement_timeout, '2s');
+            assert.equal((await client.query('SHOW transaction_read_only')).rows[0].transaction_read_only, 'off');
+        } finally { client.release(); }
+    });
 
     await t.test('offline submission, idempotency, authorization, capacity, and service/database restart', async () => {
         let store = await newStore({ maxJobs: 2 });
@@ -85,6 +199,9 @@ test('PostgreSQL inbox persists offline work and fences competing workers and tr
         store = await newStore({ target: store.config.target, maxJobs: 2 });
         const restarted = await serve(store);
         assert.equal((await restarted.publicApi('/v1/status', job)).status, 'queued');
+        const afterRestart = validateInspection(await store.inspect(), store.config.target);
+        assert.equal(afterRestart.counts.queued, 2);
+        assert.equal(afterRestart.head.requestId, job.requestId);
         await assert.rejects(restarted.api('/v1/worker/claim', { target: 'wrong-target', execution: { mode: 'ipfs' } }), { status: 409 });
         const claim = await restarted.api('/v1/worker/claim', { target: store.config.target, execution: { mode: 'ipfs' } });
         await restarted.api('/v1/worker/checkpoint', { requestId: claim.work.requestId, lease: claim.work.lease, checkpoint: { cid } });
@@ -217,6 +334,12 @@ test('PostgreSQL inbox persists offline work and fences competing workers and tr
             if (boundary !== 'completion_ack') {
                 assert.equal(first.status, 'processing');
                 assert.equal(first.error, 'awaiting_reconciliation');
+                const snapshot = validateInspection(await store.inspect(), store.config.target);
+                assert.equal(snapshot.head.requestId, job.requestId);
+                assert.equal(snapshot.head.checkpoint, 'transaction');
+                assert.equal(snapshot.head.leaseState, 'backoff');
+                assert.equal(snapshot.queued.ready, 1);
+                assert.equal('rawTransaction' in snapshot.head, false);
                 assert.equal(await store.claim(identity), null, 'unresolved transaction blocks later work');
                 assert.equal(f.state.sends, boundary === 'checkpoint_ack' ? 0 : 1);
                 await expireLease(store);
@@ -225,6 +348,10 @@ test('PostgreSQL inbox persists offline work and fences competing workers and tr
             }
             const final = await store.status(job);
             assert.equal(final.status, 'logged');
+            const snapshot = validateInspection(await store.inspect(), store.config.target);
+            assert.equal(snapshot.counts.logged, 1);
+            assert.equal(snapshot.head.status, 'queued');
+            assert.equal(snapshot.head.checkpoint, 'none');
             assert.equal(final.transactionHash, first.transactionHash);
             assert.equal(f.state.signs, 1);
             assert.equal(f.state.sends, 1);
