@@ -31,7 +31,8 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q006](#q006) | Participation beyond running a node | accessibility, community, participation | Answered |
 | [Q007](#q007) | When a commitment cannot be verified | accessibility, evidence, commitment design | Answered |
 | [Q008](#q008) | A creator's recourse after rejection | empowerment, judgment, commitment creation | Answered |
-| [Q012](#q012) | Changing a long-running commitment | consent, adaptability, ongoing commitments | Awaiting answer |
+| [Q009](#q009) | Privacy when proving fulfillment | privacy, evidence, user expectations | Answered |
+| [Q012](#q012) | Changing a long-running commitment | consent, adaptability, ongoing commitments | Answered |
 
 <a id="q001"></a>
 
@@ -275,6 +276,35 @@ If a new commitment is rejected as unresolvable but its creator disagrees, what 
 
 Nothing, that's it. They could always make a new commitment but the resolution mechanism is final for any given proposal.
 
+<a id="q009"></a>
+
+## Q009 — Privacy when proving fulfillment
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-14
+- **Topics:** privacy, evidence, user expectations
+- **Status:** Answered
+- **Source PR:** [#164](https://github.com/oyaprotocol/oya-commitments/pull/164)
+
+### Context
+
+In [Q001](#q001), @pemulis described verification using available evidence, including messages logged by nodes; [Q006](#q006) illustrated users and agents sending messages so their actions can be recognized. Exploring what users need to reveal could help us explain the experience of making a commitment before they entrust sensitive information to it.
+
+### Question
+
+What should a user be able to keep private while still having Oya verify that a commitment was fulfilled?
+
+### Answer
+
+#### @pemulis — 2026-11-15
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 6897317134](https://github.com/oyaprotocol/oya-commitments/pull/164#issuecomment-6897317134)
+- **Source created:** 2026-11-15T16:04:02Z
+- **Source updated:** 2026-11-15T16:04:02Z
+
+For initial use cases we will focus on commitments where all of the rules and evidence can be public. Privacy is particularly hard for dispute resolution. Future privacy-preserving use cases will require encrypted commitments and evidence, and pre-designated arbitrators and dispute mechanisms. They will necessarily have fewer eyes on them than public commitments since only privileged viewers will be able to raise disputes, see evidence, and arbitrate disputes. We'll get to that eventually, though, since privacy will be important for certain types of applications.
+
 <a id="q012"></a>
 
 ## Q012 — Changing a long-running commitment
@@ -282,7 +312,7 @@ Nothing, that's it. They could always make a new commitment but the resolution m
 - **Asked by:** Oya Gardener (`@oyagardener`)
 - **Asked on:** 2026-11-15
 - **Topics:** consent, adaptability, ongoing commitments
-- **Status:** Awaiting answer
+- **Status:** Answered
 - **Source PR:** [#172](https://github.com/oyaprotocol/oya-commitments/pull/172)
 
 ### Context
@@ -295,4 +325,11 @@ How should a long-running commitment adapt when its participants' needs change?
 
 ### Answer
 
-Pending an answer from `@pemulis` or `@nesseps`.
+#### @pemulis — 2026-11-15
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 6899665040](https://github.com/oyaprotocol/oya-commitments/pull/172#issuecomment-6899665040)
+- **Source created:** 2026-11-15T19:05:25Z
+- **Source updated:** 2026-11-15T19:05:25Z
+
+A commitment could include rules that allow updates to their rules. That would not necessarily be the case for every commitment, and there is no reason the same user could not spread activity across multiple commitments. But it would definitely be useful for long-running commitments, and changes to the rules may include timelocks before the new rules go into effect to clear up old business.

@@ -14,6 +14,7 @@ import { processWork } from './processor.mjs';
 const safeLogger = log => record => { try { log(record); } catch {} };
 
 export async function runOne({ api, config, target, allowedSigners, signer, fetch, signal, log = () => {}, state = {} }) {
+    if (config.batchLogging) throw new Error('Batch logging is supported only by the direct runtime.');
     log = safeLogger(log);
     const claimed = await api('/v1/worker/claim', { target, execution: executionIdentity(config, signer?.address) }, signal);
     state.lastPollAt = new Date().toISOString();
@@ -65,6 +66,7 @@ export async function runOne({ api, config, target, allowedSigners, signer, fetc
 }
 
 export async function runWorker(options) {
+    if (options.config.batchLogging) throw new Error('Batch logging is supported only by the direct runtime.');
     const { signal, state = {}, log: logger = () => {}, pollIntervalMs = 5000 } = options;
     const log = safeLogger(logger);
     let lastIdleLog = 0;
@@ -93,6 +95,7 @@ async function main() {
     const secrets = await loadSecrets(nodeSecretsFile);
     const input = await readJson(nodeFile);
     const config = parseConfig(input, { env: secrets });
+    if (config.batchLogging) throw new Error('Batch logging is supported only by the direct runtime.');
     const { allowedSigners } = input;
     const worker = await readJson(workerFile);
     if (Object.keys(worker).some(key => !['url', 'target', 'pollIntervalMs'].includes(key))) throw new Error('Unknown worker field.');
