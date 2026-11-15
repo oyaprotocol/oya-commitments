@@ -40,10 +40,15 @@ For the separate `contracts/` project, use `forge fmt --root contracts`, `forge 
 Agent changes: relevant module tests/simulations.
 4. Before requesting human review, follow [Before Human Review](AGENTS.md#before-human-review).
 Inspect the complete proposed change, including PR commits, staged and unstaged changes, new files, and proposed PR text or attachments. Check code, tests, configuration, docs, plans, and generated artifacts for sensitive data and references to developer-specific paths or local-only files. Use repository-relative paths, configurable inputs, or placeholders; documented container paths are permitted. Resolve findings before review. Report incomplete checks or unresolved findings without exposing sensitive values, and do not claim readiness while they remain. Successful checks do not require a written record in files, PRs, or handoff messages.
-5. In PRs, document:
-What changed and why.
-Tests run.
-Any config or environment variable impacts.
+5. Describe what the PR does and why. Briefly note relevant validation and any configuration or environment changes.
+
+## Pull Request Descriptions
+
+Describe what the PR does rather than listing what it does not do. Match the description's length to the change. For a very small PR, a short paragraph or a few bullets explaining the change is enough.
+
+Include only context reviewers need to understand and evaluate the change. Keep validation summaries brief and retain security warnings, compatibility constraints, configuration impacts, and validation limits that affect review. Reviewers can ask follow-up questions and inspect the code for more detail.
+
+Prefer short sentences. Start a new sentence instead of joining independent clauses with a semicolon.
 
 ## Comments and Documentation
 
