@@ -1,3 +1,5 @@
+import { loadPeers } from '../peers/config.mjs';
+import { PeerStore } from '../peers/store.mjs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { readJson, parseInboxConfig, databaseOptions, token } from './config.mjs';
@@ -8,16 +10,18 @@ export async function main(args = process.argv.slice(2)) {
     const [configFile, secretsFile, command] = args;
     if (!configFile || !secretsFile || (command && command !== 'prune') || args.length > 3) throw new Error('Usage: inbox CONFIG_JSON SECRETS_JSON [prune]');
     const config = parseInboxConfig(await readJson(configFile));
+    const peers = await loadPeers(config, configFile);
     const secrets = await readJson(secretsFile);
     const workerToken = token(secrets.workerToken);
     const store = new InboxStore(await databaseOptions(config, secrets), config);
-    try { await store.initialize(); } catch (error) { await store.close(); throw error; }
+    const peerStore = peers ? new PeerStore(store.pool, peers) : undefined;
+    try { await store.initialize(); await peerStore?.initialize(); } catch (error) { await store.close(); throw error; }
     if (command === 'prune') {
-        try { console.log(JSON.stringify(await store.prune())); } finally { await store.close(); }
+        try { console.log(JSON.stringify({ ...await store.prune(), ...(peerStore ? { peers: await peerStore.prune() } : {}) })); } finally { await store.close(); }
         return;
     }
     const log = record => { try { console.log(JSON.stringify(record)); } catch {} };
-    const server = createInboxServer({ config, workerToken, store, log });
+    const server = createInboxServer({ config, workerToken, store, peerStore, log });
     try {
         await new Promise((resolveListening, reject) => {
             server.once('error', reject);

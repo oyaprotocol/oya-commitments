@@ -1,5 +1,7 @@
 # Run a live node locally
 
+For opt-in signed informational messages between registered nodes, see [peer reception](peers/receive.md). Peer membership does not grant publication authority.
+
 Run Oya and Kubo on your own computer, mini PC, or other local device. Agents send signed messages to an HTTPS inbox backed by PostgreSQL. Your node polls using outbound requests, so it needs no public IP address, router forwarding, tunnel, or inbound message endpoint. The inbox and PostgreSQL can be hosted wherever you choose, together or separately.
 
 For agent-managed setup, secure credential handoff, and optional macOS Keychain-backed worker startup, see [Deploy with an agent](deploy-with-agent.md). The commands below use persistent protected runtime files; the Keychain helper replaces the worker token's storage and startup lifecycle.

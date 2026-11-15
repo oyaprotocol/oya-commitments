@@ -17,6 +17,7 @@ The default deployment runs Oya and Kubo on your local device, with a portable P
 | Verify a Ledger log from any source without a key | [Job-independent evidence command](inbox-api.md#verify-ledger-evidence) — record identity, content availability and explicit byte-integrity checks. |
 | Verify automatic testnet CID logging | [Testnet Ledger acceptance](testnet-ledger.md) — isolated installation, receipt evidence and recovery; requires separate broadcast authorization. |
 | Load or fetch the public peer list | [Testnet registry guide](peers/README.md) — public addresses and endpoints; signer permissions stay explicitly configured. |
+| Receive or send informational peer messages | [Peer reception](peers/receive.md) — opt-in registry membership, durable inbox receipts and explicit send/status. |
 | Develop or validate the runtime | [Install and validate](#install-and-validate). |
 | Publish an image and bundle | [Maintainer release guide](release-image.md). |
 

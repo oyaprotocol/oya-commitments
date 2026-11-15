@@ -66,11 +66,11 @@ PUBLIC_FILES = {
         'docker/compose.http.yaml', 'docker/Caddyfile', 'docker/compose.testing.yaml',
         'docker/config.example.json', 'docker/runtime.env.example',
         'inbox/compose.yaml', 'inbox/compose.postgres.yaml', 'inbox/compose.https.yaml',
-        'inbox/compose.worker.yaml', 'inbox/compose.keychain-worker.yaml',
+        'inbox/compose.worker.yaml', 'inbox/compose.keychain-worker.yaml', 'inbox/compose.peers.yaml',
         'inbox/Caddyfile', 'inbox/inbox.example.json', 'inbox/worker.example.json',
         'scripts/deploy-droplet.sh', 'scripts/deploy-droplet-remote.sh',
         'scripts/keychain-worker.py', 'scripts/upgrade-node.py',
-        'peers/testnet-directory.json', 'peers/README.md', 'scripts/peer-directory.mjs',
+        'peers/testnet-directory.json', 'peers/README.md', 'peers/receive.md', 'scripts/peer-directory.mjs',
     )
 } | {'agent-library/agents/hourly-message-test/agent.mjs'}
 ROLE_FILES = {
@@ -78,7 +78,8 @@ ROLE_FILES = {
                'node/production/inbox/compose.keychain-worker.yaml'},
     'inbox': {'node/production/inbox/compose.yaml',
               'node/production/inbox/compose.postgres.yaml',
-              'node/production/inbox/compose.https.yaml'},
+              'node/production/inbox/compose.https.yaml',
+              'node/production/inbox/compose.peers.yaml'},
 }
 
 
