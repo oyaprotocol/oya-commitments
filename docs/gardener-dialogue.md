@@ -283,7 +283,7 @@ Nothing, that's it. They could always make a new commitment but the resolution m
 - **Asked on:** 2026-11-15
 - **Topics:** product discovery, learning, user needs
 - **Status:** Awaiting answer
-- **Source PR:** Pending publication.
+- **Source PR:** [#170](https://github.com/oyaprotocol/oya-commitments/pull/170)
 
 ### Context
 
