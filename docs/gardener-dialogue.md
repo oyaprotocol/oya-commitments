@@ -34,6 +34,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q009](#q009) | Privacy when proving fulfillment | privacy, evidence, user expectations | Answered |
 | [Q010](#q010) | Testing our assumptions with early users | product discovery, learning, user needs | Answered |
 | [Q011](#q011) | Connections between independent commitments | composability, ecosystem, application design | Answered |
+| [Q012](#q012) | Changing a long-running commitment | consent, adaptability, ongoing commitments | Answered |
 
 <a id="q001"></a>
 
@@ -363,3 +364,32 @@ What is the first useful interaction you would like to see between two independe
 - **Source updated:** 2026-11-15T19:03:58Z
 
 As an example, one commitment could request to borrow funds against collateral, and a different commitment could offer to lend funds to other commitments that meet certain terms. An agent could then optimistically lend funds to the borrower, and request reimbursement (and reassignment of the loan) to the lender, and collect some fee in the process. This matches up borrowers and lenders. In addition, you could imagine lending and borrowing happening within the same commitment, so that an account could earn yield against their funds while also borrowing cash against their overall portfolio as it earns yield.
+
+<a id="q012"></a>
+
+## Q012 — Changing a long-running commitment
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-15
+- **Topics:** consent, adaptability, ongoing commitments
+- **Status:** Answered
+- **Source PR:** [#172](https://github.com/oyaprotocol/oya-commitments/pull/172)
+
+### Context
+
+In [Q007](#q007), @pemulis noted that a commitment may be ongoing, with multiple proposals over time. Exploring how its rules might change could help us distinguish useful adaptability from changing what someone originally agreed to.
+
+### Question
+
+How should a long-running commitment adapt when its participants' needs change?
+
+### Answer
+
+#### @pemulis — 2026-11-15
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 6899665040](https://github.com/oyaprotocol/oya-commitments/pull/172#issuecomment-6899665040)
+- **Source created:** 2026-11-15T19:05:25Z
+- **Source updated:** 2026-11-15T19:05:25Z
+
+A commitment could include rules that allow updates to their rules. That would not necessarily be the case for every commitment, and there is no reason the same user could not spread activity across multiple commitments. But it would definitely be useful for long-running commitments, and changes to the rules may include timelocks before the new rules go into effect to clear up old business.
