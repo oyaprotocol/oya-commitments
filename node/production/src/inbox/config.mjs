@@ -1,3 +1,4 @@
+import { parsePeers } from '../peers/config.mjs';
 import { readFile } from 'node:fs/promises';
 import { createSignedMessageAuthorizer } from '@oyaprotocol/messages';
 import { getAddress } from 'ethers';
@@ -23,7 +24,7 @@ export function inboxUrl(value) {
     return url.origin;
 }
 export function parseInboxConfig(input) {
-    const allowed = ['target', 'host', 'port', 'allowedSigners', 'execution', 'maxJobs', 'maxTextBytes', 'leaseMs', 'databaseTls', 'databaseCaFile'];
+    const allowed = ['target', 'host', 'port', 'allowedSigners', 'execution', 'maxJobs', 'maxTextBytes', 'leaseMs', 'databaseTls', 'databaseCaFile', 'peers'];
     if (Object.keys(input).some(key => !allowed.includes(key))) throw new Error('Unknown inbox configuration field.');
     createSignedMessageAuthorizer(input.allowedSigners);
     if (!input.allowedSigners.length) throw new Error('Inbox requires allowed signers.');
@@ -51,9 +52,10 @@ export function parseInboxConfig(input) {
         throw new Error('host must be a nonempty string.');
     }
     if (input.databaseTls !== undefined && typeof input.databaseTls !== 'boolean') throw new Error('databaseTls must be boolean.');
+    const peers = parsePeers(input.peers);
     const leaseMs = positive(input.leaseMs, 60000, 300000);
     if (leaseMs < 3000) throw new Error('leaseMs must be at least 3000.');
-    return { target: targetName(input.target), host: input.host ?? '127.0.0.1', port: positive(input.port, 8788, 65535),
+    return { peers, target: targetName(input.target), host: input.host ?? '127.0.0.1', port: positive(input.port, 8788, 65535),
         allowedSigners: input.allowedSigners, execution, maxJobs: positive(input.maxJobs, 10000, 1000000),
         maxTextBytes: positive(input.maxTextBytes, 8192, 8192), leaseMs,
         databaseTls: input.databaseTls ?? true, databaseCaFile: input.databaseCaFile };

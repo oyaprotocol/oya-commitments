@@ -1,3 +1,4 @@
+import { loadPeers, publicationSigners } from '../peers/config.mjs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { readJson, parseInboxConfig, databaseOptions, token } from './config.mjs';
@@ -8,6 +9,7 @@ export async function main(args = process.argv.slice(2)) {
     const [configFile, secretsFile, command] = args;
     if (!configFile || !secretsFile || (command && command !== 'prune') || args.length > 3) throw new Error('Usage: inbox CONFIG_JSON SECRETS_JSON [prune]');
     const config = parseInboxConfig(await readJson(configFile));
+    config.allowedSigners = publicationSigners(config.allowedSigners, await loadPeers(config, configFile));
     const secrets = await readJson(secretsFile);
     const workerToken = token(secrets.workerToken);
     const store = new InboxStore(await databaseOptions(config, secrets), config);

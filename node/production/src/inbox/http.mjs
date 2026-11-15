@@ -61,7 +61,8 @@ export function createInboxServer({ config, workerToken, store, log = () => {} }
                     try { log({ event: 'job_accepted', requestId: result.requestId, status: result.status }); } catch {}
                     return;
                 case '/v1/status':
-                    await validateJob(body, { ...config, checkExpiry: false });
+                    // Recover retained jobs even after the admission text limit is lowered.
+                    await validateJob(body, { ...config, maxTextBytes: 8192, checkExpiry: false });
                     result = await store.status(body); break;
                 case '/v1/worker/inspect':
                     if (Object.keys(body).join() !== 'target') reject(400, 'invalid_worker_request');

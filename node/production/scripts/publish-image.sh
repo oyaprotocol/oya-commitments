@@ -54,7 +54,7 @@ cp "$staging/source/compose.yaml" "$staging/source/README.md" \
 cp "$staging/source/docker/compose.http.yaml" "$staging/source/docker/Caddyfile" \
     "$staging/source/docker/compose.testing.yaml" \
     "$staging/source/docker/config.example.json" "$staging/source/docker/runtime.env.example" "$bundle/docker/"
-for file in compose.yaml compose.postgres.yaml compose.https.yaml compose.worker.yaml compose.keychain-worker.yaml Caddyfile inbox.example.json worker.example.json; do
+for file in compose.yaml compose.postgres.yaml compose.https.yaml compose.peers.yaml compose.worker.yaml compose.keychain-worker.yaml Caddyfile inbox.example.json worker.example.json; do
     cp "$staging/source/inbox/$file" "$bundle/inbox/"
 done
 mkdir -p "$staging/bundle/agent-library/agents/hourly-message-test"
@@ -63,7 +63,7 @@ git -C "$root" show "$revision:agent-library/agents/hourly-message-test/agent.mj
 cp "$staging/source/scripts/deploy-droplet.sh" "$staging/source/scripts/deploy-droplet-remote.sh" "$bundle/scripts/"
 cp "$staging/source/scripts/keychain-worker.py" "$staging/source/scripts/upgrade-node.py" "$bundle/scripts/"
 cp "$output/image.txt" "$bundle/image.txt"
-cp "$staging/source/peers/testnet-directory.json" "$staging/source/peers/README.md" "$bundle/peers/"
+cp "$staging/source/peers/testnet-directory.json" "$staging/source/peers/README.md" "$staging/source/peers/receive.md" "$bundle/peers/"
 cp "$staging/source/scripts/peer-directory.mjs" "$bundle/scripts/"
 # Source guides resolve the latest release; immutable bundles select their own tag.
 node --input-type=module - "$bundle" "$release" <<'NODE'
