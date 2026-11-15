@@ -441,7 +441,7 @@ It will depend on the nature of the commitment whether it is open to anyone or t
 - **Asked on:** 2026-11-15
 - **Topics:** collaboration, working style, judgment
 - **Status:** Awaiting answer
-- **Source PR:** Pending publication.
+- **Source PR:** [#178](https://github.com/oyaprotocol/oya-commitments/pull/178)
 
 ### Context
 
