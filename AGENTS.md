@@ -80,9 +80,12 @@
 - For `agent-library` changes, run the relevant agent test/simulation scripts and note commands in the PR.
 
 ## Commit & Pull Request Guidelines
-- Write imperative, concise commit messages (e.g., "Add OG deployment script"); group related changes together.
-- PRs should summarize intent, list main changes, note testing performed (`forge test`, `forge snapshot`, scripts run), and flag any config or env var impacts.
-- Include relevant issue links and, if user-visible, attach logs or gas deltas for reviewers.
+- Write imperative, concise commit messages (e.g., "Add OG deployment script"). Group related changes together.
+- Describe what the PR does and why. Focus on the change rather than lists of non-goals or unrelated unchanged behavior.
+- Match the description's length to the change. A very small PR needs only a short paragraph or a few bullets explaining what it does. Reviewers can ask follow-up questions and inspect the code for details.
+- Prefer short sentences. Start a new sentence instead of joining independent clauses with a semicolon.
+- Summarize relevant validation briefly. Include configuration impacts, security warnings, compatibility constraints, and validation limits when they affect review or prevent a misleading claim.
+- Include issue links or supporting artifacts when they help reviewers understand the change.
 
 ## Before Human Review
 
