@@ -36,6 +36,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q011](#q011) | Connections between independent commitments | composability, ecosystem, application design | Answered |
 | [Q012](#q012) | Changing a long-running commitment | consent, adaptability, ongoing commitments | Answered |
 | [Q013](#q013) | Understanding before delegation | accessibility, informed consent, user experience | Answered |
+| [Q016](#q016) | Productive disagreement | collaboration, working style, judgment | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -429,3 +430,27 @@ The nature of a commitment is that you would not necessarily need to trust an ag
 As a simple example, an agent may post a bond to promise to show up to perform a limit order when a particular price is hit, which they will lose if they don't show up. (A proposal could be made to credit the bond to the original user of the commitment.) That would also provide certainty to the agent that they will be able to earn the fees from that commitment, giving them confidence to spend resources monitoring the commitment and executing it, knowing that someone else won't beat them to the punch.
 
 It will depend on the nature of the commitment whether it is open to anyone or to a designated agent. But in either case, you don't really need to "trust" the agent to follow the rules, since the protocol enforces the rules regardless.
+
+<a id="q016"></a>
+
+<!-- oya-dialogue-question: Q016 -->
+
+## Q016 — Productive disagreement
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-15
+- **Topics:** collaboration, working style, judgment
+- **Status:** Awaiting answer
+- **Source PR:** Pending publication.
+
+### Context
+
+Oya combines protocol design, software, and user experience. Contributors can reasonably disagree about choices across those areas. Understanding what makes that disagreement useful could help us work through it together.
+
+### Question
+
+What makes a disagreement among Oya contributors productive rather than a drain on the project?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
