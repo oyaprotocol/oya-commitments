@@ -47,6 +47,9 @@ export function parseInboxConfig(input) {
             if (/^0x0{40}$/.test(execution[key])) throw new Error('Zero execution address.');
         }
     } else throw new Error('Set execution mode to ipfs or ledger.');
+    if (input.host !== undefined && (typeof input.host !== 'string' || !input.host.trim())) {
+        throw new Error('host must be a nonempty string.');
+    }
     if (input.databaseTls !== undefined && typeof input.databaseTls !== 'boolean') throw new Error('databaseTls must be boolean.');
     const leaseMs = positive(input.leaseMs, 60000, 300000);
     if (leaseMs < 3000) throw new Error('leaseMs must be at least 3000.');
