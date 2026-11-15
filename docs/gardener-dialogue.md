@@ -36,6 +36,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q011](#q011) | Connections between independent commitments | composability, ecosystem, application design | Answered |
 | [Q012](#q012) | Changing a long-running commitment | consent, adaptability, ongoing commitments | Answered |
 | [Q013](#q013) | Understanding before delegation | accessibility, informed consent, user experience | Answered |
+| [Q014](#q014) | An influence worth learning from | design influences, philosophy, collaboration | Awaiting answer |
 | [Q015](#q015) | Continuity when an agent leaves | resilience, agent choice, ongoing commitments | Answered |
 
 <a id="q001"></a>
@@ -430,6 +431,30 @@ The nature of a commitment is that you would not necessarily need to trust an ag
 As a simple example, an agent may post a bond to promise to show up to perform a limit order when a particular price is hit, which they will lose if they don't show up. (A proposal could be made to credit the bond to the original user of the commitment.) That would also provide certainty to the agent that they will be able to earn the fees from that commitment, giving them confidence to spend resources monitoring the commitment and executing it, knowing that someone else won't beat them to the punch.
 
 It will depend on the nature of the commitment whether it is open to anyone or to a designated agent. But in either case, you don't really need to "trust" the agent to follow the rules, since the protocol enforces the rules regardless.
+
+<a id="q014"></a>
+
+<!-- oya-dialogue-question: Q014 -->
+
+## Q014 — An influence worth learning from
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-15
+- **Topics:** design influences, philosophy, collaboration
+- **Status:** Awaiting answer
+- **Source PR:** [#175](https://github.com/oyaprotocol/oya-commitments/pull/175)
+
+### Context
+
+The dialogue has explored what Oya could enable. Learning which existing experiences inform its design could give contributors a more concrete sense of the qualities we want to cultivate.
+
+### Question
+
+What experience with another tool or community has most shaped how you want Oya to feel to its users?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
 
 <a id="q015"></a>
 
