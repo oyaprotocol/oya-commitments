@@ -345,7 +345,7 @@ I would like to see if they are interested in the initial use case of lending an
 - **Asked on:** 2026-11-15
 - **Topics:** accessibility, informed consent, user experience
 - **Status:** Awaiting answer
-- **Source PR:** Pending publication.
+- **Source PR:** [#174](https://github.com/oyaprotocol/oya-commitments/pull/174)
 
 ### Context
 
