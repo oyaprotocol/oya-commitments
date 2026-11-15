@@ -16,6 +16,7 @@ The default deployment runs Oya and Kubo on your local device, with a portable P
 | Use a synchronous API without an inbox | [Advanced direct HTTP setup](run-direct.md). |
 | Batch direct-runtime Ledger logs (source opt-in) | [Batch logging](batch-logging.md) — bounded durable batches; inbox/worker explicitly unsupported. |
 | Verify a Ledger log from any source without a key | [Job-independent evidence command](inbox-api.md#verify-ledger-evidence) — record identity, content availability and explicit byte-integrity checks. |
+| Review an original signed message in a logged batch | [Batch member evidence](batch-logging.md#review-one-batch-member) — bounded retrieval, CID integrity, membership, signature and optional Ledger checks. |
 | Verify automatic testnet CID logging | [Testnet Ledger acceptance](testnet-ledger.md) — isolated installation, receipt evidence and recovery; requires separate broadcast authorization. |
 | Load or fetch the public peer list | [Testnet registry guide](peers/README.md) — public addresses and endpoints; signer permissions stay explicitly configured. |
 | Develop or validate the runtime | [Install and validate](#install-and-validate). |
