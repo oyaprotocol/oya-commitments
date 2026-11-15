@@ -18,7 +18,7 @@ const receiver = Wallet.createRandom();
 const config = { networkId: 'testnet', nodeAddress: receiver.address.toLowerCase(), target: 'peer-test',
     maxTextBytes: 8192, members: [sender.address.toLowerCase()], maxMessages: 2, retentionMs: MAX_AGE };
 const envelope = (overrides = {}, wallet = sender) => signPeer(wallet, { networkId: config.networkId,
-    receiver: config.nodeAddress, target: config.target, text: 'exact\ntext ☀', ...overrides });
+    receiver: config.nodeAddress, target: config.target, text: 'exact\ntext', ...overrides });
 async function directory(t) {
     const dir = await mkdtemp(join(tmpdir(), 'oya-peer-'));
     t.after(() => rm(dir, { recursive: true, force: true }));
@@ -36,7 +36,7 @@ test('peer signatures bind every field and reject publication/domain substitutio
     assert.notEqual(checked, original);
     assert.ok(Object.isFrozen(checked));
     assert.deepEqual(checked, original);
-    for (const [key, value] of Object.entries({ version: 2, operation: 'publish', networkId: 'other',
+    for (const [key, value] of Object.entries({ version: 1, operation: 'publish', networkId: 'other',
         receiver: sender.address.toLowerCase(), target: 'other', requestId: '00000000-0000-4000-8000-000000000000',
         expiresAt: original.expiresAt - 1, text: 'changed', sender: receiver.address.toLowerCase(), signature: '0x' })) {
         assert.throws(() => validatePeer({ ...original, [key]: value }, config), { code: 'invalid_peer_envelope' }, key);
@@ -45,7 +45,7 @@ test('peer signatures bind every field and reject publication/domain substitutio
         const signed = await envelope(change);
         assert.throws(() => validatePeer(signed, config), { status: 403 });
     }
-    const otherDomain = { ...original, signature: await sender.signMessage(peerText(original).replace('informational peer receive', 'inbox job')) };
+    const otherDomain = { ...original, signature: await sender.signMessage(peerText(original).replace('peer publication receive', 'inbox job')) };
     assert.throws(() => validatePeer(otherDomain, config), { status: 403 });
     assert.throws(() => validatePeer({ ...original, extra: true }, config), { status: 403 });
     assert.throws(() => validatePeer({ ...original, sender: sender.address }, config), { status: 403 });
@@ -68,11 +68,12 @@ test('expiry, Unicode and exact text byte limits fail closed; status permits exp
     assert.equal(validatePeer(expired, config, { now, checkExpiry: false }).expiresAt, now);
     const future = await envelope({ expiresAt: now + MAX_AGE + 1 });
     assert.throws(() => validatePeer(future, config, { now }), { status: 400 });
-    for (const text of ['x'.repeat(8193), '\0', '\ud800']) {
+    await assert.rejects(envelope({ text: '\ud800' }));
+    for (const text of ['x'.repeat(8193), '\0', '', 'é', '\ufefftext']) {
         const value = await envelope({ text });
         assert.throws(() => validatePeer(value, config), { status: 403 });
     }
-    assert.equal(validatePeer(await envelope({ text: 'é'.repeat(4096) }), config).text.length, 4096);
+    assert.equal(validatePeer(await envelope({ text: 'x'.repeat(8192) }), config).message.text.length, 8192);
     for (const expiresAt of [-1, 1.2, Number.MAX_SAFE_INTEGER]) {
         const value = await envelope({ expiresAt });
         assert.throws(() => validatePeer(value, config, { checkExpiry: false }), { status: 403 });
@@ -80,7 +81,7 @@ test('expiry, Unicode and exact text byte limits fail closed; status permits exp
 });
 
 test('status recovers retained receipts after admission shrinks while preserving authentication and protocol bounds', async () => {
-    const value = await envelope({ text: 'é'.repeat(4096), expiresAt: Date.now() - 1 });
+    const value = await envelope({ text: 'x'.repeat(8192), expiresAt: Date.now() - 1 });
     const receipt = receiptFor(value, value.expiresAt - 1000, Date.now() + MAX_AGE);
     const store = new PeerStore({}, { ...config, maxTextBytes: 1 });
     let queries = 0;
@@ -90,14 +91,14 @@ test('status recovers retained receipts after admission shrinks while preserving
         return { rows: [{ digest: receipt.digest, receipt }] };
     } });
     assert.deepEqual(await store.status(value), receipt);
-    await assert.rejects(store.receive(await envelope({ text: 'é' })), { code: 'invalid_peer_envelope' });
+    await assert.rejects(store.receive(await envelope({ text: 'xx' })), { code: 'invalid_peer_envelope' });
     const rejected = [
         { ...value, text: 'forged' },
-        { ...value, signature: await sender.signMessage(peerText(value).replace('informational peer receive', 'inbox job')) },
+        { ...value, signature: await sender.signMessage(peerText(value).replace('peer publication receive', 'inbox job')) },
         await envelope({ networkId: 'other' }), await envelope({ receiver: Wallet.createRandom().address }),
         await envelope({ target: 'other' }), await envelope({}, Wallet.createRandom()),
-        await envelope({ text: 'é'.repeat(4096) + 'x' }), await envelope({ text: '\0' }),
-        await envelope({ text: '\ud800' })
+        await envelope({ text: 'x'.repeat(8193) }), await envelope({ text: '\0' }),
+        { ...value, message: { ...value.message, text: '\ud800' } }
     ];
     for (const invalid of rejected) await assert.rejects(store.status(invalid), { code: 'invalid_peer_envelope' });
     store.config = { ...store.config, members: [] };
@@ -156,7 +157,7 @@ test('saved envelope is exclusive, private and unchanged on retry; reads are bou
     await assert.rejects(readBounded(textFile, 8192));
 });
 
-test('HTTP peer routes are opt-in and do not invoke publication or worker methods', async t => {
+test('HTTP peer routes are opt-in and delegate atomic admission to the peer store', async t => {
     const value = await envelope();
     let calls = 0;
     const store = { enqueue: () => assert.fail('publication called') };

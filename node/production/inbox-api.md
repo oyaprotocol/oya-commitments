@@ -1,6 +1,6 @@
 # Inbox API and recovery contract
 
-For opt-in signed informational messages between registered nodes, see [peer reception](peers/receive.md). Peer membership does not grant publication authority.
+For opt-in signed publication requests between registered nodes, see [peer reception](peers/receive.md). Enabling an installed registry grants its non-self members publication authority.
 
 Version 1 uses JSON over HTTPS. It is implemented by `src/inbox/`, with PostgreSQL as the durable queue and execution journal. The supplied image has three entrypoints: `main.mjs` serves the inbox, `worker.mjs` polls and publishes locally, and `client.mjs` creates/submits/reads signed jobs. The synchronous `src/main.mjs` remains available separately.
 

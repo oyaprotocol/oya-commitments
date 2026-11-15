@@ -30,6 +30,9 @@ export function parsePeers(input) {
     return Object.freeze({ networkId: network(input.networkId), nodeAddress: address(input.nodeAddress), registryFile: input.registryFile,
         maxMessages: bounded(input.maxMessages, 1000, 100000), retentionMs: bounded(input.retentionMs, 7 * 86400_000, 30 * 86400_000) });
 }
+export function publicationSigners(allowedSigners, peers) {
+    return [...new Set([...allowedSigners.map(value => value.toLowerCase()), ...(peers?.members ?? []).filter(member => member !== peers.nodeAddress)])];
+}
 export async function loadPeers(config, configFile) {
     if (!config.peers) return undefined;
     const records = JSON.parse(await readBounded(resolve(dirname(resolve(configFile)), config.peers.registryFile), 1048576));

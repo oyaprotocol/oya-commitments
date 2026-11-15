@@ -48,19 +48,21 @@ export class InboxStore {
         finally { client.release(); }
     }
     async enqueue(job) {
-        return this.locked(async client => {
-            const { rows: [existing] } = await client.query('SELECT * FROM oya_inbox_jobs WHERE target=$1 AND request_id=$2', [this.config.target, job.requestId]);
-            if (existing) {
-                if (existing.payload_hash !== digest(job)) reject(409, 'request_id_conflict');
-                return publicJob(existing);
-            }
-            if (job.expiresAt <= Date.now()) reject(400, 'invalid_job_expiry');
-            const { rows: [count] } = await client.query('SELECT count(*)::int AS count FROM oya_inbox_jobs WHERE target=$1', [this.config.target]);
-            if (count.count >= this.config.maxJobs) reject(429, 'inbox_capacity');
-            const { rows: [row] } = await client.query(`INSERT INTO oya_inbox_jobs(target,request_id,payload,payload_hash,expires_at)
-                VALUES ($1,$2,$3,$4,$5) RETURNING *`, [this.config.target, job.requestId, job, digest(job), new Date(job.expiresAt)]);
-            return publicJob(row);
-        });
+        return this.locked(client => this.enqueueInTransaction(client, job));
+    }
+    // Caller must hold the target lock in the same transaction as related writes.
+    async enqueueInTransaction(client, job) {
+        const { rows: [existing] } = await client.query('SELECT * FROM oya_inbox_jobs WHERE target=$1 AND request_id=$2', [this.config.target, job.requestId]);
+        if (existing) {
+            if (existing.payload_hash !== digest(job)) reject(409, 'request_id_conflict');
+            return publicJob(existing);
+        }
+        if (job.expiresAt <= Date.now()) reject(400, 'invalid_job_expiry');
+        const { rows: [count] } = await client.query('SELECT count(*)::int AS count FROM oya_inbox_jobs WHERE target=$1', [this.config.target]);
+        if (count.count >= this.config.maxJobs) reject(429, 'inbox_capacity');
+        const { rows: [row] } = await client.query(`INSERT INTO oya_inbox_jobs(target,request_id,payload,payload_hash,expires_at)
+            VALUES ($1,$2,$3,$4,$5) RETURNING *`, [this.config.target, job.requestId, job, digest(job), new Date(job.expiresAt)]);
+        return publicJob(row);
     }
     async status(job) {
         const { rows: [row] } = await this.pool.query('SELECT * FROM oya_inbox_jobs WHERE target=$1 AND request_id=$2', [this.config.target, job.requestId]);

@@ -2,7 +2,11 @@
 
 This document follows [PLANS.md](../PLANS.md) and the repository instruction hierarchy.
 
-## Current direction — candidate revision 2026-11-14 v2
+## Current direction — founder correction 2026-11-15
+
+[pemulis's PR #173 correction 6900008120](https://github.com/oyaprotocol/oya-commitments/pull/173#issuecomment-6900008120) supersedes the receipt-only interpretation below. Peer messages are ordinary publication/logging requests and must preserve an independently signed `{ text, signer, signature }` for IPFS. For testing, opting into an installed registry adds its non-self members to the inbox and worker publication allowlists. Local explicit grants remain intact. The receiver still owns its execution configuration, private key, transaction limits and durable checkpoints. The [reception ExecPlan](peer-inbox-receive-v1-execplan.md) records the bounded correction on PR #173. This does not authorize deployment, sending real transactions, automatic replies or a continuous scheduler.
+
+## Superseded direction — candidate revision 2026-11-14 v2
 
 [pemulis's clarification 4571803463](https://github.com/oyaprotocol/oya-commitments/pull/161#discussion_r4571803463) refines clarification 4571135806: registered peers should be able to send messages recognized and handled by the inbox, and the receiving node MAY queue publication if its LOCAL policy chooses it. Peers do not directly control IPFS or transactions, and registry membership alone must not add them to publication `allowedSigners`. Existing explicit agent publication grants, signing/credential boundaries and pending-transaction recovery remain unchanged.
 

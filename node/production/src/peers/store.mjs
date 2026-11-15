@@ -1,9 +1,10 @@
 import { readFile } from 'node:fs/promises';
 import { digest, reject } from '../inbox/protocol.mjs';
-import { validatePeer, peerDigest, receiptFor } from './protocol.mjs';
+import { validatePeer, peerDigest, receiptFor, peerJob } from './protocol.mjs';
 
 export class PeerStore {
-    constructor(pool, config) {
+    constructor(pool, config, inbox) {
+        this.inbox = inbox;
         this.pool = pool;
         this.config = config;
         this.identity = { version: 1, networkId: config.networkId, receiver: config.nodeAddress, target: config.target };
@@ -51,6 +52,13 @@ export class PeerStore {
             await this.pruneRows(client, now);
             const { rows: [count] } = await client.query('SELECT count(*)::int AS count FROM oya_peer_messages WHERE target=$1', [this.config.target]);
             if (count.count >= this.config.maxMessages) reject(429, 'peer_capacity');
+            if (!this.inbox || this.inbox.pool !== this.pool || this.inbox.config.target !== this.config.target) {
+                throw new Error('Peer publication queue is not configured.');
+            }
+            // Lock order is peer target then inbox target. Both inserts commit together.
+            const { rows: [target] } = await client.query('SELECT execution FROM oya_inbox_targets WHERE target=$1 FOR UPDATE', [this.config.target]);
+            if (!target || digest(target.execution) !== digest(this.inbox.config.execution)) throw new Error('Inbox execution identity changed.');
+            await this.inbox.enqueueInTransaction(client, peerJob(envelope));
             const retainedUntil = Math.max(envelope.expiresAt, now + this.config.retentionMs);
             const receipt = receiptFor(envelope, now, retainedUntil);
             await client.query(`INSERT INTO oya_peer_messages(target,request_id,envelope,digest,receipt,retained_until)

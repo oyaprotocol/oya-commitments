@@ -16,9 +16,10 @@ import { Pool } from 'pg';
 import { InboxStore } from '../src/inbox/store.mjs';
 import { parseInboxConfig } from '../src/inbox/config.mjs';
 import { PeerStore } from '../src/peers/store.mjs';
-import { signPeer, MAX_AGE, peerDigest } from '../src/peers/protocol.mjs';
+import { signPeer, MAX_AGE, peerDigest, peerJob } from '../src/peers/protocol.mjs';
 import { sendPeer } from '../src/peers/client.mjs';
 import { waitForPostgres } from './postgres-readiness.mjs';
+import { cid } from '../test/runtime-fixture.mjs';
 
 const execute = promisify(execFile);
 const runtime = fileURLToPath(new URL('../', import.meta.url));
@@ -53,10 +54,11 @@ test('peer reception with real PostgreSQL, process restart and one-shot CLI', { 
     const config = { networkId: 'testnet', nodeAddress: receiver.address.toLowerCase(), target: `peer-${randomUUID()}`,
         members: Object.freeze([sender.address.toLowerCase()]), maxTextBytes: 8192, maxMessages: 2, retentionMs: MAX_AGE };
     const make = overrides => signPeer(sender, { networkId: config.networkId, receiver: config.nodeAddress,
-        target: config.target, text: 'informational only', ...overrides });
+        target: config.target, text: 'ordinary peer publication', ...overrides });
     const newStore = async (settings = config) => {
-        const pool = new Pool(database); pools.push(pool); pool.on('error', () => {});
-        const store = new PeerStore(pool, settings); await store.initialize(); return store;
+        const inbox = new InboxStore(database, parseInboxConfig({ target: settings.target, allowedSigners: [sender.address], execution: { mode: 'ipfs' } }));
+        pools.push(inbox.pool); await inbox.initialize();
+        const store = new PeerStore(inbox.pool, settings, inbox); await store.initialize(); return store;
     };
     let store = await newStore();
     const original = await make();
@@ -71,6 +73,8 @@ test('peer reception with real PostgreSQL, process restart and one-shot CLI', { 
         const row = (await store.pool.query('SELECT * FROM oya_peer_messages WHERE target=$1', [config.target])).rows[0];
         assert.deepEqual(row.envelope, original);
         assert.equal(row.digest, peerDigest(original));
+        const jobs = await store.pool.query('SELECT payload FROM oya_inbox_jobs WHERE target=$1', [config.target]);
+        assert.deepEqual(jobs.rows.map(row => row.payload), [peerJob(original)]);
         assert.ok(receipt.retainedUntil >= original.expiresAt);
     });
     await t.test('independent pools serialize capacity and retain earlier accepted records', async () => {
@@ -125,14 +129,44 @@ test('peer reception with real PostgreSQL, process restart and one-shot CLI', { 
         await assert.rejects(short.status(value), { status: 404 });
         const inbox = new InboxStore(database, parseInboxConfig({ target: config.target, allowedSigners: [sender.address], execution: { mode: 'ipfs' } }));
         pools.push(inbox.pool); await inbox.initialize();
-        assert.equal((await inbox.pool.query('SELECT count(*)::int AS count FROM oya_inbox_jobs')).rows[0].count, 0);
+        assert.equal((await inbox.pool.query('SELECT count(*)::int AS count FROM oya_inbox_jobs WHERE target=$1', [config.target])).rows[0].count, 2);
         // A publication checkpoint is unrelated to peer pruning.
         await inbox.pool.query(`INSERT INTO oya_inbox_jobs(target,request_id,payload,payload_hash,expires_at,status,cid)
             VALUES ($1,$2,'{}','fixture',clock_timestamp(),'processing','retained-checkpoint')`, [config.target, randomUUID()]);
         await delay(550);
         assert.equal((await short.prune()).deleted, 1);
         await retained.prune();
-        assert.equal((await inbox.pool.query('SELECT cid FROM oya_inbox_jobs')).rows[0].cid, 'retained-checkpoint');
+        assert.equal((await inbox.pool.query('SELECT cid FROM oya_inbox_jobs WHERE cid IS NOT NULL')).rows[0].cid, 'retained-checkpoint');
+    });
+    await t.test('queue capacity, conflicts and post-enqueue failure roll back both stores', async () => {
+        const isolated = await newStore({ ...config, target: `atomic-${randomUUID()}`, maxMessages: 10 });
+        const makeHere = changes => make({ target: isolated.config.target, ...changes });
+        const first = await makeHere();
+        const enqueue = isolated.inbox.enqueueInTransaction.bind(isolated.inbox);
+        isolated.inbox.enqueueInTransaction = async (client, job) => {
+            await enqueue(client, job);
+            // Real PostgreSQL error after the queue insert must abort the whole transaction.
+            await client.query('SELECT 1/0');
+        };
+        await assert.rejects(isolated.receive(first), /division by zero/);
+        for (const table of ['oya_peer_messages', 'oya_inbox_jobs']) {
+            assert.equal((await isolated.pool.query(`SELECT count(*)::int AS count FROM ${table} WHERE target=$1`, [isolated.config.target])).rows[0].count, 0);
+        }
+        await assert.rejects(isolated.status(first), { code: 'peer_not_found' });
+        isolated.inbox.enqueueInTransaction = enqueue;
+        await isolated.receive(first);
+        isolated.inbox.config.maxJobs = 1;
+        const second = await makeHere();
+        await assert.rejects(isolated.receive(second), { code: 'inbox_capacity' });
+        await assert.rejects(isolated.status(second), { code: 'peer_not_found' });
+        isolated.inbox.config.maxJobs = 10;
+        await isolated.inbox.enqueue(peerJob(second)); // ordinary route won the race
+        assert.equal((await isolated.receive(second)).requestId, second.requestId);
+        const collision = await makeHere();
+        await isolated.inbox.enqueue(peerJob(await makeHere({ requestId: collision.requestId, text: 'other signed job' })));
+        await assert.rejects(isolated.receive(collision), { code: 'request_id_conflict' });
+        await assert.rejects(isolated.status(collision), { code: 'peer_not_found' });
+        assert.equal((await isolated.pool.query('SELECT count(*)::int AS count FROM oya_inbox_jobs WHERE target=$1', [isolated.config.target])).rows[0].count, 3);
     });
     await t.test('CLI prepare→real inbox startup→HTTP→database; restart adopts registry revocation', async () => {
         const target = `cli-${randomUUID()}`;
@@ -143,7 +177,7 @@ test('peer reception with real PostgreSQL, process restart and one-shot CLI', { 
         const origin = `http://127.0.0.1:${port}`;
         const file = name => join(dir, name);
         await writeFile(file('registry.json'), JSON.stringify([{ nodeAddress: sender.address, url: 'https://sender.example/v1/jobs', target: 'sender' }]));
-        await writeFile(file('inbox.json'), JSON.stringify({ target, port, allowedSigners: [sender.address], execution: { mode: 'ipfs' }, databaseTls: false,
+        await writeFile(file('inbox.json'), JSON.stringify({ target, port, allowedSigners: [receiver.address], execution: { mode: 'ipfs' }, databaseTls: false,
             peers: { networkId: config.networkId, nodeAddress: receiver.address, registryFile: 'registry.json' } }));
         await writeFile(file('secrets.json'), JSON.stringify({ workerToken: randomBytes(32).toString('base64url'),
             databaseUrl: `postgres://postgres:${password}@127.0.0.1:${database.port}/postgres` }), { mode: 0o600 });
@@ -169,6 +203,49 @@ test('peer reception with real PostgreSQL, process restart and one-shot CLI', { 
         const accepted = await cli(['submit', origin, file('envelope')]);
         assert.equal(accepted.scope, 'inbox');
         assert.deepEqual(await cli(['submit', origin, file('envelope')]), accepted);
+        const ordinary = await fetch(origin + '/v1/jobs', { method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(peerJob(JSON.parse(bytes))) });
+        assert.equal(ordinary.status, 202, 'registry grants ordinary admission too');
+        assert.equal((await ordinary.json()).requestId, accepted.requestId);
+        // Real worker startup must independently adopt the installed registry grant.
+        let uploaded;
+        const ipfs = httpServer(async (request, response) => {
+            try {
+                const chunks = [];
+                for await (const chunk of request) chunks.push(chunk);
+                const form = await new Response(Buffer.concat(chunks), { headers: { 'content-type': request.headers['content-type'] } }).formData();
+                uploaded = JSON.parse(await form.get('file').text());
+                response.writeHead(200, { 'content-type': 'application/json' });
+                response.end(JSON.stringify({ Hash: cid }));
+            } catch { response.writeHead(500); response.end(); }
+        });
+        await new Promise(resolve => ipfs.listen(0, '127.0.0.1', resolve));
+        const health = createServer();
+        await new Promise(resolve => health.listen(0, '127.0.0.1', resolve));
+        const healthPort = health.address().port;
+        await new Promise(resolve => health.close(resolve));
+        await writeFile(file('node.json'), JSON.stringify({ mode: 'ipfs', port: healthPort, allowedSigners: [receiver.address],
+            ipfsUrl: `http://127.0.0.1:${ipfs.address().port}` }));
+        await writeFile(file('node.env'), '');
+        await writeFile(file('worker.json'), JSON.stringify({ url: origin, target, pollIntervalMs: 1000,
+            peers: { networkId: config.networkId, nodeAddress: receiver.address, registryFile: 'registry.json' } }));
+        const worker = spawn(process.execPath, [join(runtime, 'src/inbox/worker.mjs'), file('node.json'), file('node.env'), file('worker.json'), file('secrets.json')],
+            { stdio: ['ignore', 'ignore', 'ignore'] });
+        children.push(worker);
+        try {
+            let status;
+            for (let i = 0; i < 100; i++) {
+                status = (await store.pool.query('SELECT status FROM oya_inbox_jobs WHERE target=$1 AND request_id=$2', [target, accepted.requestId])).rows[0]?.status;
+                if (status === 'published' || worker.exitCode !== null) break;
+                await delay(50);
+            }
+            assert.equal(status, 'published');
+            assert.deepEqual(uploaded, JSON.parse(bytes).message);
+            assert.deepEqual(await cli(['submit', origin, file('envelope')]), accepted);
+        } finally {
+            if (worker.exitCode === null && worker.signalCode === null) await stop(worker);
+            await new Promise(resolve => ipfs.close(resolve));
+        }
         await stop(child);
         const lowered = JSON.parse(await readFile(file('inbox.json'), 'utf8'));
         lowered.maxTextBytes = 1;
@@ -179,7 +256,8 @@ test('peer reception with real PostgreSQL, process restart and one-shot CLI', { 
         assert.equal(await readFile(file('envelope'), 'utf8'), bytes);
         const rows = await store.pool.query('SELECT envelope FROM oya_peer_messages WHERE target=$1', [target]);
         assert.deepEqual(rows.rows[0].envelope, JSON.parse(bytes));
-        assert.equal((await store.pool.query('SELECT count(*)::int AS count FROM oya_inbox_jobs WHERE target=$1', [target])).rows[0].count, 0);
+        const queued = await store.pool.query('SELECT payload FROM oya_inbox_jobs WHERE target=$1', [target]);
+        assert.deepEqual(queued.rows.map(row => row.payload), [peerJob(JSON.parse(bytes))]);
         await writeFile(file('registry.json'), '[]');
         assert.deepEqual(await sendPeer(origin, bytes, 'status'), accepted); // snapshot, not a live fetch
         await stop(child); child = await start();

@@ -1,84 +1,82 @@
-# Receive informational peer messages durably
+# Receive peer messages through the ordinary publication queue
 
 Feature ID: `peer-inbox-receive-v1`. This living ExecPlan follows `PLANS.md`.
 
 ## Purpose / Big Picture
 
-An operator can explicitly enable signed informational reception from an installed trusted peer list, send one saved envelope, and recover the same inbox receipt after a lost acknowledgement or restart. A receipt means retained in PostgreSQL, not processed by the node, published to IPFS, logged onchain, or cryptographically attested by the receiver. Membership never changes publication `allowedSigners`. Receiver-local publication may be designed later. This small message interface supports accessibility and security described in dialogue Q001 and participation through messages in Q006.
+An operator enables an installed trusted registry on the inbox and worker. A registered sender prepares one independently signed message, submits its saved transport envelope, and recovers the same admission receipt after a lost acknowledgement. The receiver queues an ordinary publication job in the same PostgreSQL transaction as that receipt. Its existing worker publishes the unchanged `{ text, signer, signature }` to IPFS and, in Ledger mode, logs the CID using normal checkpoints and transaction recovery. Receipt acceptance is not proof of publication or onchain confirmation.
+
+[pemulis's correction 6900008120 on PR #173](https://github.com/oyaprotocol/oya-commitments/pull/173#issuecomment-6900008120), November 15, 2026, supersedes the original receipt-only interpretation and the older receiver-selection candidate. For testing, registry members are ordinary allowed publication senders. Enabling this grant remains explicit operator configuration, not deployment authorization. There is no automatic scheduler, reply, forwarding or instruction execution.
 
 ## Progress
 
-- [x] 2026-11-15: Read repository instructions, current peer plans, dialogue Q001/Q006, inbox configuration/protocol/store/HTTP, deployment and packaging boundaries. Docker is available.
-- [x] 2026-11-15: Wrote this plan before implementation.
-- [x] 2026-11-15: Implemented canonical signed protocol, bounded snapshot configuration, isolated PostgreSQL tables and opt-in inbox routes.
-- [x] 2026-11-15: Implemented offline exclusive synchronized prepare and explicit submit/status, operator guide, optional registry Compose mount, image whitelist and release/upgrader packaging.
-- [x] 2026-11-15: Passed 27 focused peer/packaging tests, all 401 production tests on Node 24.22.3, 6 peer PostgreSQL integration tests and 9 existing inbox PostgreSQL tests. Built the pinned-base image and exercised its offline CLI and Compose overlay. Inspected the complete diff; non-Markdown budget is 702 added/deleted lines.
-
-- [x] 2026-11-15 19:15Z: Reproduced review finding 4579794123 in unit and real PostgreSQL/CLI tests before fixing status recovery after lowering `maxTextBytes`. Passed 28 focused, 402 full production, 6 peer PostgreSQL and 9 inbox PostgreSQL tests on Node 26.12.1.
+- [x] 2026-11-15: Initial receipt-only milestone implemented and independently reviewed: 401 production tests, six real PostgreSQL peer tests, nine existing inbox PostgreSQL tests and image/packaging checks passed.
+- [x] 2026-11-15 19:15Z: Fixed retained-receipt status after lowering admission `maxTextBytes` in a6f5dca. Previous evidence: 28 focused, 402 production, six peer PostgreSQL and nine inbox PostgreSQL tests passed. This correction is retained, not duplicated.
+- [x] 2026-11-15: Read the founder's later correction, existing code and repository instructions. Inspected active ownership before creating an isolated local candidate.
+- [x] 2026-11-15: Added version-2 transport carrying the original signed message and ordinary job signature, atomic queue admission, and registry authorization on inbox and worker startup.
+- [x] 2026-11-15: Added real-signature publication and transaction failure tests; first focused run exposed the ordinary message package's ASCII-only schema, now enforced at peer admission rather than accepting unpublishable Unicode.
+- [x] 2026-11-15: Passed all 413 production tests on Node 24.22.3, seven real PostgreSQL peer/worker integration tests and nine existing inbox PostgreSQL tests, without skips. Local pinned-base image build and network-disabled image CLI signature/private-output checks pass.
+- [ ] Independent parent review before any publication. No push, public reply, deployment or real-chain action is part of this local task.
 
 ## Surprises & Discoveries
 
-Status originally reused the current admission byte limit: after lowering `maxTextBytes` to 1 and restarting, the saved CLI envelope could no longer recover its retained receipt. The new unit test failed with `invalid_peer_envelope`, and the real PostgreSQL CLI status command exited 1 before the fix.
+The earlier peer format allowed UTF-8 and only signed the transport. The installed ordinary message package requires nonempty ASCII and a signature over the message itself. Initial new end-to-end tests failed with `invalid_signed_job`; direct package validation identified `text must contain only ASCII characters`. The corrected validator calls the installed `verifySignedMessage` and preserves its validated object. Unicode/BOM is rejected, never stripped or rewritten.
 
-Review also caught UTF-8 decoder BOM stripping; bounded file reads now preserve exact text, with unit and real image-CLI coverage.
+The worker revalidates an ordinary job signature as well as the inner message. A transport signature cannot substitute for either. Signing a normal job at preparation permits reuse of the existing worker without trusting inbox-created signatures or adding a second execution pipeline.
 
-The first full suite exposed the packaging fixture’s exact file-list assertions; updated them for the new guide and overlay, and the rerun passed all 401 tests. Real PostgreSQL restart and a deliberately severed post-commit HTTP response preserve the original receipt.
-
-The existing `/v1/jobs` path is a publication queue and cannot safely serve informational messages. The image copies only allowlisted `src` files; put the CLI under `src/peers` so a pinned image can run it without distributing host dependencies. Existing registry URLs end in `/v1/jobs`; the sender takes an explicit origin and does not follow registry URLs or fan out.
+The ordinary queue has its own capacity, duplicate-ID and expiry rules. Calling its public `enqueue` from a separate transaction would leave partial acceptance on crashes. Extracting its existing insertion logic into `enqueueInTransaction` allows one transaction for both records, with target locks always taken peer first, inbox second.
 
 ## Decision Log
 
-- 2026-11-15 / Hermes: Use separate peer tables and modules, sharing only the PostgreSQL pool and existing HTTP admission bounds. This avoids worker/publication coupling and competing inbox-inspection work.
-- 2026-11-15 / Hermes: Sign a fixed ordered JSON array prefixed with operation/domain/version. Include network ID, receiver public address, exact target, UUID, expiry, text and sender. Store an immutable normalized object and its SHA-256 digest. Status reuses that signature and requires current membership but permits expired envelopes.
-- 2026-11-15 / Hermes: Retain until the later of signed expiry and acceptance plus configured retention. Serialize operations per target; enforce capacity before insert; prune only expired retention records. Persist network/receiver binding per target to reject wrong-context restarts. Receipt identity includes digest and all routing identities.
-- 2026-11-15 / Hermes: Install a local plain registry snapshot at startup, without fetching or enrollment machinery. Changes require restart. Sender uses HTTPS (loopback HTTP for local tests), no credentials or redirects, bounded bodies and deadlines. Only offline prepare reads a sender key. No inbox signing key is introduced.
-
-- 2026-11-15 / Hermes: Validate status against the existing 8,192-byte protocol ceiling rather than the operator’s current admission limit. Preserve signature/domain/receiver/target checks, current registry membership, retained-row lookup and exact digest matching. Admission still uses the configured limit.
+- 2026-11-15 / Oya Gardener: Follow the verified founder correction on the same PR. Replace receipt-only admission with ordinary publication intent. The operator-enabled registry is unioned with explicit local grants on both inbox and worker; self is excluded only from registry-derived grants. Local grants are not rewritten.
+- 2026-11-15 / Oya Gardener: Use a new version-2 transport domain. Its signature binds the exact inner message, ordinary job signature, network, receiver, target, request ID and expiry. Preserve all message fields unchanged into the queue and IPFS. Version-1 receipt-only rows lack publication consent/signatures and are never automatically promoted. Old envelopes require authorized fresh preparation; records remain in the database.
+- 2026-11-15 / Oya Gardener: Keep receipt recovery separate from execution status. Status uses the 8,192-byte protocol ceiling, current membership and exact retained digest. The ordinary signed job can query `/v1/status` for execution state. A retained admission receipt never claims successful execution.
+- 2026-11-15 / Oya Gardener: Reuse normal worker authorization, IPFS publication, execution identity, fee/gas limits, checkpoints and receipt verification. No second signer, broadcaster, job processor or bridge scheduler is introduced.
+- 2026-11-15 / Oya Gardener: Registry snapshots are local, bounded and immutable until deliberate restart. Revocation requires coordinated inbox/worker restart and does not cancel a broadcast transaction; retain checkpoints and use the existing operator recovery procedure.
 
 ## Outcomes & Retrospective
 
-Initial implementation delivered reception and recovery end to end. Node 24.22.3 full production suite passes 401 tests; real Docker PostgreSQL peer integration passes 6 tests, and existing inbox integration passes 9. Local image build, protocol/client/schema smoke, network-disabled image CLI preparation and Compose mount checks pass. Independent review found no blockers and reran these suites, the image build and offline CLI checks. The complete diff and 702-line non-Markdown budget are checked. Human review and merge remain required. Releases, deployment and live peer sends require separate operator authorization.
-
-Review follow-up fixes recovery when admission policy shrinks. Regression coverage checks an expired 8,192-byte UTF-8 envelope, rejects 8,193 bytes and invalid authentication before database access, and checks missing or mismatched receipts. Real PostgreSQL coverage accepts through the CLI, lowers the limit to 1, restarts the inbox, recovers the identical receipt and rejects resubmission; subsequent registry revocation still blocks status. All four validation suites pass without skips on Node 26.12.1. Independent review found no blockers and reran all 28 focused tests. The complete feature is 738 non-Markdown added/deleted lines against current main `6887779b531b54fa08dcb4bd436cbedbd8560e42` (PR merge base `7f40c242759eedad9aa079aad8f324a99f445db5`), below the 3,000-line ceiling.
+Local correction is implemented and validated; independent parent review remains required before publication. Real CLI/inbox/worker integration proves one ordinary job, registry-only authorization on both roles and unchanged sender-signed IPFS content. The cumulative feature is 1,019 changed non-Markdown lines against PR base `7f40c242759eedad9aa079aad8f324a99f445db5`, below the 3,000-line limit. Tests use disposable synthetic wallets, PostgreSQL and controlled transports, never funded accounts or real RPC/IPFS endpoints. The original receiver-selection next-feature proposal is superseded by this correction. A continuous testnet message/publish/log/review loop remains separate future work requiring its own bounded design and operational authorization.
 
 ## Context and Orientation
 
-Production code lives in `node/production`. `src/inbox/main.mjs` loads configuration and PostgreSQL; `http.mjs` authenticates publication jobs and worker requests. `src/inbox/store.mjs` owns publication checkpoints and is not changed by this feature. `peers/testnet-directory.json` is the plain trusted `{nodeAddress,url,target}` list. The current direction is the first fifteen lines of `plans/peer-node-network-execplan.md`; everything below is superseded history. Optional batching is already separate work.
+Production code is under `node/production`. `src/peers/protocol.mjs` creates/verifies the transport and exposes `peerJob`, which extracts the normal signed job. `src/peers/store.mjs` stores receipts and atomically calls `src/inbox/store.mjs`'s insertion logic under both target locks. `src/peers/config.mjs` bounds registry reads and derives the effective signer union. `src/inbox/main.mjs` and `worker.mjs` load independent operator-installed snapshots. `src/inbox/processor.mjs` remains the ordinary publication and transaction path, unchanged by this correction.
+
+`peers/receive.md` describes configuration, compatibility and recovery. Inbox configuration uses `peers`; workers use the same object in `worker.json`, with registry paths relative to their respective config files. No private node key goes onto the inbox. `plans/peer-node-network-execplan.md` records the newer direction above superseded history.
 
 ## Plan of Work
 
-First add `src/peers/protocol.mjs`, `config.mjs`, `store.mjs` and `schema.sql`, plus minimal inbox parser/startup/route wiring. Add focused unit tests for exact bindings, immutable validation, unknown/revoked/self senders, expiry, bounds and disabled compatibility. Then add `client.mjs` and `cli.mjs`, with exclusive mode-0600 synchronized envelope persistence before any network request. Add the guide to release/upgrader allowlists and the modules to Docker inputs, and expose only the two exact peer routes in Caddy. Finally add a disposable PostgreSQL integration script proving CLI→HTTP→database, concurrency, recovery and no publication rows. Keep all non-Markdown added/deleted lines below 3,000 (aim 1,500–2,200).
+Implement signatures and exact immutable validation first. Extract ordinary queue insertion without altering its semantics, then atomically insert the job and receipt. Wire opt-in registry signer unions at both process startup paths. Update operator docs and prior-plan boundaries. Validate forged inner/outer/job signatures, authorization, queue rollback and capacity, lost acknowledgement, worker process startup, unchanged IPFS payload and signing/transaction failures. Inspect the complete cumulative feature diff, including prior commits and new tests, against the 3,000 changed-code-line cap. Parent reviews before publishing anything.
 
 ## Concrete Steps
 
-From repository root with Node 24, npm, Python 3 and Docker:
+From repository root with Node 24 or newer, npm, Python 3 and Docker:
 
     npm --prefix node/production ci --ignore-scripts --no-audit --no-fund
-    node --test node/production/test/peer-receive*.test.mjs
-    npm --prefix node/production test
+    node --test node/production/test/peer-receive.test.mjs node/production/test/peer-publication.test.mjs node/production/test/inbox-ledger.test.mjs
+    npm_config_loglevel=error npm --prefix node/production test
     node node/production/scripts/test-peer-receive.mjs
+    node node/production/scripts/test-inbox.mjs
     git diff --check
 
-Use `npm_config_loglevel=error` for validation to avoid npm notices affecting existing subprocess fixtures. Save complete validation logs outside the worktree. Integration starts only disposable loopback PostgreSQL with synthetic wallets, and cleans it up. No live RPC, IPFS service or real signing keys are needed.
+Store full logs outside Git. PostgreSQL integration uses disposable loopback containers and synthetic identities. Worker publication integration uses a local mock IPFS HTTP service. Ledger tests use real local cryptographic signing and controlled RPC responses; no real broadcasts occur.
 
 ## Validation and Acceptance
 
-Tests must prove valid receipt and identical retry; conflicting same-ID payload; network/receiver/target/operation/signature tampering; unknown, revoked and self senders including explicitly publication-authorized peers; expiry and byte bounds; disabled routing; bounded registry and immutable snapshot; client timeout/redirect/response identity failure; exclusive private preparation and unchanged retry bytes. Real PostgreSQL must prove concurrent capacity, stable receipt after service/database restart and lost acknowledgement, wrong-context startup rejection, retention/pruning independent of publication checkpoints, and zero publication jobs for peer sends. Full production and packaging tests must pass.
+Validate all three signatures independently, including valid outer signatures around forged inner content/signers/signatures and forged ordinary job signatures. Prove a detached frozen message snapshot and exact equality of queued and uploaded message objects. Reject old protocol versions, malformed/empty/non-ASCII/NUL text, oversized text, unknown/revoked/self senders, wrong routing and expiry. Preserve retained status when admission limits shrink.
+
+Real PostgreSQL must prove concurrent retries return one receipt and one ordinary job, capacity on either store rejects without partial acceptance, a database error after queue insertion rolls back both, exact ordinary-route duplicates are reused, conflicting IDs reject, restart/lost acknowledgements preserve identity, and peer pruning leaves publication checkpoints untouched. Exercise real CLI, inbox and worker processes with registry-only authorization and inspect the uploaded original signed object.
+
+Signing/transaction tests cover IPFS failure, preparation failure, signing failure, lost CID/transaction checkpoint acknowledgements, broadcast failure, receipt timeout/restart, reverted/malformed receipts and revoked authorization. No broadcast follows an unacknowledged transaction checkpoint. Resume reuses the saved raw transaction/hash. Run the existing ledger identity/event and worker tests unchanged as well as the full production suite and packaging checks.
 
 ## Idempotence and Recovery
 
-Keep the original saved envelope after any submit error: a timeout may follow a committed acceptance. Query status or resubmit those exact bytes before expiry. After expiry use signed status while retained. A missing receipt after retention or database loss is unknown history, not proof of non-reception. Revocation blocks new admission and status immediately on deliberate restart. Re-enable only with an operator-approved list. Disable `peers` to stop peer routes without deleting records. Changing network or receiver requires a new target. Prune removes only retention-expired peer records and never publication checkpoints.
+Preserve the original envelope after any send failure; acceptance may have committed. Exact retries before expiry recover the same receipt, while status works after expiry for the retained digest. Never infer non-publication from a missing receipt. Queue records have their existing lifecycle and are not pruned by peer retention. Enabling registry-derived publication does not retroactively promote version-1 receipts. Coordinate both role snapshots when enabling/revoking. Disabling peer routes does not erase queued jobs or pending transaction checkpoints.
 
 ## Artifacts and Notes
 
-Initial implementation validation: `node --test node/production/test/peer-receive.test.mjs node/production/test/publish-image.test.mjs` passes 27 tests; `npm --prefix node/production test` passes 401; `node node/production/scripts/test-peer-receive.mjs` passes 6; `node node/production/scripts/test-inbox.mjs` passes 9. All pass without skips. Local Docker build and image CLI preparation pass, including exact UTF-8/BOM preservation, mode-0600 output, and the read-only/no-create registry mount. `git diff --check` and shell syntax checks pass. Full validation logs and computed per-file budget are retained privately outside the worktree. Synthetic test identities are generated locally and disposable containers are removed. Public HTTPS deployment, real peer enrollment, automatic sending and publication are not exercised by this local milestone.
-
-Review follow-up validation uses the same commands above: focused peer/packaging 28 passed, full production 402 passed, peer PostgreSQL 6 passed and inbox PostgreSQL 9 passed, all with no skips. Before the fix, the new unit regression and PostgreSQL CLI recovery failed; after the fix both pass. `git diff --check` passes.
+Final local validation on Node 24.22.3: 413 production tests, seven peer PostgreSQL tests (including actual CLI/inbox/worker processes and mock IPFS), and nine existing inbox PostgreSQL tests all pass with no skips. The focused peer/ledger suite previously passed 53 tests on Node 26.12.1; the first run exposed and led to correction of the ASCII-schema mismatch. Local image build and network-disabled CLI checks pass, including ordinary job verification, version 2, mode-0600 output and overwrite rejection. `git diff --check` passes. No hosted CI, public HTTPS deployment, real IPFS retrieval or real-chain execution is claimed for this unpushed candidate.
 
 ## Interfaces and Dependencies
 
-Optional inbox `peers` settings: `networkId`, `nodeAddress`, `registryFile`, `maxMessages` (default 1,000, maximum 100,000), `retentionMs` (default seven days, maximum thirty days). Existing target and text limit apply to admission. Status uses the 8,192-byte protocol ceiling so lowering the admission limit cannot hide retained receipts. Both paths retain authentication and membership checks. Registry reads are capped at 1 MiB and 1,000 records. Protocol expiry is at most seven days ahead. `POST /v1/peers/receive` returns HTTP 202; `POST /v1/peers/status` returns HTTP 200. Both require the signed envelope. No worker token is sent. Reuse installed ethers, pg and Node built-ins only.
-
-## Next feature — candidate when capacity permits
-
-`peer-local-publication-v1`: optional receiver-local selection of accepted informational messages for publication. Value: operators can log useful peer information without granting peer-controlled publication authority. Deliverable: explicit local policy and durable promotion bridge preserving original envelope identity and existing worker checkpoints. Acceptance: policy denial has no publication effects; allowed promotion survives crashes without duplicate logical jobs; revocation, changed context and transaction recovery remain safe. Components: peer store, local policy, bridge tests and guide. Estimate 1,800–2,600 added/deleted non-Markdown lines, re-estimate before selection. Depends on this receipt milestone and coordination with batching/inbox inspection. Security: registry membership alone never modifies `allowedSigners`; do not execute message text, automatically reply, forward, or invent receiver evidence. This is a candidate, not work in this feature.
+Reuse installed `@oyaprotocol/messages`, ethers, pg and Node built-ins. No dependency or lockfile change. Peer settings remain `networkId`, `nodeAddress`, `registryFile`, `maxMessages` and `retentionMs`. Registry maximums remain 1 MiB/1,000 entries. Transport expiry remains at most seven days. Admission uses configured `maxTextBytes`; status uses 8,192. `POST /v1/peers/receive` acknowledges atomic receipt/job storage with 202; `POST /v1/peers/status` returns the retained receipt with 200. Both require the signed version-2 envelope. Worker startup optionally accepts `peers` in `worker.json` and validates its node address against the actual Ledger signer. Ordinary `/v1/jobs` authentication and worker execution use the effective explicit-plus-registry signer set.

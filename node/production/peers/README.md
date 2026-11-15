@@ -61,4 +61,4 @@ The command itself writes no files; the shell saves and replaces the public list
 
 ## Routing is separate from authorization
 
-Loading or fetching this address book does **not** change `allowedSigners`, node keys, configuration or running services. Operators may explicitly enable [informational peer reception](receive.md) using an installed snapshot. Membership then grants message-only inbox reception, not publication authority. Keep existing publication signer permissions separate. The guide also covers offline preparation and explicit one-shot submit/status commands.
+Loading or fetching this address book does **not** change `allowedSigners`, node keys, configuration or running services. Operators may explicitly enable [peer publication reception](receive.md) using an installed snapshot on both inbox and worker. That opt-in adds non-self members to effective publication authorization while preserving explicit local grants. The guide also covers offline preparation and explicit one-shot submit/status commands.
