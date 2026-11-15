@@ -1,6 +1,6 @@
 # Deploy a local Oya node with an agent
 
-For opt-in signed publication requests between registered nodes, see [peer reception](peers/receive.md). Enabling an installed registry grants its non-self members publication authority.
+For opt-in signed publication requests between registered nodes, see [peer reception](peers/receive.md). Enabling an installed registry grants all its members ordinary publication authority.
 
 Start here to have a coding agent set up your first Oya node. The default is **Sepolia Ledger mode**: Oya and Kubo (the IPFS service) run on your device, while an HTTPS inbox and PostgreSQL store incoming work on a host you choose. The worker polls the inbox, verifies authorized signatures, publishes to IPFS, then logs each CID to the [deployed Sepolia Ledger](README.md#deployed-sepolia-ledger). A sender must sign messages with an address approved by both the inbox and worker.
 

@@ -1,19 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Wallet, verifyMessage } from 'ethers';
-import { signPeer, peerJob, peerText, validatePeer } from '../src/peers/protocol.mjs';
 import { publicationSigners } from '../src/peers/config.mjs';
-import { validateJob, jobText } from '../src/inbox/protocol.mjs';
+import { signJob, validateJob, jobText } from '../src/inbox/protocol.mjs';
 import { processWork } from '../src/inbox/processor.mjs';
 import { fixture } from './runtime-fixture.mjs';
 
 async function setup(t) {
     const f = await fixture(t);
-    const envelope = await signPeer(f.agent, { networkId: 'testnet', receiver: f.wallet.address,
-        target: 'test', text: ' exact peer text\n' });
-    const peers = { networkId: 'testnet', nodeAddress: f.wallet.address.toLowerCase(), target: 'test',
-        maxTextBytes: 8192, members: [f.agent.address.toLowerCase()] };
-    const job = peerJob(validatePeer(envelope, peers));
+    const job = await signJob(f.agent, 'test', ' exact peer text\n');
+    const envelope = job;
+    const peers = { members: [f.agent.address.toLowerCase()] };
     const allowedSigners = publicationSigners([], peers);
     let checkpoint = {};
     let uploaded;
@@ -39,7 +36,7 @@ test('peer message is an ordinary signed job and IPFS preserves its original sig
     assert.equal(s.f.state.signs, 1);
 });
 
-test('valid transport signature cannot hide forged inner or job signatures', async t => {
+test('ordinary job signature cannot hide forged inner signatures', async t => {
     const s = await setup(t);
     const other = Wallet.createRandom();
     for (const changes of [
@@ -50,30 +47,23 @@ test('valid transport signature cannot hide forged inner or job signatures', asy
         { requestSignature: s.envelope.message.signature },
     ]) {
         const value = { ...s.envelope, ...changes };
-        if (changes.message) value.requestSignature = await s.f.agent.signMessage(jobText(peerJob(value)));
-        value.signature = await s.f.agent.signMessage(peerText(value));
-        assert.throws(() => validatePeer(value, s.peers), { code: 'invalid_peer_envelope' });
+        if (changes.message) value.requestSignature = await s.f.agent.signMessage(jobText(value));
+        await assert.rejects(validateJob(value, { target: 'test', allowedSigners: s.options().allowedSigners }), { code: 'invalid_signed_job' });
     }
-    const mutable = structuredClone(s.envelope);
-    const checked = validatePeer(mutable, s.peers);
-    mutable.message.text = 'changed after validation';
-    assert.deepEqual(checked.message, s.envelope.message);
-    assert.ok(Object.isFrozen(checked.message));
     assert.equal(s.f.state.uploads, 0);
     assert.equal(s.f.state.signs, 0);
 });
 
-test('registry union is explicit, excludes self and does not mutate local authorization', async t => {
+test('registry union treats every member ordinarily and does not mutate local authorization', async t => {
     const s = await setup(t);
     const local = [Wallet.createRandom().address];
     const before = [...local];
-    const peers = { ...s.peers, members: [...s.peers.members, s.peers.nodeAddress] };
-    assert.deepEqual(publicationSigners(local, peers), [local[0].toLowerCase(), s.f.agent.address.toLowerCase()]);
+    const peers = { members: [...s.peers.members, s.f.wallet.address.toLowerCase(), ...s.peers.members] };
+    assert.deepEqual(publicationSigners(local, peers), [local[0].toLowerCase(), s.f.agent.address.toLowerCase(), s.f.wallet.address.toLowerCase()]);
     assert.deepEqual(local, before);
     assert.deepEqual(publicationSigners(local, undefined), [local[0].toLowerCase()]);
     const legacyGrants = ['0x' + '0'.repeat(40), '0x' + 'aB'.repeat(20)];
     assert.deepEqual(publicationSigners(legacyGrants, undefined), legacyGrants.map(value => value.toLowerCase()));
-    assert.ok(publicationSigners([s.peers.nodeAddress], s.peers).includes(s.peers.nodeAddress), 'explicit self grant is preserved');
     const options = s.options();
     options.allowedSigners = publicationSigners(local, { ...peers, members: [] });
     await assert.rejects(processWork(options));

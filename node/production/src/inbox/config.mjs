@@ -53,7 +53,6 @@ export function parseInboxConfig(input) {
     }
     if (input.databaseTls !== undefined && typeof input.databaseTls !== 'boolean') throw new Error('databaseTls must be boolean.');
     const peers = parsePeers(input.peers);
-    if (peers && execution.mode === 'ledger' && peers.nodeAddress !== execution.nodeAddress) throw new Error('Peer receiver must match the public execution nodeAddress.');
     const leaseMs = positive(input.leaseMs, 60000, 300000);
     if (leaseMs < 3000) throw new Error('leaseMs must be at least 3000.');
     return { peers, target: targetName(input.target), host: input.host ?? '127.0.0.1', port: positive(input.port, 8788, 65535),

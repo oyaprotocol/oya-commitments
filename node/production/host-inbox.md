@@ -1,6 +1,6 @@
 # Host the PostgreSQL inbox
 
-For opt-in signed publication requests between registered nodes, see [peer reception](peers/receive.md). Enabling an installed registry grants its non-self members publication authority.
+For opt-in signed publication requests between registered nodes, see [peer reception](peers/receive.md). Enabling an installed registry grants all its members ordinary publication authority.
 
 The inbox is a small Oya HTTP service backed by ordinary PostgreSQL. Host it on a VM, a container platform, a home server with reachable HTTPS, or another location you control. PostgreSQL can be in the same Compose stack or on a separate self-hosted/managed service. The local Oya worker needs only outbound HTTPS to the inbox, with no tunnel or direct database access. This guide replaces cloud-hosted node deployment as the default architecture.
 

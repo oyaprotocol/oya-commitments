@@ -1,5 +1,5 @@
 {$OYA_PUBLIC_HOSTNAME} {
-    @api path /v1/jobs /v1/status /v1/peers/receive /v1/peers/status /v1/worker/*
+    @api path /v1/jobs /v1/status /v1/worker/*
     handle @api {
         request_body {
             max_size 64KB

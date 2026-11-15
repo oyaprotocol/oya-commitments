@@ -1,6 +1,6 @@
 # Inbox API and recovery contract
 
-For opt-in signed publication requests between registered nodes, see [peer reception](peers/receive.md). Enabling an installed registry grants its non-self members publication authority.
+For opt-in signed publication requests between registered nodes, see [peer reception](peers/receive.md). Enabling an installed registry grants all its members ordinary publication authority.
 
 Version 1 uses JSON over HTTPS. It is implemented by `src/inbox/`, with PostgreSQL as the durable queue and execution journal. The supplied image has three entrypoints: `main.mjs` serves the inbox, `worker.mjs` polls and publishes locally, and `client.mjs` creates/submits/reads signed jobs. The synchronous `src/main.mjs` remains available separately.
 
@@ -28,7 +28,7 @@ The timestamp above is illustrative; use a future Unix timestamp in milliseconds
 ])
 ```
 
-Message text must be nonempty ASCII without NUL (`U+0000`) and at most 8,192 bytes under the default inbox limit. PostgreSQL cannot store NUL in the inbox's `jsonb` payload; the API rejects it as `invalid_signed_job` before storage. The bundled client's `prepare` command rejects unsupported text before writing a signed job file; it preserves whitespace and trailing newlines in accepted text.
+Message text must be nonempty ASCII without NUL (`U+0000`) and at most 8,192 bytes under the default inbox limit. Status uses the 8,192-byte protocol ceiling even after admission `maxTextBytes` is lowered, with the same signature, current authorization and stored-envelope checks. PostgreSQL cannot store NUL in the inbox's `jsonb` payload; the API rejects it as `invalid_signed_job` before storage. The bundled client's `prepare` command rejects unsupported text before writing a signed job file; it preserves whitespace and trailing newlines in accepted text.
 
 Use `signJob` in `src/inbox/protocol.mjs` or the bundled client to avoid encoding differences. The server rejects extra envelope/message fields. The stored payload fingerprint is independent of object key order. Exact re-submission under the same target/ID returns the existing job. Different contents under that ID return 409. An expired submission returns 400; use status to inspect an already accepted expired envelope. Anyone possessing the complete signed file can replay/read that same request until access is revoked; keep it private before intended publication.
 

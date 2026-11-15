@@ -19,5 +19,4 @@ src/**
 !src/inbox/*.mjs
 !src/inbox/schema.sql
 !src/peers/
-!src/peers/*.mjs
-!src/peers/schema.sql
+!src/peers/config.mjs

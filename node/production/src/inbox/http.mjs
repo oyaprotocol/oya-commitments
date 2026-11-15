@@ -22,7 +22,7 @@ export async function readBody(request, limit = 65536) {
         catch { reject(400, 'invalid_json'); }
     } finally { clearTimeout(timeout); }
 }
-export function createInboxServer({ config, workerToken, store, peerStore, log = () => {} }) {
+export function createInboxServer({ config, workerToken, store, log = () => {} }) {
     const credential = Buffer.from(`Bearer ${workerToken}`);
     let active = 0;
     let inspecting = false;
@@ -54,13 +54,6 @@ export function createInboxServer({ config, workerToken, store, peerStore, log =
             if (worker && !isObject(body)) reject(400, 'invalid_worker_request');
             let result;
             switch (request.url) {
-                case '/v1/peers/receive':
-                    if (!peerStore) reject(404, 'not_found');
-                    json(response, 202, await peerStore.receive(body));
-                    return;
-                case '/v1/peers/status':
-                    if (!peerStore) reject(404, 'not_found');
-                    result = await peerStore.status(body); break;
                 case '/v1/jobs':
                     await validateJob(body, config);
                     result = await store.enqueue(body);
@@ -68,7 +61,8 @@ export function createInboxServer({ config, workerToken, store, peerStore, log =
                     try { log({ event: 'job_accepted', requestId: result.requestId, status: result.status }); } catch {}
                     return;
                 case '/v1/status':
-                    await validateJob(body, { ...config, checkExpiry: false });
+                    // Recover retained jobs even after the admission text limit is lowered.
+                    await validateJob(body, { ...config, maxTextBytes: 8192, checkExpiry: false });
                     result = await store.status(body); break;
                 case '/v1/worker/inspect':
                     if (Object.keys(body).join() !== 'target') reject(400, 'invalid_worker_request');

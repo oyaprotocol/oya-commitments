@@ -100,13 +100,12 @@ async function main() {
     const worker = await readJson(workerFile);
     if (Object.keys(worker).some(key => !['url', 'target', 'pollIntervalMs', 'peers'].includes(key))) throw new Error('Unknown worker field.');
     const target = targetName(worker.target);
-    const peers = await loadPeers({ peers: parsePeers(worker.peers), target, maxTextBytes: config.maxTextBytes }, workerFile);
+    const peers = await loadPeers({ peers: parsePeers(worker.peers) }, workerFile);
     const allowedSigners = publicationSigners(input.allowedSigners, peers);
     const api = createInboxClient(inboxUrl(worker.url), token((await readJson(workerSecretsFile)).workerToken));
     const pollIntervalMs = positive(worker.pollIntervalMs, 5000, 60000);
     if (pollIntervalMs < 1000) throw new Error('Polling interval must be at least one second.');
     const signer = config.mode === 'ledger' ? createLocalSigner(secrets.OYA_NODE_PRIVATE_KEY) : undefined;
-    if (peers && signer && peers.nodeAddress !== signer.address.toLowerCase()) throw new Error('Peer receiver must match worker signer.');
     const controller = new AbortController();
     const state = { status: 'starting', target, mode: config.mode, completed: 0 };
     const server = createServer((request, response) => {

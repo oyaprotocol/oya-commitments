@@ -1,84 +1,86 @@
-# Receive peer messages through the ordinary publication queue
+# Authorize registry members as ordinary v1 publication senders
 
 Feature ID: `peer-inbox-receive-v1`. This living ExecPlan follows `PLANS.md`.
 
 ## Purpose / Big Picture
 
-An operator enables an installed trusted registry on the inbox and worker. A registered sender prepares one independently signed message, submits its saved transport envelope, and recovers the same admission receipt after a lost acknowledgement. The receiver queues an ordinary publication job in the same PostgreSQL transaction as that receipt. Its existing worker publishes the unchanged `{ text, signer, signature }` to IPFS and, in Ledger mode, logs the CID using normal checkpoints and transaction recovery. Receipt acceptance is not proof of publication or onchain confirmation.
+An operator enables a reviewed registry snapshot on the inbox and worker. A registered node prepares an ordinary v1 signed job, submits it to `/v1/jobs`, and follows publication through `/v1/status`. The worker publishes the original independently signed `{ text, signer, signature }` to IPFS and logs its CID in Ledger mode, using the same authorization, execution identity, transaction limits and checkpoints as any other message. Queue admission is not publication confirmation.
 
-[pemulis's correction 6900008120 on PR #173](https://github.com/oyaprotocol/oya-commitments/pull/173#issuecomment-6900008120), November 15, 2026, supersedes the original receipt-only interpretation and the older receiver-selection candidate. For testing, registry members are ordinary allowed publication senders. Enabling this grant remains explicit operator configuration, not deployment authorization. There is no automatic scheduler, reply, forwarding or instruction execution.
+[pemulis's comment 6901246015 on PR #173](https://github.com/oyaprotocol/oya-commitments/pull/173#issuecomment-6901246015), updated November 15, 2026 at 20:57:37 UTC, requests removing the v2 envelope entirely and treating node messages ordinarily, without a unique receiver/network binding. It supersedes the intermediate peer transport and receipt pipeline. His earlier publication correction remains satisfied by the independently signed message and opt-in registry authorization on both roles.
 
 ## Progress
 
-- [x] 2026-11-15: Initial receipt-only milestone implemented and independently reviewed: 401 production tests, six real PostgreSQL peer tests, nine existing inbox PostgreSQL tests and image/packaging checks passed.
-- [x] 2026-11-15 19:15Z: Fixed retained-receipt status after lowering admission `maxTextBytes` in a6f5dca. Previous evidence: 28 focused, 402 production, six peer PostgreSQL and nine inbox PostgreSQL tests passed. This correction is retained, not duplicated.
-- [x] 2026-11-15: Read the founder's later correction, existing code and repository instructions. Inspected active ownership before creating an isolated local candidate.
-- [x] 2026-11-15: Added version-2 transport carrying the original signed message and ordinary job signature, atomic queue admission, and registry authorization on inbox and worker startup.
-- [x] 2026-11-15: Added real-signature publication and transaction failure tests; first focused run exposed the ordinary message package's ASCII-only schema, now enforced at peer admission rather than accepting unpublishable Unicode.
-- [x] 2026-11-15: Passed all 413 production tests on Node 24.22.3, seven real PostgreSQL peer/worker integration tests and nine existing inbox PostgreSQL tests, without skips. Local pinned-base image build and network-disabled image CLI signature/private-output checks pass.
-- [ ] Independent parent review before any publication. No push, public reply, deployment or real-chain action is part of this local task.
+- [x] 2026-11-15: Read repository guidance and the selected PR's inherited implementation. Confirmed ordinary v1 jobs already carry both signatures and support registry-member publication.
+- [x] 2026-11-15: Removed peer protocol, client/CLI, schema/store, HTTP handlers, proxy paths and cross-store insertion abstraction. Reduced peer configuration to `registryFile` and removed self exclusion and receiver identity checks.
+- [x] 2026-11-15: Updated operator guides to use the ordinary CLI and status contract. Kept discovery, image/bundle registry assets and explicit authorization.
+- [x] 2026-11-15: Added ordinary-route rejection/recovery tests and adapted real PostgreSQL/CLI/worker integration and signing/transaction failure tests.
+- [x] 2026-11-15: Passed 452 production tests, six registry PostgreSQL tests and 12 existing inbox PostgreSQL tests without skips. Built the pinned-base image and passed offline v1 CLI/signature/private-output checks.
+- [ ] Independent parent review and any authorized publication. This local task does not push, deploy, spend funds or contact a chain.
 
 ## Surprises & Discoveries
 
-The earlier peer format allowed UTF-8 and only signed the transport. The installed ordinary message package requires nonempty ASCII and a signature over the message itself. Initial new end-to-end tests failed with `invalid_signed_job`; direct package validation identified `text must contain only ASCII characters`. The corrected validator calls the installed `verifySignedMessage` and preserves its validated object. Unicode/BOM is rejected, never stripped or rewritten.
+The inherited wrapper and receipt store duplicated the ordinary job protocol, queue and status lifecycle. Once unique peer routing was removed, adapting those abstractions would have preserved unnecessary second-pipeline semantics. They are deleted instead. Registry authorization is the only runtime addition besides status recovery at the existing protocol size ceiling.
 
-The worker revalidates an ordinary job signature as well as the inner message. A transport signature cannot substitute for either. Signing a normal job at preparation permits reuse of the existing worker without trusting inbox-created signatures or adding a second execution pipeline.
+Ordinary status previously used the current admission text limit. A legitimate historical job could become unqueryable after lowering that limit. Status now verifies against 8,192 bytes, still requiring both signatures, current authorization, the exact target and the stored payload digest. Admission keeps its configured lower limit. HTTP tests cover forgery and over-ceiling rejection; real process integration covers a lower-limit restart.
 
-The ordinary queue has its own capacity, duplicate-ID and expiry rules. Calling its public `enqueue` from a separate transaction would leave partial acceptance on crashes. Extracting its existing insertion logic into `enqueueInTransaction` allows one transaction for both records, with target locks always taken peer first, inbox second.
+Ordinary retries return the current job state, not an immutable admission receipt. The integration test follows `queued` to `published` and checks the original signed IPFS object. Tests deliberately use controlled IPFS/RPC services and disposable synthetic identities.
 
 ## Decision Log
 
-- 2026-11-15 / Oya Gardener: Follow the verified founder correction on the same PR. Replace receipt-only admission with ordinary publication intent. The operator-enabled registry is unioned with explicit local grants on both inbox and worker; self is excluded only from registry-derived grants. Local grants are not rewritten.
-- 2026-11-15 / Oya Gardener: Use a new version-2 transport domain. Its signature binds the exact inner message, ordinary job signature, network, receiver, target, request ID and expiry. Preserve all message fields unchanged into the queue and IPFS. Version-1 receipt-only rows lack publication consent/signatures and are never automatically promoted. Old envelopes require authorized fresh preparation; records remain in the database.
-- 2026-11-15 / Oya Gardener: Keep receipt recovery separate from execution status. Status uses the 8,192-byte protocol ceiling, current membership and exact retained digest. The ordinary signed job can query `/v1/status` for execution state. A retained admission receipt never claims successful execution.
-- 2026-11-15 / Oya Gardener: Reuse normal worker authorization, IPFS publication, execution identity, fee/gas limits, checkpoints and receipt verification. No second signer, broadcaster, job processor or bridge scheduler is introduced.
-- 2026-11-15 / Oya Gardener: Registry snapshots are local, bounded and immutable until deliberate restart. Revocation requires coordinated inbox/worker restart and does not cancel a broadcast transaction; retain checkpoints and use the existing operator recovery procedure.
+- 2026-11-15 / Oya Gardener: Follow comment 6901246015 by using existing `signJob`, inbox client and `/v1/jobs` plus `/v1/status` directly. Delete the peer envelope, separate receipt rows and cross-store transaction method rather than rebranding them.
+- 2026-11-15 / Oya Gardener: Keep opt-in `peers: { registryFile }` on both roles. Union every registry member with explicit local grants. The founder's ordinary-message semantics require no special self exclusion or receiver/network field. Existing execution identity checks remain ordinary worker safeguards.
+- 2026-11-15 / Oya Gardener: Preserve installed, bounded, immutable registry snapshots. Coordinated role restart adopts edits; explicit grants survive registry removal. Directory discovery alone never changes authorization or sends messages.
+- 2026-11-15 / Oya Gardener: Reject obsolete peer envelopes/settings rather than silently convert publication intent. Leave experimental historical tables untouched and stop using them. Operators reconcile already queued ordinary work before authorizing replacement requests.
+- 2026-11-15 / Oya Gardener: Preserve status recovery after expiry and lower admission limits in the shared ordinary status route. This benefits all signed-job senders without weakening admission, signature or membership checks.
 
 ## Outcomes & Retrospective
 
-Local correction is implemented and validated; independent parent review remains required before publication. Real CLI/inbox/worker integration proves one ordinary job, registry-only authorization on both roles and unchanged sender-signed IPFS content. The cumulative feature is 1,019 changed non-Markdown lines against PR base `7f40c242759eedad9aa079aad8f324a99f445db5`, below the 3,000-line limit. Tests use disposable synthetic wallets, PostgreSQL and controlled transports, never funded accounts or real RPC/IPFS endpoints. The original receiver-selection next-feature proposal is superseded by this correction. A continuous testnet message/publish/log/review loop remains separate future work requiring its own bounded design and operational authorization.
+The local candidate uses one signed-job and execution pipeline. Registry membership authorizes normal publication on inbox and worker startup. Removed peer-specific code has no replacement wrapper. Discovery and release packaging remain available, with ordinary CLI instructions for both host and image use. The full feature is 558 added-plus-deleted non-Markdown lines against fetched main `f51fd93`, below the 3,000-line cap. The complete PR diff from its main merge-base is 724 lines including documentation. A direct tree comparison with main is 814 lines because main also contains 90 unrelated dialogue-document lines absent from this branch; no freshness-only merge is needed.
+
+Informational next candidate: a separately scoped, operator-approved testnet message/publication/logging review loop using these same v1 commands. Before implementation, define recipients, frequency, gas/spend caps, stop conditions and evidence requirements. It is not part of PR #173, not a receiver-binding redesign, and does not authorize deployment, sending messages or transactions now.
 
 ## Context and Orientation
 
-Production code is under `node/production`. `src/peers/protocol.mjs` creates/verifies the transport and exposes `peerJob`, which extracts the normal signed job. `src/peers/store.mjs` stores receipts and atomically calls `src/inbox/store.mjs`'s insertion logic under both target locks. `src/peers/config.mjs` bounds registry reads and derives the effective signer union. `src/inbox/main.mjs` and `worker.mjs` load independent operator-installed snapshots. `src/inbox/processor.mjs` remains the ordinary publication and transaction path, unchanged by this correction.
+Production code lives in `node/production`. `src/peers/config.mjs` reads the installed registry and derives the effective signer union. `src/inbox/config.mjs`, `main.mjs` and `worker.mjs` enable that union explicitly at startup. `src/inbox/client.mjs` prepares/submits/queries normal signed jobs. `src/inbox/protocol.mjs` verifies the independently signed message and job signature; `store.mjs` is the ordinary PostgreSQL queue; `processor.mjs` owns publication and transaction recovery. Protocol, client, queue and processor require no peer-specific adapters.
 
-`peers/receive.md` describes configuration, compatibility and recovery. Inbox configuration uses `peers`; workers use the same object in `worker.json`, with registry paths relative to their respective config files. No private node key goes onto the inbox. `plans/peer-node-network-execplan.md` records the newer direction above superseded history.
+`peers/README.md` describes discovery. `peers/receive.md` explains authorization, compatibility and recovery. The inbox Compose registry overlay and release bundle allowlists install the operator assets. `test/peer-receive.test.mjs` exercises registry authorization and ordinary routes. `test/peer-publication.test.mjs` covers publication and transaction failures. `scripts/test-peer-receive.mjs` launches disposable PostgreSQL and actual inbox/CLI/worker processes.
 
 ## Plan of Work
 
-Implement signatures and exact immutable validation first. Extract ordinary queue insertion without altering its semantics, then atomically insert the job and receipt. Wire opt-in registry signer unions at both process startup paths. Update operator docs and prior-plan boundaries. Validate forged inner/outer/job signatures, authorization, queue rollback and capacity, lost acknowledgement, worker process startup, unchanged IPFS payload and signing/transaction failures. Inspect the complete cumulative feature diff, including prior commits and new tests, against the 3,000 changed-code-line cap. Parent reviews before publishing anything.
+The implementation milestones are complete: remove the second pipeline, simplify role configuration, adapt tests to ordinary semantics, and align operator guidance. Final handoff requires reviewing the full cumulative source/tests/config/docs diff, computing its budget and checking sensitive information. Parent review precedes any remote publication.
 
 ## Concrete Steps
 
-From repository root with Node 24 or newer, npm, Python 3 and Docker:
+From repository root with Node 24 or newer, npm, Python 3 and local Docker:
 
     npm --prefix node/production ci --ignore-scripts --no-audit --no-fund
-    node --test node/production/test/peer-receive.test.mjs node/production/test/peer-publication.test.mjs node/production/test/inbox-ledger.test.mjs
-    npm_config_loglevel=error npm --prefix node/production test
+    node --test node/production/test/peer-receive.test.mjs node/production/test/peer-publication.test.mjs
+    npm --prefix node/production test
     node node/production/scripts/test-peer-receive.mjs
     node node/production/scripts/test-inbox.mjs
+    docker build -t oya-registry-local:validation node/production
     git diff --check
 
-Store full logs outside Git. PostgreSQL integration uses disposable loopback containers and synthetic identities. Worker publication integration uses a local mock IPFS HTTP service. Ledger tests use real local cryptographic signing and controlled RPC responses; no real broadcasts occur.
+All suites must pass without skipped tests. Integration scripts create and clean their own loopback PostgreSQL containers. They do not use an operator database. Image acceptance uses `src/inbox/client.mjs` offline with synthetic keys, validates both signatures and exact message bytes, checks mode-0600/exclusive job output, and verifies that `src/peers` contains only the registry loader. Keep validation logs outside Git.
 
 ## Validation and Acceptance
 
-Validate all three signatures independently, including valid outer signatures around forged inner content/signers/signatures and forged ordinary job signatures. Prove a detached frozen message snapshot and exact equality of queued and uploaded message objects. Reject old protocol versions, malformed/empty/non-ASCII/NUL text, oversized text, unknown/revoked/self senders, wrong routing and expiry. Preserve retained status when admission limits shrink.
+Tests must show registry opt-in on both roles, no extra peer routes/tables, ordinary v1 messages accepted and old wrappers rejected. Verify unknown/revoked signers, forged message/job signatures, malformed text, wrong target, expiry, capacity, bounded registry resources and fail-closed configuration. Explicit local grants must remain independent of the registry. Status must authenticate even after expiry and admission-limit reduction.
 
-Real PostgreSQL must prove concurrent retries return one receipt and one ordinary job, capacity on either store rejects without partial acceptance, a database error after queue insertion rolls back both, exact ordinary-route duplicates are reused, conflicting IDs reject, restart/lost acknowledgements preserve identity, and peer pruning leaves publication checkpoints untouched. Exercise real CLI, inbox and worker processes with registry-only authorization and inspect the uploaded original signed object.
+Real PostgreSQL tests prove concurrent retries create one ordinary row, independent pools serialize capacity, conflicting signed payloads fail, lost HTTP acknowledgements survive database restart, execution identity changes reject, and a database error after insertion rolls back admission. Actual CLI/inbox/worker processes prove registry-only authorization, the original signed IPFS upload, ordinary status progression, restart adoption of revocation and unchanged saved jobs.
 
-Signing/transaction tests cover IPFS failure, preparation failure, signing failure, lost CID/transaction checkpoint acknowledgements, broadcast failure, receipt timeout/restart, reverted/malformed receipts and revoked authorization. No broadcast follows an unacknowledged transaction checkpoint. Resume reuses the saved raw transaction/hash. Run the existing ledger identity/event and worker tests unchanged as well as the full production suite and packaging checks.
+Publication failure tests cover IPFS, preparation, signing, lost CID/transaction checkpoint acknowledgements, broadcast failure, pending receipts and reverted/malformed receipts. No broadcast follows an unacknowledged transaction checkpoint; recovery reuses the saved signed transaction. Existing inbox lease, fencing, retention and Ledger recovery tests remain unchanged and pass.
 
 ## Idempotence and Recovery
 
-Preserve the original envelope after any send failure; acceptance may have committed. Exact retries before expiry recover the same receipt, while status works after expiry for the retained digest. Never infer non-publication from a missing receipt. Queue records have their existing lifecycle and are not pruned by peer retention. Enabling registry-derived publication does not retroactively promote version-1 receipts. Coordinate both role snapshots when enabling/revoking. Disabling peer routes does not erase queued jobs or pending transaction checkpoints.
+Retain the saved ordinary v1 job after uncertain submission. Retry the exact signed job before expiry or query status afterward while the record is retained. Missing status is not proof of non-publication. Jobs use ordinary capacity, pruning and backup rules. Removing registry grants does not cancel queued or broadcast work; reconcile pending checkpoints and coordinate inbox/worker replica restarts. Explicit grants continue to authorize their senders.
+
+Do not unwrap or automatically republish historical peer requests. Remove obsolete peer configuration fields when upgrading an experimental installation. Keep existing ordinary jobs and reconcile them before authorizing a new request. Without receiver/network binding, the same valid job can be accepted by multiple authorized inboxes sharing its target; choose recipients deliberately rather than claiming cross-node deduplication.
 
 ## Artifacts and Notes
 
-Final local validation on Node 24.22.3: 413 production tests, seven peer PostgreSQL tests (including actual CLI/inbox/worker processes and mock IPFS), and nine existing inbox PostgreSQL tests all pass with no skips. The focused peer/ledger suite previously passed 53 tests on Node 26.12.1; the first run exposed and led to correction of the ASCII-schema mismatch. Local image build and network-disabled CLI checks pass, including ordinary job verification, version 2, mode-0600 output and overwrite rejection. `git diff --check` passes. No hosted CI, public HTTPS deployment, real IPFS retrieval or real-chain execution is claimed for this unpushed candidate.
-
-After independent review, integrated current main `8774f5f` with an ordinary merge. The worker conflict preserves both main's direct-runtime-only batch guard and registry-derived signer authorization. Validation on the integrated tree passes 458 production tests, seven peer PostgreSQL tests and 12 existing inbox PostgreSQL tests with no skips. Independent pre-integration review found no blockers and reran the full production and both PostgreSQL suites. Hosted CI on the published integrated head remains separate validation.
+Local validation: 15 focused tests, 452 production tests on Node 26.12.1, six registry PostgreSQL tests and 12 existing inbox PostgreSQL tests passed without skips. The pinned Node 24.21.0 image built successfully; all 15 focused tests and its ordinary CLI checks passed with external networking disabled. Production tests include discovery, packaging and upgrade-verifier coverage. No hosted CI, public HTTPS deployment, real IPFS retrieval or real-chain execution is claimed. Earlier candidate validation counts refer to superseded implementations, not this acceptance result.
 
 ## Interfaces and Dependencies
 
-Reuse installed `@oyaprotocol/messages`, ethers, pg and Node built-ins. No dependency or lockfile change. Peer settings remain `networkId`, `nodeAddress`, `registryFile`, `maxMessages` and `retentionMs`. Registry maximums remain 1 MiB/1,000 entries. Transport expiry remains at most seven days. Admission uses configured `maxTextBytes`; status uses 8,192. `POST /v1/peers/receive` acknowledges atomic receipt/job storage with 202; `POST /v1/peers/status` returns the retained receipt with 200. Both require the signed version-2 envelope. Worker startup optionally accepts `peers` in `worker.json` and validates its node address against the actual Ledger signer. Ordinary `/v1/jobs` authentication and worker execution use the effective explicit-plus-registry signer set.
+No dependency or lockfile changes. Reuse Node built-ins, ethers, pg and the installed Oya packages. Optional `peers` settings contain only `registryFile`. Registries remain capped at 1 MiB/1,000 entries. Ordinary `maxJobs`, `maxTextBytes`, lease, expiry, execution identity and worker credentials govern the queue. HTTP admission is `/v1/jobs` (202); signed execution status is `/v1/status` (200). The ordinary message signer signs the inner text and job envelope. No peer signature, network ID, receiver address, receipt retention settings or peer-specific endpoint is introduced.
