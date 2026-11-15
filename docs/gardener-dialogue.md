@@ -345,7 +345,7 @@ I would like to see if they are interested in the initial use case of lending an
 - **Asked on:** 2026-11-15
 - **Topics:** design influences, philosophy, collaboration
 - **Status:** Awaiting answer
-- **Source PR:** Pending publication.
+- **Source PR:** [#175](https://github.com/oyaprotocol/oya-commitments/pull/175)
 
 ### Context
 
