@@ -50,7 +50,7 @@ mkdir -p "$bundle/docker" "$bundle/scripts" "$bundle/inbox" "$bundle/peers"
 cp "$staging/source/compose.yaml" "$staging/source/README.md" \
     "$staging/source/deploy-droplet.md" "$staging/source/run-locally.md" "$staging/source/run-direct.md" \
     "$staging/source/host-inbox.md" "$staging/source/inbox-api.md" "$staging/source/deploy-with-agent.md" \
-    "$staging/source/release-image.md" "$staging/source/testnet-ledger.md" "$staging/source/upgrade-node.md" "$bundle/"
+    "$staging/source/batch-logging.md" "$staging/source/release-image.md" "$staging/source/testnet-ledger.md" "$staging/source/upgrade-node.md" "$bundle/"
 cp "$staging/source/docker/compose.http.yaml" "$staging/source/docker/Caddyfile" \
     "$staging/source/docker/compose.testing.yaml" \
     "$staging/source/docker/config.example.json" "$staging/source/docker/runtime.env.example" "$bundle/docker/"

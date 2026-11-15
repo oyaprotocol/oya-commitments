@@ -61,7 +61,7 @@ MAX_FILE = 8 * 1024 * 1024
 PUBLIC_FILES = {
     'node/production/' + name for name in (
         'compose.yaml', 'README.md', 'deploy-droplet.md', 'run-locally.md',
-        'run-direct.md', 'host-inbox.md', 'inbox-api.md', 'deploy-with-agent.md',
+        'run-direct.md', 'batch-logging.md', 'host-inbox.md', 'inbox-api.md', 'deploy-with-agent.md',
         'release-image.md', 'testnet-ledger.md', 'upgrade-node.md', 'image.txt',
         'docker/compose.http.yaml', 'docker/Caddyfile', 'docker/compose.testing.yaml',
         'docker/config.example.json', 'docker/runtime.env.example',

@@ -25,6 +25,7 @@ export async function readBody(request, limit = 65536) {
 export function createInboxServer({ config, workerToken, store, peerStore, log = () => {} }) {
     const credential = Buffer.from(`Bearer ${workerToken}`);
     let active = 0;
+    let inspecting = false;
     // Bound even rejected signature checks without storing attacker-controlled map keys.
     let windowStart;
     let requests = 0;
@@ -69,6 +70,13 @@ export function createInboxServer({ config, workerToken, store, peerStore, log =
                 case '/v1/status':
                     await validateJob(body, { ...config, checkExpiry: false });
                     result = await store.status(body); break;
+                case '/v1/worker/inspect':
+                    if (Object.keys(body).join() !== 'target') reject(400, 'invalid_worker_request');
+                    if (body.target !== config.target) reject(409, 'target_mismatch');
+                    if (inspecting) reject(503, 'inspection_busy');
+                    inspecting = true;
+                    try { result = await store.inspect(); } finally { inspecting = false; }
+                    break;
                 case '/v1/worker/claim':
                     if (!isObject(body.execution)) reject(400, 'invalid_worker_request');
                     if (body.target !== config.target) reject(409, 'target_mismatch');
