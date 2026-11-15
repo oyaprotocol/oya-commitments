@@ -79,6 +79,36 @@ test('expiry, Unicode and exact text byte limits fail closed; status permits exp
     }
 });
 
+test('status recovers retained receipts after admission shrinks while preserving authentication and protocol bounds', async () => {
+    const value = await envelope({ text: 'é'.repeat(4096), expiresAt: Date.now() - 1 });
+    const receipt = receiptFor(value, value.expiresAt - 1000, Date.now() + MAX_AGE);
+    const store = new PeerStore({}, { ...config, maxTextBytes: 1 });
+    let queries = 0;
+    store.locked = async action => action({ query: async (_sql, params) => {
+        queries++;
+        assert.deepEqual(params.slice(0, 2), [config.target, value.requestId]);
+        return { rows: [{ digest: receipt.digest, receipt }] };
+    } });
+    assert.deepEqual(await store.status(value), receipt);
+    await assert.rejects(store.receive(await envelope({ text: 'é' })), { code: 'invalid_peer_envelope' });
+    const rejected = [
+        { ...value, text: 'forged' },
+        { ...value, signature: await sender.signMessage(peerText(value).replace('informational peer receive', 'inbox job')) },
+        await envelope({ networkId: 'other' }), await envelope({ receiver: Wallet.createRandom().address }),
+        await envelope({ target: 'other' }), await envelope({}, Wallet.createRandom()),
+        await envelope({ text: 'é'.repeat(4096) + 'x' }), await envelope({ text: '\0' }),
+        await envelope({ text: '\ud800' })
+    ];
+    for (const invalid of rejected) await assert.rejects(store.status(invalid), { code: 'invalid_peer_envelope' });
+    store.config = { ...store.config, members: [] };
+    await assert.rejects(store.status(value), { code: 'invalid_peer_envelope' });
+    assert.equal(queries, 1, 'invalid status must fail before database access');
+    store.config = { ...store.config, members: config.members };
+    await assert.rejects(store.status(await envelope({ requestId: value.requestId, text: 'different' })), { code: 'peer_not_found' });
+    store.locked = async action => action({ query: async () => ({ rows: [] }) });
+    await assert.rejects(store.status(value), { code: 'peer_not_found' });
+});
+
 test('configuration stays optional, bounds registry resources and snapshots installed membership', async t => {
     const dir = await directory(t);
     const base = { target: 'peer-test', allowedSigners: [sender.address], execution: { mode: 'ipfs' } };

@@ -59,7 +59,8 @@ export class PeerStore {
         });
     }
     async status(input) {
-        const envelope = validatePeer(input, this.config, { checkExpiry: false });
+        // Recovery uses the protocol ceiling, not the current admission limit.
+        const envelope = validatePeer(input, { ...this.config, maxTextBytes: 8192 }, { checkExpiry: false });
         return this.locked(async client => {
             const { rows: [row] } = await client.query('SELECT digest,receipt FROM oya_peer_messages WHERE target=$1 AND request_id=$2 AND retained_until>$3',
                 [this.config.target, envelope.requestId, Date.now()]);

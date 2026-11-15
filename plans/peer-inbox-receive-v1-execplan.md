@@ -14,7 +14,11 @@ An operator can explicitly enable signed informational reception from an install
 - [x] 2026-11-15: Implemented offline exclusive synchronized prepare and explicit submit/status, operator guide, optional registry Compose mount, image whitelist and release/upgrader packaging.
 - [x] 2026-11-15: Passed 27 focused peer/packaging tests, all 401 production tests on Node 24.22.3, 6 peer PostgreSQL integration tests and 9 existing inbox PostgreSQL tests. Built the pinned-base image and exercised its offline CLI and Compose overlay. Inspected the complete diff; non-Markdown budget is 702 added/deleted lines.
 
+- [x] 2026-11-15 19:15Z: Reproduced review finding 4579794123 in unit and real PostgreSQL/CLI tests before fixing status recovery after lowering `maxTextBytes`. Passed 28 focused, 402 full production, 6 peer PostgreSQL and 9 inbox PostgreSQL tests on Node 26.12.1.
+
 ## Surprises & Discoveries
+
+Status originally reused the current admission byte limit: after lowering `maxTextBytes` to 1 and restarting, the saved CLI envelope could no longer recover its retained receipt. The new unit test failed with `invalid_peer_envelope`, and the real PostgreSQL CLI status command exited 1 before the fix.
 
 Review also caught UTF-8 decoder BOM stripping; bounded file reads now preserve exact text, with unit and real image-CLI coverage.
 
@@ -29,9 +33,13 @@ The existing `/v1/jobs` path is a publication queue and cannot safely serve info
 - 2026-11-15 / Hermes: Retain until the later of signed expiry and acceptance plus configured retention. Serialize operations per target; enforce capacity before insert; prune only expired retention records. Persist network/receiver binding per target to reject wrong-context restarts. Receipt identity includes digest and all routing identities.
 - 2026-11-15 / Hermes: Install a local plain registry snapshot at startup, without fetching or enrollment machinery. Changes require restart. Sender uses HTTPS (loopback HTTP for local tests), no credentials or redirects, bounded bodies and deadlines. Only offline prepare reads a sender key. No inbox signing key is introduced.
 
+- 2026-11-15 / Hermes: Validate status against the existing 8,192-byte protocol ceiling rather than the operator’s current admission limit. Preserve signature/domain/receiver/target checks, current registry membership, retained-row lookup and exact digest matching. Admission still uses the configured limit.
+
 ## Outcomes & Retrospective
 
-Implemented reception and recovery end to end. Node 24.22.3 full production suite passes 401 tests; real Docker PostgreSQL peer integration passes 6 tests, and existing inbox integration passes 9. Local image build, protocol/client/schema smoke, network-disabled image CLI preparation and Compose mount checks pass. Independent review found no blockers and reran these suites, the image build and offline CLI checks. The complete diff and 702-line non-Markdown budget are checked. Human review and merge remain required. Releases, deployment and live peer sends require separate operator authorization.
+Initial implementation delivered reception and recovery end to end. Node 24.22.3 full production suite passes 401 tests; real Docker PostgreSQL peer integration passes 6 tests, and existing inbox integration passes 9. Local image build, protocol/client/schema smoke, network-disabled image CLI preparation and Compose mount checks pass. Independent review found no blockers and reran these suites, the image build and offline CLI checks. The complete diff and 702-line non-Markdown budget are checked. Human review and merge remain required. Releases, deployment and live peer sends require separate operator authorization.
+
+Review follow-up fixes recovery when admission policy shrinks. Regression coverage checks an expired 8,192-byte UTF-8 envelope, rejects 8,193 bytes and invalid authentication before database access, and checks missing or mismatched receipts. Real PostgreSQL coverage accepts through the CLI, lowers the limit to 1, restarts the inbox, recovers the identical receipt and rejects resubmission; subsequent registry revocation still blocks status. All four validation suites pass without skips on Node 26.12.1. Independent review found no blockers and reran all 28 focused tests. The complete feature is 738 non-Markdown added/deleted lines against current main `6887779b531b54fa08dcb4bd436cbedbd8560e42` (PR merge base `7f40c242759eedad9aa079aad8f324a99f445db5`), below the 3,000-line ceiling.
 
 ## Context and Orientation
 
@@ -63,11 +71,13 @@ Keep the original saved envelope after any submit error: a timeout may follow a 
 
 ## Artifacts and Notes
 
-Validation: `node --test node/production/test/peer-receive.test.mjs node/production/test/publish-image.test.mjs` passes 27 tests; `npm --prefix node/production test` passes 401; `node node/production/scripts/test-peer-receive.mjs` passes 6; `node node/production/scripts/test-inbox.mjs` passes 9. All pass without skips. Local Docker build and image CLI preparation pass, including exact UTF-8/BOM preservation, mode-0600 output, and the read-only/no-create registry mount. `git diff --check` and shell syntax checks pass. Full validation logs and computed per-file budget are retained privately outside the worktree. Synthetic test identities are generated locally and disposable containers are removed. Public HTTPS deployment, real peer enrollment, automatic sending and publication are not exercised by this local milestone.
+Initial implementation validation: `node --test node/production/test/peer-receive.test.mjs node/production/test/publish-image.test.mjs` passes 27 tests; `npm --prefix node/production test` passes 401; `node node/production/scripts/test-peer-receive.mjs` passes 6; `node node/production/scripts/test-inbox.mjs` passes 9. All pass without skips. Local Docker build and image CLI preparation pass, including exact UTF-8/BOM preservation, mode-0600 output, and the read-only/no-create registry mount. `git diff --check` and shell syntax checks pass. Full validation logs and computed per-file budget are retained privately outside the worktree. Synthetic test identities are generated locally and disposable containers are removed. Public HTTPS deployment, real peer enrollment, automatic sending and publication are not exercised by this local milestone.
+
+Review follow-up validation uses the same commands above: focused peer/packaging 28 passed, full production 402 passed, peer PostgreSQL 6 passed and inbox PostgreSQL 9 passed, all with no skips. Before the fix, the new unit regression and PostgreSQL CLI recovery failed; after the fix both pass. `git diff --check` passes.
 
 ## Interfaces and Dependencies
 
-Optional inbox `peers` settings: `networkId`, `nodeAddress`, `registryFile`, `maxMessages` (default 1,000, maximum 100,000), `retentionMs` (default seven days, maximum thirty days). Existing target and text limit apply. Registry reads are capped at 1 MiB and 1,000 records. Protocol expiry is at most seven days ahead. `POST /v1/peers/receive` returns HTTP 202; `POST /v1/peers/status` returns HTTP 200. Both require the signed envelope. No worker token is sent. Reuse installed ethers, pg and Node built-ins only.
+Optional inbox `peers` settings: `networkId`, `nodeAddress`, `registryFile`, `maxMessages` (default 1,000, maximum 100,000), `retentionMs` (default seven days, maximum thirty days). Existing target and text limit apply to admission. Status uses the 8,192-byte protocol ceiling so lowering the admission limit cannot hide retained receipts. Both paths retain authentication and membership checks. Registry reads are capped at 1 MiB and 1,000 records. Protocol expiry is at most seven days ahead. `POST /v1/peers/receive` returns HTTP 202; `POST /v1/peers/status` returns HTTP 200. Both require the signed envelope. No worker token is sent. Reuse installed ethers, pg and Node built-ins only.
 
 ## Next feature — candidate when capacity permits
 

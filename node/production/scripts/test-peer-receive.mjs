@@ -169,8 +169,13 @@ test('peer reception with real PostgreSQL, process restart and one-shot CLI', { 
         const accepted = await cli(['submit', origin, file('envelope')]);
         assert.equal(accepted.scope, 'inbox');
         assert.deepEqual(await cli(['submit', origin, file('envelope')]), accepted);
-        await stop(child); child = await start();
+        await stop(child);
+        const lowered = JSON.parse(await readFile(file('inbox.json'), 'utf8'));
+        lowered.maxTextBytes = 1;
+        await writeFile(file('inbox.json'), JSON.stringify(lowered));
+        child = await start();
         assert.deepEqual(await cli(['status', origin, file('envelope')]), accepted);
+        await assert.rejects(cli(['submit', origin, file('envelope')]));
         assert.equal(await readFile(file('envelope'), 'utf8'), bytes);
         const rows = await store.pool.query('SELECT envelope FROM oya_peer_messages WHERE target=$1', [target]);
         assert.deepEqual(rows.rows[0].envelope, JSON.parse(bytes));
