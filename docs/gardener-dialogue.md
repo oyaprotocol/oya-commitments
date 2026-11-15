@@ -33,7 +33,9 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q008](#q008) | A creator's recourse after rejection | empowerment, judgment, commitment creation | Answered |
 | [Q009](#q009) | Privacy when proving fulfillment | privacy, evidence, user expectations | Answered |
 | [Q010](#q010) | Testing our assumptions with early users | product discovery, learning, user needs | Answered |
-| [Q013](#q013) | Understanding before delegation | accessibility, informed consent, user experience | Awaiting answer |
+| [Q011](#q011) | Connections between independent commitments | composability, ecosystem, application design | Answered |
+| [Q012](#q012) | Changing a long-running commitment | consent, adaptability, ongoing commitments | Answered |
+| [Q013](#q013) | Understanding before delegation | accessibility, informed consent, user experience | Answered |
 
 <a id="q001"></a>
 
@@ -335,6 +337,64 @@ What is one assumption about how people will use Oya that you most want to test 
 
 I would like to see if they are interested in the initial use case of lending and borrowing against a whole portfolio via commitments.
 
+<a id="q011"></a>
+
+## Q011 — Connections between independent commitments
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-15
+- **Topics:** composability, ecosystem, application design
+- **Status:** Answered
+- **Source PR:** [#171](https://github.com/oyaprotocol/oya-commitments/pull/171)
+
+### Context
+
+In [Q006](#q006), @pemulis described users creating commitments and agents serving them through messages. A concrete example of separately created commitments working together could help us explore what makes Oya useful as an ecosystem, beyond individual applications.
+
+### Question
+
+What is the first useful interaction you would like to see between two independently created Oya commitments?
+
+### Answer
+
+#### @pemulis — 2026-11-15
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 6899645660](https://github.com/oyaprotocol/oya-commitments/pull/171#issuecomment-6899645660)
+- **Source created:** 2026-11-15T19:03:58Z
+- **Source updated:** 2026-11-15T19:03:58Z
+
+As an example, one commitment could request to borrow funds against collateral, and a different commitment could offer to lend funds to other commitments that meet certain terms. An agent could then optimistically lend funds to the borrower, and request reimbursement (and reassignment of the loan) to the lender, and collect some fee in the process. This matches up borrowers and lenders. In addition, you could imagine lending and borrowing happening within the same commitment, so that an account could earn yield against their funds while also borrowing cash against their overall portfolio as it earns yield.
+
+<a id="q012"></a>
+
+## Q012 — Changing a long-running commitment
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-15
+- **Topics:** consent, adaptability, ongoing commitments
+- **Status:** Answered
+- **Source PR:** [#172](https://github.com/oyaprotocol/oya-commitments/pull/172)
+
+### Context
+
+In [Q007](#q007), @pemulis noted that a commitment may be ongoing, with multiple proposals over time. Exploring how its rules might change could help us distinguish useful adaptability from changing what someone originally agreed to.
+
+### Question
+
+How should a long-running commitment adapt when its participants' needs change?
+
+### Answer
+
+#### @pemulis — 2026-11-15
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 6899665040](https://github.com/oyaprotocol/oya-commitments/pull/172#issuecomment-6899665040)
+- **Source created:** 2026-11-15T19:05:25Z
+- **Source updated:** 2026-11-15T19:05:25Z
+
+A commitment could include rules that allow updates to their rules. That would not necessarily be the case for every commitment, and there is no reason the same user could not spread activity across multiple commitments. But it would definitely be useful for long-running commitments, and changes to the rules may include timelocks before the new rules go into effect to clear up old business.
+
 <a id="q013"></a>
 
 <!-- oya-dialogue-question: Q013 -->
@@ -344,7 +404,7 @@ I would like to see if they are interested in the initial use case of lending an
 - **Asked by:** Oya Gardener (`@oyagardener`)
 - **Asked on:** 2026-11-15
 - **Topics:** accessibility, informed consent, user experience
-- **Status:** Awaiting answer
+- **Status:** Answered
 - **Source PR:** [#174](https://github.com/oyaprotocol/oya-commitments/pull/174)
 
 ### Context
@@ -357,4 +417,15 @@ What should someone understand about a commitment before trusting an agent to ac
 
 ### Answer
 
-Pending an answer from `@pemulis` or `@nesseps`.
+#### @pemulis — 2026-11-15
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 6901290451](https://github.com/oyaprotocol/oya-commitments/pull/174#issuecomment-6901290451)
+- **Source created:** 2026-11-15T21:01:03Z
+- **Source updated:** 2026-11-15T21:01:03Z
+
+The nature of a commitment is that you would not necessarily need to trust an agent. Some commitments could be written such that any agent can handle it, and the protocol itself (with its potential for disputes, and dispute resolution) ensures the agent does the job correctly. In some cases you may want to designate a specific agent, or allow a specific agent to register or "reserve" their spot, to avoid conflicts. That mechanism might also require the registered agent to post a bond within the commitment that they would lose if they fail to do the job correctly.
+
+As a simple example, an agent may post a bond to promise to show up to perform a limit order when a particular price is hit, which they will lose if they don't show up. (A proposal could be made to credit the bond to the original user of the commitment.) That would also provide certainty to the agent that they will be able to earn the fees from that commitment, giving them confidence to spend resources monitoring the commitment and executing it, knowing that someone else won't beat them to the punch.
+
+It will depend on the nature of the commitment whether it is open to anyone or to a designated agent. But in either case, you don't really need to "trust" the agent to follow the rules, since the protocol enforces the rules regardless.
