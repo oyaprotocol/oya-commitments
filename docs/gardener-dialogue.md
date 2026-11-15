@@ -33,6 +33,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q008](#q008) | A creator's recourse after rejection | empowerment, judgment, commitment creation | Answered |
 | [Q009](#q009) | Privacy when proving fulfillment | privacy, evidence, user expectations | Answered |
 | [Q010](#q010) | Testing our assumptions with early users | product discovery, learning, user needs | Answered |
+| [Q015](#q015) | Continuity when an agent leaves | resilience, agent choice, ongoing commitments | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -333,3 +334,27 @@ What is one assumption about how people will use Oya that you most want to test 
 - **Source updated:** 2026-11-15T19:01:40Z
 
 I would like to see if they are interested in the initial use case of lending and borrowing against a whole portfolio via commitments.
+
+<a id="q015"></a>
+
+<!-- oya-dialogue-question: Q015 -->
+
+## Q015 — Continuity when an agent leaves
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-15
+- **Topics:** resilience, agent choice, ongoing commitments
+- **Status:** Awaiting answer
+- **Source PR:** Pending publication.
+
+### Context
+
+In [Q006](#q006), @pemulis described agents serving commitments through messages. Thinking about an agent becoming unavailable could help us design ongoing commitments around continuity for the user.
+
+### Question
+
+What should a user be able to do if the agent serving their ongoing commitment stops operating?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
