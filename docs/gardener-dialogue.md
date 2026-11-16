@@ -37,7 +37,8 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q012](#q012) | Changing a long-running commitment | consent, adaptability, ongoing commitments | Answered |
 | [Q013](#q013) | Understanding before delegation | accessibility, informed consent, user experience | Answered |
 | [Q014](#q014) | An influence worth learning from | design influences, philosophy, collaboration | Awaiting answer |
-| [Q017](#q017) | When a rule template is ready to share | commitment design, reuse, quality | Awaiting answer |
+| [Q015](#q015) | Continuity when an agent leaves | resilience, agent choice, ongoing commitments | Answered |
+| [Q017](#q017) | When a rule template is ready to share | commitment design, reuse, quality | Answered |
 
 <a id="q001"></a>
 
@@ -456,6 +457,37 @@ What experience with another tool or community has most shaped how you want Oya 
 
 Pending an answer from `@pemulis` or `@nesseps`.
 
+<a id="q015"></a>
+
+<!-- oya-dialogue-question: Q015 -->
+
+## Q015 — Continuity when an agent leaves
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-15
+- **Topics:** resilience, agent choice, ongoing commitments
+- **Status:** Answered
+- **Source PR:** [#176](https://github.com/oyaprotocol/oya-commitments/pull/176)
+
+### Context
+
+In [Q006](#q006), @pemulis described agents serving commitments through messages. Thinking about an agent becoming unavailable could help us design ongoing commitments around continuity for the user.
+
+### Question
+
+What should a user be able to do if the agent serving their ongoing commitment stops operating?
+
+### Answer
+
+#### @pemulis — 2026-11-15
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 6901316165](https://github.com/oyaprotocol/oya-commitments/pull/176#issuecomment-6901316165)
+- **Source created:** 2026-11-15T21:03:02Z
+- **Source updated:** 2026-11-15T21:03:31Z
+
+It depends on the commitment, but it would make sense to write the commitment in such a way that the agent could be replaced if they were not doing their job, with specific rules around that mechanism. Additionally, in some cases the agent may post a bond with the commitment as a surety that they will show up to do their job, and might lose that bond if they fail to perform their duties correctly. On top of that, some commitments may allow any user/agent to show up to interact, and not rely on a specific agent.
+
 <a id="q017"></a>
 
 <!-- oya-dialogue-question: Q017 -->
@@ -465,7 +497,7 @@ Pending an answer from `@pemulis` or `@nesseps`.
 - **Asked by:** Oya Gardener (`@oyagardener`)
 - **Asked on:** 2026-11-15
 - **Topics:** commitment design, reuse, quality
-- **Status:** Awaiting answer
+- **Status:** Answered
 - **Source PR:** [#180](https://github.com/oyaprotocol/oya-commitments/pull/180)
 
 ### Context
@@ -478,4 +510,11 @@ What would convince you that a commitment rule template is ready for people beyo
 
 ### Answer
 
-Pending an answer from `@pemulis` or `@nesseps`.
+#### @pemulis — 2026-11-16
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 6931933163](https://github.com/oyaprotocol/oya-commitments/pull/180#issuecomment-6931933163)
+- **Source created:** 2026-11-16T22:59:09Z
+- **Source updated:** 2026-11-16T22:59:09Z
+
+Anyone can use a commitment rule template that they think will work for their use case and will be enforceable. I think that standardized rule templates will emerge organically over time, since organic standards will make it easier for the agent ecosystem to support many commitments without custom work for each commitment.
