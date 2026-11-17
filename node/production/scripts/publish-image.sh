@@ -74,6 +74,10 @@ done
 cp "$output/image.txt" "$bundle/image.txt"
 cp "$staging/source/peers/testnet-directory.json" "$staging/source/peers/README.md" "$staging/source/peers/receive.md" "$bundle/peers/"
 cp "$staging/source/scripts/peer-directory.mjs" "$bundle/scripts/"
+mkdir -p "$bundle/src"
+cp "$staging/source/scripts/gas-policy.mjs" "$bundle/scripts/"
+cp "$staging/source/src/gas-policy.mjs" "$bundle/src/"
+cp "$staging/source/gas-policy.md" "$bundle/"
 # Source guides resolve the latest release; immutable bundles select their own tag.
 node --input-type=module - "$bundle" "$release" <<'NODE'
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';

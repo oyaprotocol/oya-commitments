@@ -73,6 +73,7 @@ PUBLIC_FILES = {
         'operator-status.md', 'operator.example.json',
         'scripts/operator-node.mjs', 'scripts/operator-profile.mjs', 'scripts/operator-status.mjs',
         'src/defaults.mjs', 'src/public-settings.mjs', 'src/health.mjs',
+        'scripts/gas-policy.mjs', 'src/gas-policy.mjs', 'gas-policy.md',
         'peers/testnet-directory.json', 'peers/README.md', 'peers/receive.md', 'scripts/peer-directory.mjs',
     )
 } | {'agent-library/agents/hourly-message-test/agent.mjs'}

@@ -121,7 +121,7 @@ async function main() {
     const state = { status: 'starting', target, mode: config.mode, completed: 0 };
     const server = createWorkerHealthServer({ config, signer, target, state, signal: controller.signal });
     await new Promise((resolveListening, reject) => { server.once('error', reject); server.listen(config.port, config.host, resolveListening); });
-    const stop = () => { state.status = 'shutting_down'; controller.abort(); };
+    const stop = () => controller.abort();
     process.on('SIGINT', stop);
     process.on('SIGTERM', stop);
     try { await runWorker({ api, config, target, allowedSigners, signer, signal: controller.signal,

@@ -137,6 +137,44 @@ for (const [name, field, value] of [['wrong chain', 'chainId', '0x1'], ['empty b
     });
 }
 
+for (const [name, limits, error] of [
+    ['gas', { gasLimit: 32767n, feePerGas: 30000000000n }, /exceeds limits.gasLimit/],
+    ['fee', { gasLimit: 200000n, feePerGas: 2n }, /exceeds limits.feePerGas/],
+]) {
+    test(`worker ${name} cap stops estimates before signing or broadcast`, async t => {
+        const s = await setup(t);
+        s.f.config.limits = limits;
+        await assert.rejects(s.run(), error);
+        assert.equal(s.f.state.signs, 0);
+        assert.equal(s.f.state.sends, 0);
+        assert.deepEqual(s.checkpoint(), { cid });
+        assert.ok(s.f.state.calls.includes(name === 'gas' ? 'eth_estimateGas' : 'eth_maxPriorityFeePerGas'));
+    });
+
+    test(`lowered ${name} cap preserves saved transaction and resumes after restoring limits`, async t => {
+        const s = await setup(t, { mutate: receipt => { receipt.to = otherAddress; } });
+        await assert.rejects(s.run(), /Ledger receipt identity mismatch/);
+        const checkpoint = s.checkpoint();
+        assert.ok(checkpoint.transaction.rawTransaction);
+        const previous = s.f.config.limits;
+        const calls = s.f.state.calls.length;
+        const saves = s.events.length;
+        s.f.config.limits = limits;
+        await assert.rejects(s.run(), /transaction/i);
+        assert.deepEqual(s.checkpoint(), checkpoint);
+        assert.equal(s.events.length, saves);
+        assert.equal(s.f.state.signs, 1);
+        assert.equal(s.f.state.sends, 0);
+        assert.deepEqual(s.f.state.calls.slice(calls), ['eth_chainId', 'eth_getCode']);
+        s.f.config.limits = previous;
+        s.correctReceipt();
+        assert.equal((await s.run()).transactionHash, checkpoint.transaction.transactionHash);
+        assert.deepEqual(s.checkpoint(), checkpoint);
+        assert.equal(s.f.state.signs, 1);
+        assert.equal(s.f.state.sends, 0);
+    });
+}
+
 test('worker retries an inconsistent receipt rather than completing, then resumes its checkpoint', async t => {
     const s = await setup(t, { mutate: receipt => { receipt.to = otherAddress; } });
     const calls = [];

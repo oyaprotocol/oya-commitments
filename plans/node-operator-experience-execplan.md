@@ -25,6 +25,7 @@ The proposed implementation covers the production node under `node/production/`,
 - [x] 2026-11-15 23:36Z: Scoped the authorized read-only status milestone and reproduced legacy status failing on a missing environment file and on an empty Ledger key.
 - [x] 2026-11-15 23:47Z: Completed `operator-status-profile-v1`: actual CLI/production health endpoints, extracted-bundle acceptance, initial focused regressions, packaging/release checks, and full production suite.
 - [x] 2026-11-15 23:55Z: Resolved independent-review symlink finding and runtime image packaging omission. Final Node 24 validation: 548 production tests, 114 focused tests, 35 packaging/release tests, 12 isolated Linux operator tests. Independent re-review found no remaining blockers.
+- [x] 2026-11-17: Reconciled main’s gas-policy packaging, reviewed the status slice for unnecessary complexity, and simplified shutdown state. Full production suite: 568 passed on Node 24 and Node 26.
 - [ ] Port the existing Python helpers and all 68 test cases to JavaScript, validating migration and recovery before lifecycle features.
 - [ ] Implement credential references and Keychain-safe worker upgrades.
 - [ ] Implement operator commands and seven-day default job expiry.
@@ -32,6 +33,8 @@ The proposed implementation covers the production node under `node/production/`,
 - [ ] Complete release-bundle integration, documentation, integration validation, and review fixes.
 
 ## Surprises & Discoveries
+
+- 2026-11-17: Merging current main requires the release archive and verifier to retain both the status and gas-policy host closures. Exact directory-content assertions must check their union, including automatically merged test sections.
 
 - Independent review reproduced silent exit 0 when the CLI path traversed a symlink. Canonicalizing the entrypoint and a subprocess regression now require actual status output for healthy, missing-profile and unreachable cases. Packaging review also caught the image’s explicit source allowlist omitting the extracted runtime dependencies. Both modules are now included, with an allowlist regression and an actual image import check.
 
@@ -49,6 +52,8 @@ The proposed implementation covers the production node under `node/production/`,
 - Open [PR #165](https://github.com/oyaprotocol/oya-commitments/pull/165) proposes optional direct-node batch logging, including HTTP 202 responses and durable transactions. Recheck its status before implementation and preserve its transaction/recovery semantics if merged. [PR #163](https://github.com/oyaprotocol/oya-commitments/pull/163) touches inbox configuration validation. Neither is a prerequisite for this plan; avoid copying changes from their unmerged branches.
 
 ## Decision Log
+
+- Decision: Keep the bounded status interface and its failure-path tests after a simplicity review. Remove the redundant mutable shutdown assignment because the health server already derives shutdown from the abort signal. Rationale: the remaining public-settings, health-validation and transport boundaries support key-free operation and sanitized output. Date/author: 2026-11-17 / Oya Gardener.
 
 - Decision: Implement `operator-status-profile-v1` before Python migration. Rationale: status reads public identity settings and loopback health only; it neither calls nor extends lifecycle helpers. Extract dependency-free public config projections used by runtime and host rather than package signing libraries or build another full config parser. Preserve all migration/parity, locking, archive, credential, and cross-platform prerequisites before lifecycle changes. The only Python change in this milestone is the public release-file allowlist. Date/author: 2026-11-15 / Oya Gardener.
 
@@ -253,7 +258,9 @@ Current artifacts are the status CLI/profile modules, shared public settings and
 
 Future scope selection should identify its plan revision and any changes to the recommended defaults. Runtime evidence should contain command names, versions, pass/fail counts, and sanitized observations. Finish each milestone by updating Progress, discoveries, decisions, and outcomes. Recheck overlapping PRs before code changes and resolve compatibility with any newly merged batch logging behavior.
 
-## Next feature — candidate when capacity permits
+## Next feature — original candidate, now implemented upstream
+
+The candidate below is preserved as design history. Current main implements the read-only gas-policy capability through `scripts/gas-policy.mjs`, documented in [gas-policy.md](../node/production/gas-policy.md). It is not pending work for this status PR.
 
 **Stable ID:** `operator-gas-policy-readonly-v1`. **Value:** let operators inspect the effective per-transaction gas ceiling without unlocking a key or contacting RPC. **Deliverable:** `operator-node.mjs gas-policy` using the existing selected node configuration, with exact integer gas/fee/product output and explicit IPFS inapplicability. **Acceptance:** defaults and overrides match runtime parsing; the command makes no network, Docker, signing, or state calls and works from the extracted bundle. Describe the product as an execution-gas ceiling, not a daily budget or a complete chain fee estimate.
 

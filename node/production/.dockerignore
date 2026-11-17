@@ -10,6 +10,7 @@ src/**
 !src/verify-batch.mjs
 !src/bytecode.mjs
 !src/config.mjs
+!src/gas-policy.mjs
 !src/defaults.mjs
 !src/public-settings.mjs
 !src/health.mjs
