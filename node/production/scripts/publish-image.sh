@@ -63,7 +63,7 @@ git -C "$root" show "$revision:agent-library/agents/hourly-message-test/agent.mj
 cp "$staging/source/scripts/deploy-droplet.sh" "$staging/source/scripts/deploy-droplet-remote.sh" "$bundle/scripts/"
 cp "$staging/source/scripts/keychain-worker.py" "$staging/source/scripts/upgrade-node.py" "$bundle/scripts/"
 cp "$output/image.txt" "$bundle/image.txt"
-cp "$staging/source/peers/testnet-directory.json" "$staging/source/peers/README.md" "$staging/source/peers/receive.md" "$bundle/peers/"
+cp "$staging/source/peers/testnet-directory.json" "$staging/source/peers/README.md" "$staging/source/peers/receive.md" "$staging/source/peers/send.md" "$bundle/peers/"
 cp "$staging/source/scripts/peer-directory.mjs" "$bundle/scripts/"
 mkdir -p "$bundle/src"
 cp "$staging/source/scripts/gas-policy.mjs" "$bundle/scripts/"

@@ -107,6 +107,7 @@ mkdir "$3"
 `, 'extract-bundle', join(f.output, 'oya-node-v0.1.0.tar.gz'), unpacked, privateDirectory]);
     const bundle = join(unpacked, 'node/production');
     assert.equal(readFileSync(join(bundle, 'peers/receive.md'), 'utf8'), readFileSync(join(runtime, 'peers/receive.md'), 'utf8'));
+    assert.equal(readFileSync(join(bundle, 'peers/send.md'), 'utf8'), readFileSync(join(runtime, 'peers/send.md'), 'utf8'));
     assert.equal(readFileSync(join(bundle, 'inbox/compose.peers.yaml'), 'utf8'), readFileSync(join(runtime, 'inbox/compose.peers.yaml'), 'utf8'));
     for (const file of ['docker/Caddyfile', 'inbox/Caddyfile']) {
         assert.equal(statSync(join(bundle, file)).mode & 0o777, 0o644,
@@ -127,7 +128,7 @@ mkdir "$3"
     assert.deepEqual(readdirSync(join(bundle, 'docker')).sort(), ['Caddyfile', 'compose.http.yaml', 'compose.testing.yaml', 'config.example.json', 'runtime.env.example']);
     const directoryBytes = readFileSync(join(bundle, 'peers/testnet-directory.json'));
     assert.deepEqual(directoryBytes, readFileSync(join(f.source, 'peers/testnet-directory.json')));
-    assert.deepEqual(readdirSync(join(bundle, 'peers')).sort(), ['README.md', 'receive.md', 'testnet-directory.json']);
+    assert.deepEqual(readdirSync(join(bundle, 'peers')).sort(), ['README.md', 'receive.md', 'send.md', 'testnet-directory.json']);
     const listed = spawnSync(process.execPath, [join(bundle, 'scripts/peer-directory.mjs')], {
         cwd: f.directory, encoding: 'utf8',
     });

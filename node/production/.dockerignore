@@ -23,3 +23,8 @@ src/**
 !src/inbox/schema.sql
 !src/peers/
 !src/peers/config.mjs
+!src/peers/send.mjs
+!src/peers/client.mjs
+!src/peers/local.mjs
+!peers/
+!peers/testnet-directory.json

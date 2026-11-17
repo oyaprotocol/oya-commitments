@@ -71,7 +71,7 @@ PUBLIC_FILES = {
         'scripts/deploy-droplet.sh', 'scripts/deploy-droplet-remote.sh',
         'scripts/keychain-worker.py', 'scripts/upgrade-node.py',
         'scripts/gas-policy.mjs', 'src/gas-policy.mjs', 'gas-policy.md',
-        'peers/testnet-directory.json', 'peers/README.md', 'peers/receive.md', 'scripts/peer-directory.mjs',
+        'peers/testnet-directory.json', 'peers/README.md', 'peers/receive.md', 'peers/send.md', 'scripts/peer-directory.mjs',
     )
 } | {'agent-library/agents/hourly-message-test/agent.mjs'}
 ROLE_FILES = {
