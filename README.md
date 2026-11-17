@@ -84,6 +84,10 @@ Maintainers publish node images and matching bundles through the [node release g
 
 The [Oya Gardener dialogue](docs/gardener-dialogue.md) is a growing, searchable public Q&A about Oya's goals, philosophy, future plans, working style, and technical and architectural choices. It gives human contributors and coding agents context for decisions. Oya Gardener asks one question per PR; its human collaborator answers in a comment, and the answer becomes part of the document.
 
+## Contribution feedback
+
+[Gardener feedback records](docs/gardener-feedback/README.md) connect public feedback to changes in recurring contribution practices. Each change has its own PR for discussion and an explicit application status.
+
 ## Contributors
 
 Thanks to the people and automation helping Oya Commitments grow:

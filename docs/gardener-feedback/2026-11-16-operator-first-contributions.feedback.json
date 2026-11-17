@@ -1,0 +1,34 @@
+{
+  "schema": "oya-gardener-feedback/v1",
+  "id": "2026-11-16-operator-first-contributions",
+  "summary": "Trace the existing operator workflow before adding feature machinery, and check that PR openings explain the user, action and observable result. These are concrete refinements to existing simplicity and concise-description guidance.",
+  "evidence": [
+    {
+      "url": "https://github.com/oyaprotocol/oya-commitments/pull/181#issuecomment-6931867684",
+      "lesson": "Human feedback from pemulis asks for a clear explanation of what the PR does. Concise, positive descriptions are already policy. Checking the opening for user, action and result is the proposed execution refinement."
+    },
+    {
+      "url": "https://github.com/oyaprotocol/oya-commitments/pull/173#issuecomment-6900800460",
+      "lesson": "Human feedback from pemulis questions the need for a new envelope instead of the existing v1 interface. The inferred technique is to trace the existing path before introducing a parallel one. This does not assert an outstanding defect in the merged PR."
+    },
+    {
+      "url": "https://github.com/oyaprotocol/oya-commitments/pull/179#discussion_r4593032328",
+      "lesson": "Human feedback from pemulis proposes a simpler operator interface with fewer mandatory inputs. This supports checking the minimum complete workflow. It is not blanket authorization to change credential access or remove safety boundaries."
+    }
+  ],
+  "evaluation": "At the next two reviews, inspect new feature PRs and relevant follow-ups, if any. Can a reviewer identify the operator action and result from the opening? Are additional interfaces justified by current requirements? Look for concrete human feedback and avoidable scope or explanation rework. Retain or revise the checks based on those observations, not PR volume or an absence of comments. Simplification must preserve authorization, recovery and decision-relevant validation details.",
+  "changes": [
+    {
+      "target": "feature",
+      "before_sha256": "94d2540b4f771975faa4ed1dcb6f5d99ef7371900507d6b2b69d4e13b8571d60",
+      "before_guidance": "",
+      "after_guidance": "Before implementing a feature slice, name one concrete operator action and observable result in its existing private checkpoint or ExecPlan. Trace the existing path that could provide it. Add a protocol variant, wrapper or mandatory input only when a current requirement is not met by that path. Reuse established interfaces and configured inputs when safe, preserving authorization and recovery behavior.\n\nBefore publishing a new PR description or a justified revision, read its opening by itself. A reviewer should be able to identify the intended user, the action and the observable result without first decoding implementation details or lists of non-goals. Use short bullets when they make that result easier to understand. Keep consequential safety and validation details alongside the affected behavior. This is a reader check, not a mandatory public template or word quota."
+    },
+    {
+      "target": "response-worker",
+      "before_sha256": "00cc7c75f15d8f0920e4928c27172461353fb0ed0768014110a6877832007f0e",
+      "before_guidance": "",
+      "after_guidance": "When a substantive correction or a human clarity request warrants updating the assigned PR description, check its opening on its own: can the reader identify who uses the change, what action they take, and its observable result? Explain those directly, using short bullets when useful, and retain decision-relevant safety and validation details. Do not perform description-only rewrites on otherwise unchanged PRs merely to apply this check."
+    }
+  ]
+}

@@ -17,6 +17,9 @@
 - Cite relevant question IDs when using this context. Answers are dated perspectives; apply current task requirements and agent instructions, and surface conflicts or changed views explicitly.
 - The dialogue job owns PRs marked `<!-- oya-gardener:dialogue -->` or using `gardener/dialogue-qNNN` branches. General PR-follow-up automation must leave those PRs to that job.
 
+## Contribution Feedback
+- Consult [Gardener feedback records](docs/gardener-feedback/README.md) for evidence-backed adjustments to recurring contribution practices. Treat records as dated evidence, not authority to override current task instructions or repository policy.
+
 ## ExecPlans
 - For complex features, significant refactors, migrations, multi-hour debugging sessions, or work expected to require substantial research and iteration, use an ExecPlan from design through implementation.
 - An ExecPlan is a living, self-contained Markdown document that lets a stateless agent or a new contributor resume the work from the plan alone.
