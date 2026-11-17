@@ -12,38 +12,14 @@ You can avoid storing raw private keys in `.env` by using the agent’s signer h
 
 ## Use With Forge Scripts
 
-The `agent/with-signer.mjs` helper resolves a signer and injects it as an env var (for example `DEPLOYER_PK`, `PROPOSER_PK`, `EXECUTOR_PK`) for any Forge script.
+Install the [runner dependencies](../agent/README.md#configure) and configure an `env`, `keystore`, `keychain`, or `vault` signer as described above. From the repository root, check that the helper passes a nonempty key to its child process:
 
-```shell
-# Private key from env
-SIGNER_TYPE=env PRIVATE_KEY=0x... \
-  node agent/with-signer.mjs --env DEPLOYER_PK -- \
-  bash script/deploy-commitment.sh --owners 0x
-
-# Encrypted keystore
-SIGNER_TYPE=keystore KEYSTORE_PATH=./keys/deployer.json KEYSTORE_PASSWORD=... \
-  node agent/with-signer.mjs --env DEPLOYER_PK -- \
-  bash script/deploy-commitment.sh --owners 0x1111111111111111111111111111111111111111,0x2222222222222222222222222222222222222222
-
-# OS keychain
-SIGNER_TYPE=keychain KEYCHAIN_SERVICE=og-deployer KEYCHAIN_ACCOUNT=deployer \
-  node agent/with-signer.mjs --env DEPLOYER_PK -- \
-  bash script/deploy-commitment.sh
-
-# Vault KV (private key stored as a secret)
-SIGNER_TYPE=vault VAULT_ADDR=https://vault.example.com VAULT_TOKEN=... VAULT_SECRET_PATH=secret/data/og-deployer \
-  node agent/with-signer.mjs --env DEPLOYER_PK -- \
-  bash script/set-safe-owners.sh --safe 0xYourSafe --owners 0x
+```sh
+node agent/with-signer.mjs --env DEPLOYER_PK -- node -e 'process.exitCode = process.env.DEPLOYER_PK ? 0 : 1'
 ```
 
-For interactions, swap the env var:
+The check exits silently on success. It does not print the key, verify the signer address, or submit a transaction.
 
-```shell
-SIGNER_TYPE=keystore KEYSTORE_PATH=./keys/proposer.json KEYSTORE_PASSWORD=... \
-  node agent/with-signer.mjs --env PROPOSER_PK -- \
-  forge script script/ProposeCommitmentTransfer.s.sol:ProposeCommitmentTransfer \
-    --rpc-url $MAINNET_RPC_URL \
-    --broadcast
-```
+When ready to deploy, follow the [commitment deployment guide](deployment.md#deploy-a-commitment) to choose the chain and Safe owners. Replace the command after `--` with the intended Forge command or wrapper. Set `--env` to the variable that script reads, such as `DEPLOYER_PK`, `PROPOSER_PK`, or `EXECUTOR_PK`.
 
-Forge scripts still expect a private key env var. For KMS/Vault signing without exporting private keys, use an RPC signer proxy that supports `eth_sendTransaction` (set `SIGNER_RPC_URL` and `SIGNER_ADDRESS`).
+RPC signers (`kms`, `vault-signer`, and `rpc`) sign remotely for the agent. They cannot supply a private key to `with-signer.mjs`.
