@@ -75,7 +75,9 @@ function settings(input) {
 }
 function record(input) {
     keys(input, ['transactionHash', 'logIndex', 'cid', 'nodeAddress', 'contentSha256']);
-    if (!hash(input.transactionHash) || !Number.isSafeInteger(input.logIndex) || input.logIndex < 0) throw new Error();
+    if (!hash(input.transactionHash) || (input.logIndex === undefined
+        ? input.cid === undefined || input.nodeAddress === undefined || input.contentSha256 === undefined
+        : !Number.isSafeInteger(input.logIndex) || input.logIndex < 0)) throw new Error();
     const result = { transactionHash: input.transactionHash.toLowerCase(), logIndex: input.logIndex };
     if (input.cid !== undefined) result.cid = assertCanonicalCid(input.cid, 'cid');
     if (input.nodeAddress !== undefined) result.nodeAddress = address(input.nodeAddress);
@@ -148,9 +150,12 @@ export const evidenceInputFailure = error => ({ ...initialReport(),
     status: error instanceof EvidenceError ? error.status : 'unavailable',
     reason: error instanceof EvidenceError ? error.reason : 'input_unreadable' });
 
-export async function verifyLedgerEvidence(identity, input) {
+export async function verifyLedgerEvidence(identity, input, { signal } = {}) {
     const report = initialReport();
     const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
     let timer;
     try {
         let config, expected;
@@ -191,7 +196,17 @@ export async function verifyLedgerEvidence(identity, input) {
         report.stage = 'event';
         const indexes = receipt.logs.map(log => log.logIndex.toString());
         requireMatch(new Set(indexes).size === indexes.length, 'duplicate_log_index');
-        const log = receipt.logs.find(log => log.logIndex === BigInt(expected.logIndex));
+        let log;
+        if (expected.logIndex === undefined) {
+            const matches = receipt.logs.filter(entry => {
+                const event = decodeLedgerEvent(entry, config.ledgerContract);
+                return event && !event.removed && same(event.node, expected.nodeAddress) && event.cid === expected.cid;
+            });
+            requireMatch(matches.length === 1, matches.length ? 'log_ambiguous' : 'log_missing');
+            [log] = matches;
+            requireMatch(log.logIndex <= BigInt(Number.MAX_SAFE_INTEGER), 'log_index');
+            report.logIndex = Number(log.logIndex);
+        } else log = receipt.logs.find(log => log.logIndex === BigInt(expected.logIndex));
         requireMatch(log !== undefined, 'log_missing');
         const event = decodeLedgerEvent(log, config.ledgerContract);
         requireMatch(event && event.removed !== true, 'ledger_event');
@@ -237,6 +252,7 @@ export async function verifyLedgerEvidence(identity, input) {
         } else if (report.stage !== 'input') report.checks.ledger = report.status;
     } finally {
         clearTimeout(timer);
+        signal?.removeEventListener('abort', abort);
         controller.abort();
         report.observedAt = new Date().toISOString();
     }

@@ -1,3 +1,4 @@
+import { assertCanonicalCid } from '@oyaprotocol/utils';
 import { open } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { nodeSendSettings, prepareOutbox } from './local.mjs';
@@ -61,7 +62,7 @@ async function validateSaved(saved, checkExpiry) {
     return saved;
 }
 
-async function loadSaved(file, checkExpiry) {
+export async function loadSaved(file, checkExpiry = false) {
     try { return await validateSaved(JSON.parse(await readBounded(file, 65536)), checkExpiry); }
     catch (error) {
         if (error instanceof PeerSendError) throw error;
@@ -78,18 +79,30 @@ async function saveNew(file, saved) {
     try { await parent.sync(); } finally { await parent.close(); }
 }
 
-async function request(saved, operation, transport) {
+async function request(saved, operation, transport = globalThis.fetch, { signal, check, evidence = false } = {}) {
     const { job, destination: pinned } = saved;
     const base = { operation, saved: true, requestId: job.requestId, expiresAt: job.expiresAt,
         nodeAddress: pinned.nodeAddress, target: pinned.target, admission: 'unknown', execution: 'unknown' };
     try {
-        const result = await createInboxClient(pinned.origin, undefined, transport)(
-            operation === 'status' ? '/v1/status' : '/v1/jobs', job);
+        signal?.throwIfAborted();
+        const result = await createInboxClient(pinned.origin, undefined, (...args) => {
+            // Check after request serialization, immediately before the external effect.
+            check?.();
+            signal?.throwIfAborted();
+            return transport(...args);
+        })(
+            operation === 'status' ? '/v1/status' : '/v1/jobs', job, signal);
         if (!object(result) || result.requestId !== job.requestId ||
             !['queued', 'processing', 'published', 'logged', 'failed', 'expired'].includes(result.status)) throw new Error();
-        // Report only the receiver's state, not arbitrary response fields or a proof of publication.
+        const identifiers = {};
+        if (evidence && operation === 'status' && result.status === 'logged') {
+            identifiers.cid = assertCanonicalCid(result.cid, 'cid');
+            if (typeof result.transactionHash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(result.transactionHash)) throw new Error();
+            identifiers.transactionHash = result.transactionHash.toLowerCase();
+        }
+        // Identifiers remain receiver claims, never proof of publication.
         return { ...base, outcome: operation === 'status' ? 'status' : 'admitted',
-            admission: 'reported', execution: result.status };
+            admission: 'reported', execution: result.status, ...identifiers };
     } catch (error) {
         if (error instanceof InboxError && Number.isInteger(error.status) && error.status >= 400 && error.status <= 599) {
             return { ...base, outcome: 'http_error', httpStatus: error.status };
@@ -98,20 +111,27 @@ async function request(saved, operation, transport) {
     }
 }
 
-async function prepareJob({ registryFile, nodeAddress, textFile, key }) {
+async function prepareJob({ registryFile, nodeAddress, textFile, key }, { signal, check } = {}) {
     const pinned = await selectDestination(registryFile, nodeAddress);
     const text = messageText(await readBounded(textFile, 8192));
     if (typeof key !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(key)) throw new Error();
-    const job = await signJob(new Wallet(key), pinned.target, text);
+    const wallet = new Wallet(key);
+    const job = await signJob({ address: wallet.address, signMessage: value => {
+        // Both signatures need a synchronous gate, including after the first await.
+        check?.();
+        signal?.throwIfAborted();
+        return wallet.signMessage(value);
+    } }, pinned.target, text);
     return validateSaved({ version: 1, destination: pinned, job }, true);
 }
 
 /** Send as the selected node, retaining a discoverable recovery file before HTTP. */
-export async function sendFromNode(nodeAddress, textFile, { env = process.env, transport } = {}) {
+export async function sendFromNode(nodeAddress, textFile, { env = process.env, transport, signal, check } = {}) {
     let settings, saved;
     try {
+        signal?.throwIfAborted();
         settings = await nodeSendSettings(env);
-        saved = await prepareJob({ ...settings, nodeAddress, textFile });
+        saved = await prepareJob({ ...settings, nodeAddress, textFile }, { signal, check });
     } catch { fail('invalid_node_settings_or_input'); }
     const savedFile = join(settings.directory, 'peer-outbox', `${saved.job.requestId}.json`);
     try {
@@ -122,7 +142,7 @@ export async function sendFromNode(nodeAddress, textFile, { env = process.env, t
         error.savedFile = savedFile; // May be partial or absent. Preserve it for inspection.
         throw error;
     }
-    return { ...await request(saved, 'send', transport), savedFile };
+    return { ...await request(saved, 'send', transport, { signal, check }), savedFile };
 }
 
 /** Sign, durably save, then submit once. The installed registry is never fetched implicitly. */
@@ -143,6 +163,6 @@ export async function retryPeerJob(savedFile, { transport } = {}) {
 }
 
 /** Query retained jobs, including expired ones, without loading a key. */
-export async function peerJobStatus(savedFile, { transport } = {}) {
-    return request(await loadSaved(savedFile, false), 'status', transport);
+export async function peerJobStatus(savedFile, { transport, signal, check, evidence = false } = {}) {
+    return request(await loadSaved(savedFile, false), 'status', transport, { signal, check, evidence });
 }
