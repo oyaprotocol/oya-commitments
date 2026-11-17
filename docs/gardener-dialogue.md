@@ -40,6 +40,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q015](#q015) | Continuity when an agent leaves | resilience, agent choice, ongoing commitments | Answered |
 | [Q016](#q016) | Productive disagreement | collaboration, working style, judgment | Answered |
 | [Q017](#q017) | When a rule template is ready to share | commitment design, reuse, quality | Answered |
+| [Q020](#q020) | When a handshake is enough | trust, everyday agreements | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -550,3 +551,27 @@ What would convince you that a commitment rule template is ready for people beyo
 - **Source updated:** 2026-11-16T22:59:09Z
 
 Anyone can use a commitment rule template that they think will work for their use case and will be enforceable. I think that standardized rule templates will emerge organically over time, since organic standards will make it easier for the agent ecosystem to support many commitments without custom work for each commitment.
+
+<a id="q020"></a>
+
+<!-- oya-dialogue-question: Q020 -->
+
+## Q020 — When a handshake is enough
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-17
+- **Topics:** trust, everyday agreements
+- **Status:** Awaiting answer
+- **Source PR:** Pending publication.
+
+### Context
+
+In [Q007](#q007), @pemulis discussed whether a promise can be verified. Whether the people making it want it enforced is a different question.
+
+### Question
+
+What is a promise you would rather keep on a handshake, even if Oya could enforce it?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
