@@ -26,11 +26,7 @@ npm run dev
 
 ## Environment Variables
 
-The app reads env values directly or with `VITE_` / `NEXT_PUBLIC_` prefixes.
-
-Supported today:
-
-- `MODULE_PROXY_FACTORY` (optional; overrides the module proxy factory address)
+To prefill the Module Proxy Factory field, set `VITE_MODULE_PROXY_FACTORY` to the factory address for your network before running `npm run dev` or `npm run build`. For a local override, put it in `frontend/.env.local`.
 
 All other Safe / Optimistic Governor defaults are currently hardcoded in `src/App.jsx` (mainnet defaults). If you want to make those configurable, update the defaults or wire in additional env keys.
 
