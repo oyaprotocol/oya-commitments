@@ -562,7 +562,7 @@ Anyone can use a commitment rule template that they think will work for their us
 - **Asked on:** 2026-11-17
 - **Topics:** trust, everyday agreements
 - **Status:** Awaiting answer
-- **Source PR:** Pending publication.
+- **Source PR:** [#195](https://github.com/oyaprotocol/oya-commitments/pull/195)
 
 ### Context
 
