@@ -48,7 +48,11 @@ async function readHealth(endpoint) {
         try {
             const url = new URL(healthUrl(endpoint));
             request = (url.protocol === 'http:' ? httpGet : httpsGet)(url,
-                { agent: false, maxHeaderSize: 16384, headers: { accept: 'application/json', connection: 'close' } }, incoming => {
+                { agent: false, maxHeaderSize: 16384, headers: { accept: 'application/json', connection: 'close' },
+                    // Pin localhost without changing its TLS identity or HTTP Host. Literal IPs bypass lookup.
+                    lookup: (_hostname, options, callback) => callback(null,
+                        options.all ? [{ address: '127.0.0.1', family: 4 }] : '127.0.0.1', 4),
+                }, incoming => {
                     response = incoming;
                     reachable = true;
                     const httpStatus = response.statusCode;

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { chmod, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { createServer as createHttpsServer } from 'node:https';
+import { chmod, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -134,6 +135,47 @@ test('direct health states and every identity dimension are checked through real
         f.response(body, http);
         checked(await f.run(), code, state);
     }
+});
+
+test('legacy direct Ledger health retains mode fallback without weakening other identities', async t => {
+    const f = await fixture(t);
+    for (const status of ['ready', 'busy']) {
+        f.response({ ...direct, mode: undefined, status, busy: status === 'busy' });
+        assert.equal(checked(await f.run(), 0, status).verified, true);
+    }
+    for (const change of [{ mode: null }, { mode: 'ipfs' }, { nodeAddress: undefined }, { chainId: 1 }]) {
+        f.response({ ...direct, mode: undefined, ...change });
+        checked(await f.run(), 1, 'identity_mismatch');
+    }
+    const ipfs = await fixture(t, 'direct', 'ipfs');
+    ipfs.response({ status: 'ready', busy: false });
+    checked(await ipfs.run(), 1, 'identity_mismatch');
+    const w = await fixture(t, 'worker');
+    w.response({ ...worker(), mode: undefined });
+    checked(await w.run(), 1, 'identity_mismatch');
+});
+
+test('HTTPS localhost preserves certificate identity and still requires trust and hostname matching', async t => {
+    const f = await fixture(t);
+    const keyFile = join(f.directory, 'test-key.pem');
+    const certFile = join(f.directory, 'test-cert.pem');
+    const configFile = join(f.directory, 'test-cert.cnf');
+    await writeFile(configFile, '[req]\ndistinguished_name=dn\nx509_extensions=ext\nprompt=no\n[dn]\nCN=localhost\n[ext]\nsubjectAltName=DNS:localhost\nbasicConstraints=critical,CA:TRUE\n');
+    execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
+        '-config', configFile, '-keyout', keyFile, '-out', certFile], { stdio: 'ignore' });
+    const server = createHttpsServer({ key: await readFile(keyFile), cert: await readFile(certFile) }, (req, res) => {
+        assert.equal(req.headers.host, `localhost:${server.address().port}`);
+        assert.equal(req.socket.servername, 'localhost');
+        res.end(JSON.stringify(direct));
+    });
+    const url = (await listen(t, server)).replace('http://127.0.0.1', 'https://localhost');
+    await f.save({ ...f.profile, healthUrl: url });
+    const args = ['status', '--profile', f.file, '--json'];
+    const env = { NODE_EXTRA_CA_CERTS: certFile };
+    checked(await runCli(cli, args, { env }), 0, 'ready');
+    checked(await runCli(cli, args), 1, 'unreachable');
+    await f.save({ ...f.profile, healthUrl: url.replace('localhost', '127.0.0.1') });
+    checked(await runCli(cli, args, { env }), 1, 'unreachable');
 });
 
 test('worker healthy states, failure states, freshness and legacy upgrade guidance', async t => {

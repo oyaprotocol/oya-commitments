@@ -18,6 +18,8 @@ The proposed implementation covers the production node under `node/production/`,
 
 ## Progress
 
+- [x] 2026-11-17: Reproduced and corrected legacy direct Ledger mode fallback and HTTPS localhost certificate matching. Added positive and rejection-path CLI regressions. All 570 production tests pass on Node 24 and Node 26. Independent review found no blockers.
+
 - [x] 2026-11-15 15:29Z: Read repository guidance and inspected upgrade, Keychain, client, health, expiry, gas, and release-packaging paths at `bda9c5c704c3fe296ae9ed602d4180eae0be3313`.
 - [x] 2026-11-15 15:29Z: Confirmed upstream `main` matches the inspected revision and checked open PRs for overlapping production-node work.
 - [x] 2026-11-15: Drafted the proposed behavior, milestones, compatibility boundaries, and acceptance tests below.
@@ -33,6 +35,8 @@ The proposed implementation covers the production node under `node/production/`,
 - [ ] Complete release-bundle integration, documentation, integration validation, and review fixes.
 
 ## Surprises & Discoveries
+
+- 2026-11-17: Older direct Ledger health omits `mode`, as supported by the existing local-status command. HTTPS localhost must retain its hostname for TLS verification while the connection is pinned to loopback. Both new CLI regressions failed before correction. Initial full-suite runs hit the existing macOS gas-policy symlink permission test with the system temporary path. Using a canonical private `TMPDIR` made both suites pass without changing that test.
 
 - 2026-11-17: Merging current main requires the release archive and verifier to retain both the status and gas-policy host closures. Exact directory-content assertions must check their union, including automatically merged test sections.
 
@@ -53,6 +57,8 @@ The proposed implementation covers the production node under `node/production/`,
 
 ## Decision Log
 
+- Decision: Default omitted mode to Ledger only for direct responses and pin localhost through request lookup rather than URL rewriting. Rationale: preserve legacy compatibility, TLS hostname verification, and loopback-only connections. Rejection tests retain explicit mode, worker identity, certificate trust, and hostname checks. Date/author: 2026-11-17 / Oya Gardener.
+
 - Decision: Keep the bounded status interface and its failure-path tests after a simplicity review. Remove the redundant mutable shutdown assignment because the health server already derives shutdown from the abort signal. Rationale: the remaining public-settings, health-validation and transport boundaries support key-free operation and sanitized output. Date/author: 2026-11-17 / Oya Gardener.
 
 - Decision: Implement `operator-status-profile-v1` before Python migration. Rationale: status reads public identity settings and loopback health only; it neither calls nor extends lifecycle helpers. Extract dependency-free public config projections used by runtime and host rather than package signing libraries or build another full config parser. Preserve all migration/parity, locking, archive, credential, and cross-platform prerequisites before lifecycle changes. The only Python change in this milestone is the public release-file allowlist. Date/author: 2026-11-15 / Oya Gardener.
@@ -65,6 +71,8 @@ The proposed implementation covers the production node under `node/production/`,
 - Decision: Run monitoring outside the worker, with optional outbound heartbeat checks and configurable offline grace. Rationale: A stopped process cannot reliably report its own death; a sleeping host also needs an observer elsewhere. External delivery remains opt-in. Date/author: 2026-11-15 / Codex; proposed for approval.
 
 ## Outcomes & Retrospective
+
+The 2026-11-17 review follow-up restores legacy Ledger status and trusted HTTPS localhost operation. `node --test node/production/test/operator-node.test.mjs` passes all 14 tests. The full production suite passes all 570 tests on Node.js 24.22.2 and 26.12.1, including packaging. The HTTPS fixture requires `openssl` and creates disposable certificates without modifying host trust. Docker integration was not rerun for this host-status correction.
 
 The bounded status implementation provides key-free identity checks for direct and worker nodes, a private version-1 profile, fixed sanitized human/JSON output, and a dependency-free extracted-bundle command. Controlled loopback CLI and production health-server tests cover normal states, legacy identity, mismatch, freshness, shutdown, transport bounds and privacy. Broader sending, expiry, monitoring, gas-policy and credential lifecycle milestones remain unimplemented. Migration/parity and platform acceptance remain required before lifecycle changes. Final validation results are recorded below.
 

@@ -19,7 +19,8 @@ export function validateHealth(health, httpStatus, expected, now = Date.now()) {
     // Legacy direct nodes predate the role field, but have a distinct busy schema.
     if ((health.role === undefined && !worker ? 'direct' : health.role) !== expected.role ||
         (!worker && Object.hasOwn(health, 'target'))) return invalid('identity_mismatch');
-    if (health.mode !== expected.mode || (worker && health.target !== expected.target)) return invalid('identity_mismatch');
+    const mode = health.mode === undefined && !worker ? 'ledger' : health.mode;
+    if (mode !== expected.mode || (worker && health.target !== expected.target)) return invalid('identity_mismatch');
     if (expected.mode === 'ledger') {
         const fields = ['chainId', 'ledgerContract', 'nodeAddress'];
         if (worker && fields.some(key => !Object.hasOwn(health, key))) return invalid('legacy_unverified');

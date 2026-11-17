@@ -31,8 +31,6 @@ export function healthUrl(value) {
     const url = new URL(value);
     if (!['http:', 'https:'].includes(url.protocol) || !['127.0.0.1', '[::1]', 'localhost'].includes(url.hostname) ||
         url.username || url.password || url.search || url.hash || url.pathname !== '/healthz') throw new Error('Invalid health URL.');
-    // Pin localhost to a loopback literal: no resolver, proxy or remote connection.
-    if (url.hostname === 'localhost') url.hostname = '127.0.0.1';
     return url.href;
 }
 

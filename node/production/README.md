@@ -368,6 +368,8 @@ Replace the hostname and files, and substitute the configured node host port if 
 
 ## Install and validate
 
+The unit suite requires Python 3 for lifecycle tests and `openssl` on `PATH` to generate disposable localhost certificates for HTTPS status tests.
+
 Use Node 22 or newer, npm, Foundry, and [Kubo 0.43.0](https://github.com/ipfs/kubo/releases/tag/v0.43.0) for the local integration tests. Both integration scripts require `ipfs` on `PATH` to report exactly `0.43.0`, matching Compose, and check the fixture daemon's version. Select that release on `PATH` before running them; a mismatch fails before any services start. CI uses Node 24. From the repository root:
 
 ```sh
