@@ -152,6 +152,35 @@ test('identical ordered CIDs produce identical manifest bytes across nodes, chai
     assert.deepEqual(first.uploads[8].text.split('\n'), first.uploads[2].text.split('\n').reverse());
 });
 
+for (const [name, limits] of [
+    ['gas', { gasLimit: 32767n, feePerGas: 30000000000n }],
+    ['fee', { gasLimit: 200000n, feePerGas: 2n }],
+]) {
+    test(`lowered ${name} cap preserves the direct batch journal and signed transaction`, async t => {
+        const s = await setup(t);
+        s.f.config.receiptTimeoutMs = 25;
+        const batch = await s.open();
+        await batch.accept(s.f.message);
+        s.f.state.receiptMode = 'pending';
+        await assert.rejects(batch.flush());
+        await batch.close();
+        const before = await readFile(join(s.directory, 'batch.json'));
+        const original = s.f.config.limits;
+        s.f.config.limits = limits;
+        await assert.rejects(s.open(), /transaction/i);
+        assert.deepEqual(await readFile(join(s.directory, 'batch.json')), before);
+        assert.equal(s.f.state.signs, 1);
+        assert.equal(s.f.state.sends, 1);
+        s.f.config.limits = original;
+        s.f.state.receiptMode = 'mined';
+        const resumed = await s.open();
+        await resumed.flush();
+        assert.equal(resumed.status().recent[0].status, 'logged');
+        assert.equal(s.f.state.signs, 1);
+        assert.equal(s.f.state.sends, 1);
+    });
+}
+
 for (const changed of ['chain', 'contract', 'node']) {
     test(`content-only manifest does not allow recovery under a changed ${changed}`, async t => {
         const s = await setup(t);
