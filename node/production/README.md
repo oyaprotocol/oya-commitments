@@ -19,7 +19,7 @@ The default deployment runs Oya and Kubo on your local device, with a portable P
 | Review an original signed message in a logged batch | [Batch member evidence](batch-logging.md#review-one-batch-member) — bounded retrieval, CID integrity, membership, signature and optional Ledger checks. |
 | Verify automatic testnet CID logging | [Testnet Ledger acceptance](testnet-ledger.md) — isolated installation, receipt evidence and recovery; requires separate broadcast authorization. |
 | Load or fetch the public peer list | [Testnet registry guide](peers/README.md) — public addresses and endpoints; signer permissions stay explicitly configured. |
-| Send to one chosen node | [Chosen-node sender](peers/send.md) — one command, reusable function and saved-job recovery. |
+| Send to one chosen node | [Chosen-node sender](peers/send.md) — `send RECIPIENT TEXT_FILE` as the installed node, with managed recovery. |
 | Receive or send peer publication requests | [Peer reception](peers/receive.md) — opt-in registry authorization, ordinary v1 jobs and execution status. |
 | Inspect configured gas caps offline | [Gas policy](gas-policy.md) — exact per-transaction caps and defaults, without credentials. |
 | Develop or validate the runtime | [Install and validate](#install-and-validate). |

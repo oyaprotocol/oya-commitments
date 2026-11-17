@@ -61,7 +61,7 @@ The command itself writes no files; the shell saves and replaces the public list
 
 ## Send to one chosen node
 
-Use the [chosen-node sender](send.md) to select an explicit address from an installed registry, sign and save one ordinary job, and submit it in one command. Retry/status reuse the saved destination without loading a key. The same functions are importable by automation.
+Use the [chosen-node sender](send.md) with `send RECIPIENT TEXT_FILE` to sign as the node selected by `OYA_LOCAL_DIR`, automatically select its configured or bundled registry, and save one ordinary job before submitting it. Retry/status reuse the saved destination without loading a key. The same functions are importable by automation.
 
 ## Routing is separate from authorization
 

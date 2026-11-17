@@ -1,5 +1,6 @@
 import { open } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { nodeSendSettings, prepareOutbox } from './local.mjs';
 import { getAddress, Wallet } from 'ethers';
 import { readBounded } from './config.mjs';
 import { inboxUrl } from '../inbox/config.mjs';
@@ -97,16 +98,39 @@ async function request(saved, operation, transport) {
     }
 }
 
+async function prepareJob({ registryFile, nodeAddress, textFile, key }) {
+    const pinned = await selectDestination(registryFile, nodeAddress);
+    const text = messageText(await readBounded(textFile, 8192));
+    if (typeof key !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(key)) throw new Error();
+    const job = await signJob(new Wallet(key), pinned.target, text);
+    return validateSaved({ version: 1, destination: pinned, job }, true);
+}
+
+/** Send as the selected node, retaining a discoverable recovery file before HTTP. */
+export async function sendFromNode(nodeAddress, textFile, { env = process.env, transport } = {}) {
+    let settings, saved;
+    try {
+        settings = await nodeSendSettings(env);
+        saved = await prepareJob({ ...settings, nodeAddress, textFile });
+    } catch { fail('invalid_node_settings_or_input'); }
+    const savedFile = join(settings.directory, 'peer-outbox', `${saved.job.requestId}.json`);
+    try {
+        await prepareOutbox(settings.directory);
+        await saveNew(savedFile, saved);
+    } catch {
+        const error = new PeerSendError('save_failed');
+        error.savedFile = savedFile; // May be partial or absent. Preserve it for inspection.
+        throw error;
+    }
+    return { ...await request(saved, 'send', transport), savedFile };
+}
+
 /** Sign, durably save, then submit once. The installed registry is never fetched implicitly. */
 export async function sendToPeer({ registryFile, nodeAddress, keyFile, textFile, outputFile }, { transport } = {}) {
     let saved;
     try {
-        const pinned = await selectDestination(registryFile, nodeAddress);
-        const text = messageText(await readBounded(textFile, 8192));
         const key = (await readBounded(keyFile, 256)).trim();
-        if (!/^0x[0-9a-fA-F]{64}$/.test(key)) throw new Error();
-        const job = await signJob(new Wallet(key), pinned.target, text);
-        saved = await validateSaved({ version: 1, destination: pinned, job }, true);
+        saved = await prepareJob({ registryFile, nodeAddress, textFile, key });
     } catch { fail('invalid_input'); }
     try { await saveNew(outputFile, saved); }
     catch { fail('save_failed'); }

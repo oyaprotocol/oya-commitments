@@ -7,6 +7,7 @@ RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
     && rm -rf /root/.npm
 
 COPY src/ ./src/
+COPY peers/testnet-directory.json ./peers/testnet-directory.json
 
 USER node
 ENTRYPOINT ["node", "src/main.mjs"]

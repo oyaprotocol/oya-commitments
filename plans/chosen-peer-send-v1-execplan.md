@@ -4,7 +4,7 @@ Feature ID: `chosen-peer-send-v1`. This living ExecPlan follows `PLANS.md`.
 
 ## Purpose / Big Picture
 
-An operator selects a node by its Ethereum address from an installed, reviewed registry and sends a text file with one command. Automation imports the same function. Before sending, the helper saves the exact ordinary version-1 signed job and destination. Later status and explicit retry use only that saved file, without a key or registry lookup. Acceptance is demonstrated against a loopback inbox with real signatures, not a live service.
+An operator sends a text file with `send RECIPIENT TEXT_FILE`, selecting the recipient by Ethereum address and signing as the node in the existing `OYA_LOCAL_DIR` installation. The command automatically uses its configured or bundled registry and manages a private recovery file. Automation imports the same function. Before sending, the helper saves the exact ordinary version-1 signed job and destination. Later status and explicit retry use only that saved file, without a key or registry lookup. Acceptance is demonstrated against a loopback inbox with real signatures, not a live service.
 
 ## Progress
 
@@ -15,15 +15,23 @@ An operator selects a node by its Ethereum address from an installed, reviewed r
 - [x] 2026-11-15: Independent review found no blockers and reran 54 focused tests. Full production suite independently rerun: 469 passed, zero failures or skips.
 - [x] 2026-11-17: Verified publication as PR #179 at `71e64af`, its source label, and all seven original-head CI checks.
 - [x] 2026-11-17: Integrated upstream `7da47ea` and reconciled the upgrade allowlist, retaining both the sender guide and gas-policy assets. All 571 production tests passed with a canonical private temporary directory.
-- [ ] Resolve the sender-identity choice raised by [review comment 4593032328](https://github.com/oyaprotocol/oya-commitments/pull/179#discussion_r4593032328), then simplify the command to recipient and text file. Existing sender credentials and node gas-paying credentials have separate roles. The proposed operator-profile resolver is not implemented.
+- [x] 2026-11-17 01:04Z: Founder pemulis (ID 1646497), comment 4593668969, explicitly selected the node identity for node-to-node messages. Read local configuration, secret loading, transport, persistence and packaging patterns.
+- [x] 2026-11-17 01:08Z: Implemented two-argument sending, node identity resolution and synchronized managed recovery. Both sender test files pass (25 tests), including real lost-acknowledgement CLI recovery without settings or keys.
+- [x] 2026-11-17 01:13Z: Final validation passed 65 focused tests, all 579 production tests, and 25 sender tests in the built read-only/network-isolated Node 24 image. Updated operator docs, checked the complete feature and its 986-code-line budget. Independent review subsequently reran all 65 focused tests and found no actionable issues.
 
 ## Surprises & Discoveries
+
+The existing local-worker guide already selects one installation with `OYA_LOCAL_DIR` and stores its identity in literal `node.env`; no new operator profile is required. Its `peers.registryFile` can be reused for routing, but adding that field also enables reception authorization, so the guide warns against changing it merely to choose an outgoing list. The original image omitted the public registry; the default now requires packaging that file. Managed outbox creation needs a parent-directory sync in addition to the existing file/outbox syncs, all covered by failure injection.
+
+The follow-up image build with `--network=none` hit `EAI_AGAIN` in the dependency layer. Rebuilding with normal build networking succeeded from cached dependencies; test containers retained `--network none`.
 
 The existing transport already bounds responses and deadlines and refuses redirects. Registry loading currently establishes membership only, so the sender must validate selected routing separately. The release bundle and Python upgrader both have explicit guide allowlists. The broader `plans/node-operator-experience-execplan.md` proposes profile-aware sending in milestone 3; this small reusable helper provides a foundation without implementing that framework.
 
 The first image build with `--network=none` failed during the existing npm dependency layer (`EAI_AGAIN`); rebuilding without that build-time restriction succeeded using cached layers. All image execution tests then ran with `--network none` and loopback-only fixtures. Review also found that URL parsing accepts an empty userinfo marker (`https://@...`); explicit routing validation now rejects it, with a regression case.
 
 ## Decision Log
+
+- 2026-11-17 / Oya Gardener: Use the existing `OYA_LOCAL_DIR` installation selection, `node.json` and literal `node.env` (`OYA_NODE_PRIVATE_KEY`) for simplified sends. Do not discover installations, read Keychain, fall back to an agent key, or merge ambient credentials. Use `peers.registryFile` relative to node settings when configured, otherwise the packaged public registry. Save each validated job under an owner-only `peer-outbox` directory before HTTP and return its recovery filename. Keep explicit low-level calls compatible. This resolves the founder’s node-identity clarification without implementing the broader profile framework.
 
 - 2026-11-17 / Oya Gardener: Preserve the union of release allowlist entries when merging upstream. Defer automatic sender-key selection until the reviewer clarifies whether sending uses a dedicated sender identity or the installed node identity. `send-message.mjs` uses `OYA_AGENT_PRIVATE_KEY`, while local node settings use `OYA_NODE_PRIVATE_KEY` and the current Keychain helper retrieves worker tokens. These are not interchangeable defaults.
 
@@ -33,13 +41,15 @@ The first image build with `--network=none` failed during the existing npm depen
 
 ## Outcomes & Retrospective
 
-The upstream integration preserves both release bundles' required files. The full production suite passed 571 tests after setting `TMPDIR` to a canonical private directory. An initial run hit macOS `/var` symlink traversal in the gas-policy permission test. No test or permission restriction was weakened. The two-argument workflow remains pending the sender-identity decision. Removing path arguments should hide setup mechanics, not silently select a different signing authority.
+The founder-requested two-argument workflow is implemented. It uses the explicitly selected installation’s node identity, configured or packaged registry, and managed recovery files. Both signatures use the node account; runtime permissions and signing authority are preserved. The low-level API and five-argument form remain compatible. Live service publication remains untested.
+
+The upstream integration previously passed 571 tests. This follow-up passed all 579 production tests with canonical private `TMPDIR`, avoiding the known macOS `/var` symlink permission-test failure without weakening restrictions. All 25 sender tests also passed in a read-only Linux arm64 Node 24 image with external networking disabled.
 
 The CLI and importable API work end to end against the ordinary inbox HTTP handler with real signatures and an in-memory store. Restarted CLI processes recover the original request after key/registry removal. Lost acknowledgement, stalled headers/body, redirects, malformed responses, forged signatures, bounded short reads, partial writes and both file/directory sync failure have regressions. The guide ships in release bundles and passes the strict upgrade verifier. No new dependencies or protocol changes were needed.
 
-Validation completed with host Node v26.12.1 and container Node v24.21.0. This demonstrates admission/recovery, not PostgreSQL durability, IPFS availability or onchain logging. The local image is Linux arm64; this task did not validate a release amd64 image or publish assets. No real-peer sends, deployments or remote mutations occurred.
+Validation completed with host Node v26.12.1 and container Node v24.21.0. This demonstrates admission/recovery, not PostgreSQL durability, IPFS availability or onchain logging. The local image is Linux arm64; this task did not validate a release amd64 image or publish assets. No real-peer sends or deployments occurred.
 
-Next candidate: integrate this sender into the operator profile interface after its prerequisite migration is ready. The bounded candidate is detailed below.
+The broader operator-profile adapter below remains an informational future candidate, not an approval gate or an outstanding requirement for this CLI.
 
 ## Context and Orientation
 
@@ -47,30 +57,35 @@ All implementation lives under `node/production`. `src/inbox/protocol.mjs` signs
 
 ## Plan of Work
 
+The founder follow-up adds `src/peers/local.mjs` to resolve only the selected installation, bound and validate its secret file, and create/sync a private outbox. `src/secrets.mjs` exposes its existing literal parser for this bounded reader without changing runtime secret loading. `sendFromNode` shares preparation and persistence with `sendToPeer`; the CLI dispatches the two-argument form to it. `test/peer-send-local.test.mjs` covers identity isolation, permissions, missing/ambiguous inputs, all three sync boundaries, concurrent independent requests and restarted CLI recovery. The Dockerfile includes the bundled registry.
+
+Original implementation milestones:
+
 First add `src/peers/send.mjs` for selection, preparation, persistence, submission and recovery, plus `src/peers/client.mjs` for positional CLI commands and sanitized JSON output. Validate all inputs before persistence or HTTP. Classify valid remote states separately from unknown delivery, HTTP failure and local invalid input.
 
 Then add `test/peer-send.test.mjs` covering validation, durability, exact retries, expiry and sanitized failures. Run the actual CLI asynchronously against `createInboxServer` with an in-memory fixture store, real disposable signatures and loopback networking only. Finally add `peers/send.md`, link it from task guides, include modules in `.dockerignore`, and include the guide in release and upgrade allowlists and packaging assertions.
 
 ## Concrete Steps
 
-From the repository root, install locked production dependencies if absent with `npm --prefix node/production ci --ignore-scripts --no-audit --no-fund`. Run:
+From the repository root, install locked production dependencies if absent with `npm --prefix node/production ci --ignore-scripts --no-audit --no-fund`. Set `TMPDIR` to an existing canonical private scratch directory (`export TMPDIR="$(cd "$TMPDIR" && pwd -P)"` when it is already selected). Run:
 
-    node --test node/production/test/peer-send.test.mjs
-    node --test node/production/test/inbox-client.test.mjs node/production/test/peer-receive.test.mjs node/production/test/publish-image.test.mjs
+    node --test node/production/test/peer-send.test.mjs node/production/test/peer-send-local.test.mjs
+    node --test node/production/test/peer-send.test.mjs node/production/test/peer-send-local.test.mjs node/production/test/secrets.test.mjs node/production/test/inbox-client.test.mjs node/production/test/peer-receive.test.mjs node/production/test/publish-image.test.mjs
     npm --prefix node/production test
     node node/production/src/peers/client.mjs --help
     git diff --check
 
-The commands above passed: sender 17/17; related client/reception/packaging 37/37; full production 469/469; CLI help and whitespace checks passed. For the successful image validation, run from the repository root:
+The original implementation passed sender 17/17, related client/reception/packaging 37/37 and production 469/469. The founder follow-up passes sender 25/25, combined sender/secrets/inbox/reception/packaging 65/65 and production 579/579; CLI help and whitespace checks also pass. For the successful image validation, run from the repository root:
 
-    docker build --pull=false -t oya-chosen-peer-send-v1:local node/production
-    docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint node oya-chosen-peer-send-v1:local /app/src/peers/client.mjs --help
+    docker build --pull=false -t oya-pr179-node-send:local node/production
+    docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint node oya-pr179-node-send:local /app/src/peers/client.mjs --help
     docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
       --tmpfs /tmp:rw,nosuid,nodev,mode=1777 \
       --mount "type=bind,src=$PWD/node/production/test/peer-send.test.mjs,dst=/app/test/peer-send.test.mjs,readonly" \
-      --entrypoint node oya-chosen-peer-send-v1:local --test /app/test/peer-send.test.mjs
+      --mount "type=bind,src=$PWD/node/production/test/peer-send-local.test.mjs,dst=/app/test/peer-send-local.test.mjs,readonly" \
+      --entrypoint node oya-pr179-node-send:local --test /app/test/peer-send.test.mjs /app/test/peer-send-local.test.mjs
 
-The real image build and packaged CLI help passed. All 17 sender tests passed inside that image with networking disabled except container loopback. The timeout regression asserts the production 10-second setting while shortening its test timer to 100 milliseconds. Release tests use fake Docker and disposable local Git repositories; they must never invoke real publication.
+The real image build and packaged CLI help passed. All 25 sender tests passed inside the follow-up image with networking disabled except container loopback. The timeout regression asserts the production 10-second setting while shortening its test timer to 100 milliseconds. Release tests use fake Docker and disposable local Git repositories; they must never invoke real publication.
 
 ## Validation and Acceptance
 
@@ -78,11 +93,11 @@ A new send must save an owner-only exact job before one POST; the fixture observ
 
 ## Idempotence and Recovery
 
-The output filename must be fresh. A write/sync failure leaves its artifact for inspection and sends nothing. Never overwrite a saved request. Status can inspect expired jobs; retry cannot extend expiry. After an uncertain send, retain the saved file and query status, then explicitly choose whether to retry the same job. Missing status does not prove non-publication. Signed jobs can be reused across authorized receivers sharing a target; no cross-node deduplication is promised. Protect local metadata from modification with a private parent directory.
+Managed sends return the fresh filename under `OYA_LOCAL_DIR/peer-outbox`; if no result was printed, inspect that directory before taking further action. Explicit low-level output filenames must be fresh. A write/sync failure leaves its artifact for inspection and sends nothing. Never overwrite a saved request. Status can inspect expired jobs; retry cannot extend expiry. After an uncertain send, retain the saved file and query status, then explicitly choose whether to retry the same job. Missing status does not prove non-publication. Signed jobs can be reused across authorized receivers sharing a target; no cross-node deduplication is promised. Protect local metadata from modification with a private parent directory.
 
 ## Artifacts and Notes
 
-The measured implementation, tests, scripts and configuration change is 634 additions plus 3 deletions, or 637 code lines, below the 3,000-line budget. Documentation is measured separately. Validation uses disposable keys and saved requests outside the checkout. Deployment and real-peer/onchain sends require separate authorization.
+Against base `7da47ea4ce1b9677f8e9e7183a6c66056186fc10`, the complete feature including the new implementation and tests measures 981 additions plus 5 deletions, or 986 code lines, below the 3,000-line budget. Documentation is measured separately. Validation uses disposable keys and saved requests outside the checkout. Deployment and real-peer/onchain sends require separate authorization.
 
 ## Next feature — candidate when capacity permits
 
@@ -92,4 +107,4 @@ Affected components are the planned operator CLI/profile loader, `src/peers/send
 
 ## Interfaces and Dependencies
 
-`sendToPeer({registryFile,nodeAddress,keyFile,textFile,outputFile}, {transport})` creates and submits once. `retryPeerJob(savedFile, {transport})` and `peerJobStatus(savedFile, {transport})` read the persisted destination/job only. The optional Fetch-compatible transport supports local deterministic tests. Public functions sanitize local validation failures and remote outcomes. CLI: `send REGISTRY_FILE NODE_ADDRESS KEY_FILE TEXT_FILE OUTPUT_FILE`, `retry SAVED_FILE`, `status SAVED_FILE`, `--help`. Exit 0 means recognized admission/state except failed/expired execution, 1 means remote/unknown/failed/expired outcome and 2 means local input/persistence failure. These commands require production dependencies (or the matching built image); no new dependencies are planned.
+`sendToPeer({registryFile,nodeAddress,keyFile,textFile,outputFile}, {transport})` creates and submits once. `retryPeerJob(savedFile, {transport})` and `peerJobStatus(savedFile, {transport})` read the persisted destination/job only. The optional Fetch-compatible transport supports local deterministic tests. Public functions sanitize local validation failures and remote outcomes. New API: `sendFromNode(nodeAddress, textFile, {env, transport})`, where `env` defaults to `process.env`. Its result includes `savedFile`. The node resolver uses `OYA_LOCAL_DIR/node.json` and `node.env` only, ignoring ambient keys and worker tokens. CLI: `send RECIPIENT TEXT_FILE`, compatibility form `send REGISTRY_FILE NODE_ADDRESS KEY_FILE TEXT_FILE OUTPUT_FILE`, `retry SAVED_FILE`, `status SAVED_FILE`, `--help`. Exit 0 means recognized admission/state except failed/expired execution, 1 means remote/unknown/failed/expired outcome and 2 means local input/persistence failure. These commands require production dependencies (or the matching built image); no new dependencies are planned.
