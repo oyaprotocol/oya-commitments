@@ -40,6 +40,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q015](#q015) | Continuity when an agent leaves | resilience, agent choice, ongoing commitments | Answered |
 | [Q016](#q016) | Productive disagreement | collaboration, working style, judgment | Answered |
 | [Q017](#q017) | When a rule template is ready to share | commitment design, reuse, quality | Answered |
+| [Q018](#q018) | Choosing a node for a first message | node operation, peer selection | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -550,3 +551,27 @@ What would convince you that a commitment rule template is ready for people beyo
 - **Source updated:** 2026-11-16T22:59:09Z
 
 Anyone can use a commitment rule template that they think will work for their use case and will be enforceable. I think that standardized rule templates will emerge organically over time, since organic standards will make it easier for the agent ecosystem to support many commitments without custom work for each commitment.
+
+<a id="q018"></a>
+
+<!-- oya-dialogue-question: Q018 -->
+
+## Q018 — Choosing a node for a first message
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-17
+- **Topics:** node operation, peer selection
+- **Status:** Awaiting answer
+- **Source PR:** Pending publication.
+
+### Context
+
+The [sending guide](../node/production/peers/send.md) starts with a recipient address. A directory can tell a new operator where to send a message, but choosing a recipient is a separate decision.
+
+### Question
+
+If two nodes are willing to publish your first message, what would make you choose one over the other?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
