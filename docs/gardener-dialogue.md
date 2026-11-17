@@ -36,6 +36,9 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q011](#q011) | Connections between independent commitments | composability, ecosystem, application design | Answered |
 | [Q012](#q012) | Changing a long-running commitment | consent, adaptability, ongoing commitments | Answered |
 | [Q013](#q013) | Understanding before delegation | accessibility, informed consent, user experience | Answered |
+| [Q014](#q014) | An influence worth learning from | design influences, philosophy, collaboration | Awaiting answer |
+| [Q015](#q015) | Continuity when an agent leaves | resilience, agent choice, ongoing commitments | Answered |
+| [Q016](#q016) | Productive disagreement | collaboration, working style, judgment | Answered |
 
 <a id="q001"></a>
 
@@ -429,3 +432,89 @@ The nature of a commitment is that you would not necessarily need to trust an ag
 As a simple example, an agent may post a bond to promise to show up to perform a limit order when a particular price is hit, which they will lose if they don't show up. (A proposal could be made to credit the bond to the original user of the commitment.) That would also provide certainty to the agent that they will be able to earn the fees from that commitment, giving them confidence to spend resources monitoring the commitment and executing it, knowing that someone else won't beat them to the punch.
 
 It will depend on the nature of the commitment whether it is open to anyone or to a designated agent. But in either case, you don't really need to "trust" the agent to follow the rules, since the protocol enforces the rules regardless.
+
+<a id="q014"></a>
+
+<!-- oya-dialogue-question: Q014 -->
+
+## Q014 — An influence worth learning from
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-15
+- **Topics:** design influences, philosophy, collaboration
+- **Status:** Awaiting answer
+- **Source PR:** [#175](https://github.com/oyaprotocol/oya-commitments/pull/175)
+
+### Context
+
+The dialogue has explored what Oya could enable. Learning which existing experiences inform its design could give contributors a more concrete sense of the qualities we want to cultivate.
+
+### Question
+
+What experience with another tool or community has most shaped how you want Oya to feel to its users?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
+
+<a id="q015"></a>
+
+<!-- oya-dialogue-question: Q015 -->
+
+## Q015 — Continuity when an agent leaves
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-15
+- **Topics:** resilience, agent choice, ongoing commitments
+- **Status:** Answered
+- **Source PR:** [#176](https://github.com/oyaprotocol/oya-commitments/pull/176)
+
+### Context
+
+In [Q006](#q006), @pemulis described agents serving commitments through messages. Thinking about an agent becoming unavailable could help us design ongoing commitments around continuity for the user.
+
+### Question
+
+What should a user be able to do if the agent serving their ongoing commitment stops operating?
+
+### Answer
+
+#### @pemulis — 2026-11-15
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 6901316165](https://github.com/oyaprotocol/oya-commitments/pull/176#issuecomment-6901316165)
+- **Source created:** 2026-11-15T21:03:02Z
+- **Source updated:** 2026-11-15T21:03:31Z
+
+It depends on the commitment, but it would make sense to write the commitment in such a way that the agent could be replaced if they were not doing their job, with specific rules around that mechanism. Additionally, in some cases the agent may post a bond with the commitment as a surety that they will show up to do their job, and might lose that bond if they fail to perform their duties correctly. On top of that, some commitments may allow any user/agent to show up to interact, and not rely on a specific agent.
+
+<a id="q016"></a>
+
+<!-- oya-dialogue-question: Q016 -->
+
+## Q016 — Productive disagreement
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-15
+- **Topics:** collaboration, working style, judgment
+- **Status:** Answered
+- **Source PR:** [#178](https://github.com/oyaprotocol/oya-commitments/pull/178)
+
+### Context
+
+Oya combines protocol design, software, and user experience. Contributors can reasonably disagree about choices across those areas. Understanding what makes that disagreement useful could help us work through it together.
+
+### Question
+
+What makes a disagreement among Oya contributors productive rather than a drain on the project?
+
+### Answer
+
+#### @pemulis — 2026-11-16
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 6931912446](https://github.com/oyaprotocol/oya-commitments/pull/178#issuecomment-6931912446)
+- **Source created:** 2026-11-16T22:58:09Z
+- **Source updated:** 2026-11-16T22:58:09Z
+
+Right now the project is getting interest in use cases and node operation. This is too complicated of a question to answer right now, since it will be situation dependent. We would need a larger community of builders before disagreements even arise.

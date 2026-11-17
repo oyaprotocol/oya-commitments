@@ -6,8 +6,11 @@
 !src/
 src/**
 !src/batch-logging.mjs
+!src/batch-evidence.mjs
+!src/verify-batch.mjs
 !src/bytecode.mjs
 !src/config.mjs
+!src/gas-policy.mjs
 !src/defaults.mjs
 !src/main.mjs
 !src/ledger-evidence.mjs

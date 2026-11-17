@@ -1,3 +1,4 @@
+import { parseGasLimits, validateGasFee } from './gas-policy.mjs';
 import { parseBatch } from './batch-logging.mjs';
 import { readFile } from 'node:fs/promises';
 import { createSignedMessageAuthorizer } from '@oyaprotocol/messages';
@@ -63,10 +64,7 @@ export function parseConfig(input, { env = process.env } = {}) {
     if (input.host !== undefined && (typeof input.host !== 'string' || !input.host.trim())) {
         throw new Error('host must be a nonempty string.');
     }
-    if (input.maxFeePerGasWei !== undefined && (typeof input.maxFeePerGasWei !== 'string' ||
-        !/^[1-9][0-9]{0,77}$/.test(input.maxFeePerGasWei))) {
-        throw new Error('maxFeePerGasWei must be a positive decimal string.');
-    }
+    validateGasFee(input);
     const transport = (url, authorization) => ({
         url, headers: authorization ? { authorization } : {}, timeoutMs: 10_000,
         maxRetries: 2, retryDelayMs: 250,
@@ -84,10 +82,7 @@ export function parseConfig(input, { env = process.env } = {}) {
             chainId, ledgerContract,
             receiptTimeoutMs: integer(input.receiptTimeoutMs, 'receiptTimeoutMs', 60_000),
             pollIntervalMs: integer(input.pollIntervalMs, 'pollIntervalMs', 1000),
-            limits: {
-                gasLimit: BigInt(integer(input.gasLimit, 'gasLimit', 200_000)),
-                feePerGas: BigInt(input.maxFeePerGasWei ?? '30000000000'),
-            },
+            limits: parseGasLimits(input),
             rpc: createHttpConfig(transport(endpoint(rpcUrl, 'rpcUrl'), env.OYA_RPC_AUTHORIZATION)),
         } : {}),
     });

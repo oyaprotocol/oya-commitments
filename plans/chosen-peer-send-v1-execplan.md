@@ -13,7 +13,9 @@ An operator selects a node by its Ethereum address from an installed, reviewed r
 - [x] 2026-11-15 22:43Z: Added 17 failure-path and real CLI-to-inbox acceptance tests; passed on host and isolated image.
 - [x] 2026-11-15 22:44Z: Packaged and documented the helper. Focused checks and all 469 production tests passed. Reviewed the complete change.
 - [x] 2026-11-15: Independent review found no blockers and reran 54 focused tests. Full production suite independently rerun: 469 passed, zero failures or skips.
-- [ ] Publish the reviewed branch and verify the remote PR, source label and initial CI.
+- [x] 2026-11-17: Verified publication as PR #179 at `71e64af`, its source label, and all seven original-head CI checks.
+- [x] 2026-11-17: Integrated upstream `7da47ea` and reconciled the upgrade allowlist, retaining both the sender guide and gas-policy assets. All 571 production tests passed with a canonical private temporary directory.
+- [ ] Resolve the sender-identity choice raised by [review comment 4593032328](https://github.com/oyaprotocol/oya-commitments/pull/179#discussion_r4593032328), then simplify the command to recipient and text file. Existing sender credentials and node gas-paying credentials have separate roles. The proposed operator-profile resolver is not implemented.
 
 ## Surprises & Discoveries
 
@@ -23,11 +25,15 @@ The first image build with `--network=none` failed during the existing npm depen
 
 ## Decision Log
 
+- 2026-11-17 / Oya Gardener: Preserve the union of release allowlist entries when merging upstream. Defer automatic sender-key selection until the reviewer clarifies whether sending uses a dedicated sender identity or the installed node identity. `send-message.mjs` uses `OYA_AGENT_PRIVATE_KEY`, while local node settings use `OYA_NODE_PRIVATE_KEY` and the current Keychain helper retrieves worker tokens. These are not interchangeable defaults.
+
 - 2026-11-15 / Oya Gardener: Follow [pemulis's PR173 request](https://github.com/oyaprotocol/oya-commitments/pull/173#issuecomment-6902056112) requesting a simple chosen-node CLI and reusable sending function. Use existing `signJob`, `validateJob` and `createInboxClient`, with unchanged independent inner signature and 24-hour default. No receiver-specific protocol.
 - 2026-11-15 / Oya Gardener: Save a versioned local wrapper containing destination metadata and the exact v1 job, exclusively with mode 0600, syncing file and parent before HTTP. Metadata is routing input, not signed identity evidence. Retry/status never consult a newer registry.
 - 2026-11-15 / Oya Gardener: Use an explicit registry path, address, key file, text file and fresh output file. No inferred destination, implicit fetch, scheduler, automatic retry or replacement request. Only HTTPS off-host; permit HTTP loopback for acceptance.
 
 ## Outcomes & Retrospective
+
+The upstream integration preserves both release bundles' required files. The full production suite passed 571 tests after setting `TMPDIR` to a canonical private directory. An initial run hit macOS `/var` symlink traversal in the gas-policy permission test. No test or permission restriction was weakened. The two-argument workflow remains pending the sender-identity decision. Removing path arguments should hide setup mechanics, not silently select a different signing authority.
 
 The CLI and importable API work end to end against the ordinary inbox HTTP handler with real signatures and an in-memory store. Restarted CLI processes recover the original request after key/registry removal. Lost acknowledgement, stalled headers/body, redirects, malformed responses, forged signatures, bounded short reads, partial writes and both file/directory sync failure have regressions. The guide ships in release bundles and passes the strict upgrade verifier. No new dependencies or protocol changes were needed.
 
