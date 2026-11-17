@@ -97,8 +97,10 @@ function createHttpConfig({ url, headers, timeoutMs, maxRetries, retryDelayMs },
 }
 function readErrorStringChain(error, key) {
     const values = [];
+    const seen = new Set();
     let current = error;
-    while (current && typeof current === 'object') {
+    while (current && typeof current === 'object' && !seen.has(current)) {
+        seen.add(current);
         const value = current[key];
         if (typeof value === 'string' && value) {
             values.push(value);
