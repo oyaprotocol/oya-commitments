@@ -49,7 +49,7 @@ The [repository skill](https://github.com/oyaprotocol/oya-commitments/blob/main/
 
 For an existing installation, use [Verified release upgrades](upgrade-node.md) instead of repeating first-install setup. Preview both roles, preserve explicit execution settings, stop every worker before inbox replacement, and use Keychain lifecycle support when configured. Retain recovery records and reconcile transaction checkpoints before any rollback.
 
-After setup, use the private handoff record for commands to monitor, send messages, stop/start, and back up your installation. Docker must be running and the local device awake to process jobs. The inbox can accept work while it is offline, subject to queue limits and job deadlines; default client jobs expire after 24 hours. Keychain-backed workers require the startup helper after a reboot or failure and may prompt for approval. A local IPFS pin alone does not guarantee retrieval while the device sleeps.
+After setup, use the private handoff record for commands to monitor, send messages, stop/start, and back up your installation. Docker must be running and the local device awake to process jobs. The inbox can accept work while it is offline, subject to queue limits and job deadlines; default client jobs expire after seven days. Keychain-backed workers require the startup helper after a reboot or failure and may prompt for approval. A local IPFS pin alone does not guarantee retrieval while the device sleeps.
 
 The rest of this guide is reference material for the operator and agent: [inputs](#what-you-supply), [credential storage](#keychain-and-runtime-secrets-are-different), [deployment work](#work-the-agent-performs), [acceptance](#acceptance-before-handoff), and [daily operation](#private-handoff-and-daily-operation).
 
@@ -149,7 +149,7 @@ Use harmless test content: publication sends it to IPFS and default Ledger opera
 - Restart the selected worker and verify health and retained results. Check memory, swap, disk, container health/restarts, and logs under startup and message processing.
 - Create a protected PostgreSQL dump, copy it to another device, and restore into an isolated database. Compare job state there. Never test restoration by rolling back the live database.
 
-Local retrieval proves publication and local pinning. It does not prove that another IPFS peer can retrieve the CID. Test from an independent peer before claiming public content availability, and arrange replication if availability while the local device sleeps matters. The remote inbox can keep accepting work while the worker is offline, subject to capacity and signed job deadlines. Default client jobs expire after 24 hours; offline work is not retained for execution indefinitely.
+Local retrieval proves publication and local pinning. It does not prove that another IPFS peer can retrieve the CID. Test from an independent peer before claiming public content availability, and arrange replication if availability while the local device sleeps matters. The remote inbox can keep accepting work while the worker is offline, subject to capacity and signed job deadlines. Default client jobs expire after seven days; offline work is not retained for execution indefinitely.
 
 ## Private handoff and daily operation
 

@@ -19,7 +19,11 @@ Version 1 uses JSON over HTTPS. It is implemented by `src/inbox/`, with PostgreS
 }
 ```
 
-The timestamp above is illustrative; use a future Unix timestamp in milliseconds. Submission permits at most seven days into the future. The client defaults to 24 hours. IDs are lowercase UUIDv4. `message.signature` is an Ethereum personal-message signature of the exact text. The outer signature uses the same signer and signs this UTF-8 string, with no trailing newline:
+The timestamp above is illustrative; use a future Unix timestamp in milliseconds. Submission permits at most seven days into the future.
+
+New client jobs default to exactly seven days (604800000 milliseconds). `prepare KEY_FILE TARGET TEXT_FILE JOB_FILE --expires-in SECONDS` selects 1–604800 integer seconds. The command prints the absolute signed `expiresAt` in Unix milliseconds. Existing signed jobs retain their original deadlines. Synchronize sender/inbox clocks: a sender clock ahead of the inbox can exceed the seven-day admission maximum. Choose a shorter lifetime when needed; never edit a signed deadline.
+
+IDs are lowercase UUIDv4. `message.signature` is an Ethereum personal-message signature of the exact text. The outer signature uses the same signer and signs this UTF-8 string, with no trailing newline:
 
 ```js
 'Oya inbox job v1\n' + JSON.stringify([

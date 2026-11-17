@@ -147,7 +147,7 @@ Capacity defaults to 10,000 retained jobs per target (`maxJobs`, configurable up
 
 One job runs per target. Leases normally last 60 seconds and are renewed during work. Lease expiry makes the same in-progress job claimable again; it never lets later jobs bypass an unresolved Ledger transaction. CID and signed transaction checkpoints are immutable. Ten failed execution attempts before a transaction exists stop that job; after a transaction exists, recovery continues against the same hash. See the [API state and recovery details](inbox-api.md).
 
-Keep terminal job records until after their signed expiry to prevent replay. The explicit prune command removes only terminal records whose deadline passed more than seven days ago:
+New client jobs default to a seven-day deadline. Terminal records remain for seven more days after that deadline, roughly fourteen days from preparation for default jobs, and longer until pruning runs. Review `maxJobs`, disk space and pruning frequency for that retention window. Keep terminal job records until after their signed expiry to prevent replay. The explicit prune command removes only terminal records whose deadline passed more than seven days ago:
 
 ```sh
 docker compose run --rm --no-deps inbox /config/inbox.json /run/secrets/inbox.json prune

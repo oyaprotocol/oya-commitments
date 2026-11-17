@@ -232,6 +232,46 @@ test('PostgreSQL inbox persists offline work and fences competing workers and tr
         assert.notEqual((await store.claim({ mode: 'ipfs' })).requestId, first.requestId);
     });
 
+    await t.test('a default job prepared two days ago can still be admitted and claimed', async t => {
+        const store = await newStore();
+        const service = await serve(store);
+        const preparedAt = Date.now() - 2 * 86400_000;
+        const clock = t.mock.method(Date, 'now', () => preparedAt);
+        const job = await signJob(agent, store.config.target, 'laptop offline for two days');
+        clock.mock.restore();
+        assert.equal(job.expiresAt, preparedAt + 604800_000);
+        assert.equal((await service.publicApi('/v1/jobs', job)).status, 'queued');
+        const work = await store.claim({ mode: 'ipfs' });
+        assert.deepEqual(work.job, job);
+        await store.checkpoint(work.requestId, work.lease, { cid });
+        await store.complete(work.requestId, work.lease, { status: 'published', cid });
+        assert.equal((await service.publicApi('/v1/status', job)).status, 'published');
+        assert.equal((await store.prune()).deleted, 0, 'terminal jobs retain their signed replay protection');
+    });
+
+    await t.test('expired signed jobs remain queryable until pruning and cannot be replayed afterward', async t => {
+        const store = await newStore();
+        const service = await serve(store);
+        const past = Date.now() - 14 * 86400_000;
+        // Seed as if admitted in the past; the database still uses its real current clock.
+        const clock = t.mock.method(Date, 'now', () => past);
+        const job = await signJob(agent, store.config.target, 'old signed job');
+        await store.enqueue(job);
+        clock.mock.restore();
+        assert.equal(await store.claim({ mode: 'ipfs' }), null);
+        assert.equal((await service.publicApi('/v1/status', job)).status, 'expired');
+        await assert.rejects(service.publicApi('/v1/jobs', job), { status: 400 });
+        // Test both sides of the retention cutoff without a seven-day wall-clock wait.
+        await store.pool.query(`UPDATE oya_inbox_jobs SET expires_at=clock_timestamp()-interval '7 days'+interval '1 minute'
+            WHERE target=$1`, [store.config.target]);
+        assert.equal((await store.prune()).deleted, 0);
+        await store.pool.query(`UPDATE oya_inbox_jobs SET expires_at=clock_timestamp()-interval '7 days'-interval '1 minute'
+            WHERE target=$1`, [store.config.target]);
+        assert.equal((await store.prune()).deleted, 1);
+        await assert.rejects(service.publicApi('/v1/status', job), { status: 404 });
+        await assert.rejects(service.publicApi('/v1/jobs', job), { status: 400 });
+    });
+
     await t.test('queued expiry, retry exhaustion, and pruning retain unexpired replay records', async () => {
         const store = await newStore();
         const job = await signJob(agent, store.config.target, 'expire');
@@ -304,7 +344,7 @@ test('PostgreSQL inbox persists offline work and fences competing workers and tr
     });
 
     for (const boundary of ['checkpoint_ack', 'broadcast_receipt', 'completion_ack']) {
-        await t.test(`Ledger recovery after ${boundary} loss keeps one prepared transaction`, async t => {
+        await t.test(`${boundary === 'completion_ack' ? 'Ledger completion status' : 'Ledger recovery'} after ${boundary} loss and job expiry keeps one prepared transaction`, async t => {
             const f = await fixture(t, { receiptTimeoutMs: 30 });
             const identity = executionIdentity(f.config, f.signer.address);
             const store = await newStore({ execution: identity, allowedSigners: [f.agent.address] });
@@ -331,6 +371,10 @@ test('PostgreSQL inbox persists offline work and fences competing workers and tr
             assert.equal(f.state.signs, 1);
             const first = await store.status(job);
             assert.ok(first.transactionHash);
+            // Advance host expiry and the database deadline without changing signed bytes.
+            t.mock.method(Date, 'now', () => job.expiresAt + 1);
+            await store.pool.query(`UPDATE oya_inbox_jobs SET expires_at=clock_timestamp()-interval '1 second'
+                WHERE target=$1 AND request_id=$2`, [store.config.target, job.requestId]);
             if (boundary !== 'completion_ack') {
                 assert.equal(first.status, 'processing');
                 assert.equal(first.error, 'awaiting_reconciliation');
@@ -356,7 +400,8 @@ test('PostgreSQL inbox persists offline work and fences competing workers and tr
             assert.equal(f.state.signs, 1);
             assert.equal(f.state.sends, 1);
             assert.equal(f.state.uploads, 1);
-            assert.equal((await service.publicApi('/v1/jobs', job)).status, 'logged');
+            assert.equal((await service.publicApi('/v1/status', job)).status, 'logged');
+            await assert.rejects(service.publicApi('/v1/jobs', job), { status: 400 });
         });
     }
 });
