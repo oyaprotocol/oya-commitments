@@ -8,6 +8,8 @@ An operator sends a text file with `send RECIPIENT TEXT_FILE`, selecting the rec
 
 ## Progress
 
+- [x] 2026-11-17: Reproduced the subsequent CI failure on merge `79ad8d8`. Upstream changed the ordinary job lifetime, invalidating this PR’s hardcoded 24-hour test expectation. Updated the assertion to follow `signJob` and corrected lifetime wording. Head tests pass 579/579 and the current-base merge tests pass 582/582.
+
 - [x] 2026-11-17: Corrected registry selection to read `worker.json` after review finding 4594037995. Updated the installed-node fixture and guide. All 65 focused and 579 production tests passed. Independent review passed 47 peer tests with no actionable findings.
 
 - [x] 2026-11-15 22:34Z: Read repository guidance, inbox protocol/transport, registry reception and broader operator plan. Established base `5179b7f046e2a4c2d49579431485bb1470fc7a1b`.
@@ -22,6 +24,8 @@ An operator sends a text file with `send RECIPIENT TEXT_FILE`, selecting the rec
 - [x] 2026-11-17 01:13Z: Final validation passed 65 focused tests, all 579 production tests, and 25 sender tests in the built read-only/network-isolated Node 24 image. Updated operator docs, checked the complete feature and its 986-code-line budget. Independent review subsequently reran all 65 focused tests and found no actionable issues.
 
 ## Surprises & Discoveries
+
+The registry correction passed head tests, but CI ran a newer base with a seven-day protocol default. Its hardcoded 24-hour sender assertion was swallowed by the transport error boundary and surfaced as `delivery_unknown`. Comparing expiry against an ordinary `signJob` preserves the shared-default contract without pinning an obsolete duration.
 
 Review identified that registry reception settings live in `worker.json`, while `node.json` rejects `peers`. Replacing the simplified sender fixture with a `parseConfig`-validated node configuration reproduced failed sends. The resolver now reads the existing worker settings, with missing or malformed settings failing closed.
 
@@ -41,7 +45,7 @@ The first image build with `--network=none` failed during the existing npm depen
 
 - 2026-11-17 / Oya Gardener: Preserve the union of release allowlist entries when merging upstream. Defer automatic sender-key selection until the reviewer clarifies whether sending uses a dedicated sender identity or the installed node identity. `send-message.mjs` uses `OYA_AGENT_PRIVATE_KEY`, while local node settings use `OYA_NODE_PRIVATE_KEY` and the current Keychain helper retrieves worker tokens. These are not interchangeable defaults.
 
-- 2026-11-15 / Oya Gardener: Follow [pemulis's PR173 request](https://github.com/oyaprotocol/oya-commitments/pull/173#issuecomment-6902056112) requesting a simple chosen-node CLI and reusable sending function. Use existing `signJob`, `validateJob` and `createInboxClient`, with unchanged independent inner signature and 24-hour default. No receiver-specific protocol.
+- 2026-11-15 / Oya Gardener: Follow [pemulis's PR173 request](https://github.com/oyaprotocol/oya-commitments/pull/173#issuecomment-6902056112) requesting a simple chosen-node CLI and reusable sending function. Use existing `signJob`, `validateJob` and `createInboxClient`, with unchanged independent inner signature and protocol default lifetime. No receiver-specific protocol.
 - 2026-11-15 / Oya Gardener: Save a versioned local wrapper containing destination metadata and the exact v1 job, exclusively with mode 0600, syncing file and parent before HTTP. Metadata is routing input, not signed identity evidence. Retry/status never consult a newer registry.
 - 2026-11-15 / Oya Gardener: Use an explicit registry path, address, key file, text file and fresh output file. No inferred destination, implicit fetch, scheduler, automatic retry or replacement request. Only HTTPS off-host; permit HTTP loopback for acceptance.
 
@@ -105,7 +109,7 @@ Managed sends return the fresh filename under `OYA_LOCAL_DIR/peer-outbox`; if no
 
 ## Artifacts and Notes
 
-Against base `7da47ea4ce1b9677f8e9e7183a6c66056186fc10`, the complete feature including the new implementation and tests measures 988 additions plus 5 deletions, or 993 code lines, below the 3,000-line budget. Documentation is measured separately. Validation uses disposable keys and saved requests outside the checkout. Deployment and real-peer/onchain sends require separate authorization.
+Against the merge base `7da47ea4ce1b9677f8e9e7183a6c66056186fc10` with current upstream `17f7a152dfdedcb068fab84d55fbdf92859b18bf`, the complete feature including the new implementation and tests measures 990 additions plus 5 deletions, or 995 code lines, below the 3,000-line budget. The complete PR diff including documentation is 1,252 added/deleted lines. Validation uses disposable keys and saved requests outside the checkout. Deployment and real-peer/onchain sends require separate authorization.
 
 ## Next feature — candidate when capacity permits
 

@@ -40,7 +40,7 @@ Replace all five positional placeholders:
 
 The selected URL must end exactly in `/v1/jobs`, with HTTPS off-host, no credentials, query or fragment. Only loopback permits HTTP. The helper derives the origin and uses the registry target without changing runtime configuration. Keep the reviewed registry separate from downloads awaiting review.
 
-The signed job retains the ordinary 24-hour default deadline and the same independently signed inner message as every other sender. Reads are bounded: registry 1 MiB/1,000 entries, key 256 bytes, text 8,192 bytes, saved request 64 KiB. Network requests have the existing ten-second deadline and 128 KiB response limit, and reject redirects.
+The signed job retains the ordinary protocol default deadline and the same independently signed inner message as every other sender. Reads are bounded: registry 1 MiB/1,000 entries, key 256 bytes, text 8,192 bytes, saved request 64 KiB. Network requests have the existing ten-second deadline and 128 KiB response limit, and reject redirects.
 
 ## Status and explicit retry
 

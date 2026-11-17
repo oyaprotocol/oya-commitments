@@ -61,6 +61,7 @@ test('importable send saves exact ordinary signatures and destination before one
     const f = await fixture(t);
     let calls = 0;
     const before = Date.now();
+    const defaultJob = await signJob(sender, 'test', 'protocol default lifetime');
     const result = await sendToPeer(f.options, { transport: async (url, options) => {
         calls++;
         assert.equal(url, 'https://peer.example/v1/jobs');
@@ -74,7 +75,8 @@ test('importable send saves exact ordinary signatures and destination before one
         assert.equal(saved.job.message.text, await readFile(f.options.textFile, 'utf8'));
         assert.equal(verifyMessage(saved.job.message.text, saved.job.message.signature), sender.address);
         await validateJob(saved.job, { target: 'test', allowedSigners: [sender.address] });
-        assert.ok(saved.job.expiresAt >= before + 86400_000 && saved.job.expiresAt <= Date.now() + 86400_000);
+        assert.ok(saved.job.expiresAt >= defaultJob.expiresAt &&
+            saved.job.expiresAt <= defaultJob.expiresAt + Date.now() - before);
         return queued(url, options);
     } });
     assert.equal(calls, 1);
