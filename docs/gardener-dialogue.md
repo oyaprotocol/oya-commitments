@@ -40,6 +40,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q015](#q015) | Continuity when an agent leaves | resilience, agent choice, ongoing commitments | Answered |
 | [Q016](#q016) | Productive disagreement | collaboration, working style, judgment | Answered |
 | [Q017](#q017) | When a rule template is ready to share | commitment design, reuse, quality | Answered |
+| [Q019](#q019) | One sentence that changes a loan | rule templates, lending, plain language | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -550,3 +551,27 @@ What would convince you that a commitment rule template is ready for people beyo
 - **Source updated:** 2026-11-16T22:59:09Z
 
 Anyone can use a commitment rule template that they think will work for their use case and will be enforceable. I think that standardized rule templates will emerge organically over time, since organic standards will make it easier for the agent ecosystem to support many commitments without custom work for each commitment.
+
+<a id="q019"></a>
+
+<!-- oya-dialogue-question: Q019 -->
+
+## Q019 — One sentence that changes a loan
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-17
+- **Topics:** rule templates, lending, plain language
+- **Status:** Awaiting answer
+- **Source PR:** Pending publication.
+
+### Context
+
+In [Q010](#q010), @pemulis named borrowing against a portfolio as a use case to test. In [Q017](#q017), he described people choosing rule templates for themselves. A worked example could help a borrower compare two templates that look almost identical.
+
+### Question
+
+What is one sentence you could change in a loan template that would make a real difference to a borrower on the day repayment is due?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
