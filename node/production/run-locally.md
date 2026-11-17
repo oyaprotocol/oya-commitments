@@ -169,9 +169,11 @@ oya_client submit https://inbox.example.com /private/job.json
 oya_client status https://inbox.example.com /private/job.json
 ```
 
-`prepare` saves a signed request with a random ID and a 24-hour submission/start deadline. It refuses to overwrite an existing file. Retry **the same job file** after a failed submission or lost response. Preparing another ID authorizes another job, including another Ledger transaction. Status reads require the saved signed envelope, even after its deadline. Keep the file private until you intend to publish its contents.
+`prepare` saves a signed request with a random ID and a seven-day submission/start deadline. It refuses to overwrite an existing file. Retry **the same job file** after a failed submission or lost response. Preparing another ID authorizes another job, including another Ledger transaction. Status reads require the saved signed envelope, even after its deadline. Keep the file private until you intend to publish its contents.
 
 Default Ledger completion requires `logged` status. Check the successful receipt and `Log` event from the configured Ledger for your node and exact CID, then retrieve the signed envelope with `docker compose exec -T ipfs ipfs cat /ipfs/REPLACE_WITH_RETURNED_CID` and verify its message and client signature. Use the [testnet acceptance checklist](testnet-ledger.md) for detailed receipt evidence. For IPFS-only mode, expect `published`. Check independent retrieval separately if replication is required.
+
+For a shorter deadline, append `--expires-in 3600` to `oya_client prepare` for one hour. The permitted range is 1–604800 integer seconds. Preparation prints the absolute signed deadline in Unix milliseconds. Keep the sender and inbox clocks synchronized; a sender ahead of the inbox can exceed its seven-day maximum. Existing job files retain their deadlines.
 
 To verify offline delivery, run `docker compose stop node`, prepare a different job file, submit it, and observe `queued`. Run `docker compose start node`; that job becomes `published` or `logged`. Unstarted jobs become `expired` on a worker claim after their deadline. Started jobs continue recovery after the deadline. The old hourly agent uses the synchronous API; use it only with the [direct profile](run-direct.md). New senders use this client or the [inbox API](inbox-api.md).
 
