@@ -40,7 +40,7 @@ export async function nodeSendSettings(env = process.env) {
     if (typeof env.OYA_LOCAL_DIR !== 'string' || !isAbsolute(env.OYA_LOCAL_DIR)) throw new Error();
     await privateDirectory(resolve(env.OYA_LOCAL_DIR));
     const directory = await realpath(env.OYA_LOCAL_DIR);
-    const config = JSON.parse(await readBounded(join(directory, 'node.json'), 1048576));
+    const config = JSON.parse(await readBounded(join(directory, 'worker.json'), 1048576));
     if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error();
     const peers = parsePeers(config.peers);
     const secrets = await readNodeSecrets(join(directory, 'node.env'));

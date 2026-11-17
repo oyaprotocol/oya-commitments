@@ -8,6 +8,8 @@ An operator sends a text file with `send RECIPIENT TEXT_FILE`, selecting the rec
 
 ## Progress
 
+- [x] 2026-11-17: Corrected registry selection to read `worker.json` after review finding 4594037995. Updated the installed-node fixture and guide. All 65 focused and 579 production tests passed. Independent review passed 47 peer tests with no actionable findings.
+
 - [x] 2026-11-15 22:34Z: Read repository guidance, inbox protocol/transport, registry reception and broader operator plan. Established base `5179b7f046e2a4c2d49579431485bb1470fc7a1b`.
 - [x] 2026-11-15 22:38Z: Implemented importable sender and thin CLI with durable preparation and pinned recovery.
 - [x] 2026-11-15 22:43Z: Added 17 failure-path and real CLI-to-inbox acceptance tests; passed on host and isolated image.
@@ -21,6 +23,8 @@ An operator sends a text file with `send RECIPIENT TEXT_FILE`, selecting the rec
 
 ## Surprises & Discoveries
 
+Review identified that registry reception settings live in `worker.json`, while `node.json` rejects `peers`. Replacing the simplified sender fixture with a `parseConfig`-validated node configuration reproduced failed sends. The resolver now reads the existing worker settings, with missing or malformed settings failing closed.
+
 The existing local-worker guide already selects one installation with `OYA_LOCAL_DIR` and stores its identity in literal `node.env`; no new operator profile is required. Its `peers.registryFile` can be reused for routing, but adding that field also enables reception authorization, so the guide warns against changing it merely to choose an outgoing list. The original image omitted the public registry; the default now requires packaging that file. Managed outbox creation needs a parent-directory sync in addition to the existing file/outbox syncs, all covered by failure injection.
 
 The follow-up image build with `--network=none` hit `EAI_AGAIN` in the dependency layer. Rebuilding with normal build networking succeeded from cached dependencies; test containers retained `--network none`.
@@ -31,7 +35,9 @@ The first image build with `--network=none` failed during the existing npm depen
 
 ## Decision Log
 
-- 2026-11-17 / Oya Gardener: Use the existing `OYA_LOCAL_DIR` installation selection, `node.json` and literal `node.env` (`OYA_NODE_PRIVATE_KEY`) for simplified sends. Do not discover installations, read Keychain, fall back to an agent key, or merge ambient credentials. Use `peers.registryFile` relative to node settings when configured, otherwise the packaged public registry. Save each validated job under an owner-only `peer-outbox` directory before HTTP and return its recovery filename. Keep explicit low-level calls compatible. This resolves the founder’s node-identity clarification without implementing the broader profile framework.
+- 2026-11-17 / Oya Gardener: Read routing settings from the existing `worker.json`, matching peer reception. Preserve node identity loading from `node.env`. Test fixtures must validate their node settings through the runtime parser so an invented configuration layout cannot mask an integration failure.
+
+- 2026-11-17 / Oya Gardener: Use the existing `OYA_LOCAL_DIR` installation selection, `worker.json` and literal `node.env` (`OYA_NODE_PRIVATE_KEY`) for simplified sends. Do not discover installations, read Keychain, fall back to an agent key, or merge ambient credentials. Use `peers.registryFile` relative to worker settings when configured, otherwise the packaged public registry. Save each validated job under an owner-only `peer-outbox` directory before HTTP and return its recovery filename. Keep explicit low-level calls compatible. This resolves the founder’s node-identity clarification without implementing the broader profile framework.
 
 - 2026-11-17 / Oya Gardener: Preserve the union of release allowlist entries when merging upstream. Defer automatic sender-key selection until the reviewer clarifies whether sending uses a dedicated sender identity or the installed node identity. `send-message.mjs` uses `OYA_AGENT_PRIVATE_KEY`, while local node settings use `OYA_NODE_PRIVATE_KEY` and the current Keychain helper retrieves worker tokens. These are not interchangeable defaults.
 
@@ -40,6 +46,8 @@ The first image build with `--network=none` failed during the existing npm depen
 - 2026-11-15 / Oya Gardener: Use an explicit registry path, address, key file, text file and fresh output file. No inferred destination, implicit fetch, scheduler, automatic retry or replacement request. Only HTTPS off-host; permit HTTP loopback for acceptance.
 
 ## Outcomes & Retrospective
+
+The registry-source correction now exercises a schema-valid node configuration alongside the existing worker registry settings. All 579 production tests pass. Validation uses canonical private `TMPDIR` as described below. This correction was tested on the host; image execution results below are from the earlier implementation.
 
 The founder-requested two-argument workflow is implemented. It uses the explicitly selected installation’s node identity, configured or packaged registry, and managed recovery files. Both signatures use the node account; runtime permissions and signing authority are preserved. The low-level API and five-argument form remain compatible. Live service publication remains untested.
 
@@ -97,7 +105,7 @@ Managed sends return the fresh filename under `OYA_LOCAL_DIR/peer-outbox`; if no
 
 ## Artifacts and Notes
 
-Against base `7da47ea4ce1b9677f8e9e7183a6c66056186fc10`, the complete feature including the new implementation and tests measures 981 additions plus 5 deletions, or 986 code lines, below the 3,000-line budget. Documentation is measured separately. Validation uses disposable keys and saved requests outside the checkout. Deployment and real-peer/onchain sends require separate authorization.
+Against base `7da47ea4ce1b9677f8e9e7183a6c66056186fc10`, the complete feature including the new implementation and tests measures 988 additions plus 5 deletions, or 993 code lines, below the 3,000-line budget. Documentation is measured separately. Validation uses disposable keys and saved requests outside the checkout. Deployment and real-peer/onchain sends require separate authorization.
 
 ## Next feature — candidate when capacity permits
 
@@ -107,4 +115,4 @@ Affected components are the planned operator CLI/profile loader, `src/peers/send
 
 ## Interfaces and Dependencies
 
-`sendToPeer({registryFile,nodeAddress,keyFile,textFile,outputFile}, {transport})` creates and submits once. `retryPeerJob(savedFile, {transport})` and `peerJobStatus(savedFile, {transport})` read the persisted destination/job only. The optional Fetch-compatible transport supports local deterministic tests. Public functions sanitize local validation failures and remote outcomes. New API: `sendFromNode(nodeAddress, textFile, {env, transport})`, where `env` defaults to `process.env`. Its result includes `savedFile`. The node resolver uses `OYA_LOCAL_DIR/node.json` and `node.env` only, ignoring ambient keys and worker tokens. CLI: `send RECIPIENT TEXT_FILE`, compatibility form `send REGISTRY_FILE NODE_ADDRESS KEY_FILE TEXT_FILE OUTPUT_FILE`, `retry SAVED_FILE`, `status SAVED_FILE`, `--help`. Exit 0 means recognized admission/state except failed/expired execution, 1 means remote/unknown/failed/expired outcome and 2 means local input/persistence failure. These commands require production dependencies (or the matching built image); no new dependencies are planned.
+`sendToPeer({registryFile,nodeAddress,keyFile,textFile,outputFile}, {transport})` creates and submits once. `retryPeerJob(savedFile, {transport})` and `peerJobStatus(savedFile, {transport})` read the persisted destination/job only. The optional Fetch-compatible transport supports local deterministic tests. Public functions sanitize local validation failures and remote outcomes. New API: `sendFromNode(nodeAddress, textFile, {env, transport})`, where `env` defaults to `process.env`. Its result includes `savedFile`. The node resolver uses `OYA_LOCAL_DIR/worker.json` and `node.env` only, ignoring ambient keys and worker tokens. CLI: `send RECIPIENT TEXT_FILE`, compatibility form `send REGISTRY_FILE NODE_ADDRESS KEY_FILE TEXT_FILE OUTPUT_FILE`, `retry SAVED_FILE`, `status SAVED_FILE`, `--help`. Exit 0 means recognized admission/state except failed/expired execution, 1 means remote/unknown/failed/expired outcome and 2 means local input/persistence failure. These commands require production dependencies (or the matching built image); no new dependencies are planned.

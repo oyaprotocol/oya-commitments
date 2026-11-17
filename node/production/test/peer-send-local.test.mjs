@@ -10,6 +10,7 @@ import { sendFromNode, PeerSendError } from '../src/peers/send.mjs';
 import { bundledRegistry, nodeSendSettings } from '../src/peers/local.mjs';
 import { createInboxServer } from '../src/inbox/http.mjs';
 import { validateJob } from '../src/inbox/protocol.mjs';
+import { parseConfig } from '../src/config.mjs';
 
 const cli = fileURLToPath(new URL('../src/peers/client.mjs', import.meta.url));
 const node = Wallet.createRandom(), recipient = Wallet.createRandom(), agent = Wallet.createRandom();
@@ -20,10 +21,14 @@ const queued = async (_url, options) => new Response(JSON.stringify({ requestId:
 async function fixture(t) {
     const directory = await mkdtemp(join(tmpdir(), 'oya-node-send-'));
     t.after(() => rm(directory, { recursive: true, force: true }));
-    const config = join(directory, 'node.json'), secrets = join(directory, 'node.env');
+    const config = join(directory, 'worker.json'), secrets = join(directory, 'node.env');
+    const nodeConfig = { allowedSigners: [agent.address], ipfsUrl: 'http://127.0.0.1:5001' };
+    assert.doesNotThrow(() => parseConfig(nodeConfig, { env: {} }));
+    await writeFile(join(directory, 'node.json'), JSON.stringify(nodeConfig));
     const text = join(directory, 'text'), registry = join(directory, 'registry.json');
     const record = { nodeAddress: recipient.address, url: 'https://peer.example/v1/jobs', target: 'test' };
-    await writeFile(config, JSON.stringify({ peers: { registryFile: 'registry.json' } }));
+    await writeFile(config, JSON.stringify({ url: 'https://inbox.example', target: 'test',
+        peers: { registryFile: 'registry.json' } }));
     await writeFile(secrets, `OYA_NODE_PRIVATE_KEY=${node.privateKey}\nOYA_RPC_AUTHORIZATION=private-rpc-marker\n`, { mode: 0o600 });
     await writeFile(text, ' exact text\r\n');
     await writeFile(registry, JSON.stringify([record]));
@@ -84,7 +89,7 @@ test('node defaults sign as installation node, sync recovery before HTTP, and ne
 
 test('registry defaults are module-relative, configured snapshots are installation-relative and never fall back', async t => {
     const f = await fixture(t);
-    await writeFile(f.config, '{}');
+    await writeFile(f.config, JSON.stringify({ url: 'https://inbox.example', target: 'test' }));
     assert.equal((await nodeSendSettings(f.env)).registryFile, bundledRegistry);
     assert.ok(Array.isArray(await json(bundledRegistry)));
     await writeFile(f.config, JSON.stringify({ peers: { registryFile: 'missing.json' } }));
@@ -117,6 +122,8 @@ test('missing, ambiguous, malformed or oversized settings and keys fail without 
         await writeFile(f.config, config);
         await assert.rejects(send(f.env), rejected('invalid_node_settings_or_input'));
     }
+    await rm(f.config);
+    await assert.rejects(send(f.env), rejected('invalid_node_settings_or_input'));
     assert.equal(calls, 0);
     await assert.rejects(stat(f.outbox), { code: 'ENOENT' });
     const result = await run(['send', recipient.address, f.text], f.env);

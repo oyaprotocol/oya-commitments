@@ -8,7 +8,7 @@ const usage = `Usage: peer client send RECIPIENT TEXT_FILE
        peer client status SAVED_FILE
        peer client --help
 
-Two-argument send uses OYA_LOCAL_DIR/node.json and node.env (node identity).
+Two-argument send uses OYA_LOCAL_DIR/worker.json and node.env (node identity).
 Registry: configured peers.registryFile or bundled list. Recovery: peer-outbox.
 Select one installed registry entry by explicit address. OUTPUT_FILE must be new.
 Save the ordinary v1 job before one HTTP request. Text is preserved exactly.
