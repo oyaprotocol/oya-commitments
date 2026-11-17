@@ -18,6 +18,8 @@ The proposed implementation covers the production node under `node/production/`,
 
 ## Progress
 
+- [x] 2026-11-17: Scoped the documented `OYA_OPERATOR_PROFILE` assignment to the status command and added cleanup guidance for previously exported selectors. Reproduced the inherited-selector upgrade rejection. The revised command returns healthy status in `sh` and `zsh` without retaining the selector. Offline upgrade preview and all 58 upgrade tests pass.
+
 - [x] 2026-11-17: Reproduced and corrected legacy direct Ledger mode fallback and HTTPS localhost certificate matching. Added positive and rejection-path CLI regressions. All 570 production tests pass on Node 24 and Node 26. Independent review found no blockers.
 
 - [x] 2026-11-15 15:29Z: Read repository guidance and inspected upgrade, Keychain, client, health, expiry, gas, and release-packaging paths at `bda9c5c704c3fe296ae9ed602d4180eae0be3313`.

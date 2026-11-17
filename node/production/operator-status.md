@@ -27,10 +27,14 @@ Relative config paths resolve against the profile directory, not the current wor
 
 The local port must reach the worker/direct node, not the inbox. Keep its Docker port mapping bound to loopback. A successful identity match is a local observation, not cryptographic attestation: a process controlled by the same host user can impersonate health.
 
+Scope the environment selector to the status command so later upgrade commands retain their saved Compose environment:
+
 ```sh
-export OYA_OPERATOR_PROFILE="$OYA_LOCAL_DIR/operator.json"
-node node/production/scripts/operator-node.mjs status --json
+OYA_OPERATOR_PROFILE="$OYA_LOCAL_DIR/operator.json" \
+  node node/production/scripts/operator-node.mjs status --json
 ```
+
+If you previously exported `OYA_OPERATOR_PROFILE`, run `unset OYA_OPERATOR_PROFILE` before upgrading.
 
 `--profile` overrides the environment selection. JSON always contains `version`, selected public `role`, `mode`, `target`, `chainId`, `ledgerContract`, `nodeAddress`, and observation fields `reachable`, `verified`, `healthy`, `status`, `message`. Inapplicable identity fields are null. Paths, endpoint URLs, arbitrary health fields, job results and exception details are omitted.
 
