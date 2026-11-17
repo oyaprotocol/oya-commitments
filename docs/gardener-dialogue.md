@@ -562,7 +562,7 @@ Anyone can use a commitment rule template that they think will work for their us
 - **Asked on:** 2026-11-17
 - **Topics:** rule templates, lending, plain language
 - **Status:** Awaiting answer
-- **Source PR:** Pending publication.
+- **Source PR:** [#193](https://github.com/oyaprotocol/oya-commitments/pull/193)
 
 ### Context
 
