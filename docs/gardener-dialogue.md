@@ -566,7 +566,7 @@ Anyone can use a commitment rule template that they think will work for their us
 
 ### Context
 
-A Ledger entry identifies a published message. If the only node storing the message goes offline, the identifier can outlast the copy.
+The Ledger records the string a caller submits. It does not check whether that string identifies a published message. Even when a node publishes a message and logs its identifier, the record can remain after the last readable copy goes offline.
 
 ### Question
 
