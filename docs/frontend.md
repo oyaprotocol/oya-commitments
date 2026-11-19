@@ -12,4 +12,4 @@ npm run dev
 
 ## Environment Overrides
 
-The UI supports `MODULE_PROXY_FACTORY` (optionally with `VITE_` or `NEXT_PUBLIC_` prefixes). Other defaults are currently hardcoded in `frontend/src/App.jsx` and can be edited there or wired to env vars.
+Set `VITE_MODULE_PROXY_FACTORY` before starting or building the UI to prefill the factory address. See the [frontend configuration guide](../frontend/README.md#environment-variables) for local setup.

@@ -12,6 +12,8 @@ src/**
 !src/config.mjs
 !src/gas-policy.mjs
 !src/defaults.mjs
+!src/public-settings.mjs
+!src/health.mjs
 !src/main.mjs
 !src/ledger-evidence.mjs
 !src/verify-ledger.mjs
@@ -26,5 +28,6 @@ src/**
 !src/peers/send.mjs
 !src/peers/client.mjs
 !src/peers/local.mjs
+!src/peers/test-loop.mjs
 !peers/
 !peers/testnet-directory.json

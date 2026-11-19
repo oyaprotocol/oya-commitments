@@ -12,7 +12,7 @@ Choose checks for the area you are changing. Commands below run from the reposit
 | Kernel libraries (`packages/`) | [Package build and validation](../packages/README.md#validate-a-release). |
 | Web frontend | [Dependency tests and build](../frontend/README.md#dependency-validation). |
 
-The node and package development guides use Node.js 24 as the validation baseline. The production node unit suite also needs Python 3 for mocked Keychain lifecycle tests. Docker integration tests have additional service/tool prerequisites listed in their guide. No single command below tests every subsystem.
+The node and package development guides use Node.js 24 as the validation baseline. The production node unit suite also needs Python 3 for mocked Keychain lifecycle tests and `openssl` for disposable HTTPS status certificates. Docker integration tests have additional service/tool prerequisites listed in their guide. No single command below tests every subsystem.
 
 ## Root Solidity project
 

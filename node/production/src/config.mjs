@@ -6,14 +6,7 @@ import { createHttpConfig } from '@oyaprotocol/ethereum';
 import { createIpfsConfig } from '@oyaprotocol/ipfs';
 import { getAddress } from 'ethers';
 import { SEPOLIA_DEFAULTS } from './defaults.mjs';
-
-function integer(value, name, fallback, max = 2_147_483_647) {
-    const selected = value ?? fallback;
-    if (!Number.isSafeInteger(selected) || selected < 1 || selected > max) {
-        throw new Error(`${name} must be a positive integer no greater than ${max}.`);
-    }
-    return selected;
-}
+import { integer, publicNodeSettings } from './public-settings.mjs';
 
 function endpoint(value, name) {
     try {
@@ -27,26 +20,10 @@ function endpoint(value, name) {
 }
 
 export function parseConfig(input, { env = process.env } = {}) {
-    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Config must be an object.');
-    const mode = input.mode === undefined ? 'ledger' : input.mode;
-    if (!['ledger', 'ipfs'].includes(mode)) throw new Error('mode must be ledger or ipfs.');
-    const fields = new Set(['mode', 'host', 'port', 'chainId', 'ledgerContract', 'allowedSigners', 'rpcUrl', 'ipfsUrl',
-        'maxBodyBytes', 'maxTextBytes', 'bodyTimeoutMs', 'receiptTimeoutMs', 'pollIntervalMs',
-        'operationTimeoutMs', 'gasLimit', 'maxFeePerGasWei', 'maxMessageRequestsPerMinute', 'batchLogging']);
-    for (const key of Object.keys(input)) {
-        if (!fields.has(key)) throw new Error('Config contains an unsupported field.');
-    }
-    const ledgerFields = ['chainId', 'ledgerContract', 'rpcUrl', 'receiptTimeoutMs', 'pollIntervalMs', 'gasLimit', 'maxFeePerGasWei'];
-    if (mode === 'ipfs' && ledgerFields.some(key => Object.hasOwn(input, key))) {
-        throw new Error('IPFS mode does not accept Ethereum or Ledger settings.');
-    }
-    let chainId, ledgerContract, rpcUrl;
+    const { mode, chainId, ledgerContract, operationTimeoutMs } = publicNodeSettings(input);
+    let rpcUrl;
     if (mode === 'ledger') {
-        chainId = integer(input.chainId === undefined ? SEPOLIA_DEFAULTS.chainId : input.chainId,
-            'chainId', undefined, Number.MAX_SAFE_INTEGER);
-        // Scope target defaults to Sepolia.
         const defaults = chainId === SEPOLIA_DEFAULTS.chainId ? SEPOLIA_DEFAULTS : {};
-        ledgerContract = input.ledgerContract === undefined ? defaults.ledgerContract : input.ledgerContract;
         rpcUrl = input.rpcUrl === undefined ? defaults.rpcUrl : input.rpcUrl;
         if (input.rpcUrl === undefined && env.OYA_RPC_AUTHORIZATION) {
             throw new Error('rpcUrl must be explicit when RPC authorization is configured.');
@@ -76,7 +53,7 @@ export function parseConfig(input, { env = process.env } = {}) {
         maxBodyBytes: integer(input.maxBodyBytes, 'maxBodyBytes', 16_384, 1_048_576),
         maxTextBytes: integer(input.maxTextBytes, 'maxTextBytes', 8192, 1_048_576),
         bodyTimeoutMs: integer(input.bodyTimeoutMs, 'bodyTimeoutMs', 10_000),
-        operationTimeoutMs: integer(input.operationTimeoutMs, 'operationTimeoutMs', 180_000),
+        operationTimeoutMs,
         ipfs: createIpfsConfig(transport(endpoint(input.ipfsUrl, 'ipfsUrl'), env.OYA_IPFS_AUTHORIZATION)),
         ...(mode === 'ledger' ? {
             chainId, ledgerContract,
