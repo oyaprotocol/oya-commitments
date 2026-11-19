@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { Interface, getIcapAddress } from 'ethers';
+import { Interface, getIcapAddress, id } from 'ethers';
 import { hashLedgerCid } from '@oyaprotocol/ethereum';
 import { verifyLedgerEvidence, evidenceExitCode, readEvidenceJson } from '../src/ledger-evidence.mjs';
 
@@ -177,6 +177,19 @@ test('selects block-global log index, not array offset or any matching event', a
     assert.equal((await f.run()).reason, 'node_identity');
     f.record.logIndex = 1;
     assert.equal((await f.run()).reason, 'log_missing');
+});
+
+test('index-free lookup skips an opaque Ledger entry from the same publisher', async t => {
+    const f = await setup(t);
+    delete f.record.logIndex;
+    Object.assign(f.record, { cid, nodeAddress: node, contentSha256: sha256(content) });
+    const label = 'batch note';
+    f.state.receipt.logs.unshift({ ...f.state.receipt.logs[0], logIndex: '0x6',
+        ...abi.encodeEventLog(abi.getEvent('Log'), [node, id(label), label]) });
+    const report = await f.run();
+    assert.equal(report.status, 'verified');
+    assert.equal(report.logIndex, 7);
+    readOnly(f.state);
 });
 
 test('contract creation and unrelated malformed Ledger event do not constrain the selected valid log', async t => {

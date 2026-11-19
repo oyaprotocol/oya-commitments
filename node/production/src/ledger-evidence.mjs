@@ -2,9 +2,9 @@ import { open } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { createHash } from 'node:crypto';
 // Keep ethers until the staged kernel getAddress is published and the pin upgraded.
-import { getAddress } from 'ethers';
+import { getAddress, zeroPadValue } from 'ethers';
 import { assertCanonicalCid } from '@oyaprotocol/utils';
-import { decodeLedgerEvent, ethGetTransactionReceipt } from '@oyaprotocol/ethereum';
+import { decodeLedgerEvent, ethGetTransactionReceipt, hashLedgerCid } from '@oyaprotocol/ethereum';
 
 const FILE_LIMIT = 65536;
 const BODY_LIMIT = 131072;
@@ -198,7 +198,11 @@ export async function verifyLedgerEvidence(identity, input, { signal } = {}) {
         requireMatch(new Set(indexes).size === indexes.length, 'duplicate_log_index');
         let log;
         if (expected.logIndex === undefined) {
+            const nodeTopic = zeroPadValue(expected.nodeAddress, 32);
+            const cidTopic = hashLedgerCid(expected.cid);
             const matches = receipt.logs.filter(entry => {
+                // Ledger accepts opaque strings; only decode candidates for this evidence record.
+                if (!same(entry.topics[1], nodeTopic) || !same(entry.topics[2], cidTopic)) return false;
                 const event = decodeLedgerEvent(entry, config.ledgerContract);
                 return event && !event.removed && same(event.node, expected.nodeAddress) && event.cid === expected.cid;
             });

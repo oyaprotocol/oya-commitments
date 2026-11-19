@@ -113,7 +113,9 @@ async function request(saved, operation, transport = globalThis.fetch, { signal,
 
 async function prepareJob({ registryFile, nodeAddress, textFile, key }, { signal, check } = {}) {
     const pinned = await selectDestination(registryFile, nodeAddress);
+    signal?.throwIfAborted();
     const text = messageText(await readBounded(textFile, 8192));
+    signal?.throwIfAborted();
     if (typeof key !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(key)) throw new Error();
     const wallet = new Wallet(key);
     const job = await signJob({ address: wallet.address, signMessage: value => {
@@ -131,6 +133,7 @@ export async function sendFromNode(nodeAddress, textFile, { env = process.env, t
     try {
         signal?.throwIfAborted();
         settings = await nodeSendSettings(env);
+        signal?.throwIfAborted();
         saved = await prepareJob({ ...settings, nodeAddress, textFile }, { signal, check });
     } catch { fail('invalid_node_settings_or_input'); }
     const savedFile = join(settings.directory, 'peer-outbox', `${saved.job.requestId}.json`);
