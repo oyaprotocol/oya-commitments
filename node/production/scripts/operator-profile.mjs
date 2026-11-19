@@ -1,6 +1,7 @@
 import { constants } from 'node:fs';
 import { lstat, open } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
+import { projectGasPolicy } from '../src/gas-policy.mjs';
 import { publicAddress, publicNodeSettings, workerTarget } from '../src/public-settings.mjs';
 
 function pathValue(value) {
@@ -34,7 +35,7 @@ export function healthUrl(value) {
     return url.href;
 }
 
-export async function loadProfile(file) {
+async function selectProfile(file) {
     const selected = resolve(pathValue(file));
     const directory = dirname(selected);
     const info = await lstat(directory);
@@ -44,12 +45,23 @@ export async function loadProfile(file) {
     if (!profile || typeof profile !== 'object' || Array.isArray(profile) || profile.version !== 1 ||
         Object.keys(profile).some(key => !fields.includes(key)) || !['direct', 'worker'].includes(profile.role)) throw new Error('Invalid profile.');
     const url = healthUrl(profile.healthUrl);
-    const config = publicNodeSettings(await readJson(resolve(directory, pathValue(profile.nodeConfig))));
-    let target = null;
-    if (profile.role === 'worker') {
-        target = workerTarget(await readJson(resolve(directory, pathValue(profile.workerConfig))));
-    } else if (Object.hasOwn(profile, 'workerConfig')) throw new Error('Unexpected worker config.');
-    const nodeAddress = config.mode === 'ledger' ? publicAddress(profile.nodeAddress) : null;
-    if (config.mode === 'ipfs' && Object.hasOwn(profile, 'nodeAddress')) throw new Error('Unexpected node address.');
-    return Object.freeze({ ...config, role: profile.role, target, nodeAddress, healthUrl: url });
+    let workerFile;
+    if (profile.role === 'worker') workerFile = resolve(directory, pathValue(profile.workerConfig));
+    else if (Object.hasOwn(profile, 'workerConfig')) throw new Error('Unexpected worker config.');
+    const input = await readJson(resolve(directory, pathValue(profile.nodeConfig)));
+    const nodeAddress = input?.mode === 'ipfs' ? null : publicAddress(profile.nodeAddress);
+    if (input?.mode === 'ipfs' && Object.hasOwn(profile, 'nodeAddress')) throw new Error('Unexpected node address.');
+    return { input, role: profile.role, workerFile, nodeAddress, healthUrl: url };
+}
+
+export async function loadProfile(file) {
+    const { input, role, workerFile, nodeAddress, healthUrl } = await selectProfile(file);
+    const config = publicNodeSettings(input);
+    const target = workerFile ? workerTarget(await readJson(workerFile)) : null;
+    return Object.freeze({ ...config, role, target, nodeAddress, healthUrl });
+}
+
+export async function loadProfileGasPolicy(file) {
+    const { input } = await selectProfile(file);
+    return projectGasPolicy(input);
 }

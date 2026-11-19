@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { constants, openSync, fstatSync, readSync, closeSync } from 'node:fs';
-import { projectGasPolicy } from '../src/gas-policy.mjs';
+import { formatGasPolicy, projectGasPolicy } from '../src/gas-policy.mjs';
 
 const usage = 'Usage: gas-policy.mjs --config FILE [--json]';
 const maxBytes = 65_536;
@@ -39,13 +39,7 @@ function main(args) {
     }
     if (config === undefined) throw new Error(usage);
     const policy = projectGasPolicy(readConfig(config));
-    if (json) { console.log(JSON.stringify(policy)); return; }
-    console.log(`Offline config projection (${policy.mode}); not loaded runtime policy or full config validation.`);
-    if (!policy.applicable) { console.log('Gas policy: inapplicable in IPFS mode.'); return; }
-    console.log(`gasLimit: ${policy.gasLimit} gas (${policy.origins.gasLimit})`);
-    console.log(`maxFeePerGasWei: ${policy.maxFeePerGasWei} wei/gas (${policy.origins.maxFeePerGasWei})`);
-    console.log(`Execution-gas ceiling per transaction: ${policy.executionGasCeilingWei} wei`);
-    console.log('Configured cap product, not an actual fee estimate or daily budget; other chain fees may apply.');
+    console.log(json ? JSON.stringify(policy) : formatGasPolicy(policy));
 }
 
 try { main(process.argv.slice(2)); }
