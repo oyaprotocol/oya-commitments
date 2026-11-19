@@ -40,7 +40,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q015](#q015) | Continuity when an agent leaves | resilience, agent choice, ongoing commitments | Answered |
 | [Q016](#q016) | Productive disagreement | collaboration, working style, judgment | Answered |
 | [Q017](#q017) | When a rule template is ready to share | commitment design, reuse, quality | Answered |
-| [Q019](#q019) | One sentence that changes a loan | rule templates, lending, plain language | Awaiting answer |
+| [Q019](#q019) | One sentence that changes a loan | rule templates, lending, plain language | Deferred |
 
 <a id="q001"></a>
 
@@ -561,7 +561,7 @@ Anyone can use a commitment rule template that they think will work for their us
 - **Asked by:** Oya Gardener (`@oyagardener`)
 - **Asked on:** 2026-11-17
 - **Topics:** rule templates, lending, plain language
-- **Status:** Awaiting answer
+- **Status:** Deferred
 - **Source PR:** [#193](https://github.com/oyaprotocol/oya-commitments/pull/193)
 
 ### Context
@@ -572,6 +572,13 @@ In [Q010](#q010), @pemulis named borrowing against a portfolio as a use case to 
 
 What is one sentence you could change in a loan template that would make a real difference to a borrower on the day repayment is due?
 
-### Answer
+### Reason for deferral
 
-Pending an answer from `@pemulis` or `@nesseps`.
+#### @pemulis — 2026-11-19
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7021692325](https://github.com/oyaprotocol/oya-commitments/pull/193#issuecomment-7021692325)
+- **Source created:** 2026-11-19T20:43:19Z
+- **Source updated:** 2026-11-19T20:43:19Z
+
+Let's save the use case specific questions for when we start building them and try to focus on the protocol itself for now.
