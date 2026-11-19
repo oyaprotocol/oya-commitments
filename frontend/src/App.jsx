@@ -584,8 +584,9 @@ function App() {
             <input name="collateral" value={form.collateral} onChange={onChange} placeholder="0x..." />
           </label>
           <label>
-            Bond Amount (uint256)
-            <input name="bondAmount" value={form.bondAmount} onChange={onChange} placeholder="1000000000000000000" />
+            Bond Amount (smallest collateral token units)
+            <input name="bondAmount" value={form.bondAmount} onChange={onChange} placeholder="250000000" />
+            <span className="hint">For a token with 6 decimals, enter 250000000 for a bond of 250 tokens.</span>
           </label>
           <label>
             Liveness (seconds)
