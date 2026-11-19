@@ -9,6 +9,7 @@ The default deployment runs Oya and Kubo on your local device, with a portable P
 | **Set up a first node with a coding agent** | **[Deploy with an agent](deploy-with-agent.md)** — default Sepolia Ledger setup, a task prompt, secure credential handoff, and acceptance checks. |
 | Look up the default chain and contract | [Deployed Sepolia Ledger](#deployed-sepolia-ledger) — target, verification evidence, prerequisites, and release compatibility. |
 | Set up a node manually | [Run locally](run-locally.md) — start here, then follow its [inbox hosting](host-inbox.md) step. |
+| Check direct or worker health without a key | [Host status](operator-status.md) — private profile, public identity and bounded loopback health. |
 | Monitor or resume an existing worker | [Local operation](run-locally.md#monitor-stop-and-resume), or [Keychain startup](deploy-with-agent.md#keychain-and-runtime-secrets-are-different) if configured. |
 | Upgrade an existing inbox and worker | [Verified release upgrades](upgrade-node.md) — preview, coordination, Keychain workers and recovery records. |
 | Maintain or recover the inbox | [Retention, recovery, and migration](host-inbox.md#retention-recovery-and-migration). |
@@ -367,6 +368,8 @@ nc -vz -w 5 node.example.com 8080
 Replace the hostname and files, and substitute the configured node host port if it differs from 8787. Require a `published` result in IPFS mode or `logged` in Ledger mode, and independently verify the IPFS bytes; Ledger mode also requires receipt/event verification. The health path must return 404, HTTPS port 443 must connect, and the node/IPFS API/gateway probes must fail. Check each configured IPv4/IPv6 address so an unused DNS record does not hide an exposed listener. Record the UTC time, public hostname, publication CID (and transaction hash in Ledger mode), and HTTP/port results without credentials or private client paths. Deliberate repeat submissions remain valid; reconcile any uncertain Ledger outcome before retrying.
 
 ## Install and validate
+
+The unit suite requires Python 3 for lifecycle tests and `openssl` on `PATH` to generate disposable localhost certificates for HTTPS status tests.
 
 Use Node 22 or newer, npm, Foundry, and [Kubo 0.43.0](https://github.com/ipfs/kubo/releases/tag/v0.43.0) for the local integration tests. Both integration scripts require `ipfs` on `PATH` to report exactly `0.43.0`, matching Compose, and check the fixture daemon's version. Select that release on `PATH` before running them; a mismatch fails before any services start. CI uses Node 24. From the repository root:
 

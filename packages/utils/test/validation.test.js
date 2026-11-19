@@ -316,6 +316,27 @@ test('readErrorStringChain collects string properties across error causes', () =
     assert.deepEqual(readErrorStringChain({ message: 123 }, 'message'), []);
 });
 
+test('error cause traversal stops at repeated objects', () => {
+    for (const indirect of [false, true]) {
+        for (const code of ['ECONNRESET', 'ERR_INVALID_URL']) {
+            let reads = 0;
+            const error = { message: 'failure', code };
+            const cause = indirect ? { message: 'failure', cause: error } : error;
+            Object.defineProperty(error, 'cause', {
+                get() {
+                    // Fail a regressed traversal without hanging the test process.
+                    assert.equal(++reads, 1, 'cause must be read only once');
+                    return cause;
+                },
+            });
+            assert.deepEqual(readErrorStringChain(error, 'message'),
+                indirect ? ['failure', 'failure'] : ['failure']);
+            reads = 0;
+            assert.equal(hasRetryableNetworkErrorCode(error), code === 'ECONNRESET');
+        }
+    }
+});
+
 test('abort utilities compose signals and reject aborted operations', async () => {
     const first = new AbortController();
     const second = new AbortController();

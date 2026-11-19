@@ -22,6 +22,41 @@ The receiver must authorize the **node's public address**, rather than a separat
 
 After an uncertain result, use `status SAVED_FILE`, then explicitly choose `retry SAVED_FILE`. If the process exits before printing its result, inspect `peer-outbox` to find the saved request. Never rerun `send` as recovery: every deliberate new send creates a new request. Keep recovery files until the outcome is reconciled; there is no automatic resend or cleanup.
 
+## Finite publication diagnostic
+
+This is an explicit execution command, not a read-only health probe. It submits ordinary signed publication jobs as the selected installed node and can cause public content and receiver gas expenditure. Obtain authorization for the recipient and endpoints first. From the repository root:
+
+```sh
+node node/production/src/peers/client.mjs test --execute RECIPIENT TEXT_FILE EVIDENCE_SETTINGS COUNT TIMEOUT_MS
+```
+
+`TEXT_FILE` has the same exact-byte requirements as `send`. `COUNT` is an integer from 1 to 20. `TIMEOUT_MS` is the total run budget, 1 to 600000 milliseconds, including submission, polling and evidence. The explicit JSON settings file uses the existing [Ledger evidence settings](../inbox-api.md#verify-ledger-evidence):
+
+```json
+{
+  "chainId": 31337,
+  "ledgerContract": "0x1111111111111111111111111111111111111111",
+  "rpcUrl": "http://127.0.0.1:8545",
+  "ipfsUrl": "http://127.0.0.1:5001",
+  "timeoutMs": 30000,
+  "requestTimeoutMs": 10000
+}
+```
+
+The addresses and ports above are placeholders for disposable local services. Replace them with explicitly approved settings. Optional `rpcAuthorization` and `ipfsAuthorization` are read only from this file. Protect it outside Git. No endpoints or credentials are inferred from status responses. HTTPS is required off-host. The CLI reads at most 64 KiB of settings. Inbox requests retain their ten-second deadline and 128 KiB response limit. Evidence requests have the settings' per-request and evidence deadlines and the same response cap, all within the total run deadline.
+
+Only one job is outstanding. After one durable save and one submission, the command queries ordinary status immediately and then at one-second intervals, at most 120 observations per job. Only `logged` with a valid CID and transaction hash triggers independent verification. `published` is insufficient for this Ledger-only diagnostic. Failed/expired jobs, missing or malformed status, lost acknowledgement, any deadline, and unavailable or mismatching evidence stop the entire run. Nothing is automatically resubmitted or replaced. Another job is created only after the previous one verifies. Import callers may choose polling intervals of 250–10000 milliseconds and 1–120 observations.
+
+Verification checks the configured chain and Ledger contract, a successful receipt and its current block identity, exactly one nonremoved event matching the recipient and CID, raw-CID byte integrity, and the SHA-256 digest of the original signed message in the publisher's fixed `text`, `signer`, `signature` serialization. It does not accept a different valid signed message merely because its remotely reported CID is self-consistent. Ambiguous matching logs fail. The same transaction/log pair cannot count twice within a run. Unsupported CID codecs do not count as success.
+
+The JSON summary contains `outcome`, `reason`, `requested`, `verified`, `elapsedMs` and bounded `jobs`. Each entry retains `savedFile`, submission `admission`, latest `reported` status, poll count and independent `evidence`. `exactMessage: verified` means the saved signed message and expected event passed these checks. Exit 0 requires every requested iteration to verify. Exit 1 means stopped/unknown/failed evidence or cancellation. Exit 2 means invalid local input or a local failure, retaining completed results when available. Text, signatures, keys, authorization and raw error bodies are omitted. Recovery paths make output private operational data.
+
+Evidence is a provider snapshot, not finality, named-peer storage, or a proof that this particular outer request caused an event. The ordinary message signature does not include the job request ID; identical signed text can have historical matching events. Use fresh diagnostic text to distinguish a new run, and do not infer fresh publication merely from an old matching message. A gateway retrieval proves availability through that gateway only.
+
+SIGINT or SIGTERM cancels network observation and prevents further sends. It cannot cancel work already admitted by the recipient. Every saved request remains in `peer-outbox`, including partial files after a persistence failure. If the process is killed before reporting, inspect that directory. Do not rerun `test` to resolve uncertainty: use `status SAVED_FILE` and deliberately reconcile each original job. This command has no automatic cleanup.
+
+The packaged image uses the same entrypoint: `oya_peer test --execute RECIPIENT /private/text.txt /private/evidence.json 1 60000`, using the helper below. Container loopback refers to the container, not the host.
+
 ## Explicit low-level interface
 
 With Node.js 24 and the locked `node/production` dependencies installed, run from the repository root:
@@ -124,5 +159,7 @@ const status = await peerJobStatus(result.savedFile);
 // Alternative for a deliberately new low-level send:
 // await sendToPeer({ registryFile, nodeAddress, keyFile, textFile, outputFile });
 ```
+
+The diagnostic is importable as `testNode` from `src/peers/test-loop.mjs`: pass `{nodeAddress, textFile, settings, count, timeoutMs, execute: true}` and optional `{env, signal, transport}`. It returns the same summary as the CLI. `signal` also works with `sendFromNode` and `peerJobStatus`. Only callers explicitly requesting `peerJobStatus(file, {evidence: true})` receive validated `cid` and `transactionHash` fields for a reported `logged` state; these fields remain unverified remote claims.
 
 Local failures throw `PeerSendError` with a fixed safe `code` (`invalid_node_settings_or_input`, `invalid_input`, `invalid_saved_job`, `job_expired`, `save_failed`). `sendFromNode(nodeAddress, textFile, {env, transport})` accepts an optional environment object for an explicitly selected installation; by default it uses `process.env`. It never returns or persists the loaded key. Remote outcomes return the structured result above. The low-level functions accept an optional second argument `{transport}` with a Fetch-compatible function for testing. Production calls use the existing bounded inbox transport. The helper supplies no scheduler, fanout or retry policy; callers decide when to initiate a new request and must retain its saved file.

@@ -1,0 +1,28 @@
+{
+  "schema": "oya-gardener-feedback/v1",
+  "id": "2026-11-16-finish-with-simplicity-28e9eb",
+  "summary": "Refine the feature guidance into a before-and-after simplicity check. Review the completed unpublished diff for unnecessary machinery while preserving safety and regression coverage. Consolidate the existing wording so the active guidance gets shorter.",
+  "evidence": [
+    {
+      "url": "https://github.com/oyaprotocol/oya-commitments/pull/181#issuecomment-6933193655",
+      "lesson": "Verified human feedback from pemulis asks for a completed-branch review of whether the implementation does more than necessary. The existing feedback checks design before implementation. The proposed refinement adds a final simplicity pass before publication, not maintenance of other published branches."
+    },
+    {
+      "url": "https://github.com/oyaprotocol/oya-commitments/pull/177#issuecomment-6901968095",
+      "lesson": "Verified human feedback from pemulis says the JSON manifest formats were never merged and need no compatibility support. The subsequent correction removed that support. Inference: checking whether a format actually shipped is one useful way to identify unnecessary machinery, not permission to remove established compatibility."
+    },
+    {
+      "url": "https://github.com/oyaprotocol/oya-commitments/pull/183#discussion_r4593486090",
+      "lesson": "Verified human feedback from pemulis favors refining active prompts rather than continually appending rules. This update replaces and shortens the feature feedback block while retaining its operator-workflow and PR-opening checks."
+    }
+  ],
+  "evaluation": "At the next two reviews with new feature contributions, inspect a representative resulting public diff and any human feedback. Retain this check if it catches unnecessary state, wrappers or unshipped compatibility before review without weakening authorization, recovery or regression coverage. Revise or revert if it produces cosmetic churn, compressed code, removed safeguards or redundant review ceremony. Fewer lines, silence and bot approval alone are not success. Keep assessing whether the PR opening identifies the user, action and observable result.",
+  "changes": [
+    {
+      "target": "feature",
+      "before_sha256": "25a70639201e1292650ab5394d484be59ddd9bede1751cb0b309b5e74d76b4eb",
+      "before_guidance": "Before implementing a feature slice, name one concrete operator action and observable result in its existing private checkpoint or ExecPlan. Trace the existing path that could provide it. Add a protocol variant, wrapper or mandatory input only when a current requirement is not met by that path. Reuse established interfaces and configured inputs when safe, preserving authorization and recovery behavior.\n\nBefore publishing a new PR description or a justified revision, read its opening by itself. A reviewer should be able to identify the intended user, the action and the observable result without first decoding implementation details or lists of non-goals. Use short bullets when they make that result easier to understand. Keep consequential safety and validation details alongside the affected behavior. This is a reader check, not a mandatory public template or word quota.",
+      "after_guidance": "Before implementation, record the operator action, observable result and existing path in the checkpoint or ExecPlan. Add interfaces or inputs only for unmet current needs, reusing established interfaces and configured inputs when safe.\n\nAfter implementation, review the complete unpublished diff for unnecessary machinery: duplicate state, wrappers and compatibility for formats never shipped. Remove only what lacks a current requirement. Preserve authorization, recovery and useful regression coverage, then rerun affected checks. Simplicity means less to understand, not compressed code or a deletion quota.\n\nRead the PR opening alone before publication or a justified revision: make the user, action and result clear, using short bullets when useful. Keep consequential safety and validation details alongside the behavior. This is a reader check, not a public template."
+    }
+  ]
+}

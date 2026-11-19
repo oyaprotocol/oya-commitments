@@ -1,5 +1,7 @@
 # Run a live node locally
 
+Check an existing node with [key-free host status](operator-status.md), using a private profile and Node.js 24+.
+
 For opt-in signed publication requests between registered nodes, see [peer reception](peers/receive.md). Enabling an installed registry grants all its members ordinary publication authority.
 
 Run Oya and Kubo on your own computer, mini PC, or other local device. Agents send signed messages to an HTTPS inbox backed by PostgreSQL. Your node polls using outbound requests, so it needs no public IP address, router forwarding, tunnel, or inbound message endpoint. The inbox and PostgreSQL can be hosted wherever you choose, together or separately.

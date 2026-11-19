@@ -6,7 +6,9 @@ import { parseConfig } from '../config.mjs';
 import { loadSecrets } from '../secrets.mjs';
 import { createLocalSigner } from '../signer.mjs';
 import { readJson, inboxUrl, positive, token } from './config.mjs';
-import { targetName, executionIdentity, validId } from './protocol.mjs';
+import { executionIdentity, validId } from './protocol.mjs';
+import { workerTarget } from '../public-settings.mjs';
+import { workerHealthy } from '../health.mjs';
 import { createInboxClient, json } from './http.mjs';
 import { processWork } from './processor.mjs';
 import { parsePeers, loadPeers, publicationSigners } from '../peers/config.mjs';
@@ -90,6 +92,16 @@ export async function runWorker(options) {
     log({ event: 'worker_stopped' });
 }
 
+export function createWorkerHealthServer({ config, signer, target, state, signal }) {
+    const identity = executionIdentity(config, signer?.address);
+    return createServer((request, response) => {
+        if (request.method !== 'GET' || request.url !== '/healthz') { json(response, 404, { error: 'not_found' }); return; }
+        const current = signal?.aborted ? { ...state, status: 'shutting_down' } : state;
+        json(response, workerHealthy(current, config) ? 200 : 503,
+            { ...current, role: 'worker', target, ...identity });
+    });
+}
+
 async function main() {
     const [nodeFile, nodeSecretsFile, workerFile, workerSecretsFile, ...extra] = process.argv.slice(2);
     if (!workerSecretsFile || extra.length) throw new Error('Usage: worker NODE_JSON NODE_SECRETS WORKER_JSON WORKER_SECRETS_JSON');
@@ -98,8 +110,7 @@ async function main() {
     const config = parseConfig(input, { env: secrets });
     if (config.batchLogging) throw new Error('Batch logging is supported only by the direct runtime.');
     const worker = await readJson(workerFile);
-    if (Object.keys(worker).some(key => !['url', 'target', 'pollIntervalMs', 'peers'].includes(key))) throw new Error('Unknown worker field.');
-    const target = targetName(worker.target);
+    const target = workerTarget(worker);
     const peers = await loadPeers({ peers: parsePeers(worker.peers) }, workerFile);
     const allowedSigners = publicationSigners(input.allowedSigners, peers);
     const api = createInboxClient(inboxUrl(worker.url), token((await readJson(workerSecretsFile)).workerToken));
@@ -108,11 +119,7 @@ async function main() {
     const signer = config.mode === 'ledger' ? createLocalSigner(secrets.OYA_NODE_PRIVATE_KEY) : undefined;
     const controller = new AbortController();
     const state = { status: 'starting', target, mode: config.mode, completed: 0 };
-    const server = createServer((request, response) => {
-        if (request.method !== 'GET' || request.url !== '/healthz') { json(response, 404, { error: 'not_found' }); return; }
-        const healthy = ['idle', 'processing'].includes(state.status) && Date.now() - Date.parse(state.lastPollAt) < config.operationTimeoutMs + 60000;
-        json(response, healthy ? 200 : 503, { role: 'worker', ...state });
-    });
+    const server = createWorkerHealthServer({ config, signer, target, state, signal: controller.signal });
     await new Promise((resolveListening, reject) => { server.once('error', reject); server.listen(config.port, config.host, resolveListening); });
     const stop = () => controller.abort();
     process.on('SIGINT', stop);

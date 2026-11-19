@@ -167,8 +167,10 @@ function createHttpConfig(
 
 function readErrorStringChain(error: unknown, key: string): string[] {
     const values: string[] = [];
+    const seen = new Set<object>();
     let current: unknown = error;
-    while (current && typeof current === 'object') {
+    while (current && typeof current === 'object' && !seen.has(current)) {
+        seen.add(current);
         const value = (current as Record<string, unknown>)[key];
         if (typeof value === 'string' && value) {
             values.push(value);

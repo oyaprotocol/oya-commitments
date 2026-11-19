@@ -628,7 +628,7 @@ function App() {
           <label>
             Module Proxy Factory
             <input name="moduleProxyFactory" value={form.moduleProxyFactory} onChange={onChange} placeholder="0x..." />
-            <span className="hint">Required unless you deploy a ModuleProxyFactory separately.</span>
+            <span className="hint">Enter an existing factory address, or leave blank to deploy a new factory in an extra transaction.</span>
           </label>
         </div>
       </section>
