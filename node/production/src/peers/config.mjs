@@ -1,3 +1,4 @@
+import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { getAddress } from 'ethers';
@@ -9,7 +10,8 @@ function address(value) {
 }
 
 export async function readBounded(file, limit) {
-    const handle = await open(file, 'r');
+    // Validate the opened descriptor without waiting for a special file at open time.
+    const handle = await open(file, constants.O_RDONLY | constants.O_NONBLOCK);
     try {
         if (!(await handle.stat()).isFile()) throw new Error('Expected regular file.');
         const buffer = Buffer.alloc(limit + 1);
