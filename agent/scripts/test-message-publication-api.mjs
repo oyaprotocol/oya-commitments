@@ -360,26 +360,6 @@ async function main() {
         assert.equal(health.status, 200);
         assert.deepEqual(await health.json(), { ok: true });
 
-        const missingBearer = await postPublication(
-            baseUrl,
-            {
-                message: {
-                    chainId: TEST_CHAIN_ID,
-                    requestId: 'missing-bearer',
-                    commitmentAddresses: TEST_COMMITMENT_ADDRESSES,
-                    agentAddress: account.address,
-                },
-                auth: {
-                    type: 'eip191',
-                    address: account.address,
-                    timestampMs: Date.now(),
-                    signature: `0x${'0'.repeat(130)}`,
-                },
-            },
-            { bearerToken: undefined }
-        );
-        assert.equal(missingBearer.status, 401);
-
         const acceptedRequest = await buildSignedBody({
             account,
             requestId: 'publish-ok',
@@ -391,6 +371,11 @@ async function main() {
                 },
             },
         });
+        const missingBearer = await postPublication(baseUrl, acceptedRequest.body, {
+            bearerToken: null,
+        });
+        assert.equal(missingBearer.status, 401);
+
         const accepted = await postPublication(baseUrl, acceptedRequest.body);
         assert.equal(accepted.status, 202);
         assert.equal(accepted.json.status, 'published');
