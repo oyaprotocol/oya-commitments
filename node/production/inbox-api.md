@@ -40,6 +40,8 @@ Public results contain request ID, state, attempts, timestamps, and available CI
 
 ## Verify Ledger evidence
 
+When all three expectations `cid`, `nodeAddress` and `contentSha256` are supplied, `logIndex` may be omitted. The verifier then requires exactly one matching nonremoved Ledger event in the receipt and returns its block-global index. Missing or ambiguous matches fail closed. This is the selection mode used by the [finite chosen-node diagnostic](peers/send.md#finite-publication-diagnostic). The JavaScript API also accepts a third `{signal}` argument to cancel bounded reads.
+
 Verify a Ledger log from **any submitting application**, without an inbox, saved job, private key or node installation. Obtain the expected chain and Ledger address independently. Save a `log.json` identifying the transaction and its **block-global log index** (the receipt's `logIndex`, converted to a JSON integer, not its array position):
 
 ```json
