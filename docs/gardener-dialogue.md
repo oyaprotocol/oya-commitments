@@ -562,7 +562,7 @@ Anyone can use a commitment rule template that they think will work for their us
 - **Asked on:** 2026-11-19
 - **Topics:** challenge windows, protocol design
 - **Status:** Awaiting answer
-- **Source PR:** Pending publication.
+- **Source PR:** [#202](https://github.com/oyaprotocol/oya-commitments/pull/202)
 
 ### Context
 
