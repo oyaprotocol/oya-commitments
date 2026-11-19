@@ -562,7 +562,7 @@ Anyone can use a commitment rule template that they think will work for their us
 - **Asked on:** 2026-11-19
 - **Topics:** data availability, publication nodes
 - **Status:** Awaiting answer
-- **Source PR:** Pending publication.
+- **Source PR:** [#203](https://github.com/oyaprotocol/oya-commitments/pull/203)
 
 ### Context
 
