@@ -12,6 +12,7 @@ out/
 .env
 .env.mainnet
 .env.sepolia
+/frontend/.env.local
 agent/.env
 
 # Anvil files
