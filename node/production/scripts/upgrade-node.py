@@ -70,6 +70,9 @@ PUBLIC_FILES = {
         'inbox/Caddyfile', 'inbox/inbox.example.json', 'inbox/worker.example.json',
         'scripts/deploy-droplet.sh', 'scripts/deploy-droplet-remote.sh',
         'scripts/keychain-worker.py', 'scripts/upgrade-node.py',
+        'operator-status.md', 'operator.example.json',
+        'scripts/operator-node.mjs', 'scripts/operator-profile.mjs', 'scripts/operator-status.mjs',
+        'src/defaults.mjs', 'src/public-settings.mjs', 'src/health.mjs',
         'scripts/gas-policy.mjs', 'src/gas-policy.mjs', 'gas-policy.md',
         'peers/testnet-directory.json', 'peers/README.md', 'peers/receive.md', 'peers/send.md', 'scripts/peer-directory.mjs',
     )

@@ -1,5 +1,7 @@
 # Run a local node with the direct HTTP API (advanced)
 
+Check an existing node with [key-free host status](operator-status.md), using a private profile and Node.js 24+.
+
 For the default deployment, use [Run a live node locally](run-locally.md): a local worker receives external messages through a PostgreSQL inbox. This older direct-HTTP guide remains useful for local-only clients and existing v0.2.0 installations. It has no durable queue and accepts messages only while the computer is online.
 
 Run the production node and Kubo locally with Docker Compose, persistent IPFS storage, and an optional hourly message agent. This guide uses the published **v0.2.0 Linux amd64 image** in either mode:

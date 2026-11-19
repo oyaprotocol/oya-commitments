@@ -54,6 +54,7 @@ export async function main(args, {
             + 'check: Check IPFS without writes; Ledger mode also checks Ethereum, Ledger, and gas balance.\n'
             + 'run: Check settings and services, then run the node in the foreground; Ctrl-C drains active work.\n'
             + 'status: Query local node health and identity without checking upstream services or restarting.\n'
+            + 'For key-free direct/worker status, use operator-node.mjs status --profile FILE (operator-status.md).\n'
             + 'deploy-ledger: Reuse configured code or simulate deployment; only --broadcast submits and records a new Ledger.\n'
             + '--broadcast is accepted only with deploy-ledger.\n'
             + '--verify requires deploy-ledger --broadcast and ETHERSCAN_API_KEY; verifies source on Etherscan after recording deployment, or for reused code.\n'
