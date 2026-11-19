@@ -1,0 +1,28 @@
+{
+  "schema": "oya-gardener-feedback/v1",
+  "id": "2026-11-17-fresh-small-improvement-discovery",
+  "summary": "Discover small improvements afresh on each eligible run instead of carrying candidate lists between runs.",
+  "evidence": [
+    {
+      "url": "https://github.com/oyaprotocol/oya-commitments/pull/181",
+      "lesson": "The open operator-status feature already covers a complete workflow that could otherwise be mistaken for a new small improvement. Inference: use current PR scope to exclude overlap, then inspect other current code rather than repeatedly reconsidering an old candidate."
+    },
+    {
+      "url": "https://github.com/oyaprotocol/oya-commitments/pull/185",
+      "lesson": "The open chosen-node publication diagnostic overlaps completion-verification work. Inference: parallel feature development can invalidate saved small-work candidates, so discover from current code and refresh overlap checks before implementation and publication."
+    },
+    {
+      "url": "https://github.com/oyaprotocol/oya-commitments/pull/182",
+      "lesson": "Offline gas-policy inspection is already merged. Inference: old candidate lists can retain completed work. Use completed PRs for deduplication, not as the next run's shortlist."
+    }
+  ],
+  "evaluation": "Inspect subsequent eligible small-improvement runs for fresh source revisions, concrete code inspection and broader discovery when nearby work is covered. New checkpoints should contain outcomes, inspected areas and useful lessons, not candidate arrays, rankings or deferred idea queues. A previously considered idea is eligible only if independently rediscovered and justified by current evidence. Verify that actual unfinished-work and publication recovery remains possible, current overlap is checked before writes, and safe no-work runs stay silent. Success is useful current discovery without duplication, not a quota of novel ideas or more PRs.",
+  "changes": [
+    {
+      "target": "small-improvement",
+      "before_sha256": "6d55050cbae8a8f349b75959c7be701f1e5f745cfde5b706107c28a852fe52b8",
+      "before_guidance": "",
+      "after_guidance": "After the existing capacity gate permits work, discover candidates anew on every run from freshly fetched main, current code and live repository evidence. Do not load, copy or resume a candidate list from checkpoints, previous output or historical discovery reports. Unchanged main or PR activity does not establish that no worthwhile work exists.\n\nBuild the required candidate comparison from code inspected in this run. When nearby work is already covered, inspect other relevant areas rather than treating old rejected candidates as the search space. Fresh discovery means current evidence, not forced novelty: an idea may recur only if independently rediscovered and justified now. Keep discovery bounded and leave healthy code alone.\n\nKeep candidate lists, rankings and selection alternatives in the current run only. This refines earlier instructions to save alternatives in checkpoints: persist checked revisions, inspected areas, the selected actual task and its concise rationale, validation, outcomes, recovery evidence and useful lessons, but no candidate arrays, deferred idea queues or next-run shortlist. Old candidate reports are historical records, not discovery inputs. Preserve actual unfinished work and publication receipts for safe recovery, but revalidate an unpublished task against fresh discovery before resuming it.\n\nRecheck current main and the complete open-PR inventory before implementation and again before publication. If another contribution now covers the task, select another independently discovered task or broaden the current search. Preserve existing capacity, size, ownership, validation and silent no-work rules."
+    }
+  ]
+}
