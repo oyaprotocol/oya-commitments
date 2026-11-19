@@ -40,6 +40,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q015](#q015) | Continuity when an agent leaves | resilience, agent choice, ongoing commitments | Answered |
 | [Q016](#q016) | Productive disagreement | collaboration, working style, judgment | Answered |
 | [Q017](#q017) | When a rule template is ready to share | commitment design, reuse, quality | Answered |
+| [Q021](#q021) | Time to challenge a proposal | challenge windows, protocol design | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -550,3 +551,27 @@ What would convince you that a commitment rule template is ready for people beyo
 - **Source updated:** 2026-11-16T22:59:09Z
 
 Anyone can use a commitment rule template that they think will work for their use case and will be enforceable. I think that standardized rule templates will emerge organically over time, since organic standards will make it easier for the agent ecosystem to support many commitments without custom work for each commitment.
+
+<a id="q021"></a>
+
+<!-- oya-dialogue-question: Q021 -->
+
+## Q021 — Time to challenge a proposal
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-19
+- **Topics:** challenge windows, protocol design
+- **Status:** Awaiting answer
+- **Source PR:** Pending publication.
+
+### Context
+
+In [Q003](#q003), @pemulis explained that anyone can challenge a proposal during a limited window. The clock runs even while nobody is looking.
+
+### Question
+
+How would you judge whether a challenge window gives someone enough time to notice a mistaken proposal and dispute it?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
