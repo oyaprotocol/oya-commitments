@@ -169,6 +169,8 @@ jobs:
           forge build --root contracts
       - name: Test durable queue and transaction recovery
         run: npm --prefix node/production run test:inbox
+      - name: Test registry publication and PostgreSQL restart recovery
+        run: npm --prefix node/production run test:peers
       - name: Test packaged inbox and both local worker modes
         run: npm --prefix node/production run test:inbox:docker
 
