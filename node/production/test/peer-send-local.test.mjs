@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { constants } from 'node:fs';
+import fs from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { spawn } from 'node:child_process';
 import { chmod, link, mkdir, mkdtemp, open, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -19,7 +22,7 @@ const rejected = code => error => error instanceof PeerSendError && error.code =
 const queued = async (_url, options) => new Response(JSON.stringify({ requestId: JSON.parse(options.body).requestId, status: 'queued' }), { status: 202 });
 
 async function fixture(t) {
-    const directory = await mkdtemp(join(tmpdir(), 'oya-node-send-'));
+    const directory = await fs.realpath(await mkdtemp(join(tmpdir(), 'oya-node-send-')));
     t.after(() => rm(directory, { recursive: true, force: true }));
     const config = join(directory, 'worker.json'), secrets = join(directory, 'node.env');
     const nodeConfig = { allowedSigners: [agent.address], ipfsUrl: 'http://127.0.0.1:5001' };
@@ -131,6 +134,34 @@ test('missing, ambiguous, malformed or oversized settings and keys fail without 
     assert.equal(JSON.parse(result.stdout).code, 'invalid_node_settings_or_input');
     assert.equal(result.stderr, '');
     safe(result.stdout);
+});
+
+test('node send opens each input nonblocking and rejects directories before signing or saving', async t => {
+    const f = await fixture(t);
+    const inputs = [f.config, f.secrets, f.registry, f.text];
+    const flagsByFile = new Map();
+    const originalOpen = fs.open;
+    const spy = t.mock.method(fs, 'open', function(file, flags, ...args) {
+        if (inputs.includes(file)) flagsByFile.set(file, flags);
+        return originalOpen(file, flags, ...args);
+    });
+    syncBuiltinESMExports();
+    t.after(() => { spy.mock.restore(); syncBuiltinESMExports(); });
+
+    let gates = 0, calls = 0;
+    const options = { env: f.env, check: () => { gates++; }, transport: () => { calls++; } };
+    for (const file of [f.text, f.registry, f.config]) {
+        const original = await readFile(file);
+        await rm(file);
+        await mkdir(file);
+        await assert.rejects(sendFromNode(recipient.address, f.text, options), rejected('invalid_node_settings_or_input'));
+        await rm(file, { recursive: true });
+        await writeFile(file, original);
+    }
+    for (const file of inputs) assert.ok(flagsByFile.get(file) & constants.O_NONBLOCK, file);
+    assert.equal(gates, 0);
+    assert.equal(calls, 0);
+    await assert.rejects(stat(f.outbox), { code: 'ENOENT' });
 });
 
 test('unsafe secret files and installation permissions fail closed', async t => {

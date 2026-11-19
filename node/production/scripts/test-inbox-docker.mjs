@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { chmod, chown, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, chown, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { request as httpsRequest } from 'node:https';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -228,6 +228,36 @@ test('packaged inbox and local worker publish offline-queued jobs through HTTPS 
             assert.equal(event.args.cid, completed.cid);
             assert.equal(event.args.cidKeccak256Hash, keccak256(toUtf8Bytes(completed.cid)));
             assert.equal((await chain.getTransaction(completed.transactionHash)).chainId, defaults ? 11155111n : 31337n);
+        }
+        if (scenario === 'ledger') {
+            progress('bounded peer diagnostic: installed sender CLI, real PostgreSQL, Kubo and Anvil');
+            const diagnostic = join(directory, 'diagnostic');
+            await mkdir(diagnostic, { mode: 0o700 });
+            const diagnosticWrite = (name, value) => writeFile(join(diagnostic, name), value, { mode: 0o600 });
+            await diagnosticWrite('node.env', `OYA_NODE_PRIVATE_KEY=${agent.privateKey}\n`);
+            await diagnosticWrite('worker.json', JSON.stringify({ peers: { registryFile: 'registry.json' } }));
+            await diagnosticWrite('registry.json', JSON.stringify([{ nodeAddress: nodeWallet.address,
+                url: `${await endpoint('inbox', 8788)}/v1/jobs`, target }]));
+            await diagnosticWrite('text', 'Bounded ordinary diagnostic against disposable services\n');
+            await diagnosticWrite('evidence.json', JSON.stringify({ chainId: 31337, ledgerContract,
+                rpcUrl: await endpoint('anvil', 8545), ipfsUrl }));
+            const result = await execute(process.execPath, [join(production, 'src/peers/client.mjs'), 'test', '--execute',
+                nodeWallet.address, join(diagnostic, 'text'), join(diagnostic, 'evidence.json'), '2', '60000'],
+            { env: { OYA_LOCAL_DIR: diagnostic }, timeout: 75000, maxBuffer: 131072 });
+            const report = JSON.parse(result.stdout);
+            assert.equal(report.outcome, 'completed');
+            assert.equal(report.verified, 2);
+            assert.equal(await chain.getTransactionCount(nodeWallet.address, 'latest'), 3);
+            for (const entry of report.jobs) {
+                assert.equal(entry.exactMessage, 'verified');
+                assert.equal(entry.evidence.checks.ledger, 'verified');
+                assert.equal(entry.evidence.checks.cidBinding, 'verified');
+                const saved = JSON.parse(await readFile(entry.savedFile, 'utf8'));
+                assert.equal(saved.job.message.signer, agent.address);
+                const retrieved = await (await fetch(`${ipfsUrl}/api/v0/cat?arg=${entry.evidence.cid}`, { method: 'POST' })).json();
+                assert.deepEqual(retrieved, saved.job.message);
+            }
+            progress('bounded diagnostic passed: two exact messages and recipient Ledger events verified on Anvil');
         }
         assert.equal((await api('/v1/jobs', job)).requestId, job.requestId);
         await compose(['restart', 'node']);
