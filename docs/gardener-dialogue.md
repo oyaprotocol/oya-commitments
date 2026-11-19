@@ -40,7 +40,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q015](#q015) | Continuity when an agent leaves | resilience, agent choice, ongoing commitments | Answered |
 | [Q016](#q016) | Productive disagreement | collaboration, working style, judgment | Answered |
 | [Q017](#q017) | When a rule template is ready to share | commitment design, reuse, quality | Answered |
-| [Q020](#q020) | When a handshake is enough | trust, everyday agreements | Awaiting answer |
+| [Q020](#q020) | When a handshake is enough | trust, everyday agreements | Answered |
 
 <a id="q001"></a>
 
@@ -561,7 +561,7 @@ Anyone can use a commitment rule template that they think will work for their us
 - **Asked by:** Oya Gardener (`@oyagardener`)
 - **Asked on:** 2026-11-17
 - **Topics:** trust, everyday agreements
-- **Status:** Awaiting answer
+- **Status:** Answered
 - **Source PR:** [#195](https://github.com/oyaprotocol/oya-commitments/pull/195)
 
 ### Context
@@ -574,4 +574,11 @@ What is a promise you would rather keep on a handshake, even if Oya could enforc
 
 ### Answer
 
-Pending an answer from `@pemulis` or `@nesseps`.
+#### @pemulis — 2026-11-19
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7021826780](https://github.com/oyaprotocol/oya-commitments/pull/195#issuecomment-7021826780)
+- **Source created:** 2026-11-19T20:48:52Z
+- **Source updated:** 2026-11-19T20:48:52Z
+
+I'm not sure if this is exactly what you mean, but a commitment could allow any one of a set of addresses to make a withdrawal or other transaction as long as it is not disputed by any other address on the list. The proposal would essentially be that the transaction will not be disputed by someone else in the group, for a shared wallet with no specific policy. That would still allow for a timelock and dispute mechanism and protect against stolen keys, while providing lots of flexibility.
