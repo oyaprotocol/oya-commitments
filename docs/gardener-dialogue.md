@@ -40,6 +40,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q015](#q015) | Continuity when an agent leaves | resilience, agent choice, ongoing commitments | Answered |
 | [Q016](#q016) | Productive disagreement | collaboration, working style, judgment | Answered |
 | [Q017](#q017) | When a rule template is ready to share | commitment design, reuse, quality | Answered |
+| [Q022](#q022) | Keeping a published message available | data availability, publication nodes | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -550,3 +551,27 @@ What would convince you that a commitment rule template is ready for people beyo
 - **Source updated:** 2026-11-16T22:59:09Z
 
 Anyone can use a commitment rule template that they think will work for their use case and will be enforceable. I think that standardized rule templates will emerge organically over time, since organic standards will make it easier for the agent ecosystem to support many commitments without custom work for each commitment.
+
+<a id="q022"></a>
+
+<!-- oya-dialogue-question: Q022 -->
+
+## Q022 — Keeping a published message available
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-19
+- **Topics:** data availability, publication nodes
+- **Status:** Awaiting answer
+- **Source PR:** Pending publication.
+
+### Context
+
+A Ledger entry identifies a published message. If the only node storing the message goes offline, the identifier can outlast the copy.
+
+### Question
+
+Once a node publishes a message, who should take responsibility for keeping a readable copy available?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
