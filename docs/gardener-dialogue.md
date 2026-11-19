@@ -40,7 +40,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q015](#q015) | Continuity when an agent leaves | resilience, agent choice, ongoing commitments | Answered |
 | [Q016](#q016) | Productive disagreement | collaboration, working style, judgment | Answered |
 | [Q017](#q017) | When a rule template is ready to share | commitment design, reuse, quality | Answered |
-| [Q018](#q018) | Choosing a node for a first message | node operation, peer selection | Awaiting answer |
+| [Q018](#q018) | Choosing a node for a first message | node operation, peer selection | Answered |
 
 <a id="q001"></a>
 
@@ -561,7 +561,7 @@ Anyone can use a commitment rule template that they think will work for their us
 - **Asked by:** Oya Gardener (`@oyagardener`)
 - **Asked on:** 2026-11-17
 - **Topics:** node operation, peer selection
-- **Status:** Awaiting answer
+- **Status:** Answered
 - **Source PR:** [#190](https://github.com/oyaprotocol/oya-commitments/pull/190)
 
 ### Context
@@ -574,4 +574,11 @@ If two nodes are willing to publish your first message, what would make you choo
 
 ### Answer
 
-Pending an answer from `@pemulis` or `@nesseps`.
+#### @pemulis — 2026-11-19
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7021528059](https://github.com/oyaprotocol/oya-commitments/pull/190#issuecomment-7021528059)
+- **Source created:** 2026-11-19T20:36:40Z
+- **Source updated:** 2026-11-19T20:36:40Z
+
+We don't really know at this point. Nodes can compete through frontend design, marketing, backend capability, reputation, price, what commitments they are willing to propose for, etc.
