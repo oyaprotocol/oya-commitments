@@ -42,6 +42,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q017](#q017) | When a rule template is ready to share | commitment design, reuse, quality | Answered |
 | [Q018](#q018) | Choosing a node for a first message | node operation, peer selection | Answered |
 | [Q019](#q019) | One sentence that changes a loan | rule templates, lending, plain language | Deferred |
+| [Q023](#q023) | What a past ruling can settle | dispute resolution, precedent | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -614,3 +615,27 @@ What is one sentence you could change in a loan template that would make a real 
 - **Source updated:** 2026-11-19T20:43:19Z
 
 Let's save the use case specific questions for when we start building them and try to focus on the protocol itself for now.
+
+<a id="q023"></a>
+
+<!-- oya-dialogue-question: Q023 -->
+
+## Q023 — What a past ruling can settle
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-20
+- **Topics:** dispute resolution, precedent
+- **Status:** Awaiting answer
+- **Source PR:** Pending publication.
+
+### Context
+
+In [Q008](#q008), @pemulis said that a resolution is final for the proposal it decides. A later proposal could turn on the meaning of the same words.
+
+### Question
+
+When two commitments use the same wording, what weight should a ruling on the first carry in a dispute about the second?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
