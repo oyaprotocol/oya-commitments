@@ -208,12 +208,7 @@ function App() {
     safe: '',
     ogModule: '',
   });
-  const [txHashes, setTxHashes] = useState({
-    moduleProxyFactory: '',
-    safeProxy: '',
-    ogModule: '',
-    enableModule: '',
-  });
+  const [txHashes, setTxHashes] = useState({});
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -278,7 +273,7 @@ function App() {
     setError('');
     setStatus('Preparing deployment...');
     setDeployment({ moduleProxyFactory: '', safe: '', ogModule: '' });
-    setTxHashes({ moduleProxyFactory: '', safeProxy: '', ogModule: '', enableModule: '' });
+    setTxHashes({});
 
     try {
       const account = walletClient.account.address;
@@ -481,6 +476,7 @@ function App() {
       });
 
       const addOwnerTx = await walletClient.writeContract(addOwnerExec.request);
+      setTxHashes((prev) => ({ ...prev, addOwner: addOwnerTx }));
       await publicClient.waitForTransactionReceipt({ hash: addOwnerTx });
 
       setStatus('Removing deployer from Safe owners...');
@@ -543,6 +539,7 @@ function App() {
       });
 
       const removeOwnerTx = await walletClient.writeContract(removeOwnerExec.request);
+      setTxHashes((prev) => ({ ...prev, removeOwner: removeOwnerTx }));
       await publicClient.waitForTransactionReceipt({ hash: removeOwnerTx });
 
       setDeployment({
@@ -669,6 +666,10 @@ function App() {
         <h2>Transaction Hashes</h2>
         <div className="outputs">
           <div>
+            <span>Module Proxy Factory Deployment</span>
+            <code>{txHashes.moduleProxyFactory || '-'}</code>
+          </div>
+          <div>
             <span>Safe Proxy Deployment</span>
             <code>{txHashes.safeProxy || '-'}</code>
           </div>
@@ -679,6 +680,14 @@ function App() {
           <div>
             <span>Enable Module</span>
             <code>{txHashes.enableModule || '-'}</code>
+          </div>
+          <div>
+            <span>Add Burn Address as Owner</span>
+            <code>{txHashes.addOwner || '-'}</code>
+          </div>
+          <div>
+            <span>Remove Deployer as Owner</span>
+            <code>{txHashes.removeOwner || '-'}</code>
           </div>
         </div>
       </section>
