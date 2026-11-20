@@ -216,21 +216,19 @@ Optional deploy overrides:
 - `TEST_ERC1155_SYMBOL`: Display symbol. Defaults to `OYAT1155`.
 - `TEST_ERC1155_URI`: Base ERC1155 metadata URI returned by `uri(id)`. Defaults to `https://example.invalid/oya-test-erc1155/{id}.json`.
 
-If you prefer to call Forge directly instead of the wrapper, include verification flags explicitly:
+To deploy and verify directly with Forge, export `DEPLOYER_PK`, `RPC_URL`, and `ETHERSCAN_API_KEY` from your private configuration first:
 
 ```shell
-DEPLOYER_PK=0xabc123... \
-ETHERSCAN_API_KEY=your_etherscan_api_key \
 TEST_ERC1155_NAME="Oya Test ERC1155" \
 TEST_ERC1155_SYMBOL="OYAT1155" \
 TEST_ERC1155_URI="https://example.invalid/oya-test-erc1155/{id}.json" \
 forge script script/DeployOyaTestERC1155.s.sol:DeployOyaTestERC1155 \
-  --rpc-url <your_rpc_url> \
+  --rpc-url "${RPC_URL:?Set RPC_URL to your Sepolia endpoint}" \
   --broadcast \
   --verify \
   --chain sepolia \
   --verifier etherscan \
-  --etherscan-api-key "$ETHERSCAN_API_KEY"
+  --etherscan-api-key "${ETHERSCAN_API_KEY:?Set ETHERSCAN_API_KEY}"
 ```
 
 Mint a test balance after deployment:

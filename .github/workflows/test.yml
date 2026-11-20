@@ -121,6 +121,9 @@ jobs:
       - name: Verify package build output is fresh
         run: git diff --exit-code -- packages
 
+      - name: Test kernel packages
+        run: node --test packages/*/test/*.test.js
+
   production-node:
     name: Production node
     runs-on: ubuntu-latest
