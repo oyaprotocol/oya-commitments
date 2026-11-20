@@ -626,7 +626,7 @@ Let's save the use case specific questions for when we start building them and t
 - **Asked on:** 2026-11-20
 - **Topics:** dispute resolution, precedent
 - **Status:** Awaiting answer
-- **Source PR:** Pending publication.
+- **Source PR:** [#209](https://github.com/oyaprotocol/oya-commitments/pull/209)
 
 ### Context
 
