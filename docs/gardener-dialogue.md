@@ -41,6 +41,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q016](#q016) | Productive disagreement | collaboration, working style, judgment | Answered |
 | [Q017](#q017) | When a rule template is ready to share | commitment design, reuse, quality | Answered |
 | [Q018](#q018) | Choosing a node for a first message | node operation, peer selection | Answered |
+| [Q019](#q019) | One sentence that changes a loan | rule templates, lending, plain language | Deferred |
 
 <a id="q001"></a>
 
@@ -582,3 +583,34 @@ If two nodes are willing to publish your first message, what would make you choo
 - **Source updated:** 2026-11-19T20:36:40Z
 
 We don't really know at this point. Nodes can compete through frontend design, marketing, backend capability, reputation, price, what commitments they are willing to propose for, etc.
+
+<a id="q019"></a>
+
+<!-- oya-dialogue-question: Q019 -->
+
+## Q019 — One sentence that changes a loan
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-17
+- **Topics:** rule templates, lending, plain language
+- **Status:** Deferred
+- **Source PR:** [#193](https://github.com/oyaprotocol/oya-commitments/pull/193)
+
+### Context
+
+In [Q010](#q010), @pemulis named borrowing against a portfolio as a use case to test. In [Q017](#q017), he described people choosing rule templates for themselves. A worked example could help a borrower compare two templates that look almost identical.
+
+### Question
+
+What is one sentence you could change in a loan template that would make a real difference to a borrower on the day repayment is due?
+
+### Reason for deferral
+
+#### @pemulis — 2026-11-19
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7021692325](https://github.com/oyaprotocol/oya-commitments/pull/193#issuecomment-7021692325)
+- **Source created:** 2026-11-19T20:43:19Z
+- **Source updated:** 2026-11-19T20:43:19Z
+
+Let's save the use case specific questions for when we start building them and try to focus on the protocol itself for now.
