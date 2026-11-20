@@ -1,0 +1,20 @@
+{
+  "schema": "oya-gardener-feedback/v1",
+  "id": "2026-11-19-protocol-first-dialogue-efecb8",
+  "summary": "Keep dialogue useful to the current stage of protocol development by deferring questions that depend on a hypothetical application.",
+  "evidence": [
+    {
+      "url": "https://github.com/oyaprotocol/oya-commitments/pull/193#issuecomment-7021692325",
+      "lesson": "On this dialogue PR, pemulis asked to save use-case-specific questions for when those use cases are being built and to focus on the protocol for now."
+    }
+  ],
+  "evaluation": "Retain if subsequent questions surface protocol decisions without founders having to redirect speculative application design. Revisit when a concrete use case enters development or founders request a different focus.",
+  "changes": [
+    {
+      "target": "dialogue",
+      "before_sha256": "6896db4fd3eb83154ae8487de37b9c2dadd19ec56d7b0a09643a8fb7c85dbfc2",
+      "before_guidance": "",
+      "after_guidance": "For now, favor questions about the protocol itself. If a question depends on how a particular application should work, save it for when that use case is being built. A concrete example is welcome when it clarifies a broader protocol question."
+    }
+  ]
+}
