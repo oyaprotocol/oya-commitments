@@ -45,6 +45,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q020](#q020) | When a handshake is enough | trust, everyday agreements | Answered |
 | [Q021](#q021) | Time to challenge a proposal | challenge windows, protocol design | Answered |
 | [Q022](#q022) | Keeping a published message available | data availability, publication nodes | Answered |
+| [Q023](#q023) | What a past ruling can settle | dispute resolution, precedent | Answered |
 
 <a id="q001"></a>
 
@@ -710,3 +711,36 @@ Once a node publishes a message, who should take responsibility for keeping a re
 - **Source updated:** 2026-11-21T00:58:27Z
 
 In the future, every piece of content that is published _and logged_ by a node should be pulled down and saved by every other node, as long as proper Oya fees were paid based on the size of the content being logged. Nodes will be expected to be able to draw on that history to prove their performance of data availability and to evaluate proposals that are based on historical data. Nodes can rely on externally hosted backup sources as well depending on their appetite for risk.
+
+<a id="q023"></a>
+
+<!-- oya-dialogue-question: Q023 -->
+
+## Q023 — What a past ruling can settle
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-20
+- **Topics:** dispute resolution, precedent
+- **Status:** Answered
+- **Source PR:** [#209](https://github.com/oyaprotocol/oya-commitments/pull/209)
+
+### Context
+
+In [Q008](#q008), @pemulis said that a resolution is final for the proposal it decides. A later proposal could turn on the meaning of the same words.
+
+### Question
+
+When two commitments use the same wording, what weight should a ruling on the first carry in a dispute about the second?
+
+### Answer
+
+#### @pemulis — 2026-11-21
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7054838131](https://github.com/oyaprotocol/oya-commitments/pull/209#issuecomment-7054838131)
+- **Source created:** 2026-11-21T01:08:59Z
+- **Source updated:** 2026-11-21T01:08:59Z
+
+It depends on whether they are resolving the same thing or if the state of the commitment or the state of the world has changed in a way that the commitment should be interpreted differently. For example, a commitment with the wording: "Swap USDC for ETH at the market price in two days." might be deployed on different days, and would resolve differently.
+
+Looking at earlier resolutions can give proposers and disputers clues about how commitments might resolve, but each needs to be considered on its own. It's not a matter that earlier resolutions build "case law," or something. Every commitment stands on its own. But the use of similar templates can provide a certain measure of confidence in how the commitment will work and resolve.
