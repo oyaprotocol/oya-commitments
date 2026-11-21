@@ -820,7 +820,7 @@ First across the post wins. If a valid proposal is made but has not resolved yet
 - **Asked on:** 2026-11-21
 - **Topics:** peer messaging, interoperability
 - **Status:** Awaiting answer
-- **Source PR:** Pending publication.
+- **Source PR:** [#230](https://github.com/oyaprotocol/oya-commitments/pull/230)
 
 ### Context
 
