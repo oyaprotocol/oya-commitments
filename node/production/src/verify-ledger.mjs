@@ -9,9 +9,14 @@ async function exportBytes(destination, bytes) {
     const temp = `${dirname(destination)}${sep}.ledger-export-${randomUUID()}`;
     const file = await open(temp, 'wx', 0o600);
     try {
-        try { await file.writeFile(bytes); } finally { await file.close(); }
+        try {
+            await file.writeFile(bytes);
+            await file.sync();
+        } finally { await file.close(); }
         await link(temp, destination);
     } finally { await unlink(temp); }
+    const parent = await open(dirname(destination), 'r');
+    try { await parent.sync(); } finally { await parent.close(); }
 }
 
 export async function main(args = process.argv.slice(2)) {

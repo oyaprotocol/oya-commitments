@@ -71,6 +71,8 @@ Detailed test logs and publication drafts are kept outside Git for the parent re
 
 Cumulative code/test/generated/executable-config churn is 983 lines, below the 3,000-line cap. All-file totals are recorded separately in the handoff evidence. The upstream advance since this branch point only adds dialogue documentation; it is not removed by this PR. The peer-directory inspector was the original candidate and has since landed.
 
+Review follow-up: sync the verified file before linking it and the parent directory after cleanup. A failed file sync leaves no destination. A failed directory sync reports export failure without deleting the published file. The CLI regression test injects both failures.
+
 ## Next feature — candidate when capacity permits
 
 `ledger-archive-recheck-v1`: let an operator check retained bytes against a previously trusted record without contacting Kubo. First check whether a standard checksum tool already covers the workflow. If record-aware checking adds value, reuse the production verifier’s digest rules in the evidence CLI and tests (estimated under 250 changed code lines). Accept matching binary and empty files, reject a changed byte, and distinguish an unreadable file from a mismatch. Require a trusted digest or supported raw CID. An offline match says nothing about current chain state or peer availability.

@@ -78,7 +78,7 @@ To keep the exact bytes from this check, append `--export DESTINATION`:
 node node/production/src/verify-ledger.mjs log.json evidence.json --export "$PRIVATE_DIR/content.bin"
 ```
 
-Choose a new filename in an existing private directory outside Git on a local filesystem that supports hard links. Only a `verified` observation exports bytes, without a second retrieval. The completed file has owner-only permissions and never replaces an existing entry. A local write or cleanup failure reports `stage: export`, `reason: export_failed` (exit 3); inspect the directory before retrying. An interruption can leave a private `.ledger-export-*` temporary file; remove it once the command has stopped.
+Choose a new filename in an existing private directory outside Git on a local filesystem that supports hard links. Only a `verified` observation exports bytes, without a second retrieval. The completed file has owner-only permissions and never replaces an existing entry. The command syncs the file before publishing and the parent directory after removing the temporary name. If directory sync fails, the destination may already exist but its persistence is unconfirmed. A local write, sync or cleanup failure reports `stage: export`, `reason: export_failed` (exit 3); inspect the directory before retrying. An interruption can leave a private `.ledger-export-*` temporary file; remove it once the command has stopped.
 
 ### Correctness and availability levels
 

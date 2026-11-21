@@ -547,6 +547,24 @@ test('export publishes only complete verified snapshots at a new private filenam
         syncBuiltinESMExports();`;
     await check(3, 'export_failed', dest, 'data:text/javascript,' + encodeURIComponent(failWrite));
     assert.deepEqual((await readdir(dir)).sort(), ['record', 'settings']);
+    for (const target of ['file', 'directory']) {
+        const failSync = `import fs from 'node:fs/promises';
+            import { syncBuiltinESMExports } from 'node:module';
+            const open = fs.open;
+            fs.open = async (...args) => {
+                const handle = await open(...args);
+                if (${target === 'file' ? "args[1] === 'wx'" : `args[0] === ${JSON.stringify(dir)}`})
+                    handle.sync = async () => { throw new Error('sync failed'); };
+                return handle;
+            };
+            syncBuiltinESMExports();`;
+        await check(3, 'export_failed', dest, 'data:text/javascript,' + encodeURIComponent(failSync));
+        if (target === 'directory') {
+            assert.deepEqual(await readFile(dest), content);
+            await rm(dest);
+        }
+        assert.deepEqual((await readdir(dir)).sort(), ['record', 'settings']);
+    }
     await check(0, 'snapshot_consistent');
     assert.deepEqual(await readFile(dest), content);
     assert.equal((await stat(dest)).mode & 0o777, 0o600);
