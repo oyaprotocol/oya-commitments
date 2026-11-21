@@ -26,7 +26,7 @@ function fixture(t) {
         'compose.yaml', 'README.md', 'gas-policy.md', 'operator-status.md', 'operator.example.json', 'batch-logging.md', 'deploy-droplet.md', 'deploy-with-agent.md', 'run-locally.md', 'run-direct.md', 'host-inbox.md', 'inbox-api.md', 'release-image.md', 'testnet-ledger.md', 'upgrade-node.md']) {
         cpSync(join(runtime, name), join(source, name), { recursive: true });
     }
-    for (const name of ['publish-image.sh', 'deploy-droplet.sh', 'deploy-droplet-remote.sh', 'keychain-worker.py', 'upgrade-node.py', 'peer-directory.mjs', 'gas-policy.mjs', 'operator-node.mjs', 'operator-profile.mjs', 'operator-status.mjs']) {
+    for (const name of ['publish-image.sh', 'deploy-droplet.sh', 'deploy-droplet-remote.sh', 'keychain-worker.py', 'upgrade-node.py', 'peer-directory.mjs', 'gas-policy.mjs', 'operator-balance.mjs', 'operator-node.mjs', 'operator-profile.mjs', 'operator-status.mjs']) {
         cpSync(join(runtime, 'scripts', name), join(source, 'scripts', name));
     }
     const agent = 'agent-library/agents/hourly-message-test/agent.mjs';
@@ -126,7 +126,7 @@ mkdir "$3"
         'inbox', 'inbox-api.md', 'operator-status.md', 'operator.example.json', 'peers', 'release-image.md', 'run-direct.md', 'run-locally.md', 'scripts', 'src', 'testnet-ledger.md', 'upgrade-node.md']);
     assert.deepEqual(readdirSync(join(bundle, 'inbox')).sort(), ['Caddyfile', 'compose.https.yaml', 'compose.keychain-worker.yaml', 'compose.peers.yaml', 'compose.postgres.yaml',
         'compose.worker.yaml', 'compose.yaml', 'inbox.example.json', 'worker.example.json']);
-    assert.deepEqual(readdirSync(join(bundle, 'scripts')).sort(), ['deploy-droplet-remote.sh', 'deploy-droplet.sh', 'gas-policy.mjs', 'keychain-worker.py', 'operator-node.mjs', 'operator-profile.mjs', 'operator-status.mjs', 'peer-directory.mjs', 'upgrade-node.py']);
+    assert.deepEqual(readdirSync(join(bundle, 'scripts')).sort(), ['deploy-droplet-remote.sh', 'deploy-droplet.sh', 'gas-policy.mjs', 'keychain-worker.py', 'operator-balance.mjs', 'operator-node.mjs', 'operator-profile.mjs', 'operator-status.mjs', 'peer-directory.mjs', 'upgrade-node.py']);
     assert.deepEqual(readdirSync(join(bundle, 'docker')).sort(), ['Caddyfile', 'compose.http.yaml', 'compose.testing.yaml', 'config.example.json', 'runtime.env.example']);
     const directoryBytes = readFileSync(join(bundle, 'peers/testnet-directory.json'));
     assert.deepEqual(directoryBytes, readFileSync(join(f.source, 'peers/testnet-directory.json')));
@@ -165,7 +165,7 @@ mkdir "$3"
     assert.equal(statSync(join(unpacked, agent)).mode & 0o777, 0o644, 'The container user must be able to read the mounted agent source.');
     assert.equal(readFileSync(join(unpacked, agent), 'utf8'), readFileSync(join(f.checkout, agent), 'utf8'));
     assert.equal(readFileSync(join(bundle, 'image.txt'), 'utf8'), `${repository}@${digest}\n`);
-    for (const name of ['deploy-droplet.sh', 'deploy-droplet-remote.sh', 'keychain-worker.py', 'upgrade-node.py', 'peer-directory.mjs', 'gas-policy.mjs', 'operator-node.mjs', 'operator-profile.mjs', 'operator-status.mjs']) {
+    for (const name of ['deploy-droplet.sh', 'deploy-droplet-remote.sh', 'keychain-worker.py', 'upgrade-node.py', 'peer-directory.mjs', 'gas-policy.mjs', 'operator-balance.mjs', 'operator-node.mjs', 'operator-profile.mjs', 'operator-status.mjs']) {
         assert.equal(readFileSync(join(bundle, 'scripts', name), 'utf8'), readFileSync(join(f.source, 'scripts', name), 'utf8'));
     }
     assert.equal((result.stdout + result.stderr).includes('private-fixture-marker'), false);
@@ -179,7 +179,7 @@ test('runtime image allowlist includes shared public health dependencies', () =>
     }
 });
 
-test('extracted status closure works with no checkout, npm dependencies, Docker or secrets', async t => {
+test('extracted operator CLI works with no checkout, npm dependencies, Docker or secrets', async t => {
     const f = fixture(t);
     const published = f.run('', [repository, 'node-v0.1.0', f.output, '--dry-run']);
     assert.equal(published.status, 0, published.stderr);
@@ -217,6 +217,13 @@ test('extracted status closure works with no checkout, npm dependencies, Docker 
         assert.equal(JSON.parse(result.stdout).verified, true);
         const options = { cwd: unpacked, env: { PATH: '', OYA_OPERATOR_PROFILE: join(privateDir, 'operator.json') } };
         const run = (...args) => execFileSync(process.execPath, args, { ...options, encoding: 'utf8', timeout: 10000 });
+        if (mode === 'ipfs') {
+            const balance = JSON.parse(run(join(bundle, 'scripts/operator-node.mjs'), 'balance',
+                '--profile', join(privateDir, 'operator.json'), '--json'));
+            assert.equal(balance.status, 'not_applicable');
+            assert.equal(balance.mode, 'ipfs');
+            assert.equal(balance.balanceWei, null);
+        }
         assert.equal(run(join(bundle, 'scripts/operator-node.mjs'), 'gas-policy', '--json'),
             run(join(bundle, 'scripts/gas-policy.mjs'), '--config', join(privateDir, 'node.json'), '--json'));
     }

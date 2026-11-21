@@ -76,6 +76,14 @@ Select the installation with `operator-node.mjs gas-policy --profile FILE [--jso
 
 From repository root on Node 24, run `node --test node/production/test/{operator-node,gas-policy,publish-image}.test.mjs` and `npm --prefix node/production test`. Accept when both CLIs give byte-identical policy output, invalid inputs fail privately, and the actual extracted command works without npm, secret reads or health requests. No runtime or release format change is needed. Reverting the host changes rolls back the command without migrating private profiles.
 
+## Balance snapshot milestone: operator-balance-snapshot-v1
+
+- [x] 2026-11-21 UTC: Rechecked M5 after #199 merged and reused the profile loader for `balance`. Added bounded read-only RPC and host bundle coverage. All 670 production tests passed on Node 24.22.3 with a canonical temporary directory.
+
+From the repository root run `node node/production/scripts/operator-node.mjs balance --profile FILE --json`. Select the node’s public address and explicit RPC URL. Check chain ID, read the current block number, then pass that number to the balance query. Decimal strings preserve exact wei and block numbers. Reject redirects and limit the whole observation to five seconds and each body to 64 KiB. Bind optional authorization in the private profile to the exact selected endpoint. The [operator guide](../node/production/operator-status.md#read-the-native-balance) describes exit codes and rollback compatibility.
+
+Run `node --test node/production/test/{operator-balance,publish-image}.test.mjs` and `npm --prefix node/production test` after installing locked dependencies. Loopback tests distinguish zero from failure and check authentication boundaries, malformed or oversized replies, timeout, wrong chain and IPFS. Retry safely after correcting configuration or restoring RPC. No balance or RPC error state is persisted.
+
 ## Next feature — candidate when capacity permits
 
-`operator-balance-snapshot-v1`: show the selected Ledger node’s exact native balance and observed block on its expected chain. Reuse profile identity and bounded read-only RPC; explicitly design separate RPC authorization, timeouts, response bounds and sanitized errors before implementation. Do not unlock the node key. Distinguish a zero balance from unavailable data, and IPFS inapplicability from failure. Test with synthetic loopback RPC (wrong chain, malformed quantities, timeout, auth redaction, exact large balances), no live funds, and an extracted bundle. Estimated 400–700 changed code/test/config lines. Monitoring, notifications and spending actions are separate.
+`operator-monitor-once-v1`: combine the profile-selected health and balance observations into one on-demand operator report. Show healthy, degraded, unknown and not applicable separately. Reuse the host dispatcher and observation functions once the balance command lands. Test direct and worker installations against fake health and RPC endpoints, including partial outages. Use no external notification service or persistent state. Estimated 300–600 changed code/test lines.
