@@ -35,13 +35,21 @@ export function healthUrl(value) {
     return url.href;
 }
 
+function balanceEndpoint(value) {
+    if (typeof value !== 'string' || value.length > 2048 || !/^https?:\/\/[^/?#]/.test(value) ||
+        /[\s\x00-\x1f\x7f\\#]/.test(value) || value.split('/')[2].includes('@')) throw new Error('Invalid RPC URL.');
+    const url = new URL(value);
+    if (url.protocol !== 'https:' && !['127.0.0.1', '[::1]', 'localhost'].includes(url.hostname)) throw new Error('Invalid RPC URL.');
+    return url.href;
+}
+
 export async function loadProfile(file, command) {
     const selected = resolve(pathValue(file));
     const directory = dirname(selected);
     const info = await lstat(directory);
     if (!info.isDirectory() || info.uid !== process.getuid() || (info.mode & 0o077)) throw new Error('Invalid profile directory.');
     const profile = await readJson(selected, true);
-    const fields = ['version', 'role', 'nodeConfig', 'workerConfig', 'healthUrl', 'nodeAddress'];
+    const fields = ['version', 'role', 'nodeConfig', 'workerConfig', 'healthUrl', 'nodeAddress', 'balanceRpc'];
     if (!profile || typeof profile !== 'object' || Array.isArray(profile) || profile.version !== 1 ||
         Object.keys(profile).some(key => !fields.includes(key)) || !['direct', 'worker'].includes(profile.role)) throw new Error('Invalid profile.');
     const url = healthUrl(profile.healthUrl);
@@ -51,6 +59,21 @@ export async function loadProfile(file, command) {
     const input = await readJson(resolve(directory, pathValue(profile.nodeConfig)));
     const nodeAddress = input?.mode === 'ipfs' ? null : publicAddress(profile.nodeAddress);
     if (input?.mode === 'ipfs' && Object.hasOwn(profile, 'nodeAddress')) throw new Error('Unexpected node address.');
+    const rpc = profile.balanceRpc;
+    if (Object.hasOwn(profile, 'balanceRpc')) {
+        if (input?.mode === 'ipfs' || !rpc || typeof rpc !== 'object' || Array.isArray(rpc) ||
+            Object.keys(rpc).some(key => !['url', 'authorization'].includes(key))) throw new Error('Invalid balance RPC.');
+        balanceEndpoint(rpc.url);
+        if (Object.hasOwn(rpc, 'authorization') && (typeof rpc.authorization !== 'string' ||
+            !/^[!-~][ -~]{0,1023}$/.test(rpc.authorization))) throw new Error('Invalid RPC authorization.');
+    }
+    if (command === 'balance') {
+        const config = publicNodeSettings(input);
+        const identity = { ...config, role: profile.role, nodeAddress };
+        if (config.mode === 'ipfs') return identity;
+        if (rpc && rpc.url !== input.rpcUrl) throw new Error('RPC endpoint mismatch.');
+        return { ...identity, rpcUrl: balanceEndpoint(input.rpcUrl), authorization: rpc?.authorization };
+    }
     if (command === 'gas-policy') return projectGasPolicy(input);
     if (command !== 'status') throw new Error('Invalid profile command.');
     const config = publicNodeSettings(input);

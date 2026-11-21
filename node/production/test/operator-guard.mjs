@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const allowed = new Set(JSON.parse(process.env.TEST_OPERATOR_FILES));
-for (const name of ['scripts/operator-node.mjs', 'scripts/operator-profile.mjs', 'scripts/operator-status.mjs',
+for (const name of ['scripts/operator-balance.mjs', 'scripts/operator-node.mjs', 'scripts/operator-profile.mjs', 'scripts/operator-status.mjs',
     'src/gas-policy.mjs', 'src/public-settings.mjs', 'src/defaults.mjs', 'src/health.mjs']) {
     allowed.add(fileURLToPath(new URL(`../${name}`, import.meta.url)));
 }
