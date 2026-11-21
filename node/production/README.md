@@ -30,7 +30,20 @@ The setup guides use the published [current image and matching bundle](release-i
 
 ## Prepare a first-day availability statement
 
-From `node/production`, run `node src/observe-availability.mjs record.json settings.json` using the [Ledger verifier inputs](inbox-api.md#verify-ledger-evidence). Select a publication from another node. The command retrieves the bytes through your configured Kubo endpoint. For a raw CID (a content identifier that directly hashes those bytes), it prints a short ASCII statement identifying the publisher, event, and time of retrieval. It requires a successful check before 24 hours have elapsed since the block timestamp. Use a synchronized clock and a Kubo endpoint you trust to speak for your node.
+Prepare `record.json` and `settings.json` using the [Ledger verifier inputs](inbox-api.md#verify-ledger-evidence). For a [local inbox installation](run-locally.md), load the installation environment and set `ipfsUrl` to `http://ipfs:5001` so the observer reaches Kubo on the inbox network. From the directory containing the two input files, run the release image with only those files mounted:
+
+```sh
+docker run --rm --read-only --user "$(id -u):$(id -g)" \
+  --network "${COMPOSE_PROJECT_NAME:?Load the inbox installation environment}_default" \
+  --mount "type=bind,src=$PWD/record.json,dst=/record.json,readonly" \
+  --mount "type=bind,src=$PWD/settings.json,dst=/settings.json,readonly" \
+  --entrypoint node "$(cat "${OYA_BUNDLE_DIR:?}/node/production/image.txt")" \
+  src/observe-availability.mjs /record.json /settings.json
+```
+
+From a source checkout with dependencies installed, run `node src/observe-availability.mjs record.json settings.json` in `node/production` instead, using endpoints reachable from the host.
+
+Select a publication from another node. The command retrieves the bytes through your configured Kubo endpoint. For a raw CID (a content identifier that directly hashes those bytes), it prints a short ASCII statement identifying the publisher, event, and time of retrieval. It requires a successful check before 24 hours have elapsed since the block timestamp. Use a synchronized clock and a Kubo endpoint you trust to speak for your node.
 
 To prepare text for the [chosen-node sender](peers/send.md), redirect stdout to a new private file. Review or use that file only after exit 0. On failure stdout is empty and stderr explains why. Retry unavailable reads while the window is open. The unsigned statement describes one retrieval, including a possible cache hit. It does not establish continuous availability, independent storage or who originally pinned the bytes. Signing and publication are separate operator actions.
 
