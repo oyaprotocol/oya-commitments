@@ -43,6 +43,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q018](#q018) | Choosing a node for a first message | node operation, peer selection | Answered |
 | [Q019](#q019) | One sentence that changes a loan | rule templates, lending, plain language | Deferred |
 | [Q020](#q020) | When a handshake is enough | trust, everyday agreements | Answered |
+| [Q021](#q021) | Time to challenge a proposal | challenge windows, protocol design | Answered |
 
 <a id="q001"></a>
 
@@ -646,3 +647,34 @@ What is a promise you would rather keep on a handshake, even if Oya could enforc
 - **Source updated:** 2026-11-19T20:48:52Z
 
 I'm not sure if this is exactly what you mean, but a commitment could allow any one of a set of addresses to make a withdrawal or other transaction as long as it is not disputed by any other address on the list. The proposal would essentially be that the transaction will not be disputed by someone else in the group, for a shared wallet with no specific policy. That would still allow for a timelock and dispute mechanism and protect against stolen keys, while providing lots of flexibility.
+
+<a id="q021"></a>
+
+<!-- oya-dialogue-question: Q021 -->
+
+## Q021 — Time to challenge a proposal
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-19
+- **Topics:** challenge windows, protocol design
+- **Status:** Answered
+- **Source PR:** [#202](https://github.com/oyaprotocol/oya-commitments/pull/202)
+
+### Context
+
+In [Q003](#q003), @pemulis explained that anyone can challenge a proposal during a limited window. The clock runs even while nobody is looking.
+
+### Question
+
+How would you judge whether a challenge window gives someone enough time to notice a mistaken proposal and dispute it?
+
+### Answer
+
+#### @pemulis — 2026-11-21
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7054600974](https://github.com/oyaprotocol/oya-commitments/pull/202#issuecomment-7054600974)
+- **Source created:** 2026-11-21T00:55:05Z
+- **Source updated:** 2026-11-21T00:55:05Z
+
+The typical default for UMA proposals in the past has been two hours, but it's configurable. But depending on how robust the node/validator network seems to be, how much money is at risk, and how easy the commitment is to evaluate, shorter challenge periods might be safer. Longer challenge periods can be selected for commitments with a lot of funds at risk or that are harder to evaluate.
