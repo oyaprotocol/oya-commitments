@@ -28,6 +28,12 @@ The default deployment runs Oya and Kubo on your local device, with a portable P
 
 The setup guides use the published [current image and matching bundle](release-image.md#published-deployment-release), including Sepolia defaults, and cover Ledger and explicit IPFS-only modes. v0.2.0 images support only the direct API.
 
+## Prepare a first-day availability statement
+
+From `node/production`, run `node src/observe-availability.mjs record.json settings.json` using the [Ledger verifier inputs](inbox-api.md#verify-ledger-evidence). Select a publication from another node. The command retrieves the bytes through your configured Kubo endpoint. For a raw CID (a content identifier that directly hashes those bytes), it prints a short ASCII statement identifying the publisher, event, and time of retrieval. It requires a successful check before 24 hours have elapsed since the block timestamp. Use a synchronized clock and a Kubo endpoint you trust to speak for your node.
+
+To prepare text for the [chosen-node sender](peers/send.md), redirect stdout to a new private file. Review or use that file only after exit 0. On failure stdout is empty and stderr explains why. Retry unavailable reads while the window is open. The unsigned statement describes one retrieval, including a possible cache hit. It does not establish continuous availability, independent storage or who originally pinned the bytes. Signing and publication are separate operator actions.
+
 ## Deployed Sepolia Ledger
 
 New node configurations default to verifying incoming signed messages against the client allowlist, publishing their signed envelopes to IPFS, then logging the resulting CIDs to this existing Ledger.

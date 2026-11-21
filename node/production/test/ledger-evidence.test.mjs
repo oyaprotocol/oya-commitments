@@ -103,6 +103,40 @@ test('source-independent binary log verifies without any job, inbox, signature o
     readOnly(f.state);
 });
 
+test('fresh observation produces a shareable statement only for recent CID-bound bytes', async t => {
+    const f = await setup(t);
+    const dir = await mkdtemp(join(tmpdir(), 'availability-'));
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    const files = [join(dir, 'record.json'), join(dir, 'settings.json')];
+    await writeFile(files[0], JSON.stringify(f.record));
+    await writeFile(files[1], JSON.stringify(f.config));
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const run = () => promisify(execFile)(process.execPath, [join(runtime, 'src/observe-availability.mjs'), ...files]);
+    f.state.block.timestamp = `0x${Math.floor(Date.now() / 1000).toString(16)}`;
+    const { stdout } = await run();
+    for (const value of [cid, txHash, blockHash, ledger, node, 'log 7', 'chain 31337', '6 bytes']) assert.ok(stdout.includes(value));
+    assert.match(stdout.trim(), /^[ -~]+$/);
+    readOnly(f.state);
+    f.state.content = Buffer.from('wrong');
+    await assert.rejects(run, { code: 2, stdout: '', stderr: 'cid_content\n' });
+    f.state.content = content;
+    f.state.block.timestamp = '0x1';
+    await assert.rejects(run, { code: 2, stdout: '', stderr: 'outside_observation_window\n' });
+});
+
+test('observation boundaries use completion milliseconds and reject digest-only evidence', async () => {
+    const { observation } = await import('../src/observe-availability.mjs');
+    const report = { status: 'verified', checks: { cidBinding: 'verified' }, expected: {}, block: { timestamp: '1000' } };
+    for (const [age, code] of [[-1, 2], [0, 0], [86399999, 0], [86400000, 2]]) {
+        report.observedAt = new Date(1000000 + age).toISOString();
+        assert.equal(observation(report).code, code);
+    }
+    report.checks.cidBinding = 'not_checked';
+    assert.deepEqual(observation(report), { code: 4, error: 'raw_cid_required' });
+    assert.deepEqual(observation({ status: 'unavailable', reason: 'deadline' }), { code: 3, error: 'deadline' });
+});
+
 test('fixed SHA-256 CID test vector prevents shared fixture encoder mistakes', async t => {
     const f = await setup(t);
     setContent(f, Buffer.from('hello world'));

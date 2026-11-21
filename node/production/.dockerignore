@@ -17,6 +17,7 @@ src/**
 !src/main.mjs
 !src/ledger-evidence.mjs
 !src/verify-ledger.mjs
+!src/observe-availability.mjs
 !src/server.mjs
 !src/secrets.mjs
 !src/signer.mjs
