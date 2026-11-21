@@ -22,8 +22,9 @@ Version 1 accepts exactly these fields:
 | `workerConfig` | Existing worker JSON, required only for workers. |
 | `healthUrl` | `/healthz` on `127.0.0.1`, `::1`, or `localhost`, using HTTP or HTTPS. No credentials, query or fragment. `localhost` is pinned to `127.0.0.1`. |
 | `nodeAddress` | Expected nonzero public Ethereum address, required only in Ledger mode. |
+| `balanceRpc` | Optional Ledger RPC URL and authorization for balance queries. See below. |
 
-Relative config paths resolve against the profile directory, not the current working directory. Mode, chain, Ledger and operation timeout use the runtime's public settings projection and defaults. The target comes from worker configuration. Runtime startup still validates full configuration, including address checksums and authorization. Status compares public addresses case-insensitively. For direct nodes, set `role` to `direct` and omit `workerConfig`. For IPFS-only mode, omit `nodeAddress` and keep Ethereum settings out of node JSON. Credentials, signing settings and state directories are not accepted in this profile version.
+Relative config paths resolve against the profile directory, not the current working directory. Mode, chain, Ledger and operation timeout use the runtime's public settings projection and defaults. The target comes from worker configuration. Runtime startup still validates full configuration, including address checksums and authorization. Status compares public addresses case-insensitively. For direct nodes, set `role` to `direct` and omit `workerConfig`. For IPFS-only mode, omit `nodeAddress` and keep Ethereum settings out of node JSON. The optional `balanceRpc` field below is for balance queries only. Keep signing keys and runtime credentials out of the profile.
 
 The local port must reach the worker/direct node, not the inbox. Keep its Docker port mapping bound to loopback. A successful identity match is a local observation, not cryptographic attestation: a process controlled by the same host user can impersonate health.
 
@@ -37,6 +38,16 @@ OYA_OPERATOR_PROFILE="$OYA_LOCAL_DIR/operator.json" \
 If you previously exported `OYA_OPERATOR_PROFILE`, run `unset OYA_OPERATOR_PROFILE` before upgrading.
 
 `--profile` overrides the environment selection. JSON always contains `version`, selected public `role`, `mode`, `target`, `chainId`, `ledgerContract`, `nodeAddress`, and observation fields `reachable`, `verified`, `healthy`, `status`, `message`. Inapplicable identity fields are null. Paths, endpoint URLs, arbitrary health fields, job results and exception details are omitted.
+
+### Read the native balance
+
+Run `node node/production/scripts/operator-node.mjs balance --profile FILE --json`. For a Ledger installation, set `rpcUrl` explicitly in the selected node JSON. Use HTTPS, or HTTP on loopback. The query checks the chain ID before sending the public node address. It reports exact decimal `balanceWei` and `blockNumber` plus `observedAt` (local UTC observation time). The block is not a finality guarantee.
+
+For an authenticated RPC service, set `balanceRpc` in the private profile to an object containing `url` and `authorization` (the full read-only Authorization header value). The URL must exactly match the configured `rpcUrl`. Do not put the header on the command line. Older operator CLIs reject profiles containing this field; remove it before using an older CLI.
+
+Zero is an observed balance. A timeout, wrong chain or invalid reply returns exit 1 and a null balance. An IPFS installation returns `not_applicable` without contacting RPC. Invalid configuration returns exit 2. The command neither unlocks the node key nor uses the runtime’s authorization header.
+
+For offline gas caps from the same selected installation, use [`gas-policy`](gas-policy.md) instead of `status`.
 
 ## Results and recovery
 

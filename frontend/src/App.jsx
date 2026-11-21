@@ -186,6 +186,19 @@ const zeroLike = '0x0000000000000000000000000000000000000000';
 const BURN_OWNER = '0x000000000000000000000000000000000000dEaD';
 const SENTINEL_OWNERS = '0x0000000000000000000000000000000000000001';
 
+function parseUint(input, bits, label) {
+  let value;
+  try {
+    value = BigInt(input);
+  } catch {
+    throw new Error(`${label} must be an integer.`);
+  }
+  if (value < 0n || value >= (1n << BigInt(bits))) {
+    throw new Error(`${label} must fit in an unsigned ${bits}-bit integer.`);
+  }
+  return value;
+}
+
 function App() {
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
@@ -208,12 +221,7 @@ function App() {
     safe: '',
     ogModule: '',
   });
-  const [txHashes, setTxHashes] = useState({
-    moduleProxyFactory: '',
-    safeProxy: '',
-    ogModule: '',
-    enableModule: '',
-  });
+  const [txHashes, setTxHashes] = useState({});
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -278,14 +286,14 @@ function App() {
     setError('');
     setStatus('Preparing deployment...');
     setDeployment({ moduleProxyFactory: '', safe: '', ogModule: '' });
-    setTxHashes({ moduleProxyFactory: '', safeProxy: '', ogModule: '', enableModule: '' });
+    setTxHashes({});
 
     try {
       const account = walletClient.account.address;
-      const safeSaltNonce = BigInt(form.safeSaltNonce || '0');
-      const ogSaltNonce = BigInt(form.ogSaltNonce || '0');
-      const bondAmount = BigInt(form.bondAmount || '0');
-      const liveness = BigInt(form.liveness || '0');
+      const safeSaltNonce = parseUint(form.safeSaltNonce || '0', 256, 'Safe salt nonce');
+      const ogSaltNonce = parseUint(form.ogSaltNonce || '0', 256, 'OG salt nonce');
+      const bondAmount = parseUint(form.bondAmount, 256, 'Bond amount');
+      const liveness = parseUint(form.liveness, 64, 'Liveness');
       const identifier = stringToHex(form.identifier, { size: 32 });
       let moduleProxyFactory = form.moduleProxyFactory;
 
@@ -481,6 +489,7 @@ function App() {
       });
 
       const addOwnerTx = await walletClient.writeContract(addOwnerExec.request);
+      setTxHashes((prev) => ({ ...prev, addOwner: addOwnerTx }));
       await publicClient.waitForTransactionReceipt({ hash: addOwnerTx });
 
       setStatus('Removing deployer from Safe owners...');
@@ -543,6 +552,7 @@ function App() {
       });
 
       const removeOwnerTx = await walletClient.writeContract(removeOwnerExec.request);
+      setTxHashes((prev) => ({ ...prev, removeOwner: removeOwnerTx }));
       await publicClient.waitForTransactionReceipt({ hash: removeOwnerTx });
 
       setDeployment({
@@ -669,6 +679,10 @@ function App() {
         <h2>Transaction Hashes</h2>
         <div className="outputs">
           <div>
+            <span>Module Proxy Factory Deployment</span>
+            <code>{txHashes.moduleProxyFactory || '-'}</code>
+          </div>
+          <div>
             <span>Safe Proxy Deployment</span>
             <code>{txHashes.safeProxy || '-'}</code>
           </div>
@@ -679,6 +693,14 @@ function App() {
           <div>
             <span>Enable Module</span>
             <code>{txHashes.enableModule || '-'}</code>
+          </div>
+          <div>
+            <span>Add Burn Address as Owner</span>
+            <code>{txHashes.addOwner || '-'}</code>
+          </div>
+          <div>
+            <span>Remove Deployer as Owner</span>
+            <code>{txHashes.removeOwner || '-'}</code>
           </div>
         </div>
       </section>

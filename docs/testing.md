@@ -9,10 +9,20 @@ Choose checks for the area you are changing. Commands below run from the reposit
 | Production node (`node/production/`) | [Install and validate](../node/production/README.md#install-and-validate) for Node.js tests; [Docker validation](../node/production/README.md#validate-the-docker-flow) for publication and inbox flows. |
 | Experimental node daemons | [Node commands and focused tests](../node/README.md#commands). |
 | Commitment agents | [Module validation and local harness](../agent-library/README.md#building-a-new-agentic-commitment), plus the selected module's tests. |
-| Kernel libraries (`packages/`) | [Package build and validation](../packages/README.md#validate-a-release). |
+| Kernel libraries (`packages/`) | Run the kernel runtime tests below. For a release, also follow [archive validation](../packages/README.md#validate-a-release). |
 | Web frontend | [Dependency tests and build](../frontend/README.md#dependency-validation). |
 
 The node and package development guides use Node.js 24 as the validation baseline. The production node unit suite also needs Python 3 for mocked Keychain lifecycle tests and `openssl` for disposable HTTPS status certificates. Docker integration tests have additional service/tool prerequisites listed in their guide. No single command below tests every subsystem.
+
+## Kernel runtime tests
+
+The tests import the built packages. From the repository root, install the build tools and rebuild before running the same runtime suite as CI:
+
+```sh
+npm --prefix packages ci --include=dev
+npm --prefix packages run build
+node --test packages/*/test/*.test.js
+```
 
 ## Root Solidity project
 

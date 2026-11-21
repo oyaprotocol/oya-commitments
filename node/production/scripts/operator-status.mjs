@@ -20,7 +20,7 @@ const messages = Object.freeze({
     oversized: 'Health response exceeds 64 KiB.', redirect: 'Health redirect refused. Select the local health endpoint.',
     http_error: 'Health endpoint returned an unexpected HTTP status.',
     invalid_response: 'Could not read a valid health response.',
-    arguments: 'Usage: operator-node.mjs status --profile FILE [--json] (or set OYA_OPERATOR_PROFILE).',
+    arguments: 'Usage: operator-node.mjs <status|gas-policy|balance> --profile FILE [--json] (or set OYA_OPERATOR_PROFILE).',
     configuration: 'Invalid profile or public configuration. Check version, fields, identity, loopback URL and owned private profile permissions.',
 });
 

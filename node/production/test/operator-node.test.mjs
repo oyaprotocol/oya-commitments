@@ -107,6 +107,54 @@ test('actual CLI is key-free, resolves profile-relative configs, supports env se
     assert.ok(!human.stdout.includes(f.directory));
 });
 
+test('profile gas policy matches standalone bytes without worker, health or credential access', async t => {
+    const standalone = fileURLToPath(new URL('../scripts/gas-policy.mjs', import.meta.url));
+    for (const role of ['direct', 'worker']) for (const mode of ['ledger', 'ipfs']) {
+        const f = await fixture(t, role, mode);
+        const file = join(f.directory, 'node.json');
+        if (mode === 'ledger') await writeFile(file, JSON.stringify({ gasLimit: 200001, maxFeePerGasWei: '9007199254740993' }));
+        await rm(join(f.directory, 'worker.json'));
+        const env = { TEST_OPERATOR_FILES: JSON.stringify([f.file, file]), TEST_OPERATOR_OFFLINE: '1', OYA_OPERATOR_PROFILE: f.file };
+        for (const flags of [[], ['--json']]) {
+            const expected = await runCli(standalone, ['--config', file, ...flags]);
+            assert.equal(expected.code, 0, expected.stderr);
+            const args = flags.length ? ['--profile', f.file, 'gas-policy', ...flags] : ['gas-policy'];
+            const actual = await f.run(args, { cwd: tmpdir(), env: { ...env,
+                OYA_OPERATOR_PROFILE: flags.length ? 'ignore-this-profile' : f.file } });
+            assert.deepEqual(actual, expected);
+        }
+        assert.equal(f.requests, 0);
+    }
+});
+
+test('profile gas policy rejects invalid profiles and bounded inputs without disclosing them', async t => {
+    const f = await fixture(t, 'worker');
+    const file = join(f.directory, 'node.json');
+    const args = ['gas-policy', '--profile', f.file, '--json'];
+    const rejected = async () => {
+        const failure = await f.run(args);
+        checked(failure, 2, 'configuration');
+        assert.ok(!failure.stdout.includes(f.directory));
+    };
+    await chmod(f.file, 0o644);
+    await rejected();
+    await chmod(f.file, 0o600);
+    for (const change of [{ workerConfig: undefined }, { nodeAddress: undefined }, { healthUrl: sentinel }, { secret: sentinel }]) {
+        await f.save({ ...f.profile, ...change });
+        await rejected();
+    }
+    await f.save();
+    for (const bytes of [sentinel, Buffer.from([0xff]), '{}'.padEnd(65537), '{"gasLimit":0}', '{"maxFeePerGasWei":null}']) {
+        await writeFile(file, bytes);
+        await rejected();
+    }
+    await rm(file);
+    await rejected();
+    await symlink(join(f.directory, 'worker.json'), file);
+    await rejected();
+    assert.equal(f.requests, 0);
+});
+
 test('symlinked command directory executes checks rather than silently succeeding', async t => {
     const f = await fixture(t);
     const linked = join(f.directory, 'commands');
