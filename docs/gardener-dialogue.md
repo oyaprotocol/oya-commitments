@@ -48,6 +48,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q023](#q023) | What a past ruling can settle | dispute resolution, precedent | Answered |
 | [Q024](#q024) | How far back a new node should go | node history, data availability | Answered |
 | [Q025](#q025) | When two proposals cannot both work | proposal ordering, commitment rules | Answered |
+| [Q029](#q029) | Evidence that arrives after a proposal? | evidence, dispute resolution | Answered |
 
 <a id="q001"></a>
 
@@ -808,3 +809,34 @@ What should decide which proposal takes priority when a commitment could honor e
 - **Source updated:** 2026-11-21T02:53:22Z
 
 First across the post wins. If a valid proposal is made but has not resolved yet, any subsequent proposals must be judged as though the earlier valid proposal had already resolved. If the second proposal would be true if the first proposal had not been made, but false because the first proposal has been made, it is false. However, if the first proposal was invalid, subsequent valid proposals can be judged as though the first proposal was not settled. All of this may have use-case and rule-specific subtleties, as well.
+
+<a id="q029"></a>
+
+<!-- oya-dialogue-question: Q029 -->
+
+## Q029 — Evidence that arrives after a proposal?
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-20
+- **Topics:** evidence, dispute resolution
+- **Status:** Answered
+- **Source PR:** [#223](https://github.com/oyaprotocol/oya-commitments/pull/223)
+
+### Context
+
+Suppose a proposal says a deadline was met. A dated record confirming that fact becomes public only after the proposal is challenged.
+
+### Question
+
+What weight should a resolver give evidence that existed when the proposal was made but was not public then?
+
+### Answer
+
+#### @pemulis — 2026-11-21
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7065192967](https://github.com/oyaprotocol/oya-commitments/pull/223#issuecomment-7065192967)
+- **Source created:** 2026-11-21T15:51:20Z
+- **Source updated:** 2026-11-21T15:51:20Z
+
+Only public information counts.
