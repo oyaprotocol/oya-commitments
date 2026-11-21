@@ -2,7 +2,7 @@ import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { formatGasPolicy } from '../src/gas-policy.mjs';
-import { loadProfile, loadProfileGasPolicy } from './operator-profile.mjs';
+import { loadProfile } from './operator-profile.mjs';
 import { formatStatus, operatorStatus, result } from './operator-status.mjs';
 
 export async function main(args, { env = process.env, log = console.log } = {}) {
@@ -20,17 +20,17 @@ export async function main(args, { env = process.env, log = console.log } = {}) 
         return 2;
     }
     const file = values.profile ?? env.OYA_OPERATOR_PROFILE;
-    let expected;
+    const [command] = positionals;
+    let profile;
     try {
-        if (positionals[0] === 'gas-policy') {
-            const policy = await loadProfileGasPolicy(file);
-            log(values.json ? JSON.stringify(policy) : formatGasPolicy(policy));
+        profile = await loadProfile(file, command);
+        if (command === 'gas-policy') {
+            log(values.json ? JSON.stringify(profile) : formatGasPolicy(profile));
             return 0;
         }
-        expected = await loadProfile(file);
     }
     catch { emit(result('configuration')); return 2; }
-    const observed = await operatorStatus(expected);
+    const observed = await operatorStatus(profile);
     emit(observed);
     return observed.healthy ? 0 : 1;
 }

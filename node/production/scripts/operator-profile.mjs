@@ -35,7 +35,7 @@ export function healthUrl(value) {
     return url.href;
 }
 
-async function selectProfile(file) {
+export async function loadProfile(file, command) {
     const selected = resolve(pathValue(file));
     const directory = dirname(selected);
     const info = await lstat(directory);
@@ -51,17 +51,9 @@ async function selectProfile(file) {
     const input = await readJson(resolve(directory, pathValue(profile.nodeConfig)));
     const nodeAddress = input?.mode === 'ipfs' ? null : publicAddress(profile.nodeAddress);
     if (input?.mode === 'ipfs' && Object.hasOwn(profile, 'nodeAddress')) throw new Error('Unexpected node address.');
-    return { input, role: profile.role, workerFile, nodeAddress, healthUrl: url };
-}
-
-export async function loadProfile(file) {
-    const { input, role, workerFile, nodeAddress, healthUrl } = await selectProfile(file);
+    if (command === 'gas-policy') return projectGasPolicy(input);
+    if (command !== 'status') throw new Error('Invalid profile command.');
     const config = publicNodeSettings(input);
     const target = workerFile ? workerTarget(await readJson(workerFile)) : null;
-    return Object.freeze({ ...config, role, target, nodeAddress, healthUrl });
-}
-
-export async function loadProfileGasPolicy(file) {
-    const { input } = await selectProfile(file);
-    return projectGasPolicy(input);
+    return Object.freeze({ ...config, role: profile.role, target, nodeAddress, healthUrl: url });
 }
