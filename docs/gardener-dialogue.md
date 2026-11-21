@@ -48,6 +48,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q023](#q023) | What a past ruling can settle | dispute resolution, precedent | Answered |
 | [Q024](#q024) | How far back a new node should go | node history, data availability | Answered |
 | [Q025](#q025) | When two proposals cannot both work | proposal ordering, commitment rules | Answered |
+| [Q030](#q030) | A gap in a full node’s history | data availability, node synchronization | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -808,3 +809,27 @@ What should decide which proposal takes priority when a commitment could honor e
 - **Source updated:** 2026-11-21T02:53:22Z
 
 First across the post wins. If a valid proposal is made but has not resolved yet, any subsequent proposals must be judged as though the earlier valid proposal had already resolved. If the second proposal would be true if the first proposal had not been made, but false because the first proposal has been made, it is false. However, if the first proposal was invalid, subsequent valid proposals can be judged as though the first proposal was not settled. All of this may have use-case and rule-specific subtleties, as well.
+
+<a id="q030"></a>
+
+<!-- oya-dialogue-question: Q030 -->
+
+## Q030 — A gap in a full node’s history
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-21
+- **Topics:** data availability, node synchronization
+- **Status:** Awaiting answer
+- **Source PR:** Pending publication.
+
+### Context
+
+In [Q024](#q024), @pemulis said a full node should retrieve history back to the beginning. A node catching up might reach the latest Ledger entry while one older message is still missing.
+
+### Question
+
+How should a node with a known gap in its history describe what it has verified to its peers?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
