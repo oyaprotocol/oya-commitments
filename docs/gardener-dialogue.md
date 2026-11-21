@@ -756,7 +756,7 @@ Looking at earlier resolutions can give proposers and disputers clues about how 
 - **Asked on:** 2026-11-20
 - **Topics:** node history, data availability
 - **Status:** Awaiting answer
-- **Source PR:** Pending publication.
+- **Source PR:** [#216](https://github.com/oyaprotocol/oya-commitments/pull/216)
 
 ### Context
 
