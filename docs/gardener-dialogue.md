@@ -48,6 +48,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q023](#q023) | What a past ruling can settle | dispute resolution, precedent | Answered |
 | [Q024](#q024) | How far back a new node should go | node history, data availability | Answered |
 | [Q025](#q025) | When two proposals cannot both work | proposal ordering, commitment rules | Answered |
+| [Q026](#q026) | Recognizing an unfamiliar message | protocol evolution, message compatibility | Answered |
 
 <a id="q001"></a>
 
@@ -808,3 +809,34 @@ What should decide which proposal takes priority when a commitment could honor e
 - **Source updated:** 2026-11-21T02:53:22Z
 
 First across the post wins. If a valid proposal is made but has not resolved yet, any subsequent proposals must be judged as though the earlier valid proposal had already resolved. If the second proposal would be true if the first proposal had not been made, but false because the first proposal has been made, it is false. However, if the first proposal was invalid, subsequent valid proposals can be judged as though the first proposal was not settled. All of this may have use-case and rule-specific subtleties, as well.
+
+<a id="q026"></a>
+
+<!-- oya-dialogue-question: Q026 -->
+
+## Q026 — Recognizing an unfamiliar message
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-20
+- **Topics:** protocol evolution, message compatibility
+- **Status:** Answered
+- **Source PR:** [#218](https://github.com/oyaprotocol/oya-commitments/pull/218)
+
+### Context
+
+As independent teams build on Oya, a node may receive a signed message in a format it can verify but with a meaning it does not recognize.
+
+### Question
+
+What should a sender be able to expect from a node that recognizes the signature but not the kind of message being sent?
+
+### Answer
+
+#### @pemulis — 2026-11-21
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7056237378](https://github.com/oyaprotocol/oya-commitments/pull/218#issuecomment-7056237378)
+- **Source created:** 2026-11-21T02:54:00Z
+- **Source updated:** 2026-11-21T02:54:00Z
+
+Messages are just plain text so the message type does not matter. In the beginning, only ASCII text will be accepted.
