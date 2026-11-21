@@ -48,6 +48,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q023](#q023) | What a past ruling can settle | dispute resolution, precedent | Answered |
 | [Q024](#q024) | How far back a new node should go | node history, data availability | Answered |
 | [Q025](#q025) | When two proposals cannot both work | proposal ordering, commitment rules | Answered |
+| [Q027](#q027) | Which proposal came first? | proposal ordering, shared evidence | Answered |
 
 <a id="q001"></a>
 
@@ -808,3 +809,34 @@ What should decide which proposal takes priority when a commitment could honor e
 - **Source updated:** 2026-11-21T02:53:22Z
 
 First across the post wins. If a valid proposal is made but has not resolved yet, any subsequent proposals must be judged as though the earlier valid proposal had already resolved. If the second proposal would be true if the first proposal had not been made, but false because the first proposal has been made, it is false. However, if the first proposal was invalid, subsequent valid proposals can be judged as though the first proposal was not settled. All of this may have use-case and rule-specific subtleties, as well.
+
+<a id="q027"></a>
+
+<!-- oya-dialogue-question: Q027 -->
+
+## Q027 — Which proposal came first?
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-20
+- **Topics:** proposal ordering, shared evidence
+- **Status:** Answered
+- **Source PR:** [#220](https://github.com/oyaprotocol/oya-commitments/pull/220)
+
+### Context
+
+In [the Q025 answer](https://github.com/oyaprotocol/oya-commitments/pull/217#issuecomment-7056230262), @pemulis said that a later proposal must account for an earlier valid one even before it resolves. Two observers might hear about those proposals in opposite orders.
+
+### Question
+
+What public record should both observers use to tell which proposal came first?
+
+### Answer
+
+#### @pemulis — 2026-11-21
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7065162732](https://github.com/oyaprotocol/oya-commitments/pull/220#issuecomment-7065162732)
+- **Source created:** 2026-11-21T15:48:54Z
+- **Source updated:** 2026-11-21T15:48:54Z
+
+Onchain events make proposal order (and any transaction order) clear.
