@@ -217,6 +217,14 @@ test('extracted operator CLI works with no checkout, npm dependencies, Docker or
         assert.equal(JSON.parse(result.stdout).verified, true);
         const options = { cwd: unpacked, env: { PATH: '', OYA_OPERATOR_PROFILE: join(privateDir, 'operator.json') } };
         const run = (...args) => execFileSync(process.execPath, args, { ...options, encoding: 'utf8', timeout: 10000 });
+        // Ledger fixtures deliberately omit rpcUrl. Health must still be reported.
+        const monitor = await promisify(execFile)(process.execPath,
+            [join(bundle, 'scripts/operator-node.mjs'), 'monitor-once', '--json'], options).catch(error => error);
+        assert.equal(monitor.code ?? 0, mode === 'ledger' ? 2 : 0);
+        assert.equal(monitor.stderr, '');
+        const report = JSON.parse(monitor.stdout);
+        assert.equal(report.health.state, 'healthy');
+        assert.equal(report.balance.state, mode === 'ipfs' ? 'not_applicable' : 'unknown');
         if (mode === 'ipfs') {
             const balance = JSON.parse(run(join(bundle, 'scripts/operator-node.mjs'), 'balance',
                 '--profile', join(privateDir, 'operator.json'), '--json'));

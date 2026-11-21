@@ -84,6 +84,15 @@ From the repository root run `node node/production/scripts/operator-node.mjs bal
 
 Run `node --test node/production/test/{operator-balance,publish-image}.test.mjs` and `npm --prefix node/production test` after installing locked dependencies. Loopback tests distinguish zero from failure and check authentication boundaries, malformed or oversized replies, timeout, wrong chain and IPFS. Retry safely after correcting configuration or restoring RPC. No balance or RPC error state is persisted.
 
-## Next feature — candidate when capacity permits
+## Selected milestone — operator-monitor-once-v1
 
-`operator-monitor-once-v1`: combine the profile-selected health and balance observations into one on-demand operator report. Show healthy, degraded, unknown and not applicable separately. Reuse the host dispatcher and observation functions once the balance command lands. Test direct and worker installations against fake health and RPC endpoints, including partial outages. Use no external notification service or persistent state. Estimated 300–600 changed code/test lines.
+- [x] 2026-11-21 02:35Z: Recorded the operator action before coding. Run `node node/production/scripts/operator-node.mjs monitor-once --profile FILE [--json]` to see both observations even if one is unavailable. Today the operator must invoke `status` and `balance` separately through that dispatcher. Reuse their existing bounded host readers, not a new service.
+- [x] 2026-11-21 02:38Z: Implemented separate health and balance projections from one private profile. On Node 24.22.3 the focused operator/bundle suite passed 47/47 and the full production suite passed 673/673 with no skips.
+
+Capacity at selection: earliest gate verified 0/3; #212 is frontend only and #213 merged.
+
+From the repository root run `node --test node/production/test/{operator-node,operator-balance,publish-image}.test.mjs` and `npm --prefix node/production test` with Node 24 and a canonical temporary directory. Worker config references and RPC binding must be validated within their respective checks: a bad reference must not discard a valid sibling observation. Shared identity or private profile failures still stop both. Both human and JSON output use only the public observation fields. Direct/worker fake endpoints cover partial failures and exact balance; extracted bundles cover both roles, IPFS and missing RPC configuration. Re-run safely or revert the dispatcher changes; no profile migration is needed.
+
+## Next bounded candidate — operator-balance-floor-v1
+
+Let an operator optionally pass a minimum balance in decimal wei to `monitor-once`. Distinguish below-floor from unknown without calling zero or a missing observation healthy. Scope: host dispatcher, operator guide, operator and extracted-bundle tests. Estimate 80–160 changed code/test lines. Accept when below/equal/above comparisons are exact above JavaScript’s safe integer range, malformed thresholds fail before network access, absent thresholds retain current behavior, IPFS stays inapplicable, and a balance warning never suppresses health. Use a bounded unsigned integer; keep the comparison local, with no extra requests, credential access, state or notification delivery. This is a proposed follow-up, not an implemented flag.

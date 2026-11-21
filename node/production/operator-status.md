@@ -49,6 +49,14 @@ Zero is an observed balance. A timeout, wrong chain or invalid reply returns exi
 
 For offline gas caps from the same selected installation, use [`gas-policy`](gas-policy.md) instead of `status`.
 
+### Check health and balance together
+
+Run `node node/production/scripts/operator-node.mjs monitor-once --profile FILE --json` for one snapshot. Omit `--json` for a human-readable report. The command selects the profile once and runs the two bounded reads concurrently. They are independent observations, not an atomic snapshot.
+
+`health.state` is `healthy` for a matching healthy node, `degraded` for a verified unhealthy observation, or `unknown` when health cannot be verified. `balance.state` is `observed` (including zero), `unknown`, or `not_applicable` for IPFS. An observed amount is not a funding threshold. Each section's `status` gives the reason.
+
+Exit 0 means healthy with an observed or inapplicable balance. Exit 1 means an observation failed or the node is degraded. Exit 2 means invalid arguments or configuration: if only one check is misconfigured, read the other section before troubleshooting. Invalid shared profile or identity returns the usual single configuration error. Re-run as needed; the command stores no history and sends no notifications.
+
 ## Results and recovery
 
 - Exit **0**: matching direct `ready`/`busy`, or matching worker `idle`/`processing` with a fresh poll.

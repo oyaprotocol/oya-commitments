@@ -52,13 +52,44 @@ export async function loadProfile(file, command) {
     const fields = ['version', 'role', 'nodeConfig', 'workerConfig', 'healthUrl', 'nodeAddress', 'balanceRpc'];
     if (!profile || typeof profile !== 'object' || Array.isArray(profile) || profile.version !== 1 ||
         Object.keys(profile).some(key => !fields.includes(key)) || !['direct', 'worker'].includes(profile.role)) throw new Error('Invalid profile.');
-    const url = healthUrl(profile.healthUrl);
-    let workerFile;
-    if (profile.role === 'worker') workerFile = resolve(directory, pathValue(profile.workerConfig));
-    else if (Object.hasOwn(profile, 'workerConfig')) throw new Error('Unexpected worker config.');
+    if (profile.role === 'direct' && Object.hasOwn(profile, 'workerConfig')) throw new Error('Unexpected worker config.');
     const input = await readJson(resolve(directory, pathValue(profile.nodeConfig)));
     const nodeAddress = input?.mode === 'ipfs' ? null : publicAddress(profile.nodeAddress);
     if (input?.mode === 'ipfs' && Object.hasOwn(profile, 'nodeAddress')) throw new Error('Unexpected node address.');
+    const workerFile = () => profile.role === 'worker' ? resolve(directory, pathValue(profile.workerConfig)) : null;
+    if (command !== 'monitor-once') {
+        // Existing commands validate profile references even when they do not use them.
+        if (command !== 'status') {
+            healthUrl(profile.healthUrl);
+            workerFile();
+        }
+        if (command !== 'balance') validateBalanceRpc(profile, input);
+    }
+    if (command === 'gas-policy') return projectGasPolicy(input);
+    const identity = { ...publicNodeSettings(input), role: profile.role, nodeAddress };
+    async function statusProfile() {
+        const url = healthUrl(profile.healthUrl);
+        const file = workerFile();
+        const target = file ? workerTarget(await readJson(file)) : null;
+        return { ...identity, target, healthUrl: url };
+    }
+    function balanceProfile() {
+        validateBalanceRpc(profile, input);
+        if (identity.mode === 'ipfs') return identity;
+        const rpc = profile.balanceRpc;
+        if (rpc && rpc.url !== input.rpcUrl) throw new Error('RPC endpoint mismatch.');
+        return { ...identity, rpcUrl: balanceEndpoint(input.rpcUrl), authorization: rpc?.authorization };
+    }
+    if (command === 'balance') return balanceProfile();
+    if (command === 'status') return statusProfile();
+    if (command !== 'monitor-once') throw new Error('Invalid profile command.');
+    let health = null, balance = null;
+    try { health = await statusProfile(); } catch { /* Invalid health configuration. */ }
+    try { balance = balanceProfile(); } catch { /* Invalid balance configuration. */ }
+    return { identity, health, balance };
+}
+
+function validateBalanceRpc(profile, input) {
     const rpc = profile.balanceRpc;
     if (Object.hasOwn(profile, 'balanceRpc')) {
         if (input?.mode === 'ipfs' || !rpc || typeof rpc !== 'object' || Array.isArray(rpc) ||
@@ -67,16 +98,4 @@ export async function loadProfile(file, command) {
         if (Object.hasOwn(rpc, 'authorization') && (typeof rpc.authorization !== 'string' ||
             !/^[!-~][ -~]{0,1023}$/.test(rpc.authorization))) throw new Error('Invalid RPC authorization.');
     }
-    if (command === 'balance') {
-        const config = publicNodeSettings(input);
-        const identity = { ...config, role: profile.role, nodeAddress };
-        if (config.mode === 'ipfs') return identity;
-        if (rpc && rpc.url !== input.rpcUrl) throw new Error('RPC endpoint mismatch.');
-        return { ...identity, rpcUrl: balanceEndpoint(input.rpcUrl), authorization: rpc?.authorization };
-    }
-    if (command === 'gas-policy') return projectGasPolicy(input);
-    if (command !== 'status') throw new Error('Invalid profile command.');
-    const config = publicNodeSettings(input);
-    const target = workerFile ? workerTarget(await readJson(workerFile)) : null;
-    return Object.freeze({ ...config, role: profile.role, target, nodeAddress, healthUrl: url });
 }

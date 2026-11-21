@@ -22,7 +22,13 @@ async function fixture(t) {
     const requests = [];
     let respond = (request, response) => response.end(JSON.stringify({ jsonrpc: '2.0', id: request.id,
         result: ['0x1', block, max][request.id - 1] }));
+    let health;
     const server = createServer(async (req, res) => {
+        if (req.url === '/healthz') {
+            assert.equal(req.headers.authorization, undefined);
+            res.writeHead(health?.status === 'stopped' ? 503 : 200).end(JSON.stringify(health));
+            return;
+        }
         const chunks = [];
         for await (const chunk of req) chunks.push(chunk);
         const body = JSON.parse(Buffer.concat(chunks));
@@ -35,11 +41,11 @@ async function fixture(t) {
     const profile = { version: 1, role: 'worker', workerConfig: 'unopened.json', nodeConfig: 'node.json',
         healthUrl: 'http://127.0.0.1:1/healthz', nodeAddress: address, balanceRpc: { url, authorization: `Bearer ${marker}` } };
     const config = { chainId: 1, ledgerContract: address, rpcUrl: url };
-    async function run(code, { human = false, offline = false } = {}) {
+    async function run(code, { human = false, offline = false, command = 'balance' } = {}) {
         await writeFile(file, JSON.stringify(profile), { mode: 0o600 });
         await writeFile(configFile, JSON.stringify(config));
-        const args = ['--import', guard, script, 'balance', ...(human ? ['--profile', file] : ['--json'])];
-        const env = { PATH: '', OYA_OPERATOR_PROFILE: file, TEST_OPERATOR_FILES: JSON.stringify([file, configFile]),
+        const args = ['--import', guard, script, command, ...(human ? ['--profile', file] : ['--json'])];
+        const env = { PATH: '', OYA_OPERATOR_PROFILE: file, TEST_OPERATOR_FILES: JSON.stringify([file, configFile, join(dir, 'worker.json')]),
             ...(offline ? { TEST_OPERATOR_OFFLINE: '1' } : {}) };
         return new Promise((resolve, reject) => execFile(process.execPath, args, { cwd: dir, env, timeout: 9000 }, (err, out, stderr) => {
             try {
@@ -50,7 +56,21 @@ async function fixture(t) {
             } catch (error) { reject(error); }
         }));
     }
-    return { config, profile, run, requests, url, reply(fn) { respond = fn; } };
+    return { config, profile, run, requests, url, reply(fn) { respond = fn; },
+        async setupHealth(role) {
+            profile.role = role;
+            profile.healthUrl = new URL('/healthz', url).href;
+            health = { role, mode: 'ledger', chainId: 1, ledgerContract: address, nodeAddress: address, private: marker };
+            if (role === 'direct') {
+                delete profile.workerConfig;
+                Object.assign(health, { status: 'ready', busy: false });
+            } else {
+                profile.workerConfig = 'worker.json';
+                await writeFile(join(dir, 'worker.json'), JSON.stringify({ target: 'fixture' }));
+                Object.assign(health, { status: 'idle', target: 'fixture', lastPollAt: new Date().toISOString() });
+            }
+            return health;
+        } };
 }
 
 test('worker snapshot authenticates only to the bound endpoint and pins the exact block', async t => {
@@ -145,4 +165,42 @@ test('one deadline bounds the complete observation, including an unfinished body
     assert.equal((await f.run(1)).status, 'timeout');
     assert.ok(performance.now() - start < 7200);
     assert.equal(f.requests.length, 2);
+});
+
+for (const role of ['direct', 'worker']) test(`monitor-once keeps independent ${role} observations`, async t => {
+    const f = await fixture(t);
+    const health = await f.setupHealth(role);
+    const run = (code, human = false) => f.run(code, { command: 'monitor-once', human });
+    const ok = await run(0);
+    assert.equal(ok.health.state, 'healthy');
+    assert.equal(ok.balance.balanceWei, BigInt(max).toString());
+    assert.equal(ok.balance.state, 'observed');
+    health.status = 'stopped';
+    assert.equal((await run(1)).health.state, 'degraded');
+    health.role = 'wrong';
+    const mismatch = await run(1);
+    assert.equal(mismatch.health.state, 'unknown');
+    assert.equal(mismatch.balance.state, 'observed');
+    health.role = role;
+    health.status = role === 'worker' ? 'idle' : 'ready';
+    f.reply((_req, res) => res.writeHead(503).end(marker));
+    const outage = await run(1);
+    assert.equal(outage.health.state, 'healthy');
+    assert.equal(outage.balance.state, 'unknown');
+    assert.match(await run(1, true), /Balance \(unknown\).*unavailable/);
+    f.profile.balanceRpc.authorization = '\n' + marker;
+    const invalid = await run(2);
+    assert.equal(invalid.health.state, 'healthy');
+    assert.equal(invalid.balance.status, 'configuration');
+});
+
+test('missing, invalid and unreadable worker references do not suppress the balance', async t => {
+    const f = await fixture(t);
+    for (const reference of [undefined, 123, marker]) {
+        f.profile.workerConfig = reference;
+        const report = await f.run(2, { command: 'monitor-once' });
+        assert.equal(report.health.status, 'configuration');
+        assert.equal(report.health.state, 'unknown');
+        assert.equal(report.balance.balanceWei, BigInt(max).toString());
+    }
 });
