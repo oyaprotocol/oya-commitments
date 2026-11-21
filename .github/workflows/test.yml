@@ -123,6 +123,11 @@ jobs:
           git add --intent-to-add -- packages/*/dist
           git diff --exit-code HEAD -- packages
 
+      - name: Check Ethereum and messages consumer types
+        run: |
+          packages/node_modules/.bin/tsc -p packages/ethereum/tsconfig.type-test.json
+          packages/node_modules/.bin/tsc -p packages/messages/tsconfig.type-test.json
+
       - name: Test kernel packages
         run: node --test packages/*/test/*.test.js
 
