@@ -646,8 +646,7 @@ function App() {
       <section className="card">
         <h2>Deployment</h2>
         <p>
-          <strong>Safe ownership:</strong> On a fresh Safe, the final step fails to remove your wallet as an owner.
-          Your wallet can still authorize transactions on its own. Check the Safe’s owners and threshold before relying on the governor.
+          <strong>Safe ownership:</strong> On a fresh Safe, your wallet remains an owner and can still authorize transactions on its own. Check the Safe’s owners and threshold before relying on the governor.
         </p>
         <div className="actions">
           <button type="button" onClick={handleDeploy} disabled={isSubmitting}>
