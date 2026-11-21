@@ -576,7 +576,7 @@ function App() {
           <p className="eyebrow">OG Deployer</p>
           <h1>Deploy Safe + Optimistic Governor</h1>
           <p className="subtext">
-            Mirrors the <code>DeploySafeWithOptimisticGovernor.s.sol</code> flow with UI-driven parameters.
+            Configure a Safe and its Optimistic Governor module using your connected wallet.
           </p>
         </div>
         <ConnectButton />
@@ -645,6 +645,10 @@ function App() {
 
       <section className="card">
         <h2>Deployment</h2>
+        <p>
+          <strong>Safe ownership:</strong> On a fresh Safe, the final step fails to remove your wallet as an owner.
+          Your wallet can still authorize transactions on its own. Check the Safe’s owners and threshold before relying on the governor.
+        </p>
         <div className="actions">
           <button type="button" onClick={handleDeploy} disabled={isSubmitting}>
             {isSubmitting ? 'Deploying…' : 'Deploy Safe + OG'}
