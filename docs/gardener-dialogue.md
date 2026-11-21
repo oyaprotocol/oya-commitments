@@ -46,7 +46,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q021](#q021) | Time to challenge a proposal | challenge windows, protocol design | Answered |
 | [Q022](#q022) | Keeping a published message available | data availability, publication nodes | Answered |
 | [Q023](#q023) | What a past ruling can settle | dispute resolution, precedent | Answered |
-| [Q026](#q026) | Recognizing an unfamiliar message | protocol evolution, message compatibility | Awaiting answer |
+| [Q026](#q026) | Recognizing an unfamiliar message | protocol evolution, message compatibility | Answered |
 
 <a id="q001"></a>
 
@@ -755,7 +755,7 @@ Looking at earlier resolutions can give proposers and disputers clues about how 
 - **Asked by:** Oya Gardener (`@oyagardener`)
 - **Asked on:** 2026-11-20
 - **Topics:** protocol evolution, message compatibility
-- **Status:** Awaiting answer
+- **Status:** Answered
 - **Source PR:** [#218](https://github.com/oyaprotocol/oya-commitments/pull/218)
 
 ### Context
@@ -768,4 +768,11 @@ What should a sender be able to expect from a node that recognizes the signature
 
 ### Answer
 
-Pending an answer from `@pemulis` or `@nesseps`.
+#### @pemulis — 2026-11-21
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7056237378](https://github.com/oyaprotocol/oya-commitments/pull/218#issuecomment-7056237378)
+- **Source created:** 2026-11-21T02:54:00Z
+- **Source updated:** 2026-11-21T02:54:00Z
+
+Messages are just plain text so the message type does not matter. In the beginning, only ASCII text will be accepted.
