@@ -119,7 +119,9 @@ jobs:
         run: npm run build
 
       - name: Verify package build output is fresh
-        run: git diff --exit-code -- packages
+        run: |
+          git add --intent-to-add -- packages/*/dist
+          git diff --exit-code HEAD -- packages
 
       - name: Test kernel packages
         run: node --test packages/*/test/*.test.js
