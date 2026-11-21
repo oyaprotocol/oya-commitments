@@ -186,6 +186,19 @@ const zeroLike = '0x0000000000000000000000000000000000000000';
 const BURN_OWNER = '0x000000000000000000000000000000000000dEaD';
 const SENTINEL_OWNERS = '0x0000000000000000000000000000000000000001';
 
+function parseUint(input, bits, label) {
+  let value;
+  try {
+    value = BigInt(input);
+  } catch {
+    throw new Error(`${label} must be an integer.`);
+  }
+  if (value < 0n || value >= (1n << BigInt(bits))) {
+    throw new Error(`${label} must fit in an unsigned ${bits}-bit integer.`);
+  }
+  return value;
+}
+
 function App() {
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
@@ -277,10 +290,10 @@ function App() {
 
     try {
       const account = walletClient.account.address;
-      const safeSaltNonce = BigInt(form.safeSaltNonce || '0');
-      const ogSaltNonce = BigInt(form.ogSaltNonce || '0');
-      const bondAmount = BigInt(form.bondAmount || '0');
-      const liveness = BigInt(form.liveness || '0');
+      const safeSaltNonce = parseUint(form.safeSaltNonce || '0', 256, 'Safe salt nonce');
+      const ogSaltNonce = parseUint(form.ogSaltNonce || '0', 256, 'OG salt nonce');
+      const bondAmount = parseUint(form.bondAmount, 256, 'Bond amount');
+      const liveness = parseUint(form.liveness, 64, 'Liveness');
       const identifier = stringToHex(form.identifier, { size: 32 });
       let moduleProxyFactory = form.moduleProxyFactory;
 
