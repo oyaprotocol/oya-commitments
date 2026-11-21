@@ -36,3 +36,14 @@ export function projectGasPolicy(input) {
         origins: { gasLimit: input.gasLimit == null ? 'default' : 'override',
             maxFeePerGasWei: input.maxFeePerGasWei === undefined ? 'default' : 'override' } };
 }
+
+export function formatGasPolicy(policy) {
+    const intro = `Offline config projection (${policy.mode}); not loaded runtime policy or full config validation.`;
+    if (!policy.applicable) return `${intro}\nGas policy: inapplicable in IPFS mode.`;
+    return [intro,
+        `gasLimit: ${policy.gasLimit} gas (${policy.origins.gasLimit})`,
+        `maxFeePerGasWei: ${policy.maxFeePerGasWei} wei/gas (${policy.origins.maxFeePerGasWei})`,
+        `Execution-gas ceiling per transaction: ${policy.executionGasCeilingWei} wei`,
+        'Configured cap product, not an actual fee estimate or daily budget; other chain fees may apply.',
+    ].join('\n');
+}

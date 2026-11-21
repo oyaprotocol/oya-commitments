@@ -215,6 +215,10 @@ test('extracted status closure works with no checkout, npm dependencies, Docker 
         assert.equal(result.stderr, '');
         assert.equal(JSON.parse(result.stdout).healthy, true);
         assert.equal(JSON.parse(result.stdout).verified, true);
+        const options = { cwd: unpacked, env: { PATH: '', OYA_OPERATOR_PROFILE: join(privateDir, 'operator.json') } };
+        const run = (...args) => execFileSync(process.execPath, args, { ...options, encoding: 'utf8', timeout: 10000 });
+        assert.equal(run(join(bundle, 'scripts/operator-node.mjs'), 'gas-policy', '--json'),
+            run(join(bundle, 'scripts/gas-policy.mjs'), '--config', join(privateDir, 'node.json'), '--json'));
     }
 });
 

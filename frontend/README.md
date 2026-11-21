@@ -1,6 +1,8 @@
 # Oya Commitments Frontend
 
-Lightweight web UI for configuring and deploying a commitment (Safe + Optimistic Governor module). It mirrors the Foundry deployment flow and helps craft the same onchain calls from a browser wallet.
+Use a browser wallet to deploy a Safe and an Optimistic Governor module. After enabling the module, the browser flow adds the burn address as an owner. On a fresh Safe, the next step fails to remove your wallet. Your wallet remains an owner and can still authorize transactions on its own. Check the Safe’s owners and threshold before relying on the module to control the Safe.
+
+If you want to keep your wallet as the Safe owner for testing, use the [CLI deployment guide](../docs/deployment.md). The CLI keeps the deployer as the sole owner by default.
 
 ## Beta Disclaimer
 

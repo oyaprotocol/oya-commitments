@@ -21,12 +21,14 @@ The first full run had five release-coordinator failures because task-local fixt
 
 ## Decision Log
 
+- 2026-11-19 / Hermes: Share selection, not the status operation: gas inspection needs neither the worker target nor health transport. Both host dependency sets already ship in the same release bundle.
+
 - 2026-11-16 / Hermes: Extract only gas defaults and validation, retaining configuration identity logic. Use a dependency-free module rather than copying unmerged profile/status code. This limits conflicts with the separate operator work.
 - 2026-11-16 / Hermes: Read at most 64 KiB plus one overflow byte from an opened regular file with no-follow/nonblocking flags. Reject special files and sanitize errors. Output only enumerated public policy fields.
 
 ## Outcomes & Retrospective
 
-Delivered the standalone command, shared runtime parser and public release assets. Focused macOS tests passed 103/103 on Node 24.22.2; full production tests passed 554/554, with no skips. Linux gas/worker/batch tests passed 85/85 on image Node 24.21.0 with networking disabled. Actual image imports of config, main, worker, processor and the gas module passed. Remaining roadmap integration includes profile dispatch, balance and monitoring. This slice exposes existing limits rather than introducing enforcement.
+Delivered the standalone command, shared runtime parser and public release assets. Focused macOS tests passed 103/103 on Node 24.22.2; full production tests passed 554/554, with no skips. Linux gas/worker/batch tests passed 85/85 on image Node 24.21.0 with networking disabled. Actual image imports of config, main, worker, processor and the gas module passed. The profile dispatch milestone is recorded below. Balance and monitoring remain separate. This slice exposes existing limits rather than introducing enforcement.
 
 ## Context and Orientation
 
@@ -65,6 +67,15 @@ Public artifacts are the pure module, CLI, concise guide, tests and packaging ed
 
 The CLI accepts exactly `--config FILE` plus optional `--json`, or `--help`. Exit 0 means successful projection; exit 2 means invalid arguments, unreadable input or invalid projected settings. JSON schema version 1 contains scope, mode, applicable, decimal caps/product and origins. Node built-ins suffice. Runtime dependencies remain locked and unchanged.
 
+## Profile integration milestone: operator-gas-policy-profile-v1
+
+- [x] 2026-11-19 05:34Z: Confirmed that both host commands and their release assets are present in the selected base.
+- [x] 2026-11-19 05:37Z: Shared the bounded profile reader and policy formatter, documented both entrypoints, and verified byte parity. On macOS with Node 24.22.3, 50/50 focused tests and 600/600 full production tests passed, including extracted direct/worker Ledger/IPFS profiles.
+
+Select the installation with `operator-node.mjs gas-policy --profile FILE [--json]` (or `OYA_OPERATOR_PROFILE`). Validate the private v1 profile and read its node JSON once using the existing bounded reader. Validate the worker reference as a path without opening it: the policy belongs to the node config. Reuse `projectGasPolicy` and the standalone formatter. Status must continue checking its worker target and health independently of gas validity.
+
+From repository root on Node 24, run `node --test node/production/test/{operator-node,gas-policy,publish-image}.test.mjs` and `npm --prefix node/production test`. Accept when both CLIs give byte-identical policy output, invalid inputs fail privately, and the actual extracted command works without npm, secret reads or health requests. No runtime or release format change is needed. Reverting the host changes rolls back the command without migrating private profiles.
+
 ## Next feature — candidate when capacity permits
 
-ID: `operator-gas-policy-profile-v1`. Deliverable: dispatch this projection through the converged operator profile command. Acceptance: selected profile resolves the intended node config, produces identical policy output, preserves bounded/sanitized loading and runs from an extracted bundle. Components: operator dispatcher/profile loader, this gas module, packaging tests and operator guide. Estimate: one focused implementation/review session, about 150–300 code/test lines. Dependencies: merge/convergence of status/profile and this standalone slice; do not duplicate either implementation. Tests: direct/worker profiles, relative paths, IPFS, malformed config, missing files and bundle execution. Security: no credential resolution, network, writes or loaded-runtime-policy claims. Balance/monitoring remain separate work with their own RPC and notification boundaries.
+`operator-balance-snapshot-v1`: show the selected Ledger node’s exact native balance and observed block on its expected chain. Reuse profile identity and bounded read-only RPC; explicitly design separate RPC authorization, timeouts, response bounds and sanitized errors before implementation. Do not unlock the node key. Distinguish a zero balance from unavailable data, and IPFS inapplicability from failure. Test with synthetic loopback RPC (wrong chain, malformed quantities, timeout, auth redaction, exact large balances), no live funds, and an extracted bundle. Estimated 400–700 changed code/test/config lines. Monitoring, notifications and spending actions are separate.
