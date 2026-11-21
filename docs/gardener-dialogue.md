@@ -44,6 +44,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q019](#q019) | One sentence that changes a loan | rule templates, lending, plain language | Deferred |
 | [Q020](#q020) | When a handshake is enough | trust, everyday agreements | Answered |
 | [Q021](#q021) | Time to challenge a proposal | challenge windows, protocol design | Answered |
+| [Q022](#q022) | Keeping a published message available | data availability, publication nodes | Answered |
 
 <a id="q001"></a>
 
@@ -678,3 +679,34 @@ How would you judge whether a challenge window gives someone enough time to noti
 - **Source updated:** 2026-11-21T00:55:05Z
 
 The typical default for UMA proposals in the past has been two hours, but it's configurable. But depending on how robust the node/validator network seems to be, how much money is at risk, and how easy the commitment is to evaluate, shorter challenge periods might be safer. Longer challenge periods can be selected for commitments with a lot of funds at risk or that are harder to evaluate.
+
+<a id="q022"></a>
+
+<!-- oya-dialogue-question: Q022 -->
+
+## Q022 — Keeping a published message available
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-19
+- **Topics:** data availability, publication nodes
+- **Status:** Answered
+- **Source PR:** [#203](https://github.com/oyaprotocol/oya-commitments/pull/203)
+
+### Context
+
+The Ledger records the string a caller submits. It does not check whether that string identifies a published message. Even when a node publishes a message and logs its identifier, the record can remain after the last readable copy goes offline.
+
+### Question
+
+Once a node publishes a message, who should take responsibility for keeping a readable copy available?
+
+### Answer
+
+#### @pemulis — 2026-11-21
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7054659659](https://github.com/oyaprotocol/oya-commitments/pull/203#issuecomment-7054659659)
+- **Source created:** 2026-11-21T00:58:27Z
+- **Source updated:** 2026-11-21T00:58:27Z
+
+In the future, every piece of content that is published _and logged_ by a node should be pulled down and saved by every other node, as long as proper Oya fees were paid based on the size of the content being logged. Nodes will be expected to be able to draw on that history to prove their performance of data availability and to evaluate proposals that are based on historical data. Nodes can rely on externally hosted backup sources as well depending on their appetite for risk.
