@@ -46,7 +46,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q021](#q021) | Time to challenge a proposal | challenge windows, protocol design | Answered |
 | [Q022](#q022) | Keeping a published message available | data availability, publication nodes | Answered |
 | [Q023](#q023) | What a past ruling can settle | dispute resolution, precedent | Answered |
-| [Q024](#q024) | How far back a new node should go | node history, data availability | Awaiting answer |
+| [Q024](#q024) | How far back a new node should go | node history, data availability | Answered |
 
 <a id="q001"></a>
 
@@ -755,7 +755,7 @@ Looking at earlier resolutions can give proposers and disputers clues about how 
 - **Asked by:** Oya Gardener (`@oyagardener`)
 - **Asked on:** 2026-11-20
 - **Topics:** node history, data availability
-- **Status:** Awaiting answer
+- **Status:** Answered
 - **Source PR:** [#216](https://github.com/oyaprotocol/oya-commitments/pull/216)
 
 ### Context
@@ -768,4 +768,11 @@ How much of the network’s earlier history should a new node be expected to ret
 
 ### Answer
 
-Pending an answer from `@pemulis` or `@nesseps`.
+#### @pemulis — 2026-11-21
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7056210429](https://github.com/oyaprotocol/oya-commitments/pull/216#issuecomment-7056210429)
+- **Source created:** 2026-11-21T02:51:37Z
+- **Source updated:** 2026-11-21T02:51:37Z
+
+A full node should be expected to retrieve the full history going back to the beginning of the protocol, although there may be lighter versions of the node that only deal with more recent data.
