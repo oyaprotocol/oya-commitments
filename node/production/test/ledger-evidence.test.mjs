@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
-import { mkdtemp, writeFile, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, readFile, readdir, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -449,11 +449,11 @@ test('strict settings reject unsafe endpoints, credentials, old inbox settings a
     }
 });
 
-async function cli(recordPath, configPath, alias = false) {
+async function cli(recordPath, configPath, alias = false, destination, preload = destination === undefined && join(runtime, 'test/evidence-read-guard.mjs')) {
     return new Promise((resolve, reject) => {
-        const child = spawn(process.execPath, ['--import', join(runtime, 'test/evidence-read-guard.mjs'),
+        const child = spawn(process.execPath, [...(preload ? ['--import', preload] : []),
             ...(alias ? [join(runtime, 'src/inbox/client.mjs'), 'evidence'] : [join(runtime, 'src/verify-ledger.mjs')]),
-            recordPath, configPath], {
+            recordPath, configPath, ...(destination === undefined ? [] : ['--export', destination])], {
             env: { PATH: process.env.PATH, TMPDIR: process.env.TMPDIR, OYA_NODE_PRIVATE_KEY: 'must-not-read',
                 OYA_AGENT_PRIVATE_KEY: 'must-not-read', OYA_RPC_AUTHORIZATION: 'must-not-inherit' },
         });
@@ -511,6 +511,84 @@ for (const alias of [false, true]) {
         await assert.rejects(readEvidenceJson(dir));
     });
 }
+
+test('export publishes only complete verified snapshots at a new private filename', async t => {
+    const f = await setup(t);
+    const dir = await mkdtemp(join(tmpdir(), 'oya-evidence-'));
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    const record = join(dir, 'record'), config = join(dir, 'settings'), dest = join(dir, 'content');
+    await writeFile(record, JSON.stringify(f.record));
+    await writeFile(config, JSON.stringify(f.config));
+    async function check(code, reason, path = dest, preload) {
+        f.state.requests = [];
+        const { stdout, stderr, code: actual } = await cli(record, config, false, path, preload);
+        assert.equal(actual, code, stdout + stderr);
+        assert.equal(stderr, '');
+        assert.ok(!stdout.includes(dir));
+        const report = JSON.parse(stdout);
+        assert.equal(report.reason, reason);
+        if (reason === 'export_failed') {
+            assert.equal(report.stage, 'export');
+            assert.equal(report.checks.content, 'verified');
+        }
+        readOnly(f.state);
+    }
+    // Fail after a real partial write, before the file can be published.
+    const failWrite = `import fs from 'node:fs/promises';
+        import { syncBuiltinESMExports } from 'node:module';
+        const open = fs.open;
+        fs.open = async (...args) => {
+            const file = await open(...args);
+            if (args[1] === 'wx') file.writeFile = async bytes => {
+                await file.write(bytes.subarray(0, 1)); throw new Error(args[0]);
+            };
+            return file;
+        };
+        syncBuiltinESMExports();`;
+    await check(3, 'export_failed', dest, 'data:text/javascript,' + encodeURIComponent(failWrite));
+    assert.deepEqual((await readdir(dir)).sort(), ['record', 'settings']);
+    for (const target of ['file', 'directory']) {
+        const failSync = `import fs from 'node:fs/promises';
+            import { syncBuiltinESMExports } from 'node:module';
+            const open = fs.open;
+            fs.open = async (...args) => {
+                const handle = await open(...args);
+                if (${target === 'file' ? "args[1] === 'wx'" : `args[0] === ${JSON.stringify(dir)}`})
+                    handle.sync = async () => { throw new Error('sync failed'); };
+                return handle;
+            };
+            syncBuiltinESMExports();`;
+        await check(3, 'export_failed', dest, 'data:text/javascript,' + encodeURIComponent(failSync));
+        if (target === 'directory') {
+            assert.deepEqual(await readFile(dest), content);
+            await rm(dest);
+        }
+        assert.deepEqual((await readdir(dir)).sort(), ['record', 'settings']);
+    }
+    await check(0, 'snapshot_consistent');
+    assert.deepEqual(await readFile(dest), content);
+    assert.equal((await stat(dest)).mode & 0o777, 0o600);
+    setContent(f, Buffer.alloc(0));
+    await check(3, 'export_failed');
+    assert.deepEqual(await readFile(dest), content);
+    await rm(dest);
+    await symlink(join(dir, 'absent'), dest);
+    await check(3, 'export_failed');
+    await rm(dest);
+    await check(3, 'export_failed', join(dir, 'missing', 'file'));
+    setContent(f, Buffer.alloc(0), 0x70);
+    await check(4, 'content_integrity_unsupported');
+    f.record.contentSha256 = sha256(Buffer.alloc(0));
+    await writeFile(record, JSON.stringify(f.record));
+    await check(0, 'snapshot_consistent');
+    assert.deepEqual(await readFile(dest), Buffer.alloc(0));
+    await rm(dest);
+    f.state.content = content;
+    await check(2, 'expected_content');
+    f.state.receipt = null;
+    await check(3, 'receipt_missing');
+    assert.deepEqual((await readdir(dir)).sort(), ['record', 'settings']);
+});
 
 test('generic verifier imports no job, effectful processor, worker, signer, or secret loader', async () => {
     const source = await readFile(join(runtime, 'src/ledger-evidence.mjs'), 'utf8');
