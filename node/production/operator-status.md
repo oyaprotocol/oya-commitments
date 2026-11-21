@@ -38,6 +38,8 @@ If you previously exported `OYA_OPERATOR_PROFILE`, run `unset OYA_OPERATOR_PROFI
 
 `--profile` overrides the environment selection. JSON always contains `version`, selected public `role`, `mode`, `target`, `chainId`, `ledgerContract`, `nodeAddress`, and observation fields `reachable`, `verified`, `healthy`, `status`, `message`. Inapplicable identity fields are null. Paths, endpoint URLs, arbitrary health fields, job results and exception details are omitted.
 
+For offline gas caps from the same selected installation, use [`gas-policy`](gas-policy.md) instead of `status`.
+
 ## Results and recovery
 
 - Exit **0**: matching direct `ready`/`busy`, or matching worker `idle`/`processing` with a fresh poll.
