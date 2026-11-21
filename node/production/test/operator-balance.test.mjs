@@ -1,0 +1,148 @@
+import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import test from 'node:test';
+
+const address = '0x' + 'ab'.repeat(20);
+const marker = 'synthetic-private-marker';
+const script = fileURLToPath(new URL('../scripts/operator-node.mjs', import.meta.url));
+const guard = fileURLToPath(new URL('./operator-guard.mjs', import.meta.url));
+const block = '0x123456789abcdef01';
+const max = '0x' + 'f'.repeat(64);
+
+async function fixture(t) {
+    const dir = await mkdtemp(join(tmpdir(), 'operator-balance-'));
+    await chmod(dir, 0o700);
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    const file = join(dir, 'profile.json'), configFile = join(dir, 'node.json');
+    const requests = [];
+    let respond = (request, response) => response.end(JSON.stringify({ jsonrpc: '2.0', id: request.id,
+        result: ['0x1', block, max][request.id - 1] }));
+    const server = createServer(async (req, res) => {
+        const chunks = [];
+        for await (const chunk of req) chunks.push(chunk);
+        const body = JSON.parse(Buffer.concat(chunks));
+        requests.push({ body, path: req.url, method: req.method, auth: req.headers.authorization });
+        respond(body, res);
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    t.after(() => { server.closeAllConnections(); return new Promise(resolve => server.close(resolve)); });
+    const url = `http://127.0.0.1:${server.address().port}/${marker}`;
+    const profile = { version: 1, role: 'worker', workerConfig: 'unopened.json', nodeConfig: 'node.json',
+        healthUrl: 'http://127.0.0.1:1/healthz', nodeAddress: address, balanceRpc: { url, authorization: `Bearer ${marker}` } };
+    const config = { chainId: 1, ledgerContract: address, rpcUrl: url };
+    async function run(code, { human = false, offline = false } = {}) {
+        await writeFile(file, JSON.stringify(profile), { mode: 0o600 });
+        await writeFile(configFile, JSON.stringify(config));
+        const args = ['--import', guard, script, 'balance', ...(human ? ['--profile', file] : ['--json'])];
+        const env = { PATH: '', OYA_OPERATOR_PROFILE: file, TEST_OPERATOR_FILES: JSON.stringify([file, configFile]),
+            ...(offline ? { TEST_OPERATOR_OFFLINE: '1' } : {}) };
+        return new Promise((resolve, reject) => execFile(process.execPath, args, { cwd: dir, env, timeout: 9000 }, (err, out, stderr) => {
+            try {
+                assert.equal(stderr, '');
+                assert.ok(!out.includes(marker));
+                assert.equal(err?.code ?? 0, code, out);
+                resolve(human ? out : JSON.parse(out));
+            } catch (error) { reject(error); }
+        }));
+    }
+    return { config, profile, run, requests, url, reply(fn) { respond = fn; } };
+}
+
+test('worker snapshot authenticates only to the bound endpoint and pins the exact block', async t => {
+    const f = await fixture(t);
+    const result = await f.run(0);
+    assert.deepEqual(result, { version: 1, role: 'worker', mode: 'ledger', chainId: 1, nodeAddress: address,
+        observedAt: new Date(result.observedAt).toISOString(), balanceWei: BigInt(max).toString(),
+        blockNumber: BigInt(block).toString(), status: 'observed' });
+    assert.deepEqual(f.requests.map(r => r.body), [
+        { jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] },
+        { jsonrpc: '2.0', id: 2, method: 'eth_blockNumber', params: [] },
+        { jsonrpc: '2.0', id: 3, method: 'eth_getBalance', params: [address, block] },
+    ]);
+    assert.ok(f.requests.every(r => r.method === 'POST' && r.path === `/${marker}` && r.auth === `Bearer ${marker}`));
+});
+
+test('direct snapshot reports zero as observed with no implicit authorization', async t => {
+    const f = await fixture(t);
+    Object.assign(f.profile, { role: 'direct' });
+    delete f.profile.workerConfig;
+    delete f.profile.balanceRpc;
+    f.reply(({ id }, res) => res.end(JSON.stringify({ jsonrpc: '2.0', id, result: id === 1 ? '0x1' : '0x0' })));
+    assert.equal((await f.run(0)).balanceWei, '0');
+    assert.match(await f.run(0, { human: true }), /0 wei at block 0/);
+    assert.ok(f.requests.every(r => r.auth === undefined));
+});
+
+test('IPFS returns not applicable offline without a worker config', async t => {
+    const f = await fixture(t);
+    Object.keys(f.config).forEach(k => delete f.config[k]);
+    f.config.mode = 'ipfs';
+    delete f.profile.balanceRpc;
+    delete f.profile.nodeAddress;
+    const result = await f.run(0, { offline: true });
+    assert.equal(result.status, 'not_applicable');
+    assert.equal(result.balanceWei, null);
+});
+
+test('invalid transport, absent endpoint, changed path or invalid credential fails before RPC', async t => {
+    const f = await fixture(t);
+    for (const url of [undefined, f.url + '/changed', 'http://remote.invalid/', 'https://user@host.invalid/', 'file:///abc']) {
+        f.config.rpcUrl = url;
+        if (url !== f.url + '/changed') delete f.profile.balanceRpc;
+        else f.profile.balanceRpc = { url: f.url, authorization: marker };
+        assert.equal((await f.run(2, { offline: true })).status, 'configuration');
+    }
+    f.config.rpcUrl = f.url;
+    f.profile.balanceRpc = { url: f.url, authorization: marker + '\r\n' };
+    assert.equal((await f.run(2)).status, 'configuration');
+    assert.equal(f.requests.length, 0);
+});
+
+test('wrong chain stops before querying a block or balance', async t => {
+    const f = await fixture(t);
+    f.reply(({ id }, res) => res.end(JSON.stringify({ jsonrpc: '2.0', id, result: '0x2' })));
+    const result = await f.run(1);
+    assert.equal(result.status, 'wrong_chain');
+    assert.equal(result.balanceWei, null);
+    assert.equal(f.requests.length, 1);
+});
+
+test('invalid RPC envelopes, noncanonical quantities and overflow never become a balance', async t => {
+    const f = await fixture(t);
+    for (const invalid of [{ id: 4 }, { jsonrpc: '1.0' }, { error: marker }, { result: '0x01' },
+        { result: '0x' }, { result: 0 }, { result: max + '0' }]) {
+        f.reply(({ id }, res) => res.end(JSON.stringify({ jsonrpc: '2.0', id, result: '0x1', ...(id === 3 && invalid) })));
+        const result = await f.run(1);
+        assert.equal(result.status, 'unavailable');
+        assert.equal(result.balanceWei, null);
+    }
+});
+
+test('redirects, oversized chunked bodies, provider errors and invalid UTF-8 fail privately', async t => {
+    const f = await fixture(t);
+    for (const reply of [res => res.writeHead(307, { location: f.url }).end(),
+        res => { res.write(' '.repeat(65536)); res.end('{}'); }, res => res.writeHead(403).end(marker),
+        res => res.end(Buffer.from([255]))]) {
+        f.reply((_body, res) => reply(res));
+        const before = f.requests.length;
+        assert.equal((await f.run(1)).status, 'unavailable');
+        assert.equal(f.requests.length, before + 1);
+    }
+});
+
+test('one deadline bounds the complete observation, including an unfinished body', async t => {
+    const f = await fixture(t);
+    f.reply(({ id }, res) => {
+        if (id === 1) setTimeout(() => res.end(JSON.stringify({ jsonrpc: '2.0', id, result: '0x1' })), 2500);
+        else res.write('{');
+    });
+    const start = performance.now();
+    assert.equal((await f.run(1)).status, 'timeout');
+    assert.ok(performance.now() - start < 7200);
+    assert.equal(f.requests.length, 2);
+});

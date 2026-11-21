@@ -42,7 +42,9 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q017](#q017) | When a rule template is ready to share | commitment design, reuse, quality | Answered |
 | [Q018](#q018) | Choosing a node for a first message | node operation, peer selection | Answered |
 | [Q019](#q019) | One sentence that changes a loan | rule templates, lending, plain language | Deferred |
-| [Q022](#q022) | Keeping a published message available | data availability, publication nodes | Awaiting answer |
+| [Q020](#q020) | When a handshake is enough | trust, everyday agreements | Answered |
+| [Q021](#q021) | Time to challenge a proposal | challenge windows, protocol design | Answered |
+| [Q022](#q022) | Keeping a published message available | data availability, publication nodes | Answered |
 
 <a id="q001"></a>
 
@@ -616,6 +618,68 @@ What is one sentence you could change in a loan template that would make a real 
 
 Let's save the use case specific questions for when we start building them and try to focus on the protocol itself for now.
 
+<a id="q020"></a>
+
+<!-- oya-dialogue-question: Q020 -->
+
+## Q020 — When a handshake is enough
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-17
+- **Topics:** trust, everyday agreements
+- **Status:** Answered
+- **Source PR:** [#195](https://github.com/oyaprotocol/oya-commitments/pull/195)
+
+### Context
+
+In [Q007](#q007), @pemulis discussed whether a promise can be verified. Whether the people making it want it enforced is a different question.
+
+### Question
+
+What is a promise you would rather keep on a handshake, even if Oya could enforce it?
+
+### Answer
+
+#### @pemulis — 2026-11-19
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7021826780](https://github.com/oyaprotocol/oya-commitments/pull/195#issuecomment-7021826780)
+- **Source created:** 2026-11-19T20:48:52Z
+- **Source updated:** 2026-11-19T20:48:52Z
+
+I'm not sure if this is exactly what you mean, but a commitment could allow any one of a set of addresses to make a withdrawal or other transaction as long as it is not disputed by any other address on the list. The proposal would essentially be that the transaction will not be disputed by someone else in the group, for a shared wallet with no specific policy. That would still allow for a timelock and dispute mechanism and protect against stolen keys, while providing lots of flexibility.
+
+<a id="q021"></a>
+
+<!-- oya-dialogue-question: Q021 -->
+
+## Q021 — Time to challenge a proposal
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-19
+- **Topics:** challenge windows, protocol design
+- **Status:** Answered
+- **Source PR:** [#202](https://github.com/oyaprotocol/oya-commitments/pull/202)
+
+### Context
+
+In [Q003](#q003), @pemulis explained that anyone can challenge a proposal during a limited window. The clock runs even while nobody is looking.
+
+### Question
+
+How would you judge whether a challenge window gives someone enough time to notice a mistaken proposal and dispute it?
+
+### Answer
+
+#### @pemulis — 2026-11-21
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7054600974](https://github.com/oyaprotocol/oya-commitments/pull/202#issuecomment-7054600974)
+- **Source created:** 2026-11-21T00:55:05Z
+- **Source updated:** 2026-11-21T00:55:05Z
+
+The typical default for UMA proposals in the past has been two hours, but it's configurable. But depending on how robust the node/validator network seems to be, how much money is at risk, and how easy the commitment is to evaluate, shorter challenge periods might be safer. Longer challenge periods can be selected for commitments with a lot of funds at risk or that are harder to evaluate.
+
 <a id="q022"></a>
 
 <!-- oya-dialogue-question: Q022 -->
@@ -625,7 +689,7 @@ Let's save the use case specific questions for when we start building them and t
 - **Asked by:** Oya Gardener (`@oyagardener`)
 - **Asked on:** 2026-11-19
 - **Topics:** data availability, publication nodes
-- **Status:** Awaiting answer
+- **Status:** Answered
 - **Source PR:** [#203](https://github.com/oyaprotocol/oya-commitments/pull/203)
 
 ### Context
@@ -638,4 +702,11 @@ Once a node publishes a message, who should take responsibility for keeping a re
 
 ### Answer
 
-Pending an answer from `@pemulis` or `@nesseps`.
+#### @pemulis — 2026-11-21
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7054659659](https://github.com/oyaprotocol/oya-commitments/pull/203#issuecomment-7054659659)
+- **Source created:** 2026-11-21T00:58:27Z
+- **Source updated:** 2026-11-21T00:58:27Z
+
+In the future, every piece of content that is published _and logged_ by a node should be pulled down and saved by every other node, as long as proper Oya fees were paid based on the size of the content being logged. Nodes will be expected to be able to draw on that history to prove their performance of data availability and to evaluate proposals that are based on historical data. Nodes can rely on externally hosted backup sources as well depending on their appetite for risk.
