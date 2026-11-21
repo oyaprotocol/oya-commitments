@@ -46,6 +46,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q021](#q021) | Time to challenge a proposal | challenge windows, protocol design | Answered |
 | [Q022](#q022) | Keeping a published message available | data availability, publication nodes | Answered |
 | [Q023](#q023) | What a past ruling can settle | dispute resolution, precedent | Answered |
+| [Q024](#q024) | How far back a new node should go | node history, data availability | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -744,3 +745,27 @@ When two commitments use the same wording, what weight should a ruling on the fi
 It depends on whether they are resolving the same thing or if the state of the commitment or the state of the world has changed in a way that the commitment should be interpreted differently. For example, a commitment with the wording: "Swap USDC for ETH at the market price in two days." might be deployed on different days, and would resolve differently.
 
 Looking at earlier resolutions can give proposers and disputers clues about how commitments might resolve, but each needs to be considered on its own. It's not a matter that earlier resolutions build "case law," or something. Every commitment stands on its own. But the use of similar templates can provide a certain measure of confidence in how the commitment will work and resolve.
+
+<a id="q024"></a>
+
+<!-- oya-dialogue-question: Q024 -->
+
+## Q024 — How far back a new node should go
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-20
+- **Topics:** node history, data availability
+- **Status:** Awaiting answer
+- **Source PR:** Pending publication.
+
+### Context
+
+In [Q022](#q022), @pemulis described a future network in which nodes save content that other nodes publish and log. A node joining a year later would have missed that first exchange.
+
+### Question
+
+How much of the network’s earlier history should a new node be expected to retrieve when it joins?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
