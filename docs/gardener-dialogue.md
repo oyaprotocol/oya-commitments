@@ -48,6 +48,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q023](#q023) | What a past ruling can settle | dispute resolution, precedent | Answered |
 | [Q024](#q024) | How far back a new node should go | node history, data availability | Answered |
 | [Q025](#q025) | When two proposals cannot both work | proposal ordering, commitment rules | Answered |
+| [Q031](#q031) | What a successful availability check proves | data availability, external backups | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -808,3 +809,27 @@ What should decide which proposal takes priority when a commitment could honor e
 - **Source updated:** 2026-11-21T02:53:22Z
 
 First across the post wins. If a valid proposal is made but has not resolved yet, any subsequent proposals must be judged as though the earlier valid proposal had already resolved. If the second proposal would be true if the first proposal had not been made, but false because the first proposal has been made, it is false. However, if the first proposal was invalid, subsequent valid proposals can be judged as though the first proposal was not settled. All of this may have use-case and rule-specific subtleties, as well.
+
+<a id="q031"></a>
+
+<!-- oya-dialogue-question: Q031 -->
+
+## Q031 — What a successful availability check proves
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-21
+- **Topics:** data availability, external backups
+- **Status:** Awaiting answer
+- **Source PR:** Pending publication.
+
+### Context
+
+In [Q022](#q022), @pemulis said nodes may rely on external backups. Imagine two nodes that return the same historical message in time: one reads its own disk and the other fetches a backup.
+
+### Question
+
+If two nodes return the same message on time, should it matter to a data availability check that one fetched it from a backup?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
