@@ -154,29 +154,19 @@ forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimis
 
 ## Local Testing (Anvil)
 
+Start `anvil` in a separate terminal. Set up the required contracts on that chain. In your working terminal, export the [deployment settings](#required-environment-variables) for those contracts and a local test account. Both commands below select the loopback endpoint explicitly.
+
 Dry-run (no broadcast):
 
 ```shell
-anvil
-RPC_URL=http://127.0.0.1:8545 \
-DEPLOYER_PK=0x<your_private_key> \
-OG_COLLATERAL=0x<collateral> \
-OG_BOND_AMOUNT=1 \
-OG_RULES="Testing rules" \
 forge script script/DeploySafeWithOptimisticGovernor.s.sol:DeploySafeWithOptimisticGovernor \
   --rpc-url http://127.0.0.1:8545
 ```
 
-Broadcast on Anvil:
+Broadcast on Anvil with the exported settings. Clear `ENV_FILE` for this command so the wrapper does not load another deployment configuration:
 
 ```shell
-anvil
-RPC_URL=http://127.0.0.1:8545 \
-DEPLOYER_PK=0x<your_private_key> \
-OG_COLLATERAL=0x<collateral> \
-OG_BOND_AMOUNT=1 \
-OG_RULES="Testing rules" \
-bash script/deploy-commitment.sh --owners 0x
+ENV_FILE= bash script/deploy-commitment.sh --owners 0x --rpc-url http://127.0.0.1:8545
 ```
 
 ## Deploy the Oya ERC1155 Test Token
