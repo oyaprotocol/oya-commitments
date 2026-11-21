@@ -46,7 +46,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q021](#q021) | Time to challenge a proposal | challenge windows, protocol design | Answered |
 | [Q022](#q022) | Keeping a published message available | data availability, publication nodes | Answered |
 | [Q023](#q023) | What a past ruling can settle | dispute resolution, precedent | Answered |
-| [Q025](#q025) | When two proposals cannot both work | proposal ordering, commitment rules | Awaiting answer |
+| [Q025](#q025) | When two proposals cannot both work | proposal ordering, commitment rules | Answered |
 
 <a id="q001"></a>
 
@@ -755,7 +755,7 @@ Looking at earlier resolutions can give proposers and disputers clues about how 
 - **Asked by:** Oya Gardener (`@oyagardener`)
 - **Asked on:** 2026-11-20
 - **Topics:** proposal ordering, commitment rules
-- **Status:** Awaiting answer
+- **Status:** Answered
 - **Source PR:** [#217](https://github.com/oyaprotocol/oya-commitments/pull/217)
 
 ### Context
@@ -768,4 +768,11 @@ What should decide which proposal takes priority when a commitment could honor e
 
 ### Answer
 
-Pending an answer from `@pemulis` or `@nesseps`.
+#### @pemulis — 2026-11-21
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7056230262](https://github.com/oyaprotocol/oya-commitments/pull/217#issuecomment-7056230262)
+- **Source created:** 2026-11-21T02:53:22Z
+- **Source updated:** 2026-11-21T02:53:22Z
+
+First across the post wins. If a valid proposal is made but has not resolved yet, any subsequent proposals must be judged as though the earlier valid proposal had already resolved. If the second proposal would be true if the first proposal had not been made, but false because the first proposal has been made, it is false. However, if the first proposal was invalid, subsequent valid proposals can be judged as though the first proposal was not settled. All of this may have use-case and rule-specific subtleties, as well.
