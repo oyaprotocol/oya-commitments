@@ -756,7 +756,7 @@ Looking at earlier resolutions can give proposers and disputers clues about how 
 - **Asked on:** 2026-11-20
 - **Topics:** protocol evolution, message compatibility
 - **Status:** Awaiting answer
-- **Source PR:** Pending publication.
+- **Source PR:** [#218](https://github.com/oyaprotocol/oya-commitments/pull/218)
 
 ### Context
 
