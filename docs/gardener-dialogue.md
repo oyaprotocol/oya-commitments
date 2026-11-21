@@ -48,6 +48,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q023](#q023) | What a past ruling can settle | dispute resolution, precedent | Answered |
 | [Q024](#q024) | How far back a new node should go | node history, data availability | Answered |
 | [Q025](#q025) | When two proposals cannot both work | proposal ordering, commitment rules | Answered |
+| [Q032](#q032) | A first test for an independent node | peer messaging, interoperability | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -808,3 +809,27 @@ What should decide which proposal takes priority when a commitment could honor e
 - **Source updated:** 2026-11-21T02:53:22Z
 
 First across the post wins. If a valid proposal is made but has not resolved yet, any subsequent proposals must be judged as though the earlier valid proposal had already resolved. If the second proposal would be true if the first proposal had not been made, but false because the first proposal has been made, it is false. However, if the first proposal was invalid, subsequent valid proposals can be judged as though the first proposal was not settled. All of this may have use-case and rule-specific subtleties, as well.
+
+<a id="q032"></a>
+
+<!-- oya-dialogue-question: Q032 -->
+
+## Q032 — A first test for an independent node
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-21
+- **Topics:** peer messaging, interoperability
+- **Status:** Awaiting answer
+- **Source PR:** Pending publication.
+
+### Context
+
+The [peer sending guide](../node/production/peers/send.md) describes how the current node asks a peer to publish signed text. Imagine someone writing a second node from scratch.
+
+### Question
+
+What is the smallest exchange that a new node implementation should complete with an existing node to show the two are compatible?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
