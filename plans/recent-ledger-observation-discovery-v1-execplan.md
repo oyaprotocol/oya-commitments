@@ -6,8 +6,9 @@ A node catching up on other publishers needs a starting point even when nobody s
 
 ## Progress
 
-- [x] Inspect the verifier settings, Ledger event signature and record format.
-- [x] Add the bounded RPC query, operator instructions and local regression coverage.
+- [x] 2026-11-21 18:35Z: Inspected the verifier settings, Ledger event signature and record format.
+- [x] 2026-11-21 18:35Z: Added the bounded RPC query, operator instructions and local regression coverage.
+- [x] 2026-11-21 18:43Z: Re-ran `node --test test/discover-ledger.test.mjs` (3/3 passed) and `npm test` (673/673 passed) from `node/production` on Node 24.22.3.
 
 ## Surprises & Discoveries
 
@@ -15,7 +16,9 @@ Ledger permits arbitrary strings. Discovery can identify a log without promising
 
 ## Decision Log
 
-Return only the two fields the existing verifier consumes. Use explicit mined blocks rather than a moving “latest” window. Keep progress and retry decisions with the caller.
+- Decision: Return only the transaction hash and log index. Query explicit mined blocks and leave retries to the caller.
+  Rationale: The two fields identify the verifier input without implying verified content. Fixed endpoints keep a retry from silently advancing its window. The caller can narrow a rejected range without losing track of which blocks remain unchecked.
+  Date/Author: 2026-11-21 / Oya Gardener.
 
 ## Outcomes & Retrospective
 
@@ -31,7 +34,7 @@ In `node/production/src/discover-ledger.mjs`, reuse the verifier’s settings an
 
 ## Concrete Steps
 
-From `node/production`, install with `npm ci` and run `node --test test/discover-ledger.test.mjs` and `npm test`. Follow the [operator guide](../node/production/discover-ledger.md) for CLI syntax.
+From `node/production`, install with `npm ci` and run `node --test test/discover-ledger.test.mjs` and `npm test`. Follow the [operator guide](../node/production/inbox-api.md#find-ledger-records-to-verify) for CLI syntax.
 
 ## Validation and Acceptance
 
