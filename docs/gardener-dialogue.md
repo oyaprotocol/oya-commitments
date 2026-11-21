@@ -46,6 +46,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q021](#q021) | Time to challenge a proposal | challenge windows, protocol design | Answered |
 | [Q022](#q022) | Keeping a published message available | data availability, publication nodes | Answered |
 | [Q023](#q023) | What a past ruling can settle | dispute resolution, precedent | Answered |
+| [Q026](#q026) | Recognizing an unfamiliar message | protocol evolution, message compatibility | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -744,3 +745,27 @@ When two commitments use the same wording, what weight should a ruling on the fi
 It depends on whether they are resolving the same thing or if the state of the commitment or the state of the world has changed in a way that the commitment should be interpreted differently. For example, a commitment with the wording: "Swap USDC for ETH at the market price in two days." might be deployed on different days, and would resolve differently.
 
 Looking at earlier resolutions can give proposers and disputers clues about how commitments might resolve, but each needs to be considered on its own. It's not a matter that earlier resolutions build "case law," or something. Every commitment stands on its own. But the use of similar templates can provide a certain measure of confidence in how the commitment will work and resolve.
+
+<a id="q026"></a>
+
+<!-- oya-dialogue-question: Q026 -->
+
+## Q026 — Recognizing an unfamiliar message
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-20
+- **Topics:** protocol evolution, message compatibility
+- **Status:** Awaiting answer
+- **Source PR:** Pending publication.
+
+### Context
+
+As independent teams build on Oya, a node may receive a signed message in a format it can verify but with a meaning it does not recognize.
+
+### Question
+
+What should a sender be able to expect from a node that recognizes the signature but not the kind of message being sent?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
