@@ -150,7 +150,13 @@ export const evidenceInputFailure = error => ({ ...initialReport(),
     status: error instanceof EvidenceError ? error.status : 'unavailable',
     reason: error instanceof EvidenceError ? error.reason : 'input_unreadable' });
 
-export async function verifyLedgerEvidence(identity, input, { signal } = {}) {
+export async function verifyLedgerEvidence(identity, input, options) {
+    return (await verifyLedgerSnapshot(identity, input, { ...options, retainBytes: false })).report;
+}
+
+// Bytes are returned separately from the printable report and only on verified snapshots.
+export async function verifyLedgerSnapshot(identity, input, { signal, retainBytes = false } = {}) {
+    let verifiedBytes;
     const report = initialReport();
     const controller = new AbortController();
     const abort = () => controller.abort();
@@ -245,6 +251,7 @@ export async function verifyLedgerEvidence(identity, input, { signal } = {}) {
         report.status = checked ? 'verified' : 'partial';
         report.reason = checked ? 'snapshot_consistent' : 'content_integrity_unsupported';
         report.stage = 'complete';
+        if (retainBytes && report.status === 'verified') verifiedBytes = bytes;
     } catch (error) {
         report.status = error instanceof EvidenceError ? error.status : controller.signal.aborted ? 'unavailable' : 'mismatch';
         report.reason = error instanceof EvidenceError ? error.reason : controller.signal.aborted ? 'deadline' : 'malformed_evidence';
@@ -260,5 +267,5 @@ export async function verifyLedgerEvidence(identity, input, { signal } = {}) {
         controller.abort();
         report.observedAt = new Date().toISOString();
     }
-    return report;
+    return { report, verifiedBytes };
 }

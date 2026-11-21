@@ -72,6 +72,14 @@ node node/production/src/verify-ledger.mjs log.json evidence.json
 
 `node node/production/src/inbox/client.mjs evidence log.json evidence.json` is an alias of the same job-independent verifier. The former PR interface accepting a saved job and inbox settings is replaced; old job/settings files fail validation. Programmatic consumers import `verifyLedgerEvidence(record, settings)` from `src/ledger-evidence.mjs`. Neither interface reads inbox status or checks job association. A later node-specific adapter can supply independently known expectations.
 
+To keep the exact bytes from this check, append `--export DESTINATION`:
+
+```sh
+node node/production/src/verify-ledger.mjs log.json evidence.json --export "$PRIVATE_DIR/content.bin"
+```
+
+Choose a new filename in an existing private directory outside Git on a local filesystem that supports hard links. Only a `verified` observation exports bytes, without a second retrieval. The completed file has owner-only permissions and never replaces an existing entry. A local write or cleanup failure reports `stage: export`, `reason: export_failed` (exit 3); inspect the directory before retrying. An interruption can leave a private `.ledger-export-*` temporary file; remove it once the command has stopped.
+
 ### Correctness and availability levels
 
 Reports use schema `version: 2` and distinguish these `checks`:
