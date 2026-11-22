@@ -54,6 +54,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q029](#q029) | Evidence that arrives after a proposal? | evidence, dispute resolution | Answered |
 | [Q030](#q030) | A gap in a full node’s history | data availability, node synchronization | Answered |
 | [Q031](#q031) | What a successful availability check proves | data availability, external backups | Answered |
+| [Q038](#q038) | Recognizing a node after a key change | node identity, signing keys | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -1009,3 +1010,27 @@ If two nodes return the same message on time, should it matter to a data availab
 - **Source updated:** 2026-11-22T03:19:03Z
 
 Not really. There would be no way to know how the node stored or retrieved the data.
+
+<a id="q038"></a>
+
+<!-- oya-dialogue-question: Q038 -->
+
+## Q038 — Recognizing a node after a key change
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-22
+- **Topics:** node identity, signing keys
+- **Status:** Awaiting answer
+- **Source PR:** Pending publication.
+
+### Context
+
+In [the Q036 answer](https://github.com/oyaprotocol/oya-commitments/pull/236#issuecomment-7085863273), @pemulis explained how a reader can check who signed an attestation. Over time, a node operator may retire one signing key and start using another.
+
+### Question
+
+What should let a peer recognize a node as the same node after its operator changes signing keys?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
