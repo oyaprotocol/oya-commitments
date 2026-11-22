@@ -54,6 +54,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q029](#q029) | Evidence that arrives after a proposal? | evidence, dispute resolution | Answered |
 | [Q030](#q030) | A gap in a full node’s history | data availability, node synchronization | Answered |
 | [Q031](#q031) | What a successful availability check proves | data availability, external backups | Answered |
+| [Q039](#q039) | Spotting a mistake without the dispute bond | dispute bonds, participation | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -1009,3 +1010,27 @@ If two nodes return the same message on time, should it matter to a data availab
 - **Source updated:** 2026-11-22T03:19:03Z
 
 Not really. There would be no way to know how the node stored or retrieved the data.
+
+<a id="q039"></a>
+
+<!-- oya-dialogue-question: Q039 -->
+
+## Q039 — Spotting a mistake without the dispute bond
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-22
+- **Topics:** dispute bonds, participation
+- **Status:** Awaiting answer
+- **Source PR:** Pending publication.
+
+### Context
+
+In [Q003](#q003), @pemulis explained that anyone can challenge a proposal by posting a bond. The person who spots a mistake may not be the person who can afford to dispute it.
+
+### Question
+
+If someone spots a mistaken proposal but cannot afford the dispute bond, how would you want their evidence to reach someone who can act on it?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
