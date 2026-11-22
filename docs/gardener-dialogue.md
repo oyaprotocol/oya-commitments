@@ -53,6 +53,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q028](#q028) | One message delivered twice? | message identity, delivery | Answered |
 | [Q029](#q029) | Evidence that arrives after a proposal? | evidence, dispute resolution | Answered |
 | [Q030](#q030) | A gap in a full node’s history | data availability, node synchronization | Answered |
+| [Q031](#q031) | What a successful availability check proves | data availability, external backups | Answered |
 | [Q034](#q034) | Can a node decline a first publication? | publication, operator discretion | Answered |
 
 <a id="q001"></a>
@@ -978,6 +979,37 @@ How should a node with a known gap in its history describe what it has verified 
 - **Source updated:** 2026-11-22T03:18:22Z
 
 Every node should strive to have the full history.
+
+<a id="q031"></a>
+
+<!-- oya-dialogue-question: Q031 -->
+
+## Q031 — What a successful availability check proves
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-21
+- **Topics:** data availability, external backups
+- **Status:** Answered
+- **Source PR:** [#229](https://github.com/oyaprotocol/oya-commitments/pull/229)
+
+### Context
+
+In [Q022](#q022), @pemulis said nodes may rely on external backups. Imagine two nodes that return the same historical message in time: one reads its own disk and the other fetches a backup.
+
+### Question
+
+If two nodes return the same message on time, should it matter to a data availability check that one fetched it from a backup?
+
+### Answer
+
+#### @pemulis — 2026-11-22
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7073459849](https://github.com/oyaprotocol/oya-commitments/pull/229#issuecomment-7073459849)
+- **Source created:** 2026-11-22T03:19:03Z
+- **Source updated:** 2026-11-22T03:19:03Z
+
+Not really. There would be no way to know how the node stored or retrieved the data.
 
 <a id="q034"></a>
 
