@@ -72,6 +72,14 @@ node node/production/src/verify-ledger.mjs log.json evidence.json
 
 `node node/production/src/inbox/client.mjs evidence log.json evidence.json` is an alias of the same job-independent verifier. The former PR interface accepting a saved job and inbox settings is replaced; old job/settings files fail validation. Programmatic consumers import `verifyLedgerEvidence(record, settings)` from `src/ledger-evidence.mjs`. Neither interface reads inbox status or checks job association. A later node-specific adapter can supply independently known expectations.
 
+To keep the exact bytes from this check, append `--save`:
+
+```sh
+node node/production/src/verify-ledger.mjs log.json evidence.json --save
+```
+
+Run from a trusted working directory outside Git. `--save` creates a private `oya-history/` directory there and saves the content under its canonical IPFS CID, without an extension. Use `--save DIRECTORY` to select an existing private directory instead. The filesystem must support hard links. Only a `verified` observation saves content, without a second retrieval. The completed file has owner-only permissions and never replaces an existing entry. The command syncs the file before publishing and the parent directory after removing the temporary name. If directory sync fails, the destination may already exist but its persistence is unconfirmed. A local write, sync or cleanup failure reports `stage: save`, `reason: save_failed` (exit 3); inspect the directory before retrying. An interruption can leave a private `.ledger-save-*` temporary file; remove it once the command has stopped.
+
 ### Correctness and availability levels
 
 Reports use schema `version: 2` and distinguish these `checks`:
