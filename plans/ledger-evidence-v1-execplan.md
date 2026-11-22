@@ -15,7 +15,11 @@ Validate a particular Ledger log using its chain, contract, transaction hash and
 - [x] 2026-11-11: Inspected cumulative source, tests, docs and retained generated kernel artifacts; prepared local commit and publication drafts for parent review.
 - [x] 2026-11-11: Independent review found no blockers and independently reran focused/full production and Ethereum tests on Node 26. Publication readbacks are tracked outside Git; kernel release and later caller migration remain separately authorized maintainer work.
 
+- [x] 2026-11-21 16:35Z: Implemented and tested optional single-record local byte export. Documented operator recovery and recorded the next candidate below.
+
 ## Surprises & Discoveries
+
+The bounded `cat` reader already returns the exact buffer that passes the integrity checks. Keeping that buffer separate from the printable report avoids a second request and avoids serializing content.
 
 Ledger attributes a log to its immediate caller, which can be a contract wallet. Requiring receipt sender/destination to equal the event node/Ledger incorrectly excludes forwarded calls. The published receipt kernel validates receipt/log location; its event decoder supports canonical CIDv1 lowercase Base32 SHA-256 identifiers. Ledger itself accepts opaque strings, so other CID formats remain a documented format limitation, not a claim that those onchain records cannot exist.
 
@@ -24,6 +28,8 @@ The first refactor test run caught a CLI test-guard argument offset and an overl
 The production dependency is published `@oyaprotocol/ethereum@0.2.0`, without the new `getAddress` export. Its existing ethers address caller must remain until maintainers release the kernel. Existing kernel helper source, generated artifacts and tests remain in this PR.
 
 ## Decision Log
+
+- 2026-11-21 / Hermes: Following the Q022/Q024 operator action, export one explicitly selected historical record on demand. Write a private temporary file beside the destination, then hard-link it into place after close. Unlike rename, link cannot replace an existing entry. Operators choose a private local directory that supports hard links.
 
 - 2026-11-11 / Hermes: Replace the primary interface in this same PR per founder request. Select exactly one transaction/log index, verify the emitting Ledger and optional expected caller/CID, and allow relay/contract callers. Endpoint settings are independent from record identity.
 - 2026-11-11 / Hermes: Treat content as arbitrary bounded bytes. Verify raw CIDv1 SHA-256 bytes directly, or compare an independently supplied `contentSha256` for any supported CID codec. For a non-raw CID without that independent expectation, report `partial`, never verified content. A cat response alone is availability evidence, not a UnixFS DAG proof. Byte integrity does not establish application semantics or truth.
@@ -36,6 +42,8 @@ The production dependency is published `@oyaprotocol/ethereum@0.2.0`, without th
 The standalone CLI and reusable module now verify a chosen Ledger record without a job or inbox. Tests exercise binary/JSON/empty/boundary content, forwarded calls, exact log selection, explicit partial integrity, mismatch/unavailable separation, and isolated read-only execution. The previous job-dependent command and its status/signature assumptions are superseded rather than retained as a parallel primary API. Kernel helper files are retained unchanged from the reviewed head, and production still uses published dependencies.
 
 Validation uses real loopback HTTP and spawned CLI processes with simulated RPC/Kubo data, not a live chain or Kubo daemon. Docker packaging inputs and release/upgrade regressions passed; no Docker image build, deployment or publication was performed. Non-raw CID binding, application semantics and future job reconciliation remain explicit limitations rather than inferred successes.
+
+The initial `--export DESTINATION` implementation let the operator retain verified content while the original two-argument command remains report-only. On Node 26.12.1, `node --test node/production/test/ledger-evidence.test.mjs` passed 73/73 and `npm --prefix node/production test` passed 671/671. Export tests cover same-request binary and empty bytes, a partial write failure, existing files and dangling symlinks, missing directories, and non-verified outcomes. Five mocked release tests require temporary output outside the tested source tree. For worktree-only validation the full suite ran against an identical disposable source copy with a sibling temporary directory, both inside the worktree.
 
 ## Context and Orientation
 
@@ -61,8 +69,16 @@ Verification reads two explicit bounded JSON files and at most four HTTP respons
 
 Detailed test logs and publication drafts are kept outside Git for the parent reviewer. Final Node 24.22.2/npm 11.19.1 clean production install added 30 packages; 71 focused and 380 full tests passed, with zero failures/skips. The reduced count versus the former 95/404 suite reflects removal of job/status/signature-only cases, replaced by source-independent identity, byte-integrity and transport cases. Clean kernel install/build, 90 Ethereum tests and Ethereum type checks passed, with no generated-file drift. Production resolved the registry ethereum 0.2.0 tarball, had no getAddress export, and imported the new module successfully.
 
-Cumulative code/test/generated/executable-config churn is 983 lines, below the 3,000-line cap. All-file totals are recorded separately in the handoff evidence. The upstream advance since this branch point only adds dialogue documentation; it is not removed by this PR. The next informational candidate remains the offline official peer-directory inspector, without a separate approval gate.
+Cumulative code/test/generated/executable-config churn is 983 lines, below the 3,000-line cap. All-file totals are recorded separately in the handoff evidence. The upstream advance since this branch point only adds dialogue documentation; it is not removed by this PR. The peer-directory inspector was the original candidate and has since landed.
+
+Review follow-up: sync the verified file before linking it and the parent directory after cleanup. A failed file sync leaves no destination. A failed directory sync reports export failure without deleting the published file. The CLI regression test injects both failures.
+
+## Next feature — candidate when capacity permits
+
+`ledger-archive-recheck-v1`: let an operator check retained bytes against a previously trusted record without contacting Kubo. First check whether a standard checksum tool already covers the workflow. If record-aware checking adds value, reuse the production verifier’s digest rules in the evidence CLI and tests (estimated under 250 changed code lines). Accept matching binary and empty files, reject a changed byte, and distinguish an unreadable file from a mismatch. Require a trusted digest or supported raw CID. An offline match says nothing about current chain state or peer availability.
 
 ## Interfaces and Dependencies
 
 `verifyLedgerEvidence(record, settings)` returns a versioned report with sanitized status/reason/stage, UTC observation time, validated identifiers and explicit `checks`. Record requires `transactionHash` and integer `logIndex`; optional `cid`, `nodeAddress`, `contentSha256` are independent expectations. Settings require `chainId`, `ledgerContract`, `rpcUrl`, `ipfsUrl`, with optional endpoint authorization and bounded deadlines. Unknown fields are rejected before network access. Content correctness is byte identity only; semantic truth and job association remain unassessed. Keep existing package pins and ethers address normalization until the reviewed kernel has been published by maintainers.
+
+Review follow-up: `--save [DIRECTORY]` names each saved file by its verified Ledger event CID. The default is a private `oya-history/` directory in the working directory. An explicit directory must already exist. The verifier returns `content` separately when requested.

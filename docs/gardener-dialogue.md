@@ -51,7 +51,9 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q026](#q026) | Recognizing an unfamiliar message | protocol evolution, message compatibility | Answered |
 | [Q027](#q027) | Which proposal came first? | proposal ordering, shared evidence | Answered |
 | [Q028](#q028) | One message delivered twice? | message identity, delivery | Answered |
-| [Q034](#q034) | Can a node decline a first publication? | publication, operator discretion | Awaiting answer |
+| [Q029](#q029) | Evidence that arrives after a proposal? | evidence, dispute resolution | Answered |
+| [Q030](#q030) | A gap in a full node’s history | data availability, node synchronization | Answered |
+| [Q034](#q034) | Can a node decline a first publication? | publication, operator discretion | Answered |
 
 <a id="q001"></a>
 
@@ -915,6 +917,68 @@ This is going to be extremely context dependent. The commitment rules should mak
 
 This would be specific to a particular use case. We should not look at use cases and their rules right now.
 
+<a id="q029"></a>
+
+<!-- oya-dialogue-question: Q029 -->
+
+## Q029 — Evidence that arrives after a proposal?
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-20
+- **Topics:** evidence, dispute resolution
+- **Status:** Answered
+- **Source PR:** [#223](https://github.com/oyaprotocol/oya-commitments/pull/223)
+
+### Context
+
+Suppose a proposal says a deadline was met. A dated record confirming that fact becomes public only after the proposal is challenged.
+
+### Question
+
+What weight should a resolver give evidence that existed when the proposal was made but was not public then?
+
+### Answer
+
+#### @pemulis — 2026-11-21
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7065192967](https://github.com/oyaprotocol/oya-commitments/pull/223#issuecomment-7065192967)
+- **Source created:** 2026-11-21T15:51:20Z
+- **Source updated:** 2026-11-21T15:51:20Z
+
+Only public information counts.
+
+<a id="q030"></a>
+
+<!-- oya-dialogue-question: Q030 -->
+
+## Q030 — A gap in a full node’s history
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-21
+- **Topics:** data availability, node synchronization
+- **Status:** Answered
+- **Source PR:** [#227](https://github.com/oyaprotocol/oya-commitments/pull/227)
+
+### Context
+
+In [Q024](#q024), @pemulis said a full node should retrieve history back to the beginning. A node catching up might reach the latest Ledger entry while one older message is still missing.
+
+### Question
+
+How should a node with a known gap in its history describe what it has verified to its peers?
+
+### Answer
+
+#### @pemulis — 2026-11-22
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7073452882](https://github.com/oyaprotocol/oya-commitments/pull/227#issuecomment-7073452882)
+- **Source created:** 2026-11-22T03:18:22Z
+- **Source updated:** 2026-11-22T03:18:22Z
+
+Every node should strive to have the full history.
+
 <a id="q034"></a>
 
 <!-- oya-dialogue-question: Q034 -->
@@ -924,7 +988,7 @@ This would be specific to a particular use case. We should not look at use cases
 - **Asked by:** Oya Gardener (`@oyagardener`)
 - **Asked on:** 2026-11-21
 - **Topics:** publication, operator discretion
-- **Status:** Awaiting answer
+- **Status:** Answered
 - **Source PR:** [#233](https://github.com/oyaprotocol/oya-commitments/pull/233)
 
 ### Context
@@ -937,4 +1001,11 @@ When, if ever, should the protocol require a particular node to publish a new me
 
 ### Answer
 
-Pending an answer from `@pemulis` or `@nesseps`.
+#### @pemulis — 2026-11-22
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7083745837](https://github.com/oyaprotocol/oya-commitments/pull/233#issuecomment-7083745837)
+- **Source created:** 2026-11-22T18:37:34Z
+- **Source updated:** 2026-11-22T18:37:34Z
+
+It's the operator's choice. They never have to accept messages they don't want to receive or publish content they don't want to publish. They do, however, have a responsibility to pull down and save any content that was published and logged by other addresses (presumably other nodes, though the Ledger contract allows anyone to post logs), assuming the publisher paid the protocol fee in Oya tokens.
