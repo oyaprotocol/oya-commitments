@@ -2,14 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
-import { mkdtemp, writeFile, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, readFile, readdir, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { Interface, getIcapAddress, id } from 'ethers';
 import { hashLedgerCid } from '@oyaprotocol/ethereum';
-import { verifyLedgerEvidence, evidenceExitCode, readEvidenceJson } from '../src/ledger-evidence.mjs';
+import { verifyLedgerSnapshot, verifyLedgerEvidence, evidenceExitCode, readEvidenceJson } from '../src/ledger-evidence.mjs';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 function cidFor(bytes, codec = 0x55) {
@@ -135,6 +135,20 @@ test('observation boundaries use completion milliseconds and reject digest-only 
     report.checks.cidBinding = 'not_checked';
     assert.deepEqual(observation(report), { code: 4, error: 'raw_cid_required' });
     assert.deepEqual(observation({ status: 'unavailable', reason: 'deadline' }), { code: 3, error: 'deadline' });
+});
+
+test('snapshots return content only when requested and verified', async t => {
+    const f = await setup(t);
+    const snapshot = options => verifyLedgerSnapshot(f.record, f.config, options);
+    assert.equal((await snapshot()).content, undefined);
+    const saved = await snapshot({ returnContent: true });
+    assert.equal(saved.report.status, 'verified');
+    assert.deepEqual(Buffer.from(saved.content), content);
+    assert.equal(saved.report.content, undefined);
+    f.state.content = Buffer.from('wrong');
+    const mismatch = await snapshot({ returnContent: true });
+    assert.equal(mismatch.report.status, 'mismatch');
+    assert.equal(mismatch.content, undefined);
 });
 
 test('fixed SHA-256 CID test vector prevents shared fixture encoder mistakes', async t => {
@@ -483,11 +497,11 @@ test('strict settings reject unsafe endpoints, credentials, old inbox settings a
     }
 });
 
-async function cli(recordPath, configPath, alias = false) {
+async function cli(recordPath, configPath, alias = false, args = [], cwd, preload = !args.length && join(runtime, 'test/evidence-read-guard.mjs')) {
     return new Promise((resolve, reject) => {
-        const child = spawn(process.execPath, ['--import', join(runtime, 'test/evidence-read-guard.mjs'),
+        const child = spawn(process.execPath, [...(preload ? ['--import', preload] : []),
             ...(alias ? [join(runtime, 'src/inbox/client.mjs'), 'evidence'] : [join(runtime, 'src/verify-ledger.mjs')]),
-            recordPath, configPath], {
+            recordPath, configPath, ...args], { cwd,
             env: { PATH: process.env.PATH, TMPDIR: process.env.TMPDIR, OYA_NODE_PRIVATE_KEY: 'must-not-read',
                 OYA_AGENT_PRIVATE_KEY: 'must-not-read', OYA_RPC_AUTHORIZATION: 'must-not-inherit' },
         });
@@ -545,6 +559,109 @@ for (const alias of [false, true]) {
         await assert.rejects(readEvidenceJson(dir));
     });
 }
+
+test('save publishes only complete verified snapshots at a new private filename', async t => {
+    const f = await setup(t);
+    const dir = await mkdtemp(join(tmpdir(), 'oya-evidence-'));
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    const record = join(dir, 'record'), config = join(dir, 'settings'), dest = join(dir, cid);
+    await writeFile(record, JSON.stringify(f.record));
+    await writeFile(config, JSON.stringify(f.config));
+    async function check(code, reason, directory = dir, preload) {
+        f.state.requests = [];
+        const { stdout, stderr, code: actual } = await cli(record, config, false, ['--save', directory], dir, preload);
+        assert.equal(actual, code, stdout + stderr);
+        assert.equal(stderr, '');
+        assert.ok(!stdout.includes(dir));
+        const report = JSON.parse(stdout);
+        assert.equal(report.reason, reason);
+        if (reason === 'save_failed') {
+            assert.equal(report.stage, 'save');
+            assert.equal(report.checks.content, 'verified');
+        }
+        readOnly(f.state);
+    }
+    // Fail after a real partial write, before the file can be published.
+    const failWrite = `import fs from 'node:fs/promises';
+        import { syncBuiltinESMExports } from 'node:module';
+        const open = fs.open;
+        fs.open = async (...args) => {
+            const file = await open(...args);
+            if (args[1] === 'wx' && args[0].includes('/.ledger-save-')) file.writeFile = async bytes => {
+                await file.write(bytes.subarray(0, 1)); throw new Error(args[0]);
+            };
+            return file;
+        };
+        syncBuiltinESMExports();`;
+    await check(3, 'save_failed', dir, 'data:text/javascript,' + encodeURIComponent(failWrite));
+    assert.deepEqual((await readdir(dir)).sort(), ['record', 'settings']);
+    for (const target of ['file', 'directory']) {
+        const failSync = `import fs from 'node:fs/promises';
+            import { syncBuiltinESMExports } from 'node:module';
+            const open = fs.open;
+            fs.open = async (...args) => {
+                const handle = await open(...args);
+                if (${target === 'file' ? "args[1] === 'wx'" : `args[0] === ${JSON.stringify(dir)}`})
+                    handle.sync = async () => { throw new Error('sync failed'); };
+                return handle;
+            };
+            syncBuiltinESMExports();`;
+        await check(3, 'save_failed', dir, 'data:text/javascript,' + encodeURIComponent(failSync));
+        if (target === 'directory') {
+            assert.deepEqual(await readFile(dest), content);
+            await rm(dest);
+        }
+        assert.deepEqual((await readdir(dir)).sort(), ['record', 'settings']);
+    }
+    await check(0, 'snapshot_consistent');
+    assert.deepEqual(await readFile(dest), content);
+    assert.equal((await stat(dest)).mode & 0o777, 0o600);
+    await check(3, 'save_failed');
+    assert.deepEqual(await readFile(dest), content);
+    await rm(dest);
+    await symlink(join(dir, 'absent'), dest);
+    await check(3, 'save_failed');
+    await rm(dest);
+    await check(3, 'save_failed', join(dir, 'missing'));
+    setContent(f, Buffer.alloc(0), 0x70);
+    await check(4, 'content_integrity_unsupported');
+    assert.deepEqual((await readdir(dir)).sort(), ['record', 'settings']);
+    f.record.contentSha256 = sha256(Buffer.alloc(0));
+    await writeFile(record, JSON.stringify(f.record));
+    await check(0, 'snapshot_consistent');
+    const emptyDest = join(dir, f.state.cid);
+    assert.deepEqual(await readFile(emptyDest), Buffer.alloc(0));
+    await rm(emptyDest);
+    f.state.content = content;
+    await check(2, 'expected_content');
+    f.state.receipt = null;
+    await check(3, 'receipt_missing');
+    assert.deepEqual((await readdir(dir)).sort(), ['record', 'settings']);
+});
+
+test('bare --save creates cwd/oya-history and preserves a colliding CID file', async t => {
+    const f = await setup(t);
+    const cwd = await mkdtemp(join(tmpdir(), 'oya-evidence-'));
+    t.after(() => rm(cwd, { recursive: true, force: true }));
+    const inputs = await mkdtemp(join(cwd, 'inputs-'));
+    const record = join(inputs, 'record'), config = join(inputs, 'settings');
+    await writeFile(record, JSON.stringify(f.record));
+    await writeFile(config, JSON.stringify(f.config));
+    const run = () => cli(record, config, false, ['--save'], cwd);
+    const first = await run();
+    assert.equal(first.code, 0, first.stdout + first.stderr);
+    const report = JSON.parse(first.stdout);
+    assert.equal(report.cid, cid);
+    const history = join(cwd, 'oya-history'), file = join(history, report.cid);
+    assert.equal((await stat(history)).mode & 0o777, 0o700);
+    assert.deepEqual(await readFile(file), content);
+    await writeFile(file, 'keep existing');
+    const second = await run();
+    assert.equal(second.code, 3, second.stdout + second.stderr);
+    assert.equal(JSON.parse(second.stdout).reason, 'save_failed');
+    assert.equal(await readFile(file, 'utf8'), 'keep existing');
+    assert.deepEqual(await readdir(history), [report.cid]);
+});
 
 test('generic verifier imports no job, effectful processor, worker, signer, or secret loader', async () => {
     const source = await readFile(join(runtime, 'src/ledger-evidence.mjs'), 'utf8');

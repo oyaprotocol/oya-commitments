@@ -48,6 +48,11 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q023](#q023) | What a past ruling can settle | dispute resolution, precedent | Answered |
 | [Q024](#q024) | How far back a new node should go | node history, data availability | Answered |
 | [Q025](#q025) | When two proposals cannot both work | proposal ordering, commitment rules | Answered |
+| [Q026](#q026) | Recognizing an unfamiliar message | protocol evolution, message compatibility | Answered |
+| [Q027](#q027) | Which proposal came first? | proposal ordering, shared evidence | Answered |
+| [Q028](#q028) | One message delivered twice? | message identity, delivery | Answered |
+| [Q029](#q029) | Evidence that arrives after a proposal? | evidence, dispute resolution | Answered |
+| [Q030](#q030) | A gap in a full node’s history | data availability, node synchronization | Answered |
 
 <a id="q001"></a>
 
@@ -808,3 +813,167 @@ What should decide which proposal takes priority when a commitment could honor e
 - **Source updated:** 2026-11-21T02:53:22Z
 
 First across the post wins. If a valid proposal is made but has not resolved yet, any subsequent proposals must be judged as though the earlier valid proposal had already resolved. If the second proposal would be true if the first proposal had not been made, but false because the first proposal has been made, it is false. However, if the first proposal was invalid, subsequent valid proposals can be judged as though the first proposal was not settled. All of this may have use-case and rule-specific subtleties, as well.
+
+<a id="q026"></a>
+
+<!-- oya-dialogue-question: Q026 -->
+
+## Q026 — Recognizing an unfamiliar message
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-20
+- **Topics:** protocol evolution, message compatibility
+- **Status:** Answered
+- **Source PR:** [#218](https://github.com/oyaprotocol/oya-commitments/pull/218)
+
+### Context
+
+As independent teams build on Oya, a node may receive a signed message in a format it can verify but with a meaning it does not recognize.
+
+### Question
+
+What should a sender be able to expect from a node that recognizes the signature but not the kind of message being sent?
+
+### Answer
+
+#### @pemulis — 2026-11-21
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7056237378](https://github.com/oyaprotocol/oya-commitments/pull/218#issuecomment-7056237378)
+- **Source created:** 2026-11-21T02:54:00Z
+- **Source updated:** 2026-11-21T02:54:00Z
+
+Messages are just plain text so the message type does not matter. In the beginning, only ASCII text will be accepted.
+
+<a id="q027"></a>
+
+<!-- oya-dialogue-question: Q027 -->
+
+## Q027 — Which proposal came first?
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-20
+- **Topics:** proposal ordering, shared evidence
+- **Status:** Answered
+- **Source PR:** [#220](https://github.com/oyaprotocol/oya-commitments/pull/220)
+
+### Context
+
+In [the Q025 answer](https://github.com/oyaprotocol/oya-commitments/pull/217#issuecomment-7056230262), @pemulis said that a later proposal must account for an earlier valid one even before it resolves. Two observers might hear about those proposals in opposite orders.
+
+### Question
+
+What public record should both observers use to tell which proposal came first?
+
+### Answer
+
+#### @pemulis — 2026-11-21
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7065162732](https://github.com/oyaprotocol/oya-commitments/pull/220#issuecomment-7065162732)
+- **Source created:** 2026-11-21T15:48:54Z
+- **Source updated:** 2026-11-21T15:48:54Z
+
+Onchain events make proposal order (and any transaction order) clear.
+
+<a id="q028"></a>
+
+<!-- oya-dialogue-question: Q028 -->
+
+## Q028 — One message delivered twice?
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-20
+- **Topics:** message identity, delivery
+- **Status:** Answered
+- **Source PR:** [#221](https://github.com/oyaprotocol/oya-commitments/pull/221)
+
+### Context
+
+A sender who gets no receipt might send the same signed message through a second node. Both nodes may end up publishing it.
+
+### Question
+
+How should a commitment interpret two publications of the exact same signed instruction?
+
+### Answer
+
+#### @pemulis — 2026-11-21
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7065180368](https://github.com/oyaprotocol/oya-commitments/pull/221#issuecomment-7065180368)
+- **Source created:** 2026-11-21T15:50:19Z
+- **Source updated:** 2026-11-21T15:50:19Z
+
+This is going to be extremely context dependent. The commitment rules should make it clear how they should respond to any published message or real-world information, and messages should not always be viewed as an "instruction," they could be conveying any number of different things, anything that can be expressed in written text.
+
+#### @pemulis — 2026-11-21 (follow-up)
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7065510899](https://github.com/oyaprotocol/oya-commitments/pull/221#issuecomment-7065510899)
+- **Source created:** 2026-11-21T16:15:45Z
+- **Source updated:** 2026-11-21T16:15:45Z
+
+This would be specific to a particular use case. We should not look at use cases and their rules right now.
+
+<a id="q029"></a>
+
+<!-- oya-dialogue-question: Q029 -->
+
+## Q029 — Evidence that arrives after a proposal?
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-20
+- **Topics:** evidence, dispute resolution
+- **Status:** Answered
+- **Source PR:** [#223](https://github.com/oyaprotocol/oya-commitments/pull/223)
+
+### Context
+
+Suppose a proposal says a deadline was met. A dated record confirming that fact becomes public only after the proposal is challenged.
+
+### Question
+
+What weight should a resolver give evidence that existed when the proposal was made but was not public then?
+
+### Answer
+
+#### @pemulis — 2026-11-21
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7065192967](https://github.com/oyaprotocol/oya-commitments/pull/223#issuecomment-7065192967)
+- **Source created:** 2026-11-21T15:51:20Z
+- **Source updated:** 2026-11-21T15:51:20Z
+
+Only public information counts.
+
+<a id="q030"></a>
+
+<!-- oya-dialogue-question: Q030 -->
+
+## Q030 — A gap in a full node’s history
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-21
+- **Topics:** data availability, node synchronization
+- **Status:** Answered
+- **Source PR:** [#227](https://github.com/oyaprotocol/oya-commitments/pull/227)
+
+### Context
+
+In [Q024](#q024), @pemulis said a full node should retrieve history back to the beginning. A node catching up might reach the latest Ledger entry while one older message is still missing.
+
+### Question
+
+How should a node with a known gap in its history describe what it has verified to its peers?
+
+### Answer
+
+#### @pemulis — 2026-11-22
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7073452882](https://github.com/oyaprotocol/oya-commitments/pull/227#issuecomment-7073452882)
+- **Source created:** 2026-11-22T03:18:22Z
+- **Source updated:** 2026-11-22T03:18:22Z
+
+Every node should strive to have the full history.
