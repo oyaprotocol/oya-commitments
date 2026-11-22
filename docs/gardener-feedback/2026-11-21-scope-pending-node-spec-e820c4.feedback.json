@@ -1,0 +1,20 @@
+{
+  "schema": "oya-gardener-feedback/v1",
+  "id": "2026-11-21-scope-pending-node-spec-e820c4",
+  "summary": "Keep a pending protocol decision from putting unrelated node feature work on hold.",
+  "evidence": [
+    {
+      "url": "https://github.com/oyaprotocol/oya-commitments/pull/223#issuecomment-7065227309",
+      "lesson": "Pemulis clarified that major node features should continue, with a focus on inter-node messaging and data availability checks, and said a specification for the checks is planned. Our inference: distinguish work that needs that specification from work with settled behavior."
+    }
+  ],
+  "evaluation": "When a node proposal encounters an open design question, check whether it isolates the dependency and uses established behavior elsewhere. Revise if this duplicates the planned specification, encourages speculative code, or turns feature selection into a publication quota.",
+  "changes": [
+    {
+      "target": "feature",
+      "before_sha256": "53cc9095608388a1f858bc6a331c41670996d05cccc50faf7991e7ff0745d9d9",
+      "before_guidance": "When choosing a node feature, prefer a concrete gap in node-to-node messaging or data availability over another monitoring view. Use answered protocol questions to narrow the next step; do not guess at unresolved behavior.\n\nBefore implementation, record the operator action, observable result and existing path in the checkpoint or ExecPlan. Add interfaces or inputs only for unmet current needs, reusing established interfaces and configured inputs when safe.\n\nAfter implementation, review the complete unpublished diff for unnecessary machinery: duplicate state, wrappers and compatibility for formats never shipped. Remove only what lacks a current requirement. Preserve authorization, recovery and useful regression coverage, then rerun affected checks. Simplicity means less to understand, not compressed code or a deletion quota.\n\nRead the PR opening alone before publication or a justified revision: make the user, action and result clear, using short bullets when useful. Keep consequential safety and validation details alongside the behavior. This is a reader check, not a public template.",
+      "after_guidance": "Continue looking for substantial node features in inter-node messaging and data availability checks rather than operator status views. Use answered protocol questions to narrow the next step. If a candidate depends on an unsettled rule, leave that decision open and look for independently useful work whose behavior is already clear. A pending specification is not a pause on the whole area.\n\nBefore implementation, record the operator action, observable result and existing path in the checkpoint or ExecPlan. Add interfaces or inputs only for unmet current needs, reusing established interfaces and configured inputs when safe.\n\nAfter implementation, review the complete unpublished diff for unnecessary machinery: duplicate state, wrappers and compatibility for formats never shipped. Remove only what lacks a current requirement. Preserve authorization, recovery and useful regression coverage, then rerun affected checks. Simplicity means less to understand, not compressed code or a deletion quota.\n\nRead the PR opening alone before publication or a justified revision: make the user, action and result clear, using short bullets when useful. Keep consequential safety and validation details alongside the behavior. This is a reader check, not a public template."
+    }
+  ]
+}
