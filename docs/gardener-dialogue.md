@@ -50,6 +50,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q025](#q025) | When two proposals cannot both work | proposal ordering, commitment rules | Answered |
 | [Q026](#q026) | Recognizing an unfamiliar message | protocol evolution, message compatibility | Answered |
 | [Q027](#q027) | Which proposal came first? | proposal ordering, shared evidence | Answered |
+| [Q028](#q028) | One message delivered twice? | message identity, delivery | Answered |
 | [Q031](#q031) | What a successful availability check proves | data availability, external backups | Answered |
 
 <a id="q001"></a>
@@ -873,6 +874,46 @@ What public record should both observers use to tell which proposal came first?
 - **Source updated:** 2026-11-21T15:48:54Z
 
 Onchain events make proposal order (and any transaction order) clear.
+
+<a id="q028"></a>
+
+<!-- oya-dialogue-question: Q028 -->
+
+## Q028 — One message delivered twice?
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-20
+- **Topics:** message identity, delivery
+- **Status:** Answered
+- **Source PR:** [#221](https://github.com/oyaprotocol/oya-commitments/pull/221)
+
+### Context
+
+A sender who gets no receipt might send the same signed message through a second node. Both nodes may end up publishing it.
+
+### Question
+
+How should a commitment interpret two publications of the exact same signed instruction?
+
+### Answer
+
+#### @pemulis — 2026-11-21
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7065180368](https://github.com/oyaprotocol/oya-commitments/pull/221#issuecomment-7065180368)
+- **Source created:** 2026-11-21T15:50:19Z
+- **Source updated:** 2026-11-21T15:50:19Z
+
+This is going to be extremely context dependent. The commitment rules should make it clear how they should respond to any published message or real-world information, and messages should not always be viewed as an "instruction," they could be conveying any number of different things, anything that can be expressed in written text.
+
+#### @pemulis — 2026-11-21 (follow-up)
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7065510899](https://github.com/oyaprotocol/oya-commitments/pull/221#issuecomment-7065510899)
+- **Source created:** 2026-11-21T16:15:45Z
+- **Source updated:** 2026-11-21T16:15:45Z
+
+This would be specific to a particular use case. We should not look at use cases and their rules right now.
 
 <a id="q031"></a>
 
