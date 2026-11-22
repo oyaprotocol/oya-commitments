@@ -1,4 +1,5 @@
-import { open } from 'node:fs/promises';
+import { open, lstat } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { constants } from 'node:fs';
 import { createHash } from 'node:crypto';
 // Keep ethers until the staged kernel getAddress is published and the pin upgraded.
@@ -39,21 +40,26 @@ const json = bytes => {
     catch { throw new EvidenceError('mismatch', 'malformed_json'); }
 };
 
-export async function readEvidenceJson(path) {
-    const file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
+async function readRegularFile(path, limit, flags = 0) {
+    const file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK | flags);
     try {
         if (!(await file.stat()).isFile()) throw new Error();
-        const buffer = Buffer.alloc(FILE_LIMIT + 1);
+        const buffer = Buffer.alloc(limit + 1);
         let size = 0;
         while (size < buffer.length) {
             const { bytesRead } = await file.read(buffer, size, buffer.length - size, null);
             if (!bytesRead) break;
             size += bytesRead;
         }
-        if (size > FILE_LIMIT) throw new Error();
-        try { return json(buffer.subarray(0, size)); }
-        catch { throw new EvidenceError('mismatch', 'invalid_input_json'); }
+        if (size > limit) throw new Error();
+        return buffer.subarray(0, size);
     } finally { await file.close(); }
+}
+
+export async function readEvidenceJson(path) {
+    const bytes = await readRegularFile(path, FILE_LIMIT);
+    try { return json(bytes); }
+    catch { throw new EvidenceError('mismatch', 'invalid_input_json'); }
 }
 
 function endpoint(value, authorization, kubo = false) {
@@ -133,6 +139,23 @@ function rawCidDigest(cid) {
         if (bits >= 8) { bits -= 8; bytes.push(accumulator >> bits); accumulator &= (1 << bits) - 1; }
     }
     return bytes[1] === 0x55 ? Buffer.from(bytes.slice(4)).toString('hex') : null;
+}
+
+// The caller selects a trusted history directory. Only the validated CID names the file.
+export async function checkSavedContent(cid, directory) {
+    const stage = 'saved_content';
+    try { assertCanonicalCid(cid, 'cid'); }
+    catch { return { stage, status: 'mismatch', reason: 'invalid_cid' }; }
+    const expected = rawCidDigest(cid);
+    if (expected === null) return { stage, cid, status: 'partial', reason: 'content_integrity_unsupported' };
+    try {
+        if (!constants.O_NOFOLLOW || !(await lstat(resolve(directory))).isDirectory()) throw new Error();
+        const path = join(directory, cid);
+        if (!(await lstat(path)).isFile()) throw new Error();
+        const bytes = await readRegularFile(path, BODY_LIMIT, constants.O_NOFOLLOW);
+        const match = createHash('sha256').update(bytes).digest('hex') === expected;
+        return { stage, cid, status: match ? 'verified' : 'mismatch', reason: match ? 'saved_match' : 'cid_content' };
+    } catch { return { stage, cid, status: 'unavailable', reason: 'saved_unreadable' }; }
 }
 
 // Shared read-only primitives for bounded semantic evidence adapters.
