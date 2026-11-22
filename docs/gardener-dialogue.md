@@ -49,6 +49,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q024](#q024) | How far back a new node should go | node history, data availability | Answered |
 | [Q025](#q025) | When two proposals cannot both work | proposal ordering, commitment rules | Answered |
 | [Q026](#q026) | Recognizing an unfamiliar message | protocol evolution, message compatibility | Answered |
+| [Q027](#q027) | Which proposal came first? | proposal ordering, shared evidence | Answered |
 | [Q029](#q029) | Evidence that arrives after a proposal? | evidence, dispute resolution | Answered |
 
 <a id="q001"></a>
@@ -841,6 +842,37 @@ What should a sender be able to expect from a node that recognizes the signature
 - **Source updated:** 2026-11-21T02:54:00Z
 
 Messages are just plain text so the message type does not matter. In the beginning, only ASCII text will be accepted.
+
+<a id="q027"></a>
+
+<!-- oya-dialogue-question: Q027 -->
+
+## Q027 — Which proposal came first?
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-20
+- **Topics:** proposal ordering, shared evidence
+- **Status:** Answered
+- **Source PR:** [#220](https://github.com/oyaprotocol/oya-commitments/pull/220)
+
+### Context
+
+In [the Q025 answer](https://github.com/oyaprotocol/oya-commitments/pull/217#issuecomment-7056230262), @pemulis said that a later proposal must account for an earlier valid one even before it resolves. Two observers might hear about those proposals in opposite orders.
+
+### Question
+
+What public record should both observers use to tell which proposal came first?
+
+### Answer
+
+#### @pemulis — 2026-11-21
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7065162732](https://github.com/oyaprotocol/oya-commitments/pull/220#issuecomment-7065162732)
+- **Source created:** 2026-11-21T15:48:54Z
+- **Source updated:** 2026-11-21T15:48:54Z
+
+Onchain events make proposal order (and any transaction order) clear.
 
 <a id="q029"></a>
 
