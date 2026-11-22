@@ -28,25 +28,45 @@ The default deployment runs Oya and Kubo on your local device, with a portable P
 
 The setup guides use the published [current image and matching bundle](release-image.md#published-deployment-release), including Sepolia defaults, and cover Ledger and explicit IPFS-only modes. v0.2.0 images support only the direct API.
 
-## Prepare a first-day availability statement
+## Create or verify a signed retrieval receipt
 
-Prepare `record.json` and `settings.json` using the [Ledger verifier inputs](inbox-api.md#verify-ledger-evidence). For a [local inbox installation](run-locally.md), load the installation’s `compose.env` and set `ipfsUrl` to `http://127.0.0.1:5001`. The observer shares the running `ipfs` service’s network namespace, so this loopback address reaches Kubo without publishing its API port. Use an `rpcUrl` reachable from that service, such as your approved HTTPS RPC endpoint. From the directory containing the two input files, run:
+A receipt records that a node signed for the bytes of one raw SHA-256 content identifier (CID) at its reported completion time. The read may be a cache hit. The signature does not prove continuous availability, independent storage, or a Ledger publication.
 
-```sh
-ipfs_id=$(docker compose ps -q ipfs)
-docker run --rm --read-only --user "$(id -u):$(id -g)" \
-  --network "container:${ipfs_id:?Start the local inbox ipfs service first}" \
-  --mount "type=bind,src=$PWD/record.json,dst=/record.json,readonly" \
-  --mount "type=bind,src=$PWD/settings.json,dst=/settings.json,readonly" \
-  --entrypoint node "$(cat "${OYA_BUNDLE_DIR:?}/node/production/image.txt")" \
-  src/observe-availability.mjs /record.json /settings.json
+Use a local release image that includes `src/attest-retrieval.mjs`. From the directory containing `settings.json`, set `image` to the matching image reference, `ipfs_id` to the running Kubo container ID, and `cid` to the expected content CID. For an inbox installation, obtain the ID with `docker compose ps -q ipfs` in its Compose project. The command shares Kubo’s loopback interface; do not expose the API port.
+
+```json
+{"ipfsUrl":"http://127.0.0.1:5001","nodeAddress":"<expected node signer address>"}
 ```
 
-From a source checkout with dependencies installed, run `node src/observe-availability.mjs record.json settings.json` in `node/production` instead, using endpoints reachable from the host.
+Choose `nodeAddress` and `cid` independently of the receipt. Optional settings are `ipfsAuthorization`, `timeoutMs` (default 30000, maximum 120000) and `maxBytes` (default and maximum 1048576). Keep settings private if they contain authorization. Creation needs read and block-put/pin access to Kubo. Set `OYA_LOCAL_DIR` to the absolute path of the intended installation (a real directory owned by your user, mode 0700, containing its regular, single-link `node.env`, mode 0600). Use a trusted host path; do not replace its entries during startup. Only creation mounts this file, read-only, inside a private directory. Do not source the file or pass the key through Docker’s environment. With a synchronized clock, run:
 
-Select a publication from another node. The command retrieves the bytes through your configured Kubo endpoint. For a raw CID (a content identifier that directly hashes those bytes), it prints a short ASCII statement identifying the publisher, event, and time of retrieval. It requires a successful check before 24 hours have elapsed since the block timestamp. Use a synchronized clock and a Kubo endpoint you trust to speak for your node.
+```sh
+attest() {
+  docker run --pull=never --rm --read-only --user "$(id -u):$(id -g)" \
+    --network "container:${ipfs_id:?Set the Kubo container ID}" \
+    --mount "type=bind,src=$PWD/settings.json,dst=/settings.json,readonly" \
+    "$@"
+}
+attest_create() (
+  # Docker follows host bind-source symlinks; check the source before mounting it.
+  case ${OYA_LOCAL_DIR:-} in /*) ;; *) return 1 ;; esac
+  dir=${OYA_LOCAL_DIR%/}
+  test -n "$(find "$dir" -prune -type d -user "$(id -un)" -perm 0700 -print)" &&
+    test -n "$(find "$dir/node.env" -prune -type f -links 1 -user "$(id -un)" -perm 0600 -print)" || return 1
+  attest --tmpfs "/identity:rw,noexec,nosuid,nodev,mode=0700,uid=$(id -u),gid=$(id -g)" \
+    --mount "type=bind,src=$dir/node.env,dst=/identity/node.env,readonly" \
+    -e OYA_LOCAL_DIR=/identity --entrypoint node "$image" src/attest-retrieval.mjs create "$cid" /settings.json
+)
+attest_create
+```
 
-To prepare text for the [chosen-node sender](peers/send.md), redirect stdout to a new private file. Review or use that file only after exit 0. On failure stdout is empty and stderr explains why. Retry unavailable reads while the window is open. The unsigned statement describes one retrieval, including a possible cache hit. It does not establish continuous availability, independent storage or who originally pinned the bytes. Signing and publication are separate operator actions.
+On success, stdout is JSON with `receiptCid` and `receipt`. Creation signs the verified bytes and metadata, pins the receipt as a separate raw block, then reads it back. It does not pin the source content. To verify, set `receipt_cid` to the returned receipt CID and keep the independently expected `cid` and `nodeAddress`. No key or write permission is required:
+
+```sh
+attest --entrypoint node "$image" src/attest-retrieval.mjs verify "$receipt_cid" "$cid" /settings.json
+```
+
+Verification retrieves both blocks, checks their hashes and the signed receipt against the expected node and content, and prints the same JSON on success. Exit 1 means the command failed. If creation exits 2, the receipt may already be pinned. Use the receipt CID from stderr to verify before creating another one.
 
 ## Deployed Sepolia Ledger
 
