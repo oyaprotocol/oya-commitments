@@ -30,11 +30,12 @@ The setup guides use the published [current image and matching bundle](release-i
 
 ## Prepare a first-day availability statement
 
-Prepare `record.json` and `settings.json` using the [Ledger verifier inputs](inbox-api.md#verify-ledger-evidence). For a [local inbox installation](run-locally.md), load the installation environment and set `ipfsUrl` to `http://ipfs:5001` so the observer reaches Kubo on the inbox network. From the directory containing the two input files, run the release image with only those files mounted:
+Prepare `record.json` and `settings.json` using the [Ledger verifier inputs](inbox-api.md#verify-ledger-evidence). For a [local inbox installation](run-locally.md), load the installation’s `compose.env` and set `ipfsUrl` to `http://127.0.0.1:5001`. The observer shares the running `ipfs` service’s network namespace, so this loopback address reaches Kubo without publishing its API port. Use an `rpcUrl` reachable from that service, such as your approved HTTPS RPC endpoint. From the directory containing the two input files, run:
 
 ```sh
+ipfs_id=$(docker compose ps -q ipfs)
 docker run --rm --read-only --user "$(id -u):$(id -g)" \
-  --network "${COMPOSE_PROJECT_NAME:?Load the inbox installation environment}_default" \
+  --network "container:${ipfs_id:?Start the local inbox ipfs service first}" \
   --mount "type=bind,src=$PWD/record.json,dst=/record.json,readonly" \
   --mount "type=bind,src=$PWD/settings.json,dst=/settings.json,readonly" \
   --entrypoint node "$(cat "${OYA_BUNDLE_DIR:?}/node/production/image.txt")" \
