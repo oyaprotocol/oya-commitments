@@ -52,6 +52,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q027](#q027) | Which proposal came first? | proposal ordering, shared evidence | Answered |
 | [Q028](#q028) | One message delivered twice? | message identity, delivery | Answered |
 | [Q029](#q029) | Evidence that arrives after a proposal? | evidence, dispute resolution | Answered |
+| [Q030](#q030) | A gap in a full node’s history | data availability, node synchronization | Answered |
 | [Q033](#q033) | Who pays for old messages? | publication fees, long-term storage | Answered |
 
 <a id="q001"></a>
@@ -946,6 +947,37 @@ What weight should a resolver give evidence that existed when the proposal was m
 - **Source updated:** 2026-11-21T15:51:20Z
 
 Only public information counts.
+
+<a id="q030"></a>
+
+<!-- oya-dialogue-question: Q030 -->
+
+## Q030 — A gap in a full node’s history
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-21
+- **Topics:** data availability, node synchronization
+- **Status:** Answered
+- **Source PR:** [#227](https://github.com/oyaprotocol/oya-commitments/pull/227)
+
+### Context
+
+In [Q024](#q024), @pemulis said a full node should retrieve history back to the beginning. A node catching up might reach the latest Ledger entry while one older message is still missing.
+
+### Question
+
+How should a node with a known gap in its history describe what it has verified to its peers?
+
+### Answer
+
+#### @pemulis — 2026-11-22
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7073452882](https://github.com/oyaprotocol/oya-commitments/pull/227#issuecomment-7073452882)
+- **Source created:** 2026-11-22T03:18:22Z
+- **Source updated:** 2026-11-22T03:18:22Z
+
+Every node should strive to have the full history.
 
 <a id="q033"></a>
 
