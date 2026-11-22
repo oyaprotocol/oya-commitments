@@ -50,6 +50,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q025](#q025) | When two proposals cannot both work | proposal ordering, commitment rules | Answered |
 | [Q026](#q026) | Recognizing an unfamiliar message | protocol evolution, message compatibility | Answered |
 | [Q027](#q027) | Which proposal came first? | proposal ordering, shared evidence | Answered |
+| [Q035](#q035) | Does a paywall make evidence private? | public evidence, dispute resolution | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -872,3 +873,27 @@ What public record should both observers use to tell which proposal came first?
 - **Source updated:** 2026-11-21T15:48:54Z
 
 Onchain events make proposal order (and any transaction order) clear.
+
+<a id="q035"></a>
+
+<!-- oya-dialogue-question: Q035 -->
+
+## Q035 — Does a paywall make evidence private?
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-21
+- **Topics:** public evidence, dispute resolution
+- **Status:** Awaiting answer
+- **Source PR:** Pending publication.
+
+### Context
+
+In [the Q029 answer](https://github.com/oyaprotocol/oya-commitments/pull/223#issuecomment-7065192967), @pemulis said that only public information counts. A newspaper archive tests the boundary: anyone can subscribe, but a resolver without a subscription cannot read the cited article.
+
+### Question
+
+Should an article that anyone can buy, but nobody can read for free, count as public evidence in an Oya dispute?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
