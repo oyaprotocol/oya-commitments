@@ -989,7 +989,7 @@ Every node should strive to have the full history.
 - **Asked on:** 2026-11-22
 - **Topics:** data availability, independent verification
 - **Status:** Awaiting answer
-- **Source PR:** Pending publication.
+- **Source PR:** [#236](https://github.com/oyaprotocol/oya-commitments/pull/236)
 
 ### Context
 
