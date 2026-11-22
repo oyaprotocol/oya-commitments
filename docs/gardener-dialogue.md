@@ -884,7 +884,7 @@ Onchain events make proposal order (and any transaction order) clear.
 - **Asked on:** 2026-11-21
 - **Topics:** publication fees, long-term storage
 - **Status:** Awaiting answer
-- **Source PR:** Pending publication.
+- **Source PR:** [#232](https://github.com/oyaprotocol/oya-commitments/pull/232)
 
 ### Context
 
