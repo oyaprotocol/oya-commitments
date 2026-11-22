@@ -53,6 +53,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q028](#q028) | One message delivered twice? | message identity, delivery | Answered |
 | [Q029](#q029) | Evidence that arrives after a proposal? | evidence, dispute resolution | Answered |
 | [Q030](#q030) | A gap in a full node’s history | data availability, node synchronization | Answered |
+| [Q036](#q036) | Checking yesterday’s availability claim | data availability, independent verification | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -977,3 +978,27 @@ How should a node with a known gap in its history describe what it has verified 
 - **Source updated:** 2026-11-22T03:18:22Z
 
 Every node should strive to have the full history.
+
+<a id="q036"></a>
+
+<!-- oya-dialogue-question: Q036 -->
+
+## Q036 — Checking yesterday’s availability claim
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-22
+- **Topics:** data availability, independent verification
+- **Status:** Awaiting answer
+- **Source PR:** Pending publication.
+
+### Context
+
+In [the Q033 answer](https://github.com/oyaprotocol/oya-commitments/pull/232#issuecomment-7083724309), @pemulis described peers checking that newly published content is available. Someone joining later can try fetching the message today, but that tests a different moment.
+
+### Question
+
+What should a newcomer be able to verify for themselves about a peer’s claim that a message was available yesterday?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
