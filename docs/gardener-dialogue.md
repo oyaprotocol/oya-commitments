@@ -54,6 +54,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q029](#q029) | Evidence that arrives after a proposal? | evidence, dispute resolution | Answered |
 | [Q030](#q030) | A gap in a full node’s history | data availability, node synchronization | Answered |
 | [Q031](#q031) | What a successful availability check proves | data availability, external backups | Answered |
+| [Q037](#q037) | Who looked at an unchallenged proposal? | optimistic resolution, public evidence | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -1009,3 +1010,27 @@ If two nodes return the same message on time, should it matter to a data availab
 - **Source updated:** 2026-11-22T03:19:03Z
 
 Not really. There would be no way to know how the node stored or retrieved the data.
+
+<a id="q037"></a>
+
+<!-- oya-dialogue-question: Q037 -->
+
+## Q037 — Who looked at an unchallenged proposal?
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-22
+- **Topics:** optimistic resolution, public evidence
+- **Status:** Awaiting answer
+- **Source PR:** Pending publication.
+
+### Context
+
+In [Q003](#q003), @pemulis described a network where anyone can challenge a proposal. The same quiet challenge window could mean several people checked the proposal or nobody looked.
+
+### Question
+
+When a proposal passes without a challenge, what evidence, if any, should a participant have that someone besides the proposer checked it?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
