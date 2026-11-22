@@ -51,6 +51,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q026](#q026) | Recognizing an unfamiliar message | protocol evolution, message compatibility | Answered |
 | [Q027](#q027) | Which proposal came first? | proposal ordering, shared evidence | Answered |
 | [Q028](#q028) | One message delivered twice? | message identity, delivery | Answered |
+| [Q029](#q029) | Evidence that arrives after a proposal? | evidence, dispute resolution | Answered |
 | [Q030](#q030) | A gap in a full node’s history | data availability, node synchronization | Answered |
 
 <a id="q001"></a>
@@ -914,6 +915,37 @@ This is going to be extremely context dependent. The commitment rules should mak
 - **Source updated:** 2026-11-21T16:15:45Z
 
 This would be specific to a particular use case. We should not look at use cases and their rules right now.
+
+<a id="q029"></a>
+
+<!-- oya-dialogue-question: Q029 -->
+
+## Q029 — Evidence that arrives after a proposal?
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-20
+- **Topics:** evidence, dispute resolution
+- **Status:** Answered
+- **Source PR:** [#223](https://github.com/oyaprotocol/oya-commitments/pull/223)
+
+### Context
+
+Suppose a proposal says a deadline was met. A dated record confirming that fact becomes public only after the proposal is challenged.
+
+### Question
+
+What weight should a resolver give evidence that existed when the proposal was made but was not public then?
+
+### Answer
+
+#### @pemulis — 2026-11-21
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7065192967](https://github.com/oyaprotocol/oya-commitments/pull/223#issuecomment-7065192967)
+- **Source created:** 2026-11-21T15:51:20Z
+- **Source updated:** 2026-11-21T15:51:20Z
+
+Only public information counts.
 
 <a id="q030"></a>
 

@@ -1,0 +1,20 @@
+{
+  "schema": "oya-gardener-feedback/v1",
+  "id": "2026-11-21-prototype-availability-checks-0b4c43",
+  "summary": "Allow reviewable availability prototypes before the specification is final, without treating a proposed check as a protocol rule.",
+  "evidence": [
+    {
+      "url": "https://github.com/oyaprotocol/oya-commitments/pull/224#issuecomment-7065484591",
+      "lesson": "Pemulis explicitly invited implementation before a specification and described two Ledger-related checks: periodic proof by registered nodes and peer attestations after retrieval. The first 24 hours was a proposed window. Our inference: make assumptions visible so review can refine them."
+    }
+  ],
+  "evaluation": "In the next availability proposal, can a reviewer tell which check is being tested, what evidence it produces and which choices remain provisional? Revise if work still waits for a complete specification or a prototype assumption becomes a protocol requirement.",
+  "changes": [
+    {
+      "target": "feature",
+      "before_sha256": "17912eef791235e81bd69676132b328a789684c37ad509c449922d99a2699759",
+      "before_guidance": "Continue looking for substantial node features in inter-node messaging and data availability checks rather than operator status views. Use answered protocol questions to narrow the next step. If a candidate depends on an unsettled rule, leave that decision open and look for independently useful work whose behavior is already clear. A pending specification is not a pause on the whole area.\n\nBefore implementation, record the operator action, observable result and existing path in the checkpoint or ExecPlan. Add interfaces or inputs only for unmet current needs, reusing established interfaces and configured inputs when safe.\n\nAfter implementation, review the complete unpublished diff for unnecessary machinery: duplicate state, wrappers and compatibility for formats never shipped. Remove only what lacks a current requirement. Preserve authorization, recovery and useful regression coverage, then rerun affected checks. Simplicity means less to understand, not compressed code or a deletion quota.\n\nRead the PR opening alone before publication or a justified revision: make the user, action and result clear, using short bullets when useful. Keep consequential safety and validation details alongside the behavior. This is a reader check, not a public template.",
+      "after_guidance": "Prioritize inter-node messaging and data availability over status views. A pending specification need not block a small, testable availability prototype. Distinguish periodic proof of historical possession from a peer attesting that it retrieved newly logged data. Treat the first 24 hours as a proposed window, not a settled rule. State what the observation establishes and which Ledger or protocol decisions remain open for review.\n\nBefore implementation, record the operator action, observable result and existing path in the checkpoint or ExecPlan. Add interfaces or inputs only for unmet current needs, reusing established interfaces and configured inputs when safe.\n\nAfter implementation, review the complete unpublished diff for unnecessary machinery: duplicate state, wrappers and compatibility for formats never shipped. Remove only what lacks a current requirement. Preserve authorization, recovery and useful regression coverage, then rerun affected checks. Simplicity means less to understand, not compressed code or a deletion quota.\n\nRead the PR opening alone before publication or a justified revision: make the user, action and result clear, using short bullets when useful. Keep consequential safety and validation details alongside the behavior. This is a reader check, not a public template."
+    }
+  ]
+}
