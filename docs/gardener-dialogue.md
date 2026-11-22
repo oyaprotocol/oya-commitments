@@ -1021,7 +1021,7 @@ Not really. There would be no way to know how the node stored or retrieved the d
 - **Asked on:** 2026-11-22
 - **Topics:** dispute bonds, participation
 - **Status:** Awaiting answer
-- **Source PR:** Pending publication.
+- **Source PR:** [#240](https://github.com/oyaprotocol/oya-commitments/pull/240)
 
 ### Context
 
