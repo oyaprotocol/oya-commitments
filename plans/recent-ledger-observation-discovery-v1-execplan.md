@@ -10,6 +10,8 @@ A node catching up on other publishers needs a starting point even when nobody s
 - [x] 2026-11-21 18:35Z: Added the bounded RPC query, operator instructions and local regression coverage.
 - [x] 2026-11-21 18:43Z: Re-ran `node --test test/discover-ledger.test.mjs` (3/3 passed) and `npm test` (673/673 passed) from `node/production` on Node 24.22.3.
 
+- [x] 2026-11-22: Added an operator-selected default verifier file for discovery. With a non-symlink temporary directory, `node --test test/discover-ledger.test.mjs` passed 4/4 and `npm test` passed 674/674 on Node 24.22.3.
+
 ## Surprises & Discoveries
 
 Ledger permits arbitrary strings. Discovery can identify a log without promising the verifier can retrieve its content.
@@ -19,6 +21,10 @@ Ledger permits arbitrary strings. Discovery can identify a log without promising
 - Decision: Return only the transaction hash and log index. Query explicit mined blocks and leave retries to the caller.
   Rationale: The two fields identify the verifier input without implying verified content. Fixed endpoints keep a retry from silently advancing its window. The caller can narrow a rejected range without losing track of which blocks remain unchecked.
   Date/Author: 2026-11-21 / Oya Gardener.
+
+- Decision: Require an absolute operator-selected path for the discovery default. A positional override remains valid for standalone scripts.
+  Rationale: Discovery can reuse private verifier settings without guessing a file from the launch directory or reading installation signing credentials.
+  Date/Author: 2026-11-22 / Oya Gardener.
 
 ## Outcomes & Retrospective
 
@@ -50,7 +56,7 @@ The runtime prints one JSON array only after validating all candidate locations.
 
 ## Interfaces and Dependencies
 
-The CLI accepts two decimal numbers and the same settings file as the verifier. Only the configured Ethereum RPC receives requests. IPFS settings remain private and unused during discovery.
+The CLI accepts two decimal numbers. An explicit verifier settings file overrides the absolute path configured in `OYA_LEDGER_EVIDENCE_SETTINGS`. Only the configured Ethereum RPC receives requests. IPFS settings remain private and unused during discovery.
 
 ## Next feature — candidate when capacity permits
 

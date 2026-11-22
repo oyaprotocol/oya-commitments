@@ -1,4 +1,4 @@
-import { resolve } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { id } from 'ethers';
 import { evidenceJson, ledgerEvidenceSettings, readEvidenceBytes, readEvidenceJson } from './ledger-evidence.mjs';
@@ -43,12 +43,14 @@ export async function discoverLedger(from, to, input) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-    const [from, to, settings, ...extra] = process.argv.slice(2);
+    const [from, to, override, ...extra] = process.argv.slice(2);
     try {
+        const settings = override ?? process.env.OYA_LEDGER_EVIDENCE_SETTINGS;
+        if (override === undefined && !isAbsolute(settings ?? '')) throw new Error();
         if (extra.length || !settings || ![from, to].every(v => /^(0|[1-9][0-9]*)$/.test(v))) throw new Error();
         console.log(JSON.stringify(await discoverLedger(Number(from), Number(to), await readEvidenceJson(settings)), null, 2));
     } catch {
-        console.error('Discovery failed. Check the decimal block range, verifier settings and RPC availability. Retry a smaller range if needed.');
+        console.error('Discovery failed. Pass FROM TO SETTINGS or set OYA_LEDGER_EVIDENCE_SETTINGS to an absolute settings path. Check the range and RPC availability. Retry a smaller range if needed.');
         process.exitCode = 1;
     }
 }

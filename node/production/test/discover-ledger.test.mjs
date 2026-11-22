@@ -1,5 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { discoverLedger } from '../src/discover-ledger.mjs';
 
@@ -20,7 +26,7 @@ async function fixture(t) {
     t.after(() => { server.closeAllConnections(); server.close(); });
     const rpcUrl = `http://127.0.0.1:${server.address().port}`;
     const scan = (from = 5, to = 8) => discoverLedger(from, to, { chainId: 1, ledgerContract: ledger, rpcUrl, ipfsUrl: rpcUrl });
-    return { results, calls, scan };
+    return { results, calls, scan, rpcUrl };
 }
 
 test('returns verifier records in chain order from a single address and topic query', async t => {
@@ -42,6 +48,24 @@ test('rejects invalid ranges, the wrong chain and future blocks before log looku
     results.eth_chainId = '0x2';
     await assert.rejects(scan());
     assert.deepEqual(calls.map(c => c.method), ['eth_chainId', 'eth_blockNumber', 'eth_chainId']);
+});
+
+test('CLI uses operator-selected settings, lets an explicit file win and never searches cwd', async t => {
+    const { rpcUrl, calls } = await fixture(t);
+    const cwd = await mkdtemp(join(tmpdir(), 'discovery-'));
+    t.after(() => rm(cwd, { recursive: true, force: true }));
+    const file = join(cwd, 'evidence.json');
+    await writeFile(file, JSON.stringify({ chainId: 1, ledgerContract: ledger, rpcUrl, ipfsUrl: rpcUrl }));
+    const cli = fileURLToPath(new URL('../src/discover-ledger.mjs', import.meta.url));
+    const run = (env, ...args) => promisify(execFile)(process.execPath, [cli, '5', '8', ...args], { cwd, env });
+    assert.deepEqual(JSON.parse((await run({ OYA_LEDGER_EVIDENCE_SETTINGS: file })).stdout), []);
+    assert.deepEqual(JSON.parse((await run({ OYA_LEDGER_EVIDENCE_SETTINGS: '/missing' }, 'evidence.json')).stdout), []);
+    const before = calls.length;
+    for (const [env, ...args] of [[{}], [{ OYA_LEDGER_EVIDENCE_SETTINGS: 'evidence.json' }],
+        [{ OYA_LEDGER_EVIDENCE_SETTINGS: file }, 'missing.json']]) {
+        await assert.rejects(run(env, ...args), e => e.code === 1 && e.stdout === '' && e.stderr.includes('FROM TO SETTINGS'));
+    }
+    assert.equal(calls.length, before);
 });
 
 test('rejects the whole response for inconsistent locations or filter results', async t => {
