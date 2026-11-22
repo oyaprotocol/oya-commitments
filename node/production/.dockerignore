@@ -17,6 +17,8 @@ src/**
 !src/main.mjs
 !src/ledger-evidence.mjs
 !src/verify-ledger.mjs
+!src/attest-retrieval.mjs
+!src/retrieval-attestation.mjs
 !src/server.mjs
 !src/secrets.mjs
 !src/signer.mjs

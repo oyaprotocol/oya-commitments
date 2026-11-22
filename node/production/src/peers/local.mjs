@@ -35,17 +35,28 @@ async function readNodeSecrets(path) {
     } finally { await handle.close(); }
 }
 
-/** Select only the installation explicitly selected by the existing operator environment. */
-export async function nodeSendSettings(env = process.env) {
+async function installationDirectory(env) {
     if (typeof env.OYA_LOCAL_DIR !== 'string' || !isAbsolute(env.OYA_LOCAL_DIR)) throw new Error();
     await privateDirectory(resolve(env.OYA_LOCAL_DIR));
-    const directory = await realpath(env.OYA_LOCAL_DIR);
+    return realpath(resolve(env.OYA_LOCAL_DIR));
+}
+
+async function nodeKey(directory) {
+    return (await readNodeSecrets(join(directory, 'node.env'))).OYA_NODE_PRIVATE_KEY;
+}
+
+export async function installationNodeKey(env = process.env) {
+    return nodeKey(await installationDirectory(env));
+}
+
+/** Select only the installation explicitly selected by the existing operator environment. */
+export async function nodeSendSettings(env = process.env) {
+    const directory = await installationDirectory(env);
     const config = JSON.parse(await readBounded(join(directory, 'worker.json'), 1048576));
     if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error();
     const peers = parsePeers(config.peers);
-    const secrets = await readNodeSecrets(join(directory, 'node.env'));
     // Never merge ambient keys, agent credentials, or worker tokens into this identity.
-    return { directory, key: secrets.OYA_NODE_PRIVATE_KEY,
+    return { directory, key: await nodeKey(directory),
         registryFile: peers ? resolve(directory, peers.registryFile) : bundledRegistry };
 }
 
