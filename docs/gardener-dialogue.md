@@ -49,7 +49,8 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q024](#q024) | How far back a new node should go | node history, data availability | Answered |
 | [Q025](#q025) | When two proposals cannot both work | proposal ordering, commitment rules | Answered |
 | [Q026](#q026) | Recognizing an unfamiliar message | protocol evolution, message compatibility | Answered |
-| [Q032](#q032) | A first test for an independent node | peer messaging, interoperability | Awaiting answer |
+| [Q027](#q027) | Which proposal came first? | proposal ordering, shared evidence | Answered |
+| [Q032](#q032) | A first test for an independent node | peer messaging, interoperability | Answered |
 
 <a id="q001"></a>
 
@@ -842,6 +843,37 @@ What should a sender be able to expect from a node that recognizes the signature
 
 Messages are just plain text so the message type does not matter. In the beginning, only ASCII text will be accepted.
 
+<a id="q027"></a>
+
+<!-- oya-dialogue-question: Q027 -->
+
+## Q027 — Which proposal came first?
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-20
+- **Topics:** proposal ordering, shared evidence
+- **Status:** Answered
+- **Source PR:** [#220](https://github.com/oyaprotocol/oya-commitments/pull/220)
+
+### Context
+
+In [the Q025 answer](https://github.com/oyaprotocol/oya-commitments/pull/217#issuecomment-7056230262), @pemulis said that a later proposal must account for an earlier valid one even before it resolves. Two observers might hear about those proposals in opposite orders.
+
+### Question
+
+What public record should both observers use to tell which proposal came first?
+
+### Answer
+
+#### @pemulis — 2026-11-21
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7065162732](https://github.com/oyaprotocol/oya-commitments/pull/220#issuecomment-7065162732)
+- **Source created:** 2026-11-21T15:48:54Z
+- **Source updated:** 2026-11-21T15:48:54Z
+
+Onchain events make proposal order (and any transaction order) clear.
+
 <a id="q032"></a>
 
 <!-- oya-dialogue-question: Q032 -->
@@ -851,7 +883,7 @@ Messages are just plain text so the message type does not matter. In the beginni
 - **Asked by:** Oya Gardener (`@oyagardener`)
 - **Asked on:** 2026-11-21
 - **Topics:** peer messaging, interoperability
-- **Status:** Awaiting answer
+- **Status:** Answered
 - **Source PR:** [#230](https://github.com/oyaprotocol/oya-commitments/pull/230)
 
 ### Context
@@ -864,4 +896,11 @@ What is the smallest exchange that a new node implementation should complete wit
 
 ### Answer
 
-Pending an answer from `@pemulis` or `@nesseps`.
+#### @pemulis — 2026-11-22
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7073478427](https://github.com/oyaprotocol/oya-commitments/pull/230#issuecomment-7073478427)
+- **Source created:** 2026-11-22T03:20:52Z
+- **Source updated:** 2026-11-22T03:20:52Z
+
+The data availability game and verification should be agnostic to how the node itself is implemented. This is related to the earlier question about retrieving from independent storage or a hosted backup; there is no way for our protocol to know, and we are not opinionated about that. We expect that independent node implementations will be developed and that the protocol itself will stay very generalized and not depend on detailed technical compatibility. Whatever gets the job done is fine.
