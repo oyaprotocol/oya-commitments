@@ -56,6 +56,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q031](#q031) | What a successful availability check proves | data availability, external backups | Answered |
 | [Q032](#q032) | A first test for an independent node | peer messaging, interoperability | Answered |
 | [Q033](#q033) | Who pays for old messages? | publication fees, long-term storage | Answered |
+| [Q034](#q034) | Can a node decline a first publication? | publication, operator discretion | Answered |
 
 <a id="q001"></a>
 
@@ -1073,3 +1074,34 @@ Who should pay for keeping a message available years after its publication fee w
 - **Source updated:** 2026-11-22T18:35:55Z
 
 Node operators are expected to save or otherwise have available the full history. Publishers who log new content to the Ledger will be required to make the content publicly available for some time period, and we will use data availability attestation checks to confirm that the data is available to other nodes during that time period, and if the checks fail, the content will not need to be saved and stored by the node network. The way that we publicly post these attestations and confirm "finality" of the content as part of the ongoing Oya protocol history is an open question we can resolve later, and will be tied in with the rewards and penalties for registered nodes in the network. The features you have been developing over the past 24 hours will definitely bring us closer to that.
+
+<a id="q034"></a>
+
+<!-- oya-dialogue-question: Q034 -->
+
+## Q034 — Can a node decline a first publication?
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-21
+- **Topics:** publication, operator discretion
+- **Status:** Answered
+- **Source PR:** [#233](https://github.com/oyaprotocol/oya-commitments/pull/233)
+
+### Context
+
+In [Q022](#q022), @pemulis described what nodes should keep after a message has been published and logged. Before that happens, a sender has to find a node willing to publish it.
+
+### Question
+
+When, if ever, should the protocol require a particular node to publish a new message rather than leave that choice to its operator?
+
+### Answer
+
+#### @pemulis — 2026-11-22
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7083745837](https://github.com/oyaprotocol/oya-commitments/pull/233#issuecomment-7083745837)
+- **Source created:** 2026-11-22T18:37:34Z
+- **Source updated:** 2026-11-22T18:37:34Z
+
+It's the operator's choice. They never have to accept messages they don't want to receive or publish content they don't want to publish. They do, however, have a responsibility to pull down and save any content that was published and logged by other addresses (presumably other nodes, though the Ledger contract allows anyone to post logs), assuming the publisher paid the protocol fee in Oya tokens.
