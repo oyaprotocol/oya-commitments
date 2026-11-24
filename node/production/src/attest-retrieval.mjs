@@ -1,12 +1,14 @@
-import fs from 'node:fs/promises';
+import { constants } from 'node:fs';
+import fs, { open } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Wallet } from 'ethers';
 import { installationNodeKey } from './peers/local.mjs';
 import { readEvidenceJson } from './ledger-evidence.mjs';
-import { attestRetrieval, verifyStoredRetrieval } from './retrieval-attestation.mjs';
+import { attestRetrieval, MAX_CONTENT_BYTES, MAX_RECEIPT_BYTES, receiptBlockCid,
+    verifyRetrievalAttestation, verifyStoredRetrieval } from './retrieval-attestation.mjs';
 
-const usage = 'Usage: attest-retrieval.mjs create CID SETTINGS | verify RECEIPT_CID CID SETTINGS [--export NEW_DIR]';
+const usage = 'Usage: attest-retrieval.mjs create CID SETTINGS | verify RECEIPT_CID CID SETTINGS [--export NEW_DIR] | verify-files RECEIPT_FILE CONTENT_FILE CID NODE_ADDRESS';
 
 async function exportBlocks(dir, receiptBytes, content) {
     await fs.mkdir(dir, { mode: 0o700 }); // Exclusive reservation: never replace an existing path.
@@ -22,8 +24,35 @@ async function exportBlocks(dir, receiptBytes, content) {
     }
 }
 
+async function readRegularFile(path, limit) {
+    if (!constants.O_NOFOLLOW || !constants.O_NONBLOCK) throw new Error('Safe file reads unavailable.');
+    const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+        const stat = await file.stat();
+        if (!stat.isFile() || stat.size > limit) throw new Error('Invalid input file.');
+        // Probe one byte beyond the reported length so growth cannot be silently truncated.
+        const buffer = Buffer.alloc(stat.size + 1);
+        let size = 0;
+        while (size < buffer.length) {
+            const { bytesRead } = await file.read(buffer, size, buffer.length - size, null);
+            if (!bytesRead) break;
+            size += bytesRead;
+        }
+        if (size !== stat.size) throw new Error('Input file size changed.');
+        return buffer.subarray(0, size);
+    } finally { await file.close(); }
+}
+
 export async function runRetrievalCli(args, { env = process.env, fetchImpl = fetch, now = Date.now } = {}) {
     const [mode] = args;
+    if (mode === 'verify-files') {
+        if (args.length !== 5) throw new Error(usage);
+        const [, receiptPath, contentPath, cid, nodeAddress] = args;
+        const bytes = await readRegularFile(receiptPath, MAX_RECEIPT_BYTES);
+        const content = await readRegularFile(contentPath, MAX_CONTENT_BYTES);
+        const receipt = verifyRetrievalAttestation(bytes, content, { cid, nodeAddress });
+        return { receiptCid: receiptBlockCid(bytes), receipt };
+    }
     if (mode === 'verify') {
         const exporting = args.length === 6 && args[4] === '--export' && args[5] !== '';
         if (args.length !== 4 && !exporting) throw new Error(usage);

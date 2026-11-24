@@ -11,7 +11,7 @@ const check = (ok, message) => { if (!ok) throw new Error(message); };
 const encode = value => Buffer.from(JSON.stringify(value), 'utf8');
 
 // CIDv1, raw codec, SHA2-256 multihash; unpadded lowercase multibase base32.
-function receiptBlockCid(bytes) {
+export function receiptBlockCid(bytes) {
     const block = Buffer.concat([Buffer.from([1, 0x55, 0x12, 32]), createHash('sha256').update(bytes).digest()]);
     const alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
     let result = 'b', bits = 0, acc = 0;

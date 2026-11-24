@@ -17,6 +17,8 @@ Validate a particular Ledger log using its chain, contract, transaction hash and
 
 - [x] 2026-11-21 16:35Z: Implemented and tested optional single-record local byte export. Documented operator recovery and recorded the next candidate below.
 
+- [x] 2026-11-22: Implemented the offline recheck of a single saved CID, documented exit codes and ran the focused and full production suites on Node 24.22.2 (76/76 and 674/674 passed, no skips). The full suite used a disposable source copy with sibling temporary output inside the worktree for the mocked release tests.
+
 ## Surprises & Discoveries
 
 The bounded `cat` reader already returns the exact buffer that passes the integrity checks. Keeping that buffer separate from the printable report avoids a second request and avoids serializing content.
@@ -28,6 +30,8 @@ The first refactor test run caught a CLI test-guard argument offset and an overl
 The production dependency is published `@oyaprotocol/ethereum@0.2.0`, without the new `getAddress` export. Its existing ethers address caller must remain until maintainers release the kernel. Existing kernel helper source, generated artifacts and tests remain in this PR.
 
 ## Decision Log
+
+- 2026-11-22: `shasum` emits a hex digest, not a comparison to a trusted Ledger CID. Validate the supplied CID with the kernel before extracting its raw digest or constructing a filename. Reuse the bounded regular-file reader and the online byte limit. Keep local results separate from chain evidence: an offline match establishes only the identity of the bytes read.
 
 - 2026-11-21 / Hermes: Following the Q022/Q024 operator action, export one explicitly selected historical record on demand. Write a private temporary file beside the destination, then hard-link it into place after close. Unlike rename, link cannot replace an existing entry. Operators choose a private local directory that supports hard links.
 
@@ -75,7 +79,7 @@ Review follow-up: sync the verified file before linking it and the parent direct
 
 ## Next feature — candidate when capacity permits
 
-`ledger-archive-recheck-v1`: let an operator check retained bytes against a previously trusted record without contacting Kubo. First check whether a standard checksum tool already covers the workflow. If record-aware checking adds value, reuse the production verifier’s digest rules in the evidence CLI and tests (estimated under 250 changed code lines). Accept matching binary and empty files, reject a changed byte, and distinguish an unreadable file from a mismatch. Require a trusted digest or supported raw CID. An offline match says nothing about current chain state or peer availability.
+`offline-batch-membership-v1` (candidate only): given a trusted raw manifest CID and a member CID, check whether the retained batch manifest lists that member and return its index or an explicit absence. The online batch verifier retrieves bytes; running `--check-saved` followed by a text search opens the file twice and does not validate manifest format. Prototype by passing the same bounded, digest-checked bytes to `parseBatchManifest` in `node/production/src/batch-evidence.mjs`. Extend the batch CLI, its tests and the operator guide (estimate: under 250 changed code/test lines). Accept a valid listed or absent member; distinguish missing, corrupt, malformed and unsupported manifests. A listed CID is not evidence of possessing the member bytes or of a Ledger log. This does not duplicate peer retrieval or range discovery (#226 and #228); reassess need and overlap before starting.
 
 ## Interfaces and Dependencies
 
