@@ -54,7 +54,9 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q029](#q029) | Evidence that arrives after a proposal? | evidence, dispute resolution | Answered |
 | [Q030](#q030) | A gap in a full node’s history | data availability, node synchronization | Answered |
 | [Q031](#q031) | What a successful availability check proves | data availability, external backups | Answered |
-| [Q037](#q037) | Who looked at an unchallenged proposal? | optimistic resolution, public evidence | Awaiting answer |
+| [Q032](#q032) | A first test for an independent node | peer messaging, interoperability | Answered |
+| [Q033](#q033) | Who pays for old messages? | publication fees, long-term storage | Answered |
+| [Q037](#q037) | Who looked at an unchallenged proposal? | optimistic resolution, public evidence | Answered |
 
 <a id="q001"></a>
 
@@ -1011,6 +1013,68 @@ If two nodes return the same message on time, should it matter to a data availab
 
 Not really. There would be no way to know how the node stored or retrieved the data.
 
+<a id="q032"></a>
+
+<!-- oya-dialogue-question: Q032 -->
+
+## Q032 — A first test for an independent node
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-21
+- **Topics:** peer messaging, interoperability
+- **Status:** Answered
+- **Source PR:** [#230](https://github.com/oyaprotocol/oya-commitments/pull/230)
+
+### Context
+
+The [peer sending guide](../node/production/peers/send.md) describes how the current node asks a peer to publish signed text. Imagine someone writing a second node from scratch.
+
+### Question
+
+What is the smallest exchange that a new node implementation should complete with an existing node to show the two are compatible?
+
+### Answer
+
+#### @pemulis — 2026-11-22
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7073478427](https://github.com/oyaprotocol/oya-commitments/pull/230#issuecomment-7073478427)
+- **Source created:** 2026-11-22T03:20:52Z
+- **Source updated:** 2026-11-22T03:20:52Z
+
+The data availability game and verification should be agnostic to how the node itself is implemented. This is related to the earlier question about retrieving from independent storage or a hosted backup; there is no way for our protocol to know, and we are not opinionated about that. We expect that independent node implementations will be developed and that the protocol itself will stay very generalized and not depend on detailed technical compatibility. Whatever gets the job done is fine.
+
+<a id="q033"></a>
+
+<!-- oya-dialogue-question: Q033 -->
+
+## Q033 — Who pays for old messages?
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-21
+- **Topics:** publication fees, long-term storage
+- **Status:** Answered
+- **Source PR:** [#232](https://github.com/oyaprotocol/oya-commitments/pull/232)
+
+### Context
+
+In [Q022](#q022), @pemulis described a fee based on the size of a message. In [Q024](#q024), he said a full node joining later should retrieve the whole history. A node might start doing that work years after the sender paid.
+
+### Question
+
+Who should pay for keeping a message available years after its publication fee was paid?
+
+### Answer
+
+#### @pemulis — 2026-11-22
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7083724309](https://github.com/oyaprotocol/oya-commitments/pull/232#issuecomment-7083724309)
+- **Source created:** 2026-11-22T18:35:55Z
+- **Source updated:** 2026-11-22T18:35:55Z
+
+Node operators are expected to save or otherwise have available the full history. Publishers who log new content to the Ledger will be required to make the content publicly available for some time period, and we will use data availability attestation checks to confirm that the data is available to other nodes during that time period, and if the checks fail, the content will not need to be saved and stored by the node network. The way that we publicly post these attestations and confirm "finality" of the content as part of the ongoing Oya protocol history is an open question we can resolve later, and will be tied in with the rewards and penalties for registered nodes in the network. The features you have been developing over the past 24 hours will definitely bring us closer to that.
+
 <a id="q037"></a>
 
 <!-- oya-dialogue-question: Q037 -->
@@ -1020,7 +1084,7 @@ Not really. There would be no way to know how the node stored or retrieved the d
 - **Asked by:** Oya Gardener (`@oyagardener`)
 - **Asked on:** 2026-11-22
 - **Topics:** optimistic resolution, public evidence
-- **Status:** Awaiting answer
+- **Status:** Answered
 - **Source PR:** [#237](https://github.com/oyaprotocol/oya-commitments/pull/237)
 
 ### Context
@@ -1033,4 +1097,11 @@ When a proposal passes without a challenge, what evidence, if any, should a part
 
 ### Answer
 
-Pending an answer from `@pemulis` or `@nesseps`.
+#### @pemulis — 2026-11-24
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7146497973](https://github.com/oyaprotocol/oya-commitments/pull/237#issuecomment-7146497973)
+- **Source created:** 2026-11-24T22:39:50Z
+- **Source updated:** 2026-11-24T22:39:50Z
+
+There does not need to be evidence that it was checked. The assurance comes from economic incentives to raise disputes plus demonstrations of liveness of the node network (which presumably includes nodes capable of and interested in validating proposals). Finally, we'll eventually add a "bogey" game of invalid proposals where nodes will prove that, in theory, they can identify invalid proposals and why they are wrong. None of this provides evidence that any particular proposal was reviewed, however, just a reason to believe it likely has been.
