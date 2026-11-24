@@ -69,6 +69,18 @@ attest --entrypoint node "$image" src/attest-retrieval.mjs verify "$receipt_cid"
 
 Verification retrieves both blocks, checks their hashes and the signed receipt against the expected node and content, and prints the same JSON on success. Exit 1 means the command failed. If creation exits 2, the receipt may already be pinned. Use the receipt CID from stderr to verify before creating another one.
 
+### Verify a receipt from two files
+
+A reviewer with the original bytes can verify a transferred receipt without Kubo, settings, or a signing key. Save the raw receipt block itself (for example, `ipfs block get "$receipt_cid" >receipt.bin` on the exporting machine), not the JSON wrapper printed by `create`. Preserve both files byte for byte. Obtain the expected content CID and signer address independently.
+
+From `node/production` with dependencies installed, run:
+
+```sh
+node src/attest-retrieval.mjs verify-files receipt.bin content.bin "$cid" "$node_address"
+```
+
+Success prints the computed receipt CID and verified receipt. Compare that CID with any particular receipt identifier you were given. Failure exits 1 without a receipt. Inputs must be regular files, not symlinks, in directories you trust. The receipt limit is 1,024 bytes and the content limit is 1 MiB.
+
 ## Deployed Sepolia Ledger
 
 New node configurations default to verifying incoming signed messages against the client allowlist, publishing their signed envelopes to IPFS, then logging the resulting CIDs to this existing Ledger.

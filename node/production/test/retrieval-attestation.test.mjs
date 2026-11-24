@@ -183,11 +183,49 @@ test('CLI create uses the configured identity; verify reads both blocks without 
     assert.deepEqual(f.events, [cat(receiptCid), cat(cid)]);
 });
 
+test('verify-files checks exact local bytes against independent expectations without keys or transport', async t => {
+    const dir = await mkdtemp(join(tmpdir(), 'oya-verify-files-'));
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    const signed = join(dir, 'receipt'), source = join(dir, 'content');
+    const run = (r = signed, s = source, c = cid, a = nodeAddress) => runRetrievalCli(['verify-files', r, s, c, a], {
+        env: new Proxy({}, { get() { assert.fail('accessed environment'); } }),
+        fetchImpl() { assert.fail('accessed network'); },
+    });
+    await writeFile(signed, encode(receipt));
+    await writeFile(source, content);
+    assert.deepEqual(await run(), { receiptCid, receipt });
+    await assert.rejects(run(signed, source, receiptCid), /CID\/content mismatch/);
+    await assert.rejects(run(signed, source, cid, other.address), /metadata mismatch/);
+    await writeFile(signed, JSON.stringify(receipt) + '\n');
+    await assert.rejects(run(), /metadata mismatch/);
+    await writeFile(signed, encode(receipt));
+    await writeFile(source, Buffer.alloc(content.length));
+    await assert.rejects(run(), /CID\/content mismatch/);
+});
+
+test('verify-files rejects oversized and non-regular files', async t => {
+    const dir = await mkdtemp(join(tmpdir(), 'oya-verify-files-'));
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    const signed = join(dir, 'receipt'), source = join(dir, 'content'), alias = join(dir, 'alias');
+    const run = (r, s) => runRetrievalCli(['verify-files', r, s, cid, nodeAddress]);
+    await writeFile(signed, encode(receipt));
+    await writeFile(source, content);
+    await symlink(source, alias);
+    await assert.rejects(run(signed, alias), { code: 'ELOOP' });
+    await assert.rejects(run(dir, source), /Invalid input file/);
+    await assert.rejects(run(signed, '/dev/null'), /Invalid input file/);
+    await writeFile(source, Buffer.alloc(1048577));
+    await assert.rejects(run(signed, source), /Invalid input file/);
+    await writeFile(signed, Buffer.alloc(1025));
+    await assert.rejects(run(signed, join(dir, 'missing')), /Invalid input file/);
+});
+
 test('CLI process reports usage and operational failure on stderr, never printing private input', async t => {
     const cli = fileURLToPath(new URL('../src/attest-retrieval.mjs', import.meta.url));
     const run = args => promisify(execFile)(process.execPath, [cli, ...args], { env: { OYA_NODE_PRIVATE_KEY: 'private-invalid-test-key' } });
     const file = await configFile(t);
-    for (const [args, pattern] of [[['verify'], /^Usage:/], [['create', cid, file], /^Retrieval attestation failed\./]]) {
+    for (const [args, pattern] of [[['verify'], /^Usage:/], [['verify-files'], /^Usage:/],
+        [['verify-files', file, file, cid, nodeAddress], /^Retrieval attestation failed\./], [['create', cid, file], /^Retrieval attestation failed\./]]) {
         await assert.rejects(run(args), error => {
             assert.equal(error.code, 1);
             assert.equal(error.stdout, '');
