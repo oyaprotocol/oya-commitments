@@ -11,6 +11,8 @@ An operator can sign for a single successful read and give a reviewer a receipt 
 
 - [x] 2026-11-22 21:40Z: Rebuilt the release image with the guarded installation signer and repeated create, keyless verify, pin and wrong-content checks using only a disposable mode-0600 `node.env`.
 
+- [x] 2026-11-22: Added `offline-retrieval-receipt-v1` and exercised the file-only CLI against the existing signing vector.
+
 ## Surprises & Discoveries
 
 The pinned Node base and production dependencies were cached locally, but a build with `--network=none` missed the npm layer and failed with `EAI_AGAIN`. The build below reused the existing layer without running npm. The CLI containers themselves shared only the offline Kubo container’s loopback network.
@@ -98,6 +100,12 @@ On 2026-11-22 the packaged retrieval and peer-local suites passed 22/22. The 21-
 
 `create CID SETTINGS` checks the configured identity against the signer from the guarded `$OYA_LOCAL_DIR/node.env`; inherited private keys are ignored. The signed digest covers compact metadata, a NUL separator and the source bytes. `verify RECEIPT_CID CID SETTINGS` fetches both raw blocks and checks the signature without writing. Both return `{receiptCid,receipt}`. The CLI limits content to 1 MiB and receipts to 1024 bytes.
 
+## Offline receipt handoff
+
+A later reviewer can have both blocks but no running IPFS service. PR #226 supplied the byte verifier, while its CLI required Kubo even for local evidence. The `verify-files` mode reads two bounded regular files, then calls the same verifier with the independently expected signer and CID. It returns the CID calculated from the exact receipt block. A signature authenticates a claim, not its reported time. See the [operator command](../node/production/README.md#verify-a-receipt-from-two-files).
+
+From `node/production` run `node --test test/retrieval-attestation.test.mjs`, then `node --test test/*.test.mjs` with Node 24 and installed dependencies. The focused suite passed 15 tests and the full suite passed 688. The file-mode tests reject changed bytes, a different signer, noncanonical JSON, oversized inputs and nonregular files. Rechecking does not change either file.
+
 ## Next feature — candidate when capacity permits
 
-`recent-ledger-observation-discovery-v1`: let observers find records without already knowing a transaction hash. Add an explicitly bounded, read-only block-range lookup to the production evidence tools. Return exact transaction/log identities for the configured Ledger; test empty, multiple, wrong-emitter, removed-log, oversized and unavailable results against loopback RPC. Depend on existing Ledger event decoding, not on statement publication. Estimate 180–350 changed code/test lines. Do not treat a provider’s empty response as proof that nothing was published.
+`retrieval-receipt-export-v1`: let a peer transfer the two verified raw blocks without manually selecting blocks from Kubo. Extend the existing keyless retrieval CLI to export exact bytes into a new private directory. Reuse bounded reads and the existing verifier. Verify an export with `verify-files` while disconnected. Test refusal to overwrite, interrupted writes and wrong identities before publishing any output. Estimate 100–250 changed implementation and test lines. Depends on the verifier and a source Kubo endpoint. Block-range discovery remains independently under review in #228.
