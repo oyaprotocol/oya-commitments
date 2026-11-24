@@ -71,13 +71,15 @@ Verification retrieves both blocks, checks their hashes and the signed receipt a
 
 ### Verify a receipt from two files
 
-From `node/production` with dependencies installed, the sender can fetch and verify both blocks from Kubo and export their exact bytes. Choose a new destination under a trusted parent directory:
+From the directory containing `settings.json`, use the `attest` helper above and an image that supports `verify --export`. Give the container a new, private output directory so it can write the verified blocks without mounting the rest of your working directory:
 
 ```sh
-node src/attest-retrieval.mjs verify "$receipt_cid" "$cid" settings.json --export handoff
+mkdir -m 700 receipt-export &&
+  attest --mount "type=bind,src=$PWD/receipt-export,dst=/export" \
+    --entrypoint node "$image" src/attest-retrieval.mjs verify "$receipt_cid" "$cid" /settings.json --export /export/handoff
 ```
 
-Transfer `handoff/blocks/receipt.json` and `handoff/blocks/content.bin` byte for byte. The receipt file is the raw signed block, not the JSON wrapper printed on stdout. Existing destinations are refused. If the process stops before `blocks/` appears, discard the incomplete destination and retry with a new name.
+Transfer `receipt-export/handoff/blocks/receipt.json` and `receipt-export/handoff/blocks/content.bin` byte for byte. The receipt file is the raw signed block, not the JSON wrapper printed on stdout. Existing destinations are refused. If the process stops before `blocks/` appears, discard the incomplete destination and retry with a new name.
 
 The recipient needs only the two files and an independently obtained content CID and signer address. From `node/production`, set `blocks` to the received directory and run:
 
