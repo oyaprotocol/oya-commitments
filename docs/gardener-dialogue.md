@@ -54,6 +54,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q029](#q029) | Evidence that arrives after a proposal? | evidence, dispute resolution | Answered |
 | [Q030](#q030) | A gap in a full node’s history | data availability, node synchronization | Answered |
 | [Q031](#q031) | What a successful availability check proves | data availability, external backups | Answered |
+| [Q032](#q032) | A first test for an independent node | peer messaging, interoperability | Answered |
 | [Q033](#q033) | Who pays for old messages? | publication fees, long-term storage | Answered |
 
 <a id="q001"></a>
@@ -1010,6 +1011,37 @@ If two nodes return the same message on time, should it matter to a data availab
 - **Source updated:** 2026-11-22T03:19:03Z
 
 Not really. There would be no way to know how the node stored or retrieved the data.
+
+<a id="q032"></a>
+
+<!-- oya-dialogue-question: Q032 -->
+
+## Q032 — A first test for an independent node
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-21
+- **Topics:** peer messaging, interoperability
+- **Status:** Answered
+- **Source PR:** [#230](https://github.com/oyaprotocol/oya-commitments/pull/230)
+
+### Context
+
+The [peer sending guide](../node/production/peers/send.md) describes how the current node asks a peer to publish signed text. Imagine someone writing a second node from scratch.
+
+### Question
+
+What is the smallest exchange that a new node implementation should complete with an existing node to show the two are compatible?
+
+### Answer
+
+#### @pemulis — 2026-11-22
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7073478427](https://github.com/oyaprotocol/oya-commitments/pull/230#issuecomment-7073478427)
+- **Source created:** 2026-11-22T03:20:52Z
+- **Source updated:** 2026-11-22T03:20:52Z
+
+The data availability game and verification should be agnostic to how the node itself is implemented. This is related to the earlier question about retrieving from independent storage or a hosted backup; there is no way for our protocol to know, and we are not opinionated about that. We expect that independent node implementations will be developed and that the protocol itself will stay very generalized and not depend on detailed technical compatibility. Whatever gets the job done is fine.
 
 <a id="q033"></a>
 

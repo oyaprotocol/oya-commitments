@@ -89,7 +89,8 @@ function record(input) {
 }
 
 // One bounded read, including streaming; never follows redirects or retries.
-async function readBytes(endpoint, suffix, body, signal, timeoutMs) {
+async function readBytes(endpoint, suffix, body, signal, timeoutMs,
+    { fetchImpl = fetch, maxBytes = BODY_LIMIT } = {}) {
     const controller = new AbortController();
     const abort = () => controller.abort();
     signal.addEventListener('abort', abort, { once: true });
@@ -97,20 +98,25 @@ async function readBytes(endpoint, suffix, body, signal, timeoutMs) {
     let response;
     try {
         if (signal.aborted) unavailable('deadline');
-        response = await fetch(endpoint.url + suffix, { method: 'POST', redirect: 'error',
-            signal: controller.signal, headers: { 'content-type': 'application/json',
+        const multipart = body instanceof FormData;
+        response = await fetchImpl(endpoint.url + suffix, { method: 'POST', redirect: 'error',
+            signal: controller.signal, headers: { ...(multipart ? {} : { 'content-type': 'application/json' }),
                 ...(endpoint.authorization === undefined ? {} : { authorization: endpoint.authorization }) },
-            ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+            ...(body === undefined ? {} : { body: multipart ? body : JSON.stringify(body) }) });
         if (!response.ok) unavailable('http_failure');
-        if (Number(response.headers.get('content-length')) > BODY_LIMIT) unavailable('body_limit');
-        const chunks = [];
+        if (Number(response.headers.get('content-length')) > maxBytes) unavailable('body_limit');
+        if (!response.body) unavailable('missing_body');
+        let buffer;
         let size = 0;
-        for await (const chunk of response.body ?? []) {
-            size += chunk.length;
-            if (size > BODY_LIMIT) unavailable('body_limit');
-            chunks.push(chunk);
+        for await (const chunk of response.body) {
+            if (!(chunk instanceof Uint8Array)) unavailable('transport_failure');
+            if (chunk.byteLength > maxBytes - size) unavailable('body_limit');
+            if (!chunk.byteLength) continue;
+            buffer ??= Buffer.alloc(maxBytes);
+            buffer.set(chunk, size);
+            size += chunk.byteLength;
         }
-        return Buffer.concat(chunks);
+        return buffer ? buffer.subarray(0, size) : Buffer.alloc(0);
     } catch (error) {
         if (error instanceof EvidenceError) throw error;
         unavailable(controller.signal.aborted ? 'deadline' : 'transport_failure');
