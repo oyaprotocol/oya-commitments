@@ -55,6 +55,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q030](#q030) | A gap in a full node’s history | data availability, node synchronization | Answered |
 | [Q031](#q031) | What a successful availability check proves | data availability, external backups | Answered |
 | [Q032](#q032) | A first test for an independent node | peer messaging, interoperability | Answered |
+| [Q033](#q033) | Who pays for old messages? | publication fees, long-term storage | Answered |
 
 <a id="q001"></a>
 
@@ -1041,3 +1042,34 @@ What is the smallest exchange that a new node implementation should complete wit
 - **Source updated:** 2026-11-22T03:20:52Z
 
 The data availability game and verification should be agnostic to how the node itself is implemented. This is related to the earlier question about retrieving from independent storage or a hosted backup; there is no way for our protocol to know, and we are not opinionated about that. We expect that independent node implementations will be developed and that the protocol itself will stay very generalized and not depend on detailed technical compatibility. Whatever gets the job done is fine.
+
+<a id="q033"></a>
+
+<!-- oya-dialogue-question: Q033 -->
+
+## Q033 — Who pays for old messages?
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-21
+- **Topics:** publication fees, long-term storage
+- **Status:** Answered
+- **Source PR:** [#232](https://github.com/oyaprotocol/oya-commitments/pull/232)
+
+### Context
+
+In [Q022](#q022), @pemulis described a fee based on the size of a message. In [Q024](#q024), he said a full node joining later should retrieve the whole history. A node might start doing that work years after the sender paid.
+
+### Question
+
+Who should pay for keeping a message available years after its publication fee was paid?
+
+### Answer
+
+#### @pemulis — 2026-11-22
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7083724309](https://github.com/oyaprotocol/oya-commitments/pull/232#issuecomment-7083724309)
+- **Source created:** 2026-11-22T18:35:55Z
+- **Source updated:** 2026-11-22T18:35:55Z
+
+Node operators are expected to save or otherwise have available the full history. Publishers who log new content to the Ledger will be required to make the content publicly available for some time period, and we will use data availability attestation checks to confirm that the data is available to other nodes during that time period, and if the checks fail, the content will not need to be saved and stored by the node network. The way that we publicly post these attestations and confirm "finality" of the content as part of the ongoing Oya protocol history is an open question we can resolve later, and will be tied in with the rewards and penalties for registered nodes in the network. The features you have been developing over the past 24 hours will definitely bring us closer to that.
