@@ -198,8 +198,8 @@ async function runWithRetry<TResult>({
     run,
 }: RunWithRetryOptions<TResult>): Promise<TResult> {
     const retryLimit = assertNonNegativeInteger(maxRetries, 'maxRetries');
-    const retryDelay = assertNonNegativeInteger(retryDelayMs, 'retryDelayMs');
-    const requestTimeoutMs = assertPositiveInteger(timeoutMs, 'timeoutMs');
+    const retryDelay = retryDelayMs === 0 ? 0 : assertTimerMs(retryDelayMs, 'retryDelayMs');
+    const requestTimeoutMs = assertTimerMs(timeoutMs, 'timeoutMs');
     const callerAbortErrorMessage = assertNonEmptyString(
         abortErrorMessage,
         'abortErrorMessage'
