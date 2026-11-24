@@ -1,19 +1,37 @@
-import { resolve } from 'node:path';
+import fs from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Wallet } from 'ethers';
 import { installationNodeKey } from './peers/local.mjs';
 import { readEvidenceJson } from './ledger-evidence.mjs';
 import { attestRetrieval, verifyStoredRetrieval } from './retrieval-attestation.mjs';
 
-const usage = 'Usage: attest-retrieval.mjs create CID SETTINGS | verify RECEIPT_CID CID SETTINGS';
+const usage = 'Usage: attest-retrieval.mjs create CID SETTINGS | verify RECEIPT_CID CID SETTINGS [--export NEW_DIR]';
+
+async function exportBlocks(dir, receiptBytes, content) {
+    await fs.mkdir(dir, { mode: 0o700 }); // Exclusive reservation: never replace an existing path.
+    const pending = join(dir, '.pending');
+    try {
+        await fs.mkdir(pending, { mode: 0o700 });
+        await fs.writeFile(join(pending, 'receipt.json'), receiptBytes, { mode: 0o600 });
+        await fs.writeFile(join(pending, 'content.bin'), content, { mode: 0o600 });
+        await fs.rename(pending, join(dir, 'blocks'));
+    } catch (error) {
+        await fs.rm(dir, { recursive: true });
+        throw error;
+    }
+}
 
 export async function runRetrievalCli(args, { env = process.env, fetchImpl = fetch, now = Date.now } = {}) {
     const [mode] = args;
-    if (!((mode === 'create' && args.length === 3) || (mode === 'verify' && args.length === 4))) {
-        throw new Error(usage);
+    if (mode === 'verify') {
+        const exporting = args.length === 6 && args[4] === '--export' && args[5] !== '';
+        if (args.length !== 4 && !exporting) throw new Error(usage);
+        return verifyStoredRetrieval(args[1], args[2], await readEvidenceJson(args[3]), { fetchImpl,
+            onVerified: exporting ? (bytes, content) => exportBlocks(args[5], bytes, content) : undefined });
     }
-    const settings = await readEvidenceJson(args.at(-1));
-    if (mode === 'verify') return verifyStoredRetrieval(args[1], args[2], settings, { fetchImpl });
+    if (mode !== 'create' || args.length !== 3) throw new Error(usage);
+    const settings = await readEvidenceJson(args[2]);
     let signer;
     try { signer = new Wallet(await installationNodeKey(env)); }
     catch { throw new Error('Invalid node signing key.'); }

@@ -25,6 +25,16 @@ The pinned Node base and production dependencies were cached locally, but a buil
 
 The packaged commands returned identical JSON for creation and keyless verification. Changing the expected content made verification fail even though both requested reads were available. A cached read qualifies; a receipt is not evidence that a remote peer served the bytes.
 
+## Export verified blocks for offline handoff
+
+- [x] 2026-11-24 22:35Z: Traced `verifyStoredRetrieval`: it already reads and verifies both raw blocks but returns only parsed metadata. Ledger save requires a different record. #239 consumes files rather than producing them.
+- [x] 2026-11-24 22:37Z: Added `verify ... --export NEW_DIR`. The verifier passes the two checked buffers to the CLI before returning its usual JSON. The CLI reserves the destination and renames a private staging directory to `blocks/` after both writes finish.
+- [x] 2026-11-24 22:38Z: Both new tests initially failed with the old CLI usage error. On Node 24 the receipt suite then passed. Separately exercised the README recipient command with only the exported files, expected signer and content CID; the permanent round-trip test uses the same verifier without needing the README in a packaged test image. The failure cases leave existing paths unchanged and remove an interrupted export.
+
+Repeat from `node/production` with installed dependencies: `node --test test/retrieval-attestation.test.mjs`. The fixture supplies the Kubo reads in memory. See the export and recipient commands in `node/production/README.md`.
+
+Decision (2026-11-24, Gardener): export the existing wire bytes, not a new archive format or an additional Kubo read. Q031 and Q032 distinguish checking the data from knowing how a node stored it. A reviewer needs the two files and independent expectations, not the sender's settings.
+
 ## Context and Orientation
 
 Kubo is the local IPFS service. A raw CID identifies one block by the hash of its bytes. In `node/production/src`, `attest-retrieval.mjs` handles the command line, `retrieval-attestation.mjs` signs and verifies, and `ledger-evidence.mjs` supplies bounded reads and validation helpers. Neither a Ledger record nor an RPC endpoint is needed.
@@ -100,4 +110,6 @@ On 2026-11-22 the packaged retrieval and peer-local suites passed 22/22. The 21-
 
 ## Next feature — candidate when capacity permits
 
-`recent-ledger-observation-discovery-v1`: let observers find records without already knowing a transaction hash. Add an explicitly bounded, read-only block-range lookup to the production evidence tools. Return exact transaction/log identities for the configured Ledger; test empty, multiple, wrong-emitter, removed-log, oversized and unavailable results against loopback RPC. Depend on existing Ledger event decoding, not on statement publication. Estimate 180–350 changed code/test lines. Do not treat a provider’s empty response as proof that nothing was published.
+`retrieval-cli-from-any-directory-v1`: a reviewer in #239 asked to run scripts without changing to a particular directory. The previous Ledger discovery candidate shipped in #228. Start with one task: from a directory containing evidence or settings, invoke the installed receipt verifier by name and resolve all input and export paths against that directory.
+
+Inventory the existing operator launcher and release packaging first. If an installed command already forwards these arguments, test and document it rather than adding a second launcher. Otherwise add one thin dispatch entry to the existing distribution, forwarding argv, stdout, stderr and exit status to the production CLI. Keep signing, verification and path interpretation in the existing modules. Test from an unrelated working directory whose path contains spaces, including relative arguments, usage errors and an unavailable input. Exercise the packaged command with a fixture, without installing a service. Depends on the production CLI and a supported local distribution, not on Ledger or an offline file mode. Estimate 40–120 changed code/test lines; defer if it would require a new distribution just for this command.

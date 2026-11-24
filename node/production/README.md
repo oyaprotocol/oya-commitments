@@ -33,6 +33,28 @@ The setup guides use the published [current image and matching bundle](release-i
 
 A receipt records that a node signed for the bytes of one raw SHA-256 content identifier (CID) at its reported completion time. The read may be a cache hit. The signature does not prove continuous availability, independent storage, or a Ledger publication.
 
+**Export for offline handoff.** From a source checkout with the production dependencies installed, run this from `node/production`. Use a new destination under a trusted parent directory:
+
+```sh
+node src/attest-retrieval.mjs verify "$receipt_cid" "$cid" settings.json --export handoff
+```
+
+On success, transfer `handoff/blocks/receipt.json` and `handoff/blocks/content.bin` as binary files. Do not send `settings.json`. Existing destinations are refused. If the process is killed before `blocks/` appears, discard the incomplete destination and retry with a new name.
+
+A recipient with the same installed verifier can check the two exported regular files offline (receipt at most 1 KiB, content at most 1 MiB). Obtain the expected content CID and signer address independently. From `node/production`, with `blocks` set to the directory containing the received files:
+
+```sh
+node --input-type=module - "$blocks" "$cid" "$node_address" <<'JS'
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { verifyRetrievalAttestation } from './src/retrieval-attestation.mjs';
+const [dir, cid, nodeAddress] = process.argv.slice(2);
+const receipt = await readFile(join(dir, 'receipt.json'));
+const content = await readFile(join(dir, 'content.bin'));
+console.log(JSON.stringify(verifyRetrievalAttestation(receipt, content, { cid, nodeAddress })));
+JS
+```
+
 Use a local release image that includes `src/attest-retrieval.mjs`. From the directory containing `settings.json`, set `image` to the matching image reference, `ipfs_id` to the running Kubo container ID, and `cid` to the expected content CID. For an inbox installation, obtain the ID with `docker compose ps -q ipfs` in its Compose project. The command shares Kubo’s loopback interface; do not expose the API port.
 
 ```json

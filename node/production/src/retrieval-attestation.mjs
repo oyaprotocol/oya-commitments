@@ -115,12 +115,13 @@ export async function attestRetrieval(cid, settings, { signer, fetchImpl = fetch
     return { receiptCid, receipt };
 }
 
-/** Retrieve both raw blocks; no signing key or write operation is used. */
-export async function verifyStoredRetrieval(receiptCid, cid, settings, { fetchImpl = fetch } = {}) {
+/** Fetch both blocks without a signing key. Forward the original bytes only after verification. */
+export async function verifyStoredRetrieval(receiptCid, cid, settings, { fetchImpl = fetch, onVerified } = {}) {
     rawDigest(cid);
     const api = kubo(settings, fetchImpl);
     const receiptBytes = await api.read(receiptCid, MAX_RECEIPT_BYTES);
     const content = await api.read(cid, api.limit);
     const receipt = verifyRetrievalAttestation(receiptBytes, content, { cid, nodeAddress: api.nodeAddress });
+    await onVerified?.(receiptBytes, content);
     return { receiptCid, receipt };
 }

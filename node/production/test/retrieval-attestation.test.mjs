@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { chmod, link, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import fs, { chmod, link, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
@@ -147,6 +147,50 @@ async function configFile(t) {
     await writeFile(file, JSON.stringify(settings));
     return file;
 }
+
+test('verify exports exactly the two checked blocks for offline verification', async t => {
+    const file = await configFile(t);
+    const dir = join(dirname(file), 'handoff');
+    const f = fixture();
+    const args = ['verify', receiptCid, cid, file, '--export', dir];
+    assert.deepEqual(await runRetrievalCli(args, f), { receiptCid, receipt });
+    assert.deepEqual(f.events, [cat(receiptCid), cat(cid)]);
+    const blocks = join(dir, 'blocks');
+    const bytes = await fs.readFile(join(blocks, 'receipt.json'));
+    const source = await fs.readFile(join(blocks, 'content.bin'));
+    assert.deepEqual(bytes, encode(receipt));
+    assert.deepEqual(source, content);
+    await assert.rejects(runRetrievalCli(args, f), { code: 'EEXIST' });
+    assert.deepEqual(await fs.readFile(join(blocks, 'content.bin')), source);
+    assert.deepEqual(verifyRetrievalAttestation(bytes, source, { cid, nodeAddress }), receipt);
+    for (const path of [dir, blocks, join(blocks, 'receipt.json'), join(blocks, 'content.bin')]) {
+        assert.equal((await fs.stat(path)).mode & 0o077, 0);
+    }
+});
+
+test('failed verification or write leaves no handoff and a symlink is never followed', async t => {
+    const file = await configFile(t);
+    const dir = join(dirname(file), 'handoff');
+    const run = () => runRetrievalCli(['verify', receiptCid, cid, file, '--export', dir], fixture());
+    await writeFile(file, JSON.stringify({ ...settings, nodeAddress: other.address }));
+    await assert.rejects(run(), /metadata mismatch/);
+    await assert.rejects(fs.stat(dir), { code: 'ENOENT' });
+    await writeFile(file, JSON.stringify(settings));
+    const damaged = fixture({ [cat(cid)]: () => new Response(Buffer.alloc(content.length)) });
+    await assert.rejects(runRetrievalCli(['verify', receiptCid, cid, file, '--export', dir], damaged), /CID\/content mismatch/);
+    await assert.rejects(fs.stat(dir), { code: 'ENOENT' });
+    await symlink(dirname(file), dir);
+    await assert.rejects(run(), { code: 'EEXIST' });
+    assert.deepEqual((await fs.readdir(dirname(file))).sort(), ['handoff', 'settings.json']);
+    await rm(dir);
+    const write = fs.writeFile;
+    t.mock.method(fs, 'writeFile', async (path, ...rest) => {
+        if (path.endsWith('content.bin')) throw new Error('disk full');
+        await write(path, ...rest);
+    });
+    await assert.rejects(run(), /disk full/);
+    await assert.rejects(fs.stat(dir), { code: 'ENOENT' });
+});
 
 test('CLI create uses the configured identity; verify reads both blocks without accessing keys or writing', async t => {
     const file = await configFile(t);
