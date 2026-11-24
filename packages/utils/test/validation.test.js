@@ -381,6 +381,21 @@ test('waitForRetryDelay resolves immediately for zero delay and rejects aborted 
     );
 });
 
+test('runWithRetry rejects overflowing timers before starting a request', async () => {
+    for (const field of ['timeoutMs', 'retryDelayMs']) {
+        await assert.rejects(runWithRetry({
+            maxRetries: 1,
+            timeoutMs: 1_000,
+            retryDelayMs: 0,
+            [field]: 2 ** 31,
+            abortErrorMessage: 'operation aborted',
+            shouldRetry: () => false,
+            normalizeError: (error) => error,
+            run: async () => assert.fail('request started'),
+        }), new RegExp(`${field} must not exceed 2147483647 ms`));
+    }
+});
+
 test('runWithRetry retries eligible failures and normalizes terminal errors', async () => {
     let attempts = 0;
     const result = await runWithRetry({

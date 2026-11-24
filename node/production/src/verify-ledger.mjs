@@ -2,7 +2,7 @@ import { open, link, unlink, mkdir, lstat } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { verifyLedgerSnapshot, readEvidenceJson, evidenceExitCode, evidenceInputFailure } from './ledger-evidence.mjs';
+import { checkSavedContent, verifyLedgerSnapshot, readEvidenceJson, evidenceExitCode, evidenceInputFailure } from './ledger-evidence.mjs';
 
 async function syncDirectory(path) {
     const directory = await open(path, 'r');
@@ -32,19 +32,27 @@ async function saveContent(directory, cid, content) {
     await syncDirectory(path);
 }
 
+async function run(args) {
+    if (args[0] === '--check-saved') {
+        if (args.length !== 2 && !(args.length === 3 && args[2])) throw new Error();
+        return checkSavedContent(args[1], args[2] ?? 'oya-history');
+    }
+    const saving = args[2] === '--save' && (args.length === 3 || (args.length === 4 && args[3] !== ''));
+    if (args.length !== 2 && !saving) throw new Error();
+    const [record, settings] = await Promise.all(args.slice(0, 2).map(readEvidenceJson));
+    const snapshot = await verifyLedgerSnapshot(record, settings, { returnContent: saving });
+    const report = snapshot.report;
+    if (saving && report.status === 'verified') {
+        try { await saveContent(args[3], report.cid, snapshot.content); }
+        catch { Object.assign(report, { status: 'unavailable', stage: 'save', reason: 'save_failed' }); }
+    }
+    return report;
+}
+
 export async function main(args = process.argv.slice(2)) {
     let report;
-    try {
-        const saving = args[2] === '--save' && (args.length === 3 || (args.length === 4 && args[3] !== ''));
-        if (args.length !== 2 && !saving) throw new Error();
-        const [record, settings] = await Promise.all(args.slice(0, 2).map(readEvidenceJson));
-        const snapshot = await verifyLedgerSnapshot(record, settings, { returnContent: saving });
-        report = snapshot.report;
-        if (saving && report.status === 'verified') {
-            try { await saveContent(args[3], report.cid, snapshot.content); }
-            catch { Object.assign(report, { status: 'unavailable', stage: 'save', reason: 'save_failed' }); }
-        }
-    } catch (error) { report = evidenceInputFailure(error); }
+    try { report = await run(args); }
+    catch (error) { report = evidenceInputFailure(error); }
     console.log(JSON.stringify(report, null, 2));
     process.exitCode = evidenceExitCode(report);
 }

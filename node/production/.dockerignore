@@ -8,6 +8,7 @@ src/**
 !src/batch-logging.mjs
 !src/batch-evidence.mjs
 !src/verify-batch.mjs
+!src/discover-ledger.mjs
 !src/bytecode.mjs
 !src/config.mjs
 !src/gas-policy.mjs
@@ -17,6 +18,8 @@ src/**
 !src/main.mjs
 !src/ledger-evidence.mjs
 !src/verify-ledger.mjs
+!src/attest-retrieval.mjs
+!src/retrieval-attestation.mjs
 !src/server.mjs
 !src/secrets.mjs
 !src/signer.mjs

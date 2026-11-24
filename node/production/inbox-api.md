@@ -38,6 +38,20 @@ Use `signJob` in `src/inbox/protocol.mjs` or the bundled client to avoid encodin
 
 Public results contain request ID, state, attempts, timestamps, and available CID/transaction hash/result/error. They exclude leases, tokens, raw transaction bytes, and message content. States are `queued`, `processing`, `published`, `logged`, `failed`, and `expired`. `processing` may include `execution_retry` or `awaiting_reconciliation`. The attempt counter counts claims, including crash recovery.
 
+## Find Ledger records to verify
+
+From the repository root, give the command the first and last block numbers (inclusive, in decimal) and your existing [verifier settings](#verify-ledger-evidence). For example:
+
+```sh
+node node/production/src/discover-ledger.mjs 1000 1099 evidence.json
+```
+
+For repeated discovery, set `OYA_LEDGER_EVIDENCE_SETTINGS` to the absolute path of your private verifier settings file. Then pass just the block range. A settings file on the command line always wins. Discovery does not search the working directory or load a node signing key.
+
+The command prints a JSON array in block and log order. Save one object from the array as `log.json` and run `node node/production/src/verify-ledger.mjs log.json evidence.json` to check its receipt and retrieve its content. Discovery reports candidate locations from your configured RPC. It does not contact IPFS. A matching log may contain unsupported content, and a chain reorganization may invalidate a candidate. An empty array means the RPC returned no matching logs for this query, not proof that history is complete.
+
+Use at most 1,024 mined blocks per query. If the provider refuses a range or the response exceeds the verifier’s 128 KiB limit, divide the range and retry. A failed query exits nonzero without printing partial results. If even a single block exceeds the limit this command cannot enumerate that block. Keep verifier settings private.
+
 ## Verify Ledger evidence
 
 When all three expectations `cid`, `nodeAddress` and `contentSha256` are supplied, `logIndex` may be omitted. The verifier then requires exactly one matching nonremoved Ledger event in the receipt and returns its block-global index. Missing or ambiguous matches fail closed. This is the selection mode used by the [finite chosen-node diagnostic](peers/send.md#finite-publication-diagnostic). The JavaScript API also accepts a third `{signal}` argument to cancel bounded reads.
@@ -79,6 +93,23 @@ node node/production/src/verify-ledger.mjs log.json evidence.json --save
 ```
 
 Run from a trusted working directory outside Git. `--save` creates a private `oya-history/` directory there and saves the content under its canonical IPFS CID, without an extension. Use `--save DIRECTORY` to select an existing private directory instead. The filesystem must support hard links. Only a `verified` observation saves content, without a second retrieval. The completed file has owner-only permissions and never replaces an existing entry. The command syncs the file before publishing and the parent directory after removing the temporary name. If directory sync fails, the destination may already exist but its persistence is unconfirmed. A local write, sync or cleanup failure reports `stage: save`, `reason: save_failed` (exit 3); inspect the directory before retrying. An interruption can leave a private `.ledger-save-*` temporary file; remove it once the command has stopped.
+
+### Recheck a saved file offline
+
+Use a raw CID from a record you already trust, not a name discovered by listing the archive. From the directory containing `oya-history/`, set `VERIFY_LEDGER` to the path of the checkout’s `node/production/src/verify-ledger.mjs` and run:
+
+```sh
+node "$VERIFY_LEDGER" --check-saved "$CID"
+```
+
+Append an existing directory to check `DIRECTORY/CID` instead of `oya-history/CID`. Choose a private path under your control. The check reads at most 131,073 bytes to enforce the 131,072-byte save limit. It never creates a file or contacts Kubo or the chain.
+
+| Exit | Meaning |
+| --- | --- |
+| 0 | `saved_match`: the local bytes match the trusted raw CID now. This does not prove past possession, chain inclusion or peer availability. |
+| 2 | `cid_content`: the bytes differ. Preserve the file and verify a fresh retrieval separately. `invalid_cid` instead means the supplied identifier is not canonical. |
+| 3 | `saved_unreadable`: missing, unreadable, oversized, symlink or nonregular entry. Check the directory and file before retrying. |
+| 4 | `content_integrity_unsupported`: a non-raw CID does not directly hash the saved bytes. No file was checked. |
 
 ### Correctness and availability levels
 

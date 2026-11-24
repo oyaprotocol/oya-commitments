@@ -140,8 +140,8 @@ async function waitForRetryDelay({ retryDelayMs, signal, abortErrorMessage, }) {
 }
 async function runWithRetry({ maxRetries, retryDelayMs, timeoutMs, signal, abortErrorMessage, shouldRetry, normalizeError, run, }) {
     const retryLimit = assertNonNegativeInteger(maxRetries, 'maxRetries');
-    const retryDelay = assertNonNegativeInteger(retryDelayMs, 'retryDelayMs');
-    const requestTimeoutMs = assertPositiveInteger(timeoutMs, 'timeoutMs');
+    const retryDelay = retryDelayMs === 0 ? 0 : assertTimerMs(retryDelayMs, 'retryDelayMs');
+    const requestTimeoutMs = assertTimerMs(timeoutMs, 'timeoutMs');
     const callerAbortErrorMessage = assertNonEmptyString(abortErrorMessage, 'abortErrorMessage');
     if (typeof shouldRetry !== 'function') {
         throw new Error('shouldRetry must be provided as a function.');

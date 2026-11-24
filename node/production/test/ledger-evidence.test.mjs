@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
-import { mkdtemp, writeFile, rm, readFile, readdir, stat, symlink } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, readFile, readdir, stat, symlink, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { Interface, getIcapAddress, id } from 'ethers';
 import { hashLedgerCid } from '@oyaprotocol/ethereum';
 import { verifyLedgerSnapshot, verifyLedgerEvidence, evidenceExitCode, readEvidenceJson } from '../src/ledger-evidence.mjs';
@@ -467,7 +467,7 @@ async function cli(recordPath, configPath, alias = false, args = [], cwd, preloa
     return new Promise((resolve, reject) => {
         const child = spawn(process.execPath, [...(preload ? ['--import', preload] : []),
             ...(alias ? [join(runtime, 'src/inbox/client.mjs'), 'evidence'] : [join(runtime, 'src/verify-ledger.mjs')]),
-            recordPath, configPath, ...args], { cwd,
+            recordPath, configPath, ...args], { cwd, timeout: 15000,
             env: { PATH: process.env.PATH, TMPDIR: process.env.TMPDIR, OYA_NODE_PRIVATE_KEY: 'must-not-read',
                 OYA_AGENT_PRIVATE_KEY: 'must-not-read', OYA_RPC_AUTHORIZATION: 'must-not-inherit' },
         });
@@ -627,6 +627,50 @@ test('bare --save creates cwd/oya-history and preserves a colliding CID file', a
     assert.equal(JSON.parse(second.stdout).reason, 'save_failed');
     assert.equal(await readFile(file, 'utf8'), 'keep existing');
     assert.deepEqual(await readdir(history), [report.cid]);
+});
+
+test('offline check compares only bounded regular files named by a trusted raw CID', async t => {
+    const cwd = await mkdtemp(join(tmpdir(), 'oya-saved-'));
+    t.after(() => rm(cwd, { recursive: true, force: true }));
+    const history = join(cwd, 'oya-history');
+    const offline = 'data:text/javascript,globalThis.fetch=()=>process.exit(99)';
+    async function check(input, args, code, reason) {
+        const result = await cli('--check-saved', input, false, args, cwd, offline);
+        assert.equal(result.code, code, result.stdout + result.stderr);
+        assert.equal(result.stderr, '');
+        const report = JSON.parse(result.stdout);
+        assert.equal(report.reason, reason);
+        assert.equal(report.stage, 'saved_content');
+        assert.ok(!result.stdout.includes(cwd));
+    }
+    await check(cid, [], 3, 'saved_unreadable');
+    assert.deepEqual(await readdir(cwd), []);
+    await mkdir(history);
+    for (const bytes of [content, Buffer.alloc(0), Buffer.alloc(131072, 255)]) {
+        const id = cidFor(bytes);
+        await writeFile(join(history, id), bytes);
+        await check(id, [], 0, 'saved_match');
+    }
+    const file = join(history, cid);
+    await writeFile(file, Buffer.from(content).fill(2, 0, 1));
+    await check(cid, [history], 2, 'cid_content');
+    await writeFile(file, Buffer.alloc(131073));
+    await check(cid, [], 3, 'saved_unreadable');
+    await rm(file);
+    await check(cid, [], 3, 'saved_unreadable');
+    await writeFile(join(cwd, cid), content);
+    await check(cid, [cwd], 0, 'saved_match');
+    await symlink(join(cwd, cid), file);
+    await check(cid, [], 3, 'saved_unreadable');
+    await rm(file);
+    execFileSync('mkfifo', [file]);
+    await check(cid, [], 3, 'saved_unreadable');
+    await symlink(cwd, join(cwd, 'alias'));
+    await check(cid, ['alias/'], 3, 'saved_unreadable');
+    await check(cidFor(content, 0x70), [], 4, 'content_integrity_unsupported');
+    for (const invalid of ['../' + cid, cid.toUpperCase(), cid + 'a']) {
+        await check(invalid, [], 2, 'invalid_cid');
+    }
 });
 
 test('generic verifier imports no job, effectful processor, worker, signer, or secret loader', async () => {
