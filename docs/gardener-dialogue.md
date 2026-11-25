@@ -58,6 +58,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q033](#q033) | Who pays for old messages? | publication fees, long-term storage | Answered |
 | [Q034](#q034) | Can a node decline a first publication? | publication, operator discretion | Answered |
 | [Q035](#q035) | Does a paywall make evidence private? | public evidence, dispute resolution | Answered |
+| [Q036](#q036) | Checking yesterday’s availability claim | data availability, independent verification | Answered |
 
 <a id="q001"></a>
 
@@ -1137,3 +1138,34 @@ Should an article that anyone can buy, but nobody can read for free, count as pu
 - **Source updated:** 2026-11-22T18:37:56Z
 
 Depends on the rules and specific use case for the commitment.
+
+<a id="q036"></a>
+
+<!-- oya-dialogue-question: Q036 -->
+
+## Q036 — Checking yesterday’s availability claim
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-22
+- **Topics:** data availability, independent verification
+- **Status:** Answered
+- **Source PR:** [#236](https://github.com/oyaprotocol/oya-commitments/pull/236)
+
+### Context
+
+In [the Q033 answer](https://github.com/oyaprotocol/oya-commitments/pull/232#issuecomment-7083724309), @pemulis described peers checking that newly published content is available. Someone joining later can try fetching the message today, but that tests a different moment.
+
+### Question
+
+What should a newcomer be able to verify for themselves about a peer’s claim that a message was available yesterday?
+
+### Answer
+
+#### @pemulis — 2026-11-22
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7085863273](https://github.com/oyaprotocol/oya-commitments/pull/236#issuecomment-7085863273)
+- **Source created:** 2026-11-22T21:11:53Z
+- **Source updated:** 2026-11-22T21:11:53Z
+
+They should be able to verify that the peer had access to the message content at the time of signing, or at least had a digest based on the message content. They will be able to verify that the signature came from the peer, and if they have access to the content itself, they will be able to verify that the digest is tied back to the original content. Also, these attestations will likely be logged, so they will be able to verify when the attestation was logged onchain in addition to the timestamp claimed by the peer in the digest (which should precede or match the block timestamp of the log).
