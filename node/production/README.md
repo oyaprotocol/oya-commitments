@@ -71,12 +71,20 @@ Verification retrieves both blocks, checks their hashes and the signed receipt a
 
 ### Verify a receipt from two files
 
-A reviewer with the original bytes can verify a transferred receipt without Kubo, settings, or a signing key. Save the raw receipt block itself (for example, `ipfs block get "$receipt_cid" >receipt.bin` on the exporting machine), not the JSON wrapper printed by `create`. Preserve both files byte for byte. Obtain the expected content CID and signer address independently.
-
-From `node/production` with dependencies installed, run:
+From the directory containing `settings.json`, use the `attest` helper above and an image that supports `verify --export`. Give the container a new, private output directory so it can write the verified blocks without mounting the rest of your working directory:
 
 ```sh
-node src/attest-retrieval.mjs verify-files receipt.bin content.bin "$cid" "$node_address"
+mkdir -m 700 receipt-export &&
+  attest --mount "type=bind,src=$PWD/receipt-export,dst=/export" \
+    --entrypoint node "$image" src/attest-retrieval.mjs verify "$receipt_cid" "$cid" /settings.json --export /export/handoff
+```
+
+Transfer `receipt-export/handoff/blocks/receipt.json` and `receipt-export/handoff/blocks/content.bin` byte for byte. The receipt file is the raw signed block, not the JSON wrapper printed on stdout. Existing destinations are refused. If the process stops before `blocks/` appears, discard the incomplete destination and retry with a new name.
+
+The recipient needs only the two files and an independently obtained content CID and signer address. From `node/production`, set `blocks` to the received directory and run:
+
+```sh
+node src/attest-retrieval.mjs verify-files "$blocks/receipt.json" "$blocks/content.bin" "$cid" "$node_address"
 ```
 
 Success prints the computed receipt CID and verified receipt. Compare that CID with any particular receipt identifier you were given. Failure exits 1 without a receipt. Inputs must be regular files, not symlinks, in directories you trust. The receipt limit is 1,024 bytes and the content limit is 1 MiB.

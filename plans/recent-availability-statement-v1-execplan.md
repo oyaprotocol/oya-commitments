@@ -13,6 +13,8 @@ An operator can sign for a single successful read and give a reviewer a receipt 
 
 - [x] 2026-11-22: Added `offline-retrieval-receipt-v1` and exercised the file-only CLI against the existing signing vector.
 
+- [x] 2026-11-24 23:36Z: Integrated export with #239 and tested the exported files using the two-file CLI.
+
 ## Surprises & Discoveries
 
 The pinned Node base and production dependencies were cached locally, but a build with `--network=none` missed the npm layer and failed with `EAI_AGAIN`. The build below reused the existing layer without running npm. The CLI containers themselves shared only the offline Kubo container’s loopback network.
@@ -23,9 +25,13 @@ The pinned Node base and production dependencies were cached locally, but a buil
 
 2026-11-22, implementation review: use a signed raw IPFS block rather than unsigned text tied to a Ledger event. The recipient can check both the exact bytes and who signed without a chain lookup. Pin the receipt separately so creating it does not change the source block’s retention policy.
 
+2026-11-24, Gardener: Export the two buffers already checked by `verifyStoredRetrieval`, rather than fetching again or reserializing JSON. The recipient can use #239 with independent expectations (Q031, Q032).
+
 ## Outcomes & Retrospective
 
 The packaged commands returned identical JSON for creation and keyless verification. Changing the expected content made verification fail even though both requested reads were available. A cached read qualifies; a receipt is not evidence that a remote peer served the bytes.
+
+The export round trip passed on Node 24.22.3: two fixture Kubo reads, byte-identical files, and the same receipt CID and metadata from a fresh `verify-files` process. Wrong identity or corrupt content produced no directory. An existing destination or symlink was refused, and a simulated second-file write failure removed staging.
 
 ## Context and Orientation
 
@@ -92,7 +98,7 @@ Each smoke run starts an empty repository and a new identity; expect a different
 
 ## Artifacts and Notes
 
-The final full production suite passed 686 tests with a private scratch temporary directory.
+The original signing milestone passed 686 production tests with a private scratch temporary directory.
 
 On 2026-11-22 the packaged retrieval and peer-local suites passed 22/22. The 21-byte test block was `bafkreifgalwpj54m4yyn5wvpk7pksqudsrdlmcgggxn7q5kgskseoazqcm`. The receipt completed at `2026-11-22T21:40:28.731Z`; Kubo listed `bafkreiaqyhzcl3pidlmc5wewhw6q4z62gragl37zaeo7wmadjcszrw4tam recursive`. The wrong-content run exited 1 with zero stdout bytes.
 
@@ -104,8 +110,12 @@ On 2026-11-22 the packaged retrieval and peer-local suites passed 22/22. The 21-
 
 A later reviewer can have both blocks but no running IPFS service. PR #226 supplied the byte verifier, while its CLI required Kubo even for local evidence. The `verify-files` mode reads two bounded regular files, then calls the same verifier with the independently expected signer and CID. It returns the CID calculated from the exact receipt block. A signature authenticates a claim, not its reported time. See the [operator command](../node/production/README.md#verify-a-receipt-from-two-files).
 
-From `node/production` run `node --test test/retrieval-attestation.test.mjs`, then `node --test test/*.test.mjs` with Node 24 and installed dependencies. The focused suite passed 15 tests and the full suite passed 688. The file-mode tests reject changed bytes, a different signer, noncanonical JSON, oversized inputs and nonregular files. Rechecking does not change either file.
+`verify RECEIPT_CID CID SETTINGS --export NEW_DIR` reserves a new private directory after verification and renames its staging directory to `blocks/` once both files are complete. After a hard interruption, discard an incomplete destination and retry with a new name.
+
+From `node/production` run `node --test test/retrieval-attestation.test.mjs`, then `node --test test/*.test.mjs` with Node 24 and installed dependencies. After integrating export with `f8788ad`, 17 focused and 695 production tests passed. For the full run, use a private temporary directory outside the tested source tree and install dependencies inside the tree: release fixtures reject in-tree output and evidence read guards reject external dependency paths. The file-mode tests reject changed bytes, a different signer, noncanonical JSON, oversized inputs and nonregular files. Rechecking does not change either file.
 
 ## Next feature — candidate when capacity permits
 
-`retrieval-receipt-export-v1`: let a peer transfer the two verified raw blocks without manually selecting blocks from Kubo. Extend the existing keyless retrieval CLI to export exact bytes into a new private directory. Reuse bounded reads and the existing verifier. Verify an export with `verify-files` while disconnected. Test refusal to overwrite, interrupted writes and wrong identities before publishing any output. Estimate 100–250 changed implementation and test lines. Depends on the verifier and a source Kubo endpoint. Block-range discovery remains independently under review in #228.
+`retrieval-cli-from-any-directory-v1`: a reviewer in #239 asked to run scripts without changing to a particular directory. The previous Ledger discovery candidate shipped in #228. Start with one task: from a directory containing evidence or settings, invoke the installed receipt verifier by name and resolve all input and export paths against that directory.
+
+Inventory the existing operator launcher and release packaging first. If an installed command already forwards these arguments, test and document it rather than adding a second launcher. Otherwise add one thin dispatch entry to the existing distribution, forwarding argv, stdout, stderr and exit status to the production CLI. Keep signing, verification and path interpretation in the existing modules. Test from an unrelated working directory whose path contains spaces, including relative arguments, usage errors and an unavailable input. Exercise the packaged command with a fixture, without installing a service. Depends on the shipped `verify-files` CLI and a supported local distribution. Estimate 40–120 changed code/test lines; defer if it would require a new distribution just for this command.
