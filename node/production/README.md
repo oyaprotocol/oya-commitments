@@ -89,6 +89,16 @@ node src/attest-retrieval.mjs verify-files "$blocks/receipt.json" "$blocks/conte
 
 Success prints the computed receipt CID and verified receipt. Compare that CID with any particular receipt identifier you were given. Failure exits 1 without a receipt. Inputs must be regular files, not symlinks, in directories you trust. The receipt limit is 1,024 bytes and the content limit is 1 MiB.
 
+### Check when a signed receipt was logged
+
+If a Ledger event contains the **receipt CID**, a reviewer can compare the signed completion time with the block time. From `node/production`, use a [Ledger record and verifier settings](inbox-api.md), a local copy of the original content, and an independently expected content CID and signer:
+
+```sh
+node src/attest-retrieval.mjs verify-logged record.json settings.json "$blocks/content.bin" "$cid" "$node_address"
+```
+
+The command reads the signed receipt from IPFS and checks its exact bytes against the event. Success prints the signed receipt, the Ledger caller (who may differ from the signer), and the block number, hash and timestamp reported by the configured RPC. A claimed time later than the block timestamp fails, even by one millisecond. This dates the log, not the retrieval: a signer can backdate a claim or sign a digest supplied by someone else. Recheck after a reorganization.
+
 ## Deployed Sepolia Ledger
 
 New node configurations default to verifying incoming signed messages against the client allowlist, publishing their signed envelopes to IPFS, then logging the resulting CIDs to this existing Ledger.

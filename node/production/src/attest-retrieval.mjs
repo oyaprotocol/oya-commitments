@@ -4,11 +4,11 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Wallet } from 'ethers';
 import { installationNodeKey } from './peers/local.mjs';
-import { readEvidenceJson } from './ledger-evidence.mjs';
+import { readEvidenceJson, verifyLedgerSnapshot } from './ledger-evidence.mjs';
 import { attestRetrieval, MAX_CONTENT_BYTES, MAX_RECEIPT_BYTES, receiptBlockCid,
     verifyRetrievalAttestation, verifyStoredRetrieval } from './retrieval-attestation.mjs';
 
-const usage = 'Usage: attest-retrieval.mjs create CID SETTINGS | verify RECEIPT_CID CID SETTINGS [--export NEW_DIR] | verify-files RECEIPT_FILE CONTENT_FILE CID NODE_ADDRESS';
+const usage = 'Usage: attest-retrieval.mjs create CID SETTINGS | verify RECEIPT_CID CID SETTINGS [--export NEW_DIR] | verify-files RECEIPT_FILE CONTENT_FILE CID NODE_ADDRESS | verify-logged RECORD SETTINGS CONTENT_FILE CID NODE_ADDRESS';
 
 async function exportBlocks(dir, receiptBytes, content) {
     await fs.mkdir(dir, { mode: 0o700 }); // Exclusive reservation: never replace an existing path.
@@ -45,6 +45,22 @@ async function readRegularFile(path, limit) {
 
 export async function runRetrievalCli(args, { env = process.env, fetchImpl = fetch, now = Date.now } = {}) {
     const [mode] = args;
+    if (mode === 'verify-logged') {
+        if (args.length !== 6) throw new Error(usage);
+        const [, recordFile, settingsFile, contentPath, cid, nodeAddress] = args;
+        const snapshot = await verifyLedgerSnapshot(await readEvidenceJson(recordFile),
+            await readEvidenceJson(settingsFile), { returnContent: true });
+        const { report, content: receiptBytes } = snapshot;
+        if (report.status !== 'verified' || report.checks.cidBinding !== 'verified') throw new Error('Unverified log.');
+        const content = await readRegularFile(contentPath, MAX_CONTENT_BYTES);
+        const receipt = verifyRetrievalAttestation(receiptBytes, content, { cid, nodeAddress });
+        if (BigInt(Date.parse(receipt.completedAt)) > BigInt(report.block.timestamp) * 1000n) {
+            throw new Error('Claimed time is after block time.');
+        }
+        return { receiptCid: report.cid, receipt, ledger: { chainId: report.expected.chainId,
+            contract: report.expected.ledgerContract, transactionHash: report.transactionHash,
+            logIndex: report.logIndex, caller: report.nodeAddress, block: report.block } };
+    }
     if (mode === 'verify-files') {
         if (args.length !== 5) throw new Error(usage);
         const [, receiptPath, contentPath, cid, nodeAddress] = args;

@@ -7,7 +7,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync, spawn } from 'node:child_process';
-import { Interface, getIcapAddress, id } from 'ethers';
+import { runRetrievalCli } from '../src/attest-retrieval.mjs';
+import { Wallet, Interface, getIcapAddress, id } from 'ethers';
 import { hashLedgerCid } from '@oyaprotocol/ethereum';
 import { verifyLedgerSnapshot, verifyLedgerEvidence, evidenceExitCode, readEvidenceJson } from '../src/ledger-evidence.mjs';
 
@@ -101,6 +102,39 @@ test('source-independent binary log verifies without any job, inbox, signature o
     assert.equal(f.state.requests.length, 4);
     assert.deepEqual(f.state.requests[0].body.params, []);
     readOnly(f.state);
+});
+
+test('logged receipt ties the signer and local bytes to the canonical receipt block time', async t => {
+    const f = await setup(t);
+    const signer = Wallet.createRandom();
+    const dir = await mkdtemp(join(tmpdir(), 'logged-receipt-'));
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    const paths = ['record', 'settings', 'source'].map(name => join(dir, name));
+    await Promise.all([JSON.stringify(f.record), JSON.stringify(f.config), content].map((v, i) => writeFile(paths[i], v)));
+    const run = (address = signer.address) => runRetrievalCli(['verify-logged', ...paths, cid, address]);
+    async function logAt(ms) {
+        const fields = { kind: 'oya.retrieval-attestation', version: 1, cid, nodeAddress: signer.address.toLowerCase(),
+            completedAt: new Date(ms).toISOString(), byteLength: content.length };
+        const digest = createHash('sha256').update(JSON.stringify(fields)).update(Buffer.from([0])).update(content).digest();
+        setContent(f, Buffer.from(JSON.stringify({ ...fields, signature: await signer.signMessage(digest) })));
+    }
+    await logAt(291000);
+    const result = await run();
+    assert.equal(result.receiptCid, f.state.cid);
+    assert.equal(result.receipt.nodeAddress, signer.address.toLowerCase());
+    assert.equal(result.ledger.caller, node);
+    assert.deepEqual(result.ledger.block, { number: '2', hash: blockHash, timestamp: '291' });
+    readOnly(f.state);
+    await assert.rejects(run(other));
+    await writeFile(paths[2], 'changed');
+    await assert.rejects(run());
+    await writeFile(paths[2], content);
+    await logAt(291001);
+    await assert.rejects(run(), /after block time/);
+    await logAt(290999);
+    assert.equal((await run()).receiptCid, f.state.cid);
+    f.state.block.hash = txHash;
+    await assert.rejects(run(), /Unverified log/);
 });
 
 test('snapshots return content only when requested and verified', async t => {

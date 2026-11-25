@@ -15,6 +15,8 @@ An operator can sign for a single successful read and give a reviewer a receipt 
 
 - [x] 2026-11-24 23:36Z: Integrated export with #239 and tested the exported files using the two-file CLI.
 
+- [x] 2026-11-25: Added keyless verification of an already logged receipt and tested the block-time boundary.
+
 ## Surprises & Discoveries
 
 The pinned Node base and production dependencies were cached locally, but a build with `--network=none` missed the npm layer and failed with `EAI_AGAIN`. The build below reused the existing layer without running npm. The CLI containers themselves shared only the offline Kubo container’s loopback network.
@@ -114,8 +116,12 @@ A later reviewer can have both blocks but no running IPFS service. PR #226 suppl
 
 From `node/production` run `node --test test/retrieval-attestation.test.mjs`, then `node --test test/*.test.mjs` with Node 24 and installed dependencies. After integrating export with `f8788ad`, 17 focused and 695 production tests passed. For the full run, use a private temporary directory outside the tested source tree and install dependencies inside the tree: release fixtures reject in-tree output and evidence read guards reject external dependency paths. The file-mode tests reject changed bytes, a different signer, noncanonical JSON, oversized inputs and nonregular files. Rechecking does not change either file.
 
+## Logged receipt verification
+
+2026-11-25, Gardener: Q036 asks what a newcomer can check about yesterday's claim. When a receipt CID has already been logged, use `verifyLedgerSnapshot` to obtain the checked receipt bytes and canonical block from the configured RPC. Use the existing receipt verifier with the reviewer's local source bytes, expected content CID and signer. Keep the signer separate from the event caller. The signed time must precede or equal the block time. This comparison establishes consistency, not an independent clock for the retrieval.
+
+From `node/production`, run `node --test test/ledger-evidence.test.mjs test/retrieval-attestation.test.mjs`. The loopback test accepts a different Ledger caller and a matching timestamp. It rejects a later claim, changed bytes, a wrong signer and a replaced block. The [operator guide](../node/production/README.md#check-when-a-signed-receipt-was-logged) gives the command. Retry with the same inputs after an endpoint outage. Nothing is submitted.
+
 ## Next feature — candidate when capacity permits
 
-`retrieval-cli-from-any-directory-v1`: a reviewer in #239 asked to run scripts without changing to a particular directory. The previous Ledger discovery candidate shipped in #228. Start with one task: from a directory containing evidence or settings, invoke the installed receipt verifier by name and resolve all input and export paths against that directory.
-
-Inventory the existing operator launcher and release packaging first. If an installed command already forwards these arguments, test and document it rather than adding a second launcher. Otherwise add one thin dispatch entry to the existing distribution, forwarding argv, stdout, stderr and exit status to the production CLI. Keep signing, verification and path interpretation in the existing modules. Test from an unrelated working directory whose path contains spaces, including relative arguments, usage errors and an unavailable input. Exercise the packaged command with a fixture, without installing a service. Depends on the shipped `verify-files` CLI and a supported local distribution. Estimate 40–120 changed code/test lines; defer if it would require a new distribution just for this command.
+`bounded-operator-selected-range-retention`: combine the existing range discovery and verified save paths for operators catching up on published content. Test a bounded local range containing an unavailable block, retry, and confirm that a verified file is never overwritten. Recheck event positions after a reorganization. Keep selection explicit: the Ledger event does not show a fee payment. Estimate under 350 changed code and test lines in production discovery, verification and loopback tests.
