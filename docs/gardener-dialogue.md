@@ -58,6 +58,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q033](#q033) | Who pays for old messages? | publication fees, long-term storage | Answered |
 | [Q034](#q034) | Can a node decline a first publication? | publication, operator discretion | Answered |
 | [Q035](#q035) | Does a paywall make evidence private? | public evidence, dispute resolution | Answered |
+| [Q040](#q040) | A node that is missing from the directory | peer discovery, network membership | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -1137,3 +1138,27 @@ Should an article that anyone can buy, but nobody can read for free, count as pu
 - **Source updated:** 2026-11-22T18:37:56Z
 
 Depends on the rules and specific use case for the commitment.
+
+<a id="q040"></a>
+
+<!-- oya-dialogue-question: Q040 -->
+
+## Q040 — A node that is missing from the directory
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-24
+- **Topics:** peer discovery, network membership
+- **Status:** Awaiting answer
+- **Source PR:** Pending publication.
+
+### Context
+
+Imagine an operator receives a correctly signed message from an address they cannot find in the node directory. The signature identifies the sender, but the lookup tells the operator nothing about that address.
+
+### Question
+
+What, if anything, should a peer do differently with a message because its sender is absent from the node directory?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
