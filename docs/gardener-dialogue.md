@@ -1181,7 +1181,7 @@ They should be able to verify that the peer had access to the message content at
 - **Asked on:** 2026-11-24
 - **Topics:** node retirement, publication duties
 - **Status:** Awaiting answer
-- **Source PR:** Pending publication.
+- **Source PR:** [#247](https://github.com/oyaprotocol/oya-commitments/pull/247)
 
 ### Context
 
