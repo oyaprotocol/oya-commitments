@@ -58,7 +58,8 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q033](#q033) | Who pays for old messages? | publication fees, long-term storage | Answered |
 | [Q034](#q034) | Can a node decline a first publication? | publication, operator discretion | Answered |
 | [Q035](#q035) | Does a paywall make evidence private? | public evidence, dispute resolution | Answered |
-| [Q040](#q040) | A node that is missing from the directory | peer discovery, network membership | Awaiting answer |
+| [Q036](#q036) | Checking yesterday’s availability claim | data availability, independent verification | Answered |
+| [Q040](#q040) | A node that is missing from the directory | peer discovery, network membership | Answered |
 
 <a id="q001"></a>
 
@@ -1139,6 +1140,37 @@ Should an article that anyone can buy, but nobody can read for free, count as pu
 
 Depends on the rules and specific use case for the commitment.
 
+<a id="q036"></a>
+
+<!-- oya-dialogue-question: Q036 -->
+
+## Q036 — Checking yesterday’s availability claim
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-22
+- **Topics:** data availability, independent verification
+- **Status:** Answered
+- **Source PR:** [#236](https://github.com/oyaprotocol/oya-commitments/pull/236)
+
+### Context
+
+In [the Q033 answer](https://github.com/oyaprotocol/oya-commitments/pull/232#issuecomment-7083724309), @pemulis described peers checking that newly published content is available. Someone joining later can try fetching the message today, but that tests a different moment.
+
+### Question
+
+What should a newcomer be able to verify for themselves about a peer’s claim that a message was available yesterday?
+
+### Answer
+
+#### @pemulis — 2026-11-22
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7085863273](https://github.com/oyaprotocol/oya-commitments/pull/236#issuecomment-7085863273)
+- **Source created:** 2026-11-22T21:11:53Z
+- **Source updated:** 2026-11-22T21:11:53Z
+
+They should be able to verify that the peer had access to the message content at the time of signing, or at least had a digest based on the message content. They will be able to verify that the signature came from the peer, and if they have access to the content itself, they will be able to verify that the digest is tied back to the original content. Also, these attestations will likely be logged, so they will be able to verify when the attestation was logged onchain in addition to the timestamp claimed by the peer in the digest (which should precede or match the block timestamp of the log).
+
 <a id="q040"></a>
 
 <!-- oya-dialogue-question: Q040 -->
@@ -1148,7 +1180,7 @@ Depends on the rules and specific use case for the commitment.
 - **Asked by:** Oya Gardener (`@oyagardener`)
 - **Asked on:** 2026-11-24
 - **Topics:** peer discovery, network membership
-- **Status:** Awaiting answer
+- **Status:** Answered
 - **Source PR:** [#243](https://github.com/oyaprotocol/oya-commitments/pull/243)
 
 ### Context
@@ -1161,4 +1193,11 @@ What, if anything, should a peer do differently with a message because its sende
 
 ### Answer
 
-Pending an answer from `@pemulis` or `@nesseps`.
+#### @pemulis — 2026-11-25
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7149383475](https://github.com/oyaprotocol/oya-commitments/pull/243#issuecomment-7149383475)
+- **Source created:** 2026-11-25T01:16:39Z
+- **Source updated:** 2026-11-25T01:16:39Z
+
+It will be a pretty normal occurrence for a message to come from a sender that is not a registered node; regular users and agents that are using the protocol but not running nodes, for instance. The main consideration is whether the node wants to accept messages from them or not, which is a complicated question and will depend on the node's use case or business model.
