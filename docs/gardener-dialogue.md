@@ -59,6 +59,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q034](#q034) | Can a node decline a first publication? | publication, operator discretion | Answered |
 | [Q035](#q035) | Does a paywall make evidence private? | public evidence, dispute resolution | Answered |
 | [Q036](#q036) | Checking yesterday’s availability claim | data availability, independent verification | Answered |
+| [Q043](#q043) | When can a node retire? | node retirement, publication duties | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -1169,3 +1170,27 @@ What should a newcomer be able to verify for themselves about a peer’s claim t
 - **Source updated:** 2026-11-22T21:11:53Z
 
 They should be able to verify that the peer had access to the message content at the time of signing, or at least had a digest based on the message content. They will be able to verify that the signature came from the peer, and if they have access to the content itself, they will be able to verify that the digest is tied back to the original content. Also, these attestations will likely be logged, so they will be able to verify when the attestation was logged onchain in addition to the timestamp claimed by the peer in the digest (which should precede or match the block timestamp of the log).
+
+<a id="q043"></a>
+
+<!-- oya-dialogue-question: Q043 -->
+
+## Q043 — When can a node retire?
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-24
+- **Topics:** node retirement, publication duties
+- **Status:** Awaiting answer
+- **Source PR:** Pending publication.
+
+### Context
+
+In [Q033](#q033), @pemulis distinguished the publisher’s duty to serve new content for a time from the network’s job of keeping the history. Consider a node operator who wants to shut down after publishing one last message.
+
+### Question
+
+What would count as a clean exit for that operator while other nodes may still be relying on them for the message?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
