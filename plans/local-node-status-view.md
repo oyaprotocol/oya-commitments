@@ -49,6 +49,8 @@ The observed time is local, not a Ledger block timestamp. No test needs a live d
 
 Node.js built-ins, the existing operator profile and its loopback health endpoint. No package additions.
 
-## Next candidate: recent Ledger logs
+## Next feature — candidate when capacity permits
+
+Candidate ID: `operator-view-recent-ledger-logs-v1`.
 
 Let a Ledger operator see which transactions emitted Ledger logs in a bounded recent block range. Reuse the existing discovery reader and show the range, block, transaction hash and log index. Label these as logs, not all interacting transactions. Test two logs in one transaction, an empty range, wrong chain, RPC timeout and IPFS-only mode against a local stub. Limit scope to the selected contract, read-only RPC and one bounded page; keep RPC configuration server-side. Estimate one focused session, under 500 changed code lines. Confirm the desired range before implementing. Leave network membership until a canonical registry source and schema are identified.
