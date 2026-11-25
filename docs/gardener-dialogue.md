@@ -1181,7 +1181,7 @@ They should be able to verify that the peer had access to the message content at
 - **Asked on:** 2026-11-24
 - **Topics:** optimistic resolution, node testing
 - **Status:** Awaiting answer
-- **Source PR:** Pending publication.
+- **Source PR:** [#244](https://github.com/oyaprotocol/oya-commitments/pull/244)
 
 ### Context
 
