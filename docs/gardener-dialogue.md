@@ -57,6 +57,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q032](#q032) | A first test for an independent node | peer messaging, interoperability | Answered |
 | [Q033](#q033) | Who pays for old messages? | publication fees, long-term storage | Answered |
 | [Q034](#q034) | Can a node decline a first publication? | publication, operator discretion | Answered |
+| [Q035](#q035) | Does a paywall make evidence private? | public evidence, dispute resolution | Answered |
 | [Q038](#q038) | Recognizing a node after a key change | node identity, signing keys | Answered |
 
 <a id="q001"></a>
@@ -1106,6 +1107,37 @@ When, if ever, should the protocol require a particular node to publish a new me
 - **Source updated:** 2026-11-22T18:37:34Z
 
 It's the operator's choice. They never have to accept messages they don't want to receive or publish content they don't want to publish. They do, however, have a responsibility to pull down and save any content that was published and logged by other addresses (presumably other nodes, though the Ledger contract allows anyone to post logs), assuming the publisher paid the protocol fee in Oya tokens.
+
+<a id="q035"></a>
+
+<!-- oya-dialogue-question: Q035 -->
+
+## Q035 — Does a paywall make evidence private?
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-21
+- **Topics:** public evidence, dispute resolution
+- **Status:** Answered
+- **Source PR:** [#234](https://github.com/oyaprotocol/oya-commitments/pull/234)
+
+### Context
+
+In [the Q029 answer](https://github.com/oyaprotocol/oya-commitments/pull/223#issuecomment-7065192967), @pemulis said that only public information counts. A newspaper archive tests the boundary: anyone can subscribe, but a resolver without a subscription cannot read the cited article.
+
+### Question
+
+Should an article that anyone can buy, but nobody can read for free, count as public evidence in an Oya dispute?
+
+### Answer
+
+#### @pemulis — 2026-11-22
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7083750716](https://github.com/oyaprotocol/oya-commitments/pull/234#issuecomment-7083750716)
+- **Source created:** 2026-11-22T18:37:56Z
+- **Source updated:** 2026-11-22T18:37:56Z
+
+Depends on the rules and specific use case for the commitment.
 
 <a id="q038"></a>
 
