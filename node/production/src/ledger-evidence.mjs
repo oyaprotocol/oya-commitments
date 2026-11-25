@@ -262,6 +262,7 @@ export async function verifyLedgerSnapshot(identity, input, { signal, returnCont
         report.block.timestamp = quantity(block.timestamp).toString();
         report.checks.ledger = 'verified';
         if (shouldFetchContent && !await shouldFetchContent(report.cid, receipt.blockNumber)) {
+            if (controller.signal.aborted) unavailable('deadline');
             Object.assign(report, { status: 'partial', reason: 'content_not_requested' });
             return { report };
         }

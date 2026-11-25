@@ -413,6 +413,22 @@ test('unreachable endpoint and HTTP 404 content are unavailable', async t => {
     assert.equal(report.checks.availability, 'unavailable');
 });
 
+test('cancellation during a local content check takes precedence over its result', async t => {
+    const f = await setup(t);
+    const controller = new AbortController();
+    const { report } = await verifyLedgerSnapshot(f.record, f.config, {
+        signal: controller.signal,
+        async shouldFetchContent() {
+            await Promise.resolve();
+            controller.abort();
+            return false;
+        },
+    });
+    assert.equal(report.reason, 'deadline');
+    assert.equal(report.status, 'unavailable');
+    assert.ok(f.state.requests.every(request => request.url === '/rpc'));
+});
+
 test('overall deadline bounds multiple reads', async t => {
     const f = await setup(t);
     f.config.timeoutMs = 80;

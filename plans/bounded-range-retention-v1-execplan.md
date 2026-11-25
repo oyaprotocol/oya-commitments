@@ -13,6 +13,8 @@ Operator action: choose two mined block numbers, a verifier settings file, and a
 
 - [x] 2026-11-25 04:36Z: Resolved the #245 test overlap and repeated focused (77/77) and production (696/696) validation on Node 26.12.1, with no skips.
 
+- [x] 2026-11-25 04:44Z: Reproduced cancellation during the local content check. The verifier now reports `deadline` and retention preserves that result instead of reporting `already_saved`. All 697 production tests passed with the private temporary directory described below.
+
 ## Surprises & Discoveries
 
 The first overlap check against #245 conflicted only in the imports of `node/production/test/ledger-evidence.test.mjs`. The range test needs the existing child-process fixture, not a separate `execFile` import.

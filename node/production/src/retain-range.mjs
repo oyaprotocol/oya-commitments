@@ -20,7 +20,7 @@ async function retain(record, settings, directory, from, to) {
             return local === undefined;
         },
     });
-    if (local) return local;
+    if (report.reason === 'content_not_requested') return local;
     if (report.status !== 'verified') return report.reason;
     try { await saveContent(directory, report.cid, content); }
     catch { return 'save_failed'; }
