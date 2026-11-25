@@ -11,7 +11,11 @@ Operator action: choose two mined block numbers, a verifier settings file, and a
 - [x] 2026-11-25 03:33Z: Checked the pinned base, related branches, existing discovery, single-record save and offline check. Recorded operator action before implementation.
 - [x] 2026-11-25 03:37Z: Implemented retention and exercised partial success, retry, conflicting bytes and bounded rejection. On Node 26.12.1, 77/77 focused and 696/696 production tests passed, with no skips.
 
+- [x] 2026-11-25 04:36Z: Resolved the #245 test overlap and repeated focused (77/77) and production (696/696) validation on Node 26.12.1, with no skips.
+
 ## Surprises & Discoveries
+
+The first overlap check against #245 conflicted only in the imports of `node/production/test/ledger-evidence.test.mjs`. The range test needs the existing child-process fixture, not a separate `execFile` import.
 
 A candidate from discovery contains no CID. A retry must authenticate the receipt and its block again before trusting a saved file.
 
@@ -19,9 +23,11 @@ A candidate from discovery contains no CID. A retry must authenticate the receip
 
 - 2026-11-25 / Hermes: Use an explicit rerun, not a queue or progress file. A fresh scan and local digest check tolerate interruption and avoid trusting stale names after a chain reorganization.
 
+- 2026-11-25 / Hermes: Share the existing bounded subprocess runner between the verifier and range tests. Keep verifier-specific arguments in `cli` and keep the loopback fixture in one file.
+
 ## Outcomes & Retrospective
 
-The loopback CLI recovered a missing file without another content request for its neighbor. Reusing the single-record fixture avoided duplicating the Ethereum receipt and binary CID setup. Next candidate only: support individual selection in an unusually dense block that exceeds the per-run record limit. Reassess need against single-record verification before starting.
+The loopback CLI recovered a missing file without another content request for its neighbor. Reusing the single-record fixture avoided duplicating the Ethereum receipt and binary CID setup. The shared runner now gives both commands the same timeout and restricted test environment.
 
 ## Context and Orientation
 
@@ -37,6 +43,8 @@ From the repository root run `npm --prefix node/production ci --ignore-scripts -
 
 ## Validation and Acceptance
 
+Check compatibility from the repository root with `git merge-tree --write-tree HEAD 1132e8671ab0e40226abcb822d3bbe290bc95447`. A clean merge prints only the tree ID and exits zero. On macOS the first full run passed 695/696: the gas-policy symlink test denied access to a system temporary-directory alias. Rerunning with `TMPDIR` set to an existing private, non-symlinked directory passed 696/696.
+
 A mixed run must save good bytes and report the missing position. An explicit retry must fill the gap without downloading the first copy again. Wrong bytes, out-of-range receipts and conflicting local entries must never become successful writes. A dense range must fail before partial processing.
 
 ## Idempotence and Recovery
@@ -50,3 +58,7 @@ Use `node node/production/src/retain-range.mjs FROM TO SETTINGS DIRECTORY` from 
 ## Interfaces and Dependencies
 
 Reuse production Node dependencies and operator-selected RPC and Kubo (IPFS content service) settings. No signing identity is needed. Validation uses only synthetic loopback fixtures and temporary files.
+
+## Next feature candidate
+
+An operator catching up on a block with more than 32 candidate logs could retain a selected subset without preparing a separate verifier input for each log. First exercise discovery and `verify-ledger.mjs --save` on a loopback block with 33 small logs. If the existing workflow suffices, document it instead of adding a command option. Otherwise, prototype selection by explicit transaction hash and log index. Accept it only if two selected records can be retained and retried, no unselected content is fetched, and a position that moved out of the chosen block is rejected. Keep the 32-record processing cap and the discovery response-size limit.

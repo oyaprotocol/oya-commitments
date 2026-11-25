@@ -6,8 +6,7 @@ import { mkdtemp, writeFile, rm, readFile, readdir, stat, symlink, mkdir } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
-import { execFile, execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { Interface, getIcapAddress, id } from 'ethers';
 import { hashLedgerCid } from '@oyaprotocol/ethereum';
 import { verifyLedgerSnapshot, verifyLedgerEvidence, evidenceExitCode, readEvidenceJson } from '../src/ledger-evidence.mjs';
@@ -465,10 +464,13 @@ test('strict settings reject unsafe endpoints, credentials, old inbox settings a
 });
 
 async function cli(recordPath, configPath, alias = false, args = [], cwd, preload = !args.length && join(runtime, 'test/evidence-read-guard.mjs')) {
+    return runNode([...(preload ? ['--import', preload] : []),
+        ...(alias ? [join(runtime, 'src/inbox/client.mjs'), 'evidence'] : [join(runtime, 'src/verify-ledger.mjs')]),
+        recordPath, configPath, ...args], cwd);
+}
+function runNode(args, cwd) {
     return new Promise((resolve, reject) => {
-        const child = spawn(process.execPath, [...(preload ? ['--import', preload] : []),
-            ...(alias ? [join(runtime, 'src/inbox/client.mjs'), 'evidence'] : [join(runtime, 'src/verify-ledger.mjs')]),
-            recordPath, configPath, ...args], { cwd, timeout: 15000,
+        const child = spawn(process.execPath, args, { cwd, timeout: 15000,
             env: { PATH: process.env.PATH, TMPDIR: process.env.TMPDIR, OYA_NODE_PRIVATE_KEY: 'must-not-read',
                 OYA_AGENT_PRIVATE_KEY: 'must-not-read', OYA_RPC_AUTHORIZATION: 'must-not-inherit' },
         });
@@ -706,10 +708,8 @@ test('range retention retries only missing content and preserves conflicting ent
     };
     async function run(from = '2', to = '2', code = 0, dir = directory) {
         const args = [join(runtime, 'src/retain-range.mjs'), from, to, settings, dir];
-        let result;
-        try { result = await promisify(execFile)(process.execPath, args); }
-        catch (error) { result = error; }
-        assert.equal(result.code ?? 0, code, result.stderr || result.stdout);
+        const result = await runNode(args);
+        assert.equal(result.code, code, result.stderr || result.stdout);
         if (code === 1) { assert.equal(result.stdout, ''); return; }
         const report = JSON.parse(result.stdout);
         assert.equal(report.complete, code === 0);
