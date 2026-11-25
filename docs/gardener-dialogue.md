@@ -1149,7 +1149,7 @@ Depends on the rules and specific use case for the commitment.
 - **Asked on:** 2026-11-24
 - **Topics:** peer discovery, network membership
 - **Status:** Awaiting answer
-- **Source PR:** Pending publication.
+- **Source PR:** [#243](https://github.com/oyaprotocol/oya-commitments/pull/243)
 
 ### Context
 
