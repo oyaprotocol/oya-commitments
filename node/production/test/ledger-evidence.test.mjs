@@ -6,7 +6,8 @@ import { mkdtemp, writeFile, rm, readFile, readdir, stat, symlink, mkdir } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execFileSync, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { Interface, getIcapAddress, id } from 'ethers';
 import { hashLedgerCid } from '@oyaprotocol/ethereum';
 import { verifyLedgerSnapshot, verifyLedgerEvidence, evidenceExitCode, readEvidenceJson } from '../src/ledger-evidence.mjs';
@@ -678,5 +679,66 @@ test('generic verifier imports no job, effectful processor, worker, signer, or s
     assert.doesNotMatch(source, /from ['"]\..*(?:inbox|protocol|processor|worker|signer|secrets)/);
     assert.doesNotMatch(source, /process\.env|Wallet|signMessage|signTransaction|sendRawTransaction|\/v1\/|\/api\/v0\/(?:add|pin)/);
     const ignore = await readFile(join(runtime, '.dockerignore'), 'utf8');
-    for (const module of ['ledger-evidence', 'verify-ledger']) assert.ok(ignore.includes(`!src/${module}.mjs`));
+    for (const module of ['ledger-evidence', 'verify-ledger', 'retain-range']) assert.ok(ignore.includes(`!src/${module}.mjs`));
+});
+
+test('range retention retries only missing content and preserves conflicting entries', async t => {
+    const { state, config } = await setup(t);
+    const directory = await mkdtemp(join(tmpdir(), 'range-'));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const settings = join(directory, 'settings.json');
+    await writeFile(settings, JSON.stringify(config));
+    const second = Buffer.from('second'), secondCid = cidFor(second);
+    const [first] = state.receipt.logs;
+    state.receipt.logs.push({ ...first, ...encode(secondCid), logIndex: '0x8' });
+    let logs = state.receipt.logs, secondBody;
+    const fetches = [];
+    state.hook = (req, res, body) => {
+        if (req.url.startsWith('/api/v0/cat?')) {
+            fetches.push(req.url.split('=')[1]);
+            if (fetches.at(-1) !== secondCid) return false;
+            if (!secondBody) res.writeHead(404);
+            res.end(secondBody);
+        } else if (['eth_blockNumber', 'eth_getLogs'].includes(body.method)) {
+            res.end(JSON.stringify({ jsonrpc: '2.0', id: body.id, result: body.method === 'eth_getLogs' ? logs : '0x3' }));
+        } else return false;
+        return true;
+    };
+    async function run(from = '2', to = '2', code = 0, dir = directory) {
+        const args = [join(runtime, 'src/retain-range.mjs'), from, to, settings, dir];
+        let result;
+        try { result = await promisify(execFile)(process.execPath, args); }
+        catch (error) { result = error; }
+        assert.equal(result.code ?? 0, code, result.stderr || result.stdout);
+        if (code === 1) { assert.equal(result.stdout, ''); return; }
+        const report = JSON.parse(result.stdout);
+        assert.equal(report.complete, code === 0);
+        return report.results.map(r => r.outcome);
+    }
+    assert.deepEqual(await run('2', '2', 2), ['saved', 'http_failure']);
+    assert.deepEqual(await readFile(join(directory, cid)), content);
+    assert.deepEqual(fetches.splice(0), [cid, secondCid]);
+    secondBody = content;
+    assert.deepEqual(await run('2', '2', 2), ['already_saved', 'cid_content']);
+    assert.deepEqual(fetches.splice(0), [secondCid]);
+    await assert.rejects(stat(join(directory, secondCid)), { code: 'ENOENT' });
+    secondBody = second;
+    assert.deepEqual(await run(), ['already_saved', 'saved']);
+    assert.deepEqual(await readFile(join(directory, secondCid)), second);
+    assert.deepEqual(fetches.splice(0), [secondCid]);
+    await writeFile(join(directory, cid), 'conflict');
+    assert.deepEqual(await run('2', '2', 2), ['saved_conflict', 'already_saved']);
+    assert.equal(await readFile(join(directory, cid), 'utf8'), 'conflict');
+    logs = [{ ...first, blockNumber: '0x3' }];
+    assert.deepEqual(await run('3', '3', 2), ['outside_range']);
+    logs = Array.from({ length: 33 }, (_, i) => ({ ...first, logIndex: `0x${i.toString(16)}` }));
+    const before = state.requests.length;
+    await run('2', '2', 1);
+    assert.equal(state.requests.length - before, 3);
+    assert.deepEqual(fetches, []);
+    logs = [];
+    assert.deepEqual(await run(), []);
+    const alias = join(directory, 'alias');
+    await symlink(directory, alias);
+    await run('2', '2', 1, alias);
 });

@@ -9,6 +9,7 @@ src/**
 !src/batch-evidence.mjs
 !src/verify-batch.mjs
 !src/discover-ledger.mjs
+!src/retain-range.mjs
 !src/bytecode.mjs
 !src/config.mjs
 !src/gas-policy.mjs

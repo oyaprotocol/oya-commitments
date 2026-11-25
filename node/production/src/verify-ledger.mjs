@@ -10,7 +10,7 @@ async function syncDirectory(path) {
 }
 
 // Publish only after verification. The decoded event supplies the canonical CID.
-async function saveContent(directory, cid, content) {
+export async function saveContent(directory, cid, content) {
     const path = resolve(directory ?? 'oya-history');
     if (directory === undefined) {
         try { await mkdir(path, { mode: 0o700 }); }
