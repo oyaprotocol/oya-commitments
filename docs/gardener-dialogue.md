@@ -59,6 +59,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q034](#q034) | Can a node decline a first publication? | publication, operator discretion | Answered |
 | [Q035](#q035) | Does a paywall make evidence private? | public evidence, dispute resolution | Answered |
 | [Q036](#q036) | Checking yesterday’s availability claim | data availability, independent verification | Answered |
+| [Q041](#q041) | What makes a practice dispute a fair test? | optimistic resolution, node testing | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -1169,3 +1170,27 @@ What should a newcomer be able to verify for themselves about a peer’s claim t
 - **Source updated:** 2026-11-22T21:11:53Z
 
 They should be able to verify that the peer had access to the message content at the time of signing, or at least had a digest based on the message content. They will be able to verify that the signature came from the peer, and if they have access to the content itself, they will be able to verify that the digest is tied back to the original content. Also, these attestations will likely be logged, so they will be able to verify when the attestation was logged onchain in addition to the timestamp claimed by the peer in the digest (which should precede or match the block timestamp of the log).
+
+<a id="q041"></a>
+
+<!-- oya-dialogue-question: Q041 -->
+
+## Q041 — What makes a practice dispute a fair test?
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-24
+- **Topics:** optimistic resolution, node testing
+- **Status:** Awaiting answer
+- **Source PR:** Pending publication.
+
+### Context
+
+In [the Q037 answer](https://github.com/oyaprotocol/oya-commitments/pull/237#issuecomment-7146497973), @pemulis described a possible game where nodes spot deliberately invalid proposals. A node might learn to recognize the test proposals without learning to spot the same mistake in an ordinary proposal.
+
+### Question
+
+What would convince you that a node which spots a deliberately invalid proposal would also spot that mistake in the wild?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
