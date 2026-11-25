@@ -8,6 +8,12 @@ node node/production/scripts/operator-node.mjs status --profile "$OYA_LOCAL_DIR/
 
 Status needs no Docker, host npm installation, environment-secret file, Keychain access, RPC or IPFS connection. It observes the selected local health endpoint; it does not preflight all runtime settings or prove upstream availability.
 
+## Watch health in a browser
+
+Run `node node/production/scripts/operator-view.mjs --profile "$OYA_LOCAL_DIR/operator.json"` and open the printed loopback URL on the same device. The page refreshes every five seconds and shows the selected identity, validated health state and time of the last check. An unreachable endpoint is not proof the node stopped.
+
+The viewer reads the profile at startup. Press Ctrl-C to stop it or restart after changing configuration. Other processes on the same host can read the page while it runs.
+
 ## Private profile
 
 Keep `operator.json` outside Git in an owned mode-0700 directory, with file mode 0600. Profile and configuration files must be regular files, not symlinks. Start from [operator.example.json](operator.example.json), preserve any existing profile, and replace the public-address placeholder with the dedicated node address recorded at installation. Do not derive it by unlocking a key for status.

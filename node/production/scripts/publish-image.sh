@@ -64,7 +64,7 @@ cp "$staging/source/scripts/deploy-droplet.sh" "$staging/source/scripts/deploy-d
 cp "$staging/source/scripts/keychain-worker.py" "$staging/source/scripts/upgrade-node.py" "$bundle/scripts/"
 # Dependency-free host operator CLI; operators need only Node.js.
 cp "$staging/source/operator-status.md" "$staging/source/operator.example.json" "$bundle/"
-for file in operator-balance.mjs operator-node.mjs operator-profile.mjs operator-status.mjs; do
+for file in operator-balance.mjs operator-node.mjs operator-profile.mjs operator-status.mjs operator-view.mjs; do
     cp "$staging/source/scripts/$file" "$bundle/scripts/"
 done
 mkdir -p "$bundle/src"
