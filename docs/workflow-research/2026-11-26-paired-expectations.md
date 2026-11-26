@@ -4,7 +4,7 @@
 
 ## Why try it at Oya?
 
-In [PR #197](https://github.com/oyaprotocol/oya-commitments/pull/197), an existing test saw the expected rejection, but an invalid signature caused it. The helper had actually supplied the credential the test meant to omit. The correction reused one valid message for both outcomes. This proposal borrows that reasoning for review of other tests. It does not reopen the fix or add a PR template.
+In [PR #197](https://github.com/oyaprotocol/oya-commitments/pull/197), an existing test saw the expected rejection, but an invalid signature caused it. The helper had actually supplied the credential the test meant to omit. The correction reused one valid message for both outcomes. This proposal borrows that reasoning for review of other tests.
 
 For example, consider the duration limit in [PR #241](https://github.com/oyaprotocol/oya-commitments/pull/241). For an otherwise valid request with a stubbed, immediately resolving operation, predict that the largest supported timeout lets the operation start, while the next integer is rejected before it starts. A pair where neither operation starts tells us little about that boundary, even if one assertion reports the expected error. This is an illustration, not a finding against #241.
 
