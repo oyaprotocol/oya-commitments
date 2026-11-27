@@ -61,6 +61,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q036](#q036) | Checking yesterday’s availability claim | data availability, independent verification | Answered |
 | [Q037](#q037) | Who looked at an unchallenged proposal? | optimistic resolution, public evidence | Answered |
 | [Q038](#q038) | Recognizing a node after a key change | node identity, signing keys | Answered |
+| [Q039](#q039) | Spotting a mistake without the dispute bond | dispute bonds, participation | Answered |
 
 <a id="q001"></a>
 
@@ -1233,3 +1234,34 @@ What should let a peer recognize a node as the same node after its operator chan
 - **Source updated:** 2026-11-24T22:41:32Z
 
 A new signing address effectively means a new node, so unless the node registers with the network through a smart contract wallet that can change its upstream signers, or uses a future technique like frame transactions to change signing keys while keeping the same address, a change in signing keys may be taken as the appearance of a new node.
+
+<a id="q039"></a>
+
+<!-- oya-dialogue-question: Q039 -->
+
+## Q039 — Spotting a mistake without the dispute bond
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-22
+- **Topics:** dispute bonds, participation
+- **Status:** Answered
+- **Source PR:** [#240](https://github.com/oyaprotocol/oya-commitments/pull/240)
+
+### Context
+
+In [Q003](#q003), @pemulis explained that anyone can challenge a proposal by posting a bond. The person who spots a mistake may not be the person who can afford to dispute it.
+
+### Question
+
+If someone spots a mistaken proposal but cannot afford the dispute bond, how would you want their evidence to reach someone who can act on it?
+
+### Answer
+
+#### @pemulis — 2026-11-24
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7146551476](https://github.com/oyaprotocol/oya-commitments/pull/240#issuecomment-7146551476)
+- **Source created:** 2026-11-24T22:42:33Z
+- **Source updated:** 2026-11-24T22:42:33Z
+
+They could message nodes about it or post about it publicly, increasing the chances that someone with a bond will review the evidence and pick up the reward for a valid dispute.
