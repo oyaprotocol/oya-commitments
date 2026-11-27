@@ -3,7 +3,7 @@ import { loadProfile } from './operator-profile.mjs';
 import { operatorStatus } from './operator-status.mjs';
 
 const refreshSeconds = 5;
-const labels = { role: 'Selected role', mode: 'Mode', target: 'Worker target', nodeAddress: 'Selected node',
+const labels = { role: 'Node role', mode: 'Mode', target: 'Inbox queue (target)', nodeAddress: 'Selected node',
     chainId: 'Chain', ledgerContract: 'Ledger', status: 'Status', reachable: 'Reachable', verified: 'Identity matches', healthy: 'Healthy' };
 
 function text(value) {
@@ -13,10 +13,11 @@ function text(value) {
 async function observe(profile) {
     const status = await operatorStatus(profile);
     const rows = Object.entries(labels).filter(([key]) => status[key] !== null).map(([key, label]) =>
-        `<dt>${label}</dt><dd>${text(status[key])}</dd>`).join('\n');
+        `<tr><th scope="row">${label}</th><td>${typeof status[key] === 'boolean'
+            ? (status[key] ? '<span aria-hidden="true">✅</span> Yes' : 'No') : text(status[key])}</td></tr>`).join('\n');
     return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Local node health</title>
 <meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="${refreshSeconds}"></head>
-<body><main><h1>Local node health</h1><p>${text(status.message)}</p><dl>${rows}</dl>
+<body><main><h1>Local node health</h1><p>${text(status.message)}</p><table><tbody>${rows}</tbody></table>
 <p>Checked at ${new Date().toISOString()}. Refreshes every ${refreshSeconds} seconds.</p></main></body></html>`;
 }
 

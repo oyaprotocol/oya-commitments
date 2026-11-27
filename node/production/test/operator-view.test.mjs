@@ -56,10 +56,17 @@ test('page refresh follows a real worker health handler from retrying to idle', 
     assert.equal(reads, 1);
     assert.match(page, /http-equiv="refresh" content="5"/);
     assert.match(page, /Worker is retrying/);
-    assert.match(page, /local-worker/);
+    assert.match(page, /<table><tbody>/);
+    assert.match(page, /Inbox queue \(target\)<\/th><td>local-worker<\/td>/);
+    for (const label of ['Reachable', 'Identity matches']) {
+        assert.ok(page.includes(`${label}</th><td><span aria-hidden="true">✅</span> Yes</td>`));
+    }
+    assert.ok(page.includes('Healthy</th><td>No</td>'));
     assert.doesNotMatch(page, /private-sentinel|healthz|operator\.json/);
     Object.assign(state, { status: 'idle', lastPollAt: new Date().toISOString() });
     await delay(5100);
-    assert.match(await (await fetch(url)).text(), /Worker is polling and idle/);
+    const idle = await (await fetch(url)).text();
+    assert.match(idle, /Worker is polling and idle/);
+    assert.ok(idle.includes('Healthy</th><td><span aria-hidden="true">✅</span> Yes</td>'));
     assert.equal(reads, 2);
 });

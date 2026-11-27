@@ -9,6 +9,8 @@ Open a page on the operator’s device and see whether the selected worker or di
 - [x] 2026-11-25 05:37Z: Traced the installed operator profile, validated status and bundle allowlist.
 - [x] 2026-11-25 05:40Z: Implemented and packaged the page. The focused suite passed 22 tests and the full production suite passed 697 on Node 24.
 
+- [x] 2026-11-27: Clarified the role and inbox queue, presented health checks in a table, and refreshed the browser screenshot. All 697 production tests passed.
+
 ## Surprises & Discoveries
 
 `operatorStatus` already distinguishes failure to reach the endpoint from a node reporting that it stopped. Reusing this result preserves that distinction.

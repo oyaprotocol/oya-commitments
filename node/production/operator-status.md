@@ -12,6 +12,8 @@ Status needs no Docker, host npm installation, environment-secret file, Keychain
 
 Run `node node/production/scripts/operator-view.mjs --profile "$OYA_LOCAL_DIR/operator.json"` and open the printed loopback URL on the same device. The page refreshes every five seconds and shows the selected identity, validated health state and time of the last check. An unreachable endpoint is not proof the node stopped.
 
+The node role comes from the profile: a `direct` node accepts requests directly, while a `worker` polls an inbox for jobs. The inbox queue (target) is the configured name of the queue the worker polls. Direct nodes have no queue row.
+
 The viewer reads the profile at startup. Press Ctrl-C to stop it or restart after changing configuration. Other processes on the same host can read the page while it runs.
 
 ## Private profile
