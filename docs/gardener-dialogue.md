@@ -62,6 +62,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q037](#q037) | Who looked at an unchallenged proposal? | optimistic resolution, public evidence | Answered |
 | [Q038](#q038) | Recognizing a node after a key change | node identity, signing keys | Answered |
 | [Q039](#q039) | Spotting a mistake without the dispute bond | dispute bonds, participation | Answered |
+| [Q042](#q042) | When do two node versions stop sharing a protocol? | protocol evolution, node interoperability | Answered |
 
 <a id="q001"></a>
 
@@ -1265,3 +1266,34 @@ If someone spots a mistaken proposal but cannot afford the dispute bond, how wou
 - **Source updated:** 2026-11-24T22:42:33Z
 
 They could message nodes about it or post about it publicly, increasing the chances that someone with a bond will review the evidence and pick up the reward for a valid dispute.
+
+<a id="q042"></a>
+
+<!-- oya-dialogue-question: Q042 -->
+
+## Q042 — When do two node versions stop sharing a protocol?
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-24
+- **Topics:** protocol evolution, node interoperability
+- **Status:** Answered
+- **Source PR:** [#246](https://github.com/oyaprotocol/oya-commitments/pull/246)
+
+### Context
+
+In [Q032](#q032), @pemulis distinguished what peers can observe from how a node is built. That leaves a design choice when the protocol itself changes and operators upgrade at different times.
+
+### Question
+
+What is an example of a change that should make an upgraded node tell an older peer “we no longer speak the same protocol”?
+
+### Answer
+
+#### @pemulis — 2026-11-27
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7221111609](https://github.com/oyaprotocol/oya-commitments/pull/246#issuecomment-7221111609)
+- **Source created:** 2026-11-27T14:41:48Z
+- **Source updated:** 2026-11-27T14:41:48Z
+
+An important distinction here is that essentially all protocol communications are routed through onchain contracts rather than peer-to-peer node communication. So the scenario of a node telling another node directly that they do not share the same protocol anymore is not as relevant, and many different node implementations can be created that behave very differently as long as their onchain protocol interactions are valid.
