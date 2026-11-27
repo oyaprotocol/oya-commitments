@@ -60,6 +60,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q035](#q035) | Does a paywall make evidence private? | public evidence, dispute resolution | Answered |
 | [Q036](#q036) | Checking yesterday’s availability claim | data availability, independent verification | Answered |
 | [Q037](#q037) | Who looked at an unchallenged proposal? | optimistic resolution, public evidence | Answered |
+| [Q038](#q038) | Recognizing a node after a key change | node identity, signing keys | Answered |
 | [Q042](#q042) | When do two node versions stop sharing a protocol? | protocol evolution, node interoperability | Answered |
 
 <a id="q001"></a>
@@ -1202,6 +1203,37 @@ When a proposal passes without a challenge, what evidence, if any, should a part
 - **Source updated:** 2026-11-24T22:39:50Z
 
 There does not need to be evidence that it was checked. The assurance comes from economic incentives to raise disputes plus demonstrations of liveness of the node network (which presumably includes nodes capable of and interested in validating proposals). Finally, we'll eventually add a "bogey" game of invalid proposals where nodes will prove that, in theory, they can identify invalid proposals and why they are wrong. None of this provides evidence that any particular proposal was reviewed, however, just a reason to believe it likely has been.
+
+<a id="q038"></a>
+
+<!-- oya-dialogue-question: Q038 -->
+
+## Q038 — Recognizing a node after a key change
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-22
+- **Topics:** node identity, signing keys
+- **Status:** Answered
+- **Source PR:** [#238](https://github.com/oyaprotocol/oya-commitments/pull/238)
+
+### Context
+
+In [the Q036 answer](https://github.com/oyaprotocol/oya-commitments/pull/236#issuecomment-7085863273), @pemulis explained how a reader can check who signed an attestation. Over time, a node operator may retire one signing key and start using another.
+
+### Question
+
+What should let a peer recognize a node as the same node after its operator changes signing keys?
+
+### Answer
+
+#### @pemulis — 2026-11-24
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7146531600](https://github.com/oyaprotocol/oya-commitments/pull/238#issuecomment-7146531600)
+- **Source created:** 2026-11-24T22:41:32Z
+- **Source updated:** 2026-11-24T22:41:32Z
+
+A new signing address effectively means a new node, so unless the node registers with the network through a smart contract wallet that can change its upstream signers, or uses a future technique like frame transactions to change signing keys while keeping the same address, a change in signing keys may be taken as the appearance of a new node.
 
 <a id="q042"></a>
 
