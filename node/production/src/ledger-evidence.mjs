@@ -185,7 +185,7 @@ export async function verifyLedgerEvidence(identity, input, options) {
 }
 
 // Bytes are returned separately from the printable report and only on verified snapshots.
-export async function verifyLedgerSnapshot(identity, input, { signal, returnContent = false } = {}) {
+export async function verifyLedgerSnapshot(identity, input, { signal, returnContent = false, shouldFetchContent } = {}) {
     let content;
     const report = initialReport();
     const controller = new AbortController();
@@ -261,6 +261,11 @@ export async function verifyLedgerSnapshot(identity, input, { signal, returnCont
             quantity(block.number) === receipt.blockNumber, 'block_identity');
         report.block.timestamp = quantity(block.timestamp).toString();
         report.checks.ledger = 'verified';
+        if (shouldFetchContent && !await shouldFetchContent(report.cid, receipt.blockNumber)) {
+            if (controller.signal.aborted) unavailable('deadline');
+            Object.assign(report, { status: 'partial', reason: 'content_not_requested' });
+            return { report };
+        }
         report.stage = 'content';
         const bytes = await read(config.ipfs, `/api/v0/cat?arg=${encodeURIComponent(report.cid)}`, undefined);
         report.checks.availability = 'available';

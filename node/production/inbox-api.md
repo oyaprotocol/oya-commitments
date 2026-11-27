@@ -40,6 +40,8 @@ Public results contain request ID, state, attempts, timestamps, and available CI
 
 ## Find Ledger records to verify
 
+To save authenticated bytes and retry gaps, see [Retain content from a range](discover-ledger.md#retain-content-from-a-range).
+
 From the repository root, give the command the first and last block numbers (inclusive, in decimal) and your existing [verifier settings](#verify-ledger-evidence). For example:
 
 ```sh
