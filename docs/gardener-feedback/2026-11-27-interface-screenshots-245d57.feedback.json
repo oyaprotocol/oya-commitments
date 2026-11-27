@@ -1,0 +1,24 @@
+{
+  "schema": "oya-gardener-feedback/v1",
+  "id": "2026-11-27-interface-screenshots-245d57",
+  "summary": "Show reviewers the actual interface when opening a feature PR, rather than waiting for a screenshot request.",
+  "evidence": [
+    {
+      "url": "https://github.com/oyaprotocol/oya-commitments/pull/250#issuecomment-7220860180",
+      "lesson": "Pemulis asked to see the interface and requested screenshots for future frontend interfaces when possible."
+    },
+    {
+      "url": "https://github.com/oyaprotocol/oya-commitments/pull/250#issuecomment-7222634700",
+      "lesson": "The follow-up supplied the rendered page with example worker data. Moving that evidence to the opening PR should avoid a second request."
+    }
+  ],
+  "evaluation": "On the next feature PR introducing an interface, check whether the opening shows the implemented page with safe example data or explains a capture limitation. Revise if images misrepresent the reviewed revision or expose operator details.",
+  "changes": [
+    {
+      "target": "feature",
+      "before_sha256": "164c86027492732a57f7d2c88c9378f39a6708952ad12ba19941e593098e7292",
+      "before_guidance": "Favor inter-node messaging and availability over speculative dashboards. The requested local operator view is an exception: keep live node stats, Ledger activity and the current node registry simple, with few dependencies. Leave broader design decisions for operator feedback. A pending specification need not block a small, testable availability prototype. Distinguish periodic proof of historical possession from a peer attesting that it retrieved newly logged data. Treat the first 24 hours as a proposed window, not a settled rule. State what the observation establishes and which Ledger or protocol decisions remain open for review.\n\nBefore implementation, record the operator action, observable result and existing path in the checkpoint or ExecPlan. Add interfaces or inputs only for unmet current needs, reusing established interfaces and configured inputs when safe.\n\nAfter implementation, review the complete unpublished diff for unnecessary machinery: duplicate state, wrappers and compatibility for formats never shipped. Remove only what lacks a current requirement. Preserve authorization, recovery and useful regression coverage, then rerun affected checks. Simplicity means less to understand, not compressed code or a deletion quota.\n\nRead the PR opening alone before publication or a justified revision: make the user, action and result clear, using short bullets when useful. Keep consequential safety and validation details alongside the behavior. This is a reader check, not a public template.",
+      "after_guidance": "Favor inter-node messaging and availability over speculative dashboards. The requested local operator view is an exception: keep live node stats, Ledger activity and the current node registry simple, with few dependencies. Leave broader design decisions for operator feedback. A pending specification need not block a small, testable availability prototype. Distinguish periodic proof of historical possession from a peer attesting that it retrieved newly logged data. Treat the first 24 hours as a proposed window, not a settled rule. State what the observation establishes and which Ledger or protocol decisions remain open for review.\n\nBefore implementation, record the operator action, observable result and existing path in the checkpoint or ExecPlan. Add interfaces or inputs only for unmet current needs, reusing established interfaces and configured inputs when safe.\n\nAfter implementation, review the complete unpublished diff for unnecessary machinery: duplicate state, wrappers and compatibility for formats never shipped. Remove only what lacks a current requirement. Preserve authorization, recovery and useful regression coverage, then rerun affected checks. Simplicity means less to understand, not compressed code or a deletion quota.\n\nRead the PR opening alone before publication or a justified revision: make the user, action and result clear, using short bullets when useful. Keep consequential safety and validation details alongside the behavior. For a new frontend interface, include a screenshot of the actual page in the opening PR using safe example data. Inspect the image before sharing; if safe capture is unavailable, say why rather than substituting a mockup."
+    }
+  ]
+}
