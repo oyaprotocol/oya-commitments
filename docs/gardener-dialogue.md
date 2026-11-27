@@ -62,6 +62,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q037](#q037) | Who looked at an unchallenged proposal? | optimistic resolution, public evidence | Answered |
 | [Q038](#q038) | Recognizing a node after a key change | node identity, signing keys | Answered |
 | [Q039](#q039) | Spotting a mistake without the dispute bond | dispute bonds, participation | Answered |
+| [Q043](#q043) | When can a node retire? | node retirement, publication duties | Awaiting answer |
 
 <a id="q001"></a>
 
@@ -1265,3 +1266,27 @@ If someone spots a mistaken proposal but cannot afford the dispute bond, how wou
 - **Source updated:** 2026-11-24T22:42:33Z
 
 They could message nodes about it or post about it publicly, increasing the chances that someone with a bond will review the evidence and pick up the reward for a valid dispute.
+
+<a id="q043"></a>
+
+<!-- oya-dialogue-question: Q043 -->
+
+## Q043 — When can a node retire?
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-24
+- **Topics:** node retirement, publication duties
+- **Status:** Awaiting answer
+- **Source PR:** [#247](https://github.com/oyaprotocol/oya-commitments/pull/247)
+
+### Context
+
+In [Q033](#q033), @pemulis distinguished the publisher’s duty to serve new content for a time from the network’s job of keeping the history. Consider a node operator who wants to shut down after publishing one last message.
+
+### Question
+
+What would count as a clean exit for that operator while other nodes may still be relying on them for the message?
+
+### Answer
+
+Pending an answer from `@pemulis` or `@nesseps`.
