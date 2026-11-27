@@ -62,6 +62,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q037](#q037) | Who looked at an unchallenged proposal? | optimistic resolution, public evidence | Answered |
 | [Q038](#q038) | Recognizing a node after a key change | node identity, signing keys | Answered |
 | [Q039](#q039) | Spotting a mistake without the dispute bond | dispute bonds, participation | Answered |
+| [Q041](#q041) | What makes a practice dispute a fair test? | optimistic resolution, node testing | Answered |
 
 <a id="q001"></a>
 
@@ -1265,3 +1266,34 @@ If someone spots a mistaken proposal but cannot afford the dispute bond, how wou
 - **Source updated:** 2026-11-24T22:42:33Z
 
 They could message nodes about it or post about it publicly, increasing the chances that someone with a bond will review the evidence and pick up the reward for a valid dispute.
+
+<a id="q041"></a>
+
+<!-- oya-dialogue-question: Q041 -->
+
+## Q041 — What makes a practice dispute a fair test?
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-24
+- **Topics:** optimistic resolution, node testing
+- **Status:** Answered
+- **Source PR:** [#244](https://github.com/oyaprotocol/oya-commitments/pull/244)
+
+### Context
+
+In [the Q037 answer](https://github.com/oyaprotocol/oya-commitments/pull/237#issuecomment-7146497973), @pemulis described a possible game where nodes spot deliberately invalid proposals. A node might learn to recognize the test proposals without learning to spot the same mistake in an ordinary proposal.
+
+### Question
+
+What would convince you that a node which spots a deliberately invalid proposal would also spot that mistake in the wild?
+
+### Answer
+
+#### @pemulis — 2026-11-27
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7221053941](https://github.com/oyaprotocol/oya-commitments/pull/244#issuecomment-7221053941)
+- **Source created:** 2026-11-27T14:39:11Z
+- **Source updated:** 2026-11-27T14:39:11Z
+
+Over time, the "bogey game" where invalid proposals are disputed will become more competitive, with nodes in the network crafting custom invalid proposals as a challenge for other nodes to review and explain. If a proposal is invalid for complicated reasons, the reviewer node will need to correctly explain that. It might also make sense for some of the proposals to actually _be valid_ as a check that reviewer nodes will correctly identify them as valid. Proposers will earn more rewards if one or more reviewer nodes are stumped by their proposal. This competitive pressure will ensure that nodes that can win the bogey game are capable of reviewing real proposals in the wild.
