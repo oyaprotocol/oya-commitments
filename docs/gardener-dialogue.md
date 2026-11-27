@@ -59,7 +59,8 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q034](#q034) | Can a node decline a first publication? | publication, operator discretion | Answered |
 | [Q035](#q035) | Does a paywall make evidence private? | public evidence, dispute resolution | Answered |
 | [Q036](#q036) | Checking yesterday’s availability claim | data availability, independent verification | Answered |
-| [Q042](#q042) | When do two node versions stop sharing a protocol? | protocol evolution, node interoperability | Awaiting answer |
+| [Q037](#q037) | Who looked at an unchallenged proposal? | optimistic resolution, public evidence | Answered |
+| [Q042](#q042) | When do two node versions stop sharing a protocol? | protocol evolution, node interoperability | Answered |
 
 <a id="q001"></a>
 
@@ -1171,6 +1172,37 @@ What should a newcomer be able to verify for themselves about a peer’s claim t
 
 They should be able to verify that the peer had access to the message content at the time of signing, or at least had a digest based on the message content. They will be able to verify that the signature came from the peer, and if they have access to the content itself, they will be able to verify that the digest is tied back to the original content. Also, these attestations will likely be logged, so they will be able to verify when the attestation was logged onchain in addition to the timestamp claimed by the peer in the digest (which should precede or match the block timestamp of the log).
 
+<a id="q037"></a>
+
+<!-- oya-dialogue-question: Q037 -->
+
+## Q037 — Who looked at an unchallenged proposal?
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-22
+- **Topics:** optimistic resolution, public evidence
+- **Status:** Answered
+- **Source PR:** [#237](https://github.com/oyaprotocol/oya-commitments/pull/237)
+
+### Context
+
+In [Q003](#q003), @pemulis described a network where anyone can challenge a proposal. The same quiet challenge window could mean several people checked the proposal or nobody looked.
+
+### Question
+
+When a proposal passes without a challenge, what evidence, if any, should a participant have that someone besides the proposer checked it?
+
+### Answer
+
+#### @pemulis — 2026-11-24
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7146497973](https://github.com/oyaprotocol/oya-commitments/pull/237#issuecomment-7146497973)
+- **Source created:** 2026-11-24T22:39:50Z
+- **Source updated:** 2026-11-24T22:39:50Z
+
+There does not need to be evidence that it was checked. The assurance comes from economic incentives to raise disputes plus demonstrations of liveness of the node network (which presumably includes nodes capable of and interested in validating proposals). Finally, we'll eventually add a "bogey" game of invalid proposals where nodes will prove that, in theory, they can identify invalid proposals and why they are wrong. None of this provides evidence that any particular proposal was reviewed, however, just a reason to believe it likely has been.
+
 <a id="q042"></a>
 
 <!-- oya-dialogue-question: Q042 -->
@@ -1180,7 +1212,7 @@ They should be able to verify that the peer had access to the message content at
 - **Asked by:** Oya Gardener (`@oyagardener`)
 - **Asked on:** 2026-11-24
 - **Topics:** protocol evolution, node interoperability
-- **Status:** Awaiting answer
+- **Status:** Answered
 - **Source PR:** [#246](https://github.com/oyaprotocol/oya-commitments/pull/246)
 
 ### Context
@@ -1193,4 +1225,11 @@ What is an example of a change that should make an upgraded node tell an older p
 
 ### Answer
 
-Pending an answer from `@pemulis` or `@nesseps`.
+#### @pemulis — 2026-11-27
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7221111609](https://github.com/oyaprotocol/oya-commitments/pull/246#issuecomment-7221111609)
+- **Source created:** 2026-11-27T14:41:48Z
+- **Source updated:** 2026-11-27T14:41:48Z
+
+An important distinction here is that essentially all protocol communications are routed through onchain contracts rather than peer-to-peer node communication. So the scenario of a node telling another node directly that they do not share the same protocol anymore is not as relevant, and many different node implementations can be created that behave very differently as long as their onchain protocol interactions are valid.
