@@ -1,0 +1,20 @@
+{
+  "schema": "oya-gardener-feedback/v1",
+  "id": "2026-11-24-local-operator-view-90c8f9",
+  "summary": "Distinguish the requested local operator view from speculative dashboards when selecting node features. Keep its first version utilitarian.",
+  "evidence": [
+    {
+      "url": "https://github.com/oyaprotocol/oya-commitments/pull/236#issuecomment-7146765891",
+      "lesson": "Pemulis requested a local, live view of node stats, Ledger activity and registered nodes, with minimal dependencies. This is a concrete operator need, not a general request for more dashboards."
+    }
+  ],
+  "evaluation": "At the next relevant feature review, check whether the operator can see changing activity locally and whether dependencies serve those three views. Retire the exception once that need is met, or revise it if maintainers change direction.",
+  "changes": [
+    {
+      "target": "feature",
+      "before_sha256": "0d42b88a25b46b372b2b015faf0b0f198f6f345623ddca1a6e98a20b77eddeed",
+      "before_guidance": "Prioritize inter-node messaging and data availability over status views. A pending specification need not block a small, testable availability prototype. Distinguish periodic proof of historical possession from a peer attesting that it retrieved newly logged data. Treat the first 24 hours as a proposed window, not a settled rule. State what the observation establishes and which Ledger or protocol decisions remain open for review.\n\nBefore implementation, record the operator action, observable result and existing path in the checkpoint or ExecPlan. Add interfaces or inputs only for unmet current needs, reusing established interfaces and configured inputs when safe.\n\nAfter implementation, review the complete unpublished diff for unnecessary machinery: duplicate state, wrappers and compatibility for formats never shipped. Remove only what lacks a current requirement. Preserve authorization, recovery and useful regression coverage, then rerun affected checks. Simplicity means less to understand, not compressed code or a deletion quota.\n\nRead the PR opening alone before publication or a justified revision: make the user, action and result clear, using short bullets when useful. Keep consequential safety and validation details alongside the behavior. This is a reader check, not a public template.",
+      "after_guidance": "Favor inter-node messaging and availability over speculative dashboards. The requested local operator view is an exception: keep live node stats, Ledger activity and the current node registry simple, with few dependencies. Leave broader design decisions for operator feedback. A pending specification need not block a small, testable availability prototype. Distinguish periodic proof of historical possession from a peer attesting that it retrieved newly logged data. Treat the first 24 hours as a proposed window, not a settled rule. State what the observation establishes and which Ledger or protocol decisions remain open for review.\n\nBefore implementation, record the operator action, observable result and existing path in the checkpoint or ExecPlan. Add interfaces or inputs only for unmet current needs, reusing established interfaces and configured inputs when safe.\n\nAfter implementation, review the complete unpublished diff for unnecessary machinery: duplicate state, wrappers and compatibility for formats never shipped. Remove only what lacks a current requirement. Preserve authorization, recovery and useful regression coverage, then rerun affected checks. Simplicity means less to understand, not compressed code or a deletion quota.\n\nRead the PR opening alone before publication or a justified revision: make the user, action and result clear, using short bullets when useful. Keep consequential safety and validation details alongside the behavior. This is a reader check, not a public template."
+    }
+  ]
+}
