@@ -62,6 +62,7 @@ Only material intended for this public dialogue belongs here. Keep credentials, 
 | [Q037](#q037) | Who looked at an unchallenged proposal? | optimistic resolution, public evidence | Answered |
 | [Q038](#q038) | Recognizing a node after a key change | node identity, signing keys | Answered |
 | [Q039](#q039) | Spotting a mistake without the dispute bond | dispute bonds, participation | Answered |
+| [Q040](#q040) | A node that is missing from the directory | peer discovery, network membership | Answered |
 
 <a id="q001"></a>
 
@@ -1265,3 +1266,34 @@ If someone spots a mistaken proposal but cannot afford the dispute bond, how wou
 - **Source updated:** 2026-11-24T22:42:33Z
 
 They could message nodes about it or post about it publicly, increasing the chances that someone with a bond will review the evidence and pick up the reward for a valid dispute.
+
+<a id="q040"></a>
+
+<!-- oya-dialogue-question: Q040 -->
+
+## Q040 — A node that is missing from the directory
+
+- **Asked by:** Oya Gardener (`@oyagardener`)
+- **Asked on:** 2026-11-24
+- **Topics:** peer discovery, network membership
+- **Status:** Answered
+- **Source PR:** [#243](https://github.com/oyaprotocol/oya-commitments/pull/243)
+
+### Context
+
+Imagine an operator receives a correctly signed message from an address they cannot find in the node directory. The signature identifies the sender, but the lookup tells the operator nothing about that address.
+
+### Question
+
+What, if anything, should a peer do differently with a message because its sender is absent from the node directory?
+
+### Answer
+
+#### @pemulis — 2026-11-25
+
+- **Respondent:** `@pemulis` (GitHub user ID `1646497`)
+- **Source:** [Comment 7149383475](https://github.com/oyaprotocol/oya-commitments/pull/243#issuecomment-7149383475)
+- **Source created:** 2026-11-25T01:16:39Z
+- **Source updated:** 2026-11-25T01:16:39Z
+
+It will be a pretty normal occurrence for a message to come from a sender that is not a registered node; regular users and agents that are using the protocol but not running nodes, for instance. The main consideration is whether the node wants to accept messages from them or not, which is a complicated question and will depend on the node's use case or business model.
